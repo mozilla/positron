@@ -13,6 +13,7 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/Sprintf.h"
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -125,7 +126,6 @@ js::DestroyContext(JSContext* cx)
         MOZ_CRASH("Attempted to destroy a context while it is in a request.");
 
     cx->roots.checkNoGCRooters();
-    cx->roots.finishPersistentRoots();
 
     /*
      * Dump remaining type inference results while we still have a context.
@@ -538,7 +538,7 @@ class MOZ_RAII AutoMessageArgs
         for (uint16_t i = 0; i < count_; i++) {
             if (passed_) {
                 lengths_[i] = js_strlen(args_[i]);
-            } else if (typeArg == ArgumentsAreASCII) {
+            } else if (typeArg == ArgumentsAreASCII || typeArg == ArgumentsAreLatin1) {
                 char* charArg = va_arg(ap, char*);
                 size_t charArgLength = strlen(charArg);
                 args_[i] = InflateString(cx, charArg, &charArgLength);
@@ -835,7 +835,7 @@ js::ReportMissingArg(JSContext* cx, HandleValue v, unsigned arg)
     char argbuf[11];
     UniqueChars bytes;
 
-    snprintf(argbuf, sizeof argbuf, "%u", arg);
+    SprintfLiteral(argbuf, "%u", arg);
     if (IsFunctionObject(v)) {
         RootedAtom name(cx, v.toObject().as<JSFunction>().name());
         bytes = DecompileValueGenerator(cx, JSDVG_SEARCH_STACK, v, name);
@@ -883,7 +883,8 @@ js::GetErrorMessage(void* userRef, const unsigned errorNumber)
 
 ExclusiveContext::ExclusiveContext(JSRuntime* rt, PerThreadData* pt, ContextKind kind,
                                    const JS::ContextOptions& options)
-  : ContextFriendFields(rt),
+  : ContextFriendFields(kind == Context_JS),
+    runtime_(rt),
     helperThread_(nullptr),
     contextKind_(kind),
     options_(options),
@@ -921,7 +922,10 @@ JSContext::JSContext(JSRuntime* parentRuntime)
     generatingError(false),
     data(nullptr),
     outstandingRequests(0),
-    jitIsBroken(false)
+    jitIsBroken(false),
+    asyncStackForNewActivations(this),
+    asyncCauseForNewActivations(nullptr),
+    asyncCallIsExplicit(false)
 {
     MOZ_ASSERT(static_cast<ContextFriendFields*>(this) ==
                ContextFriendFields::get(this));
@@ -1097,6 +1101,26 @@ ExclusiveContext::stackLimitForJitCode(StackKind kind)
 #endif
 }
 
+void
+JSContext::resetJitStackLimit()
+{
+    // Note that, for now, we use the untrusted limit for ion. This is fine,
+    // because it's the most conservative limit, and if we hit it, we'll bail
+    // out of ion into the interpreter, which will do a proper recursion check.
+#ifdef JS_SIMULATOR
+    jitStackLimit_ = jit::Simulator::StackLimit();
+#else
+    jitStackLimit_ = nativeStackLimit[StackForUntrustedScript];
+#endif
+    jitStackLimitNoInterrupt_ = jitStackLimit_;
+}
+
+void
+JSContext::initJitStackLimit()
+{
+    resetJitStackLimit();
+}
+
 JSVersion
 JSContext::findVersion() const
 {
@@ -1144,14 +1168,14 @@ void
 CompartmentChecker::check(InterpreterFrame* fp)
 {
     if (fp)
-        check(fp->scopeChain());
+        check(fp->environmentChain());
 }
 
 void
 CompartmentChecker::check(AbstractFramePtr frame)
 {
     if (frame)
-        check(frame.scopeChain());
+        check(frame.environmentChain());
 }
 #endif
 
@@ -1159,7 +1183,7 @@ void
 AutoEnterOOMUnsafeRegion::crash(const char* reason)
 {
     char msgbuf[1024];
-    snprintf(msgbuf, sizeof(msgbuf), "[unhandlable oom] %s", reason);
+    SprintfLiteral(msgbuf, "[unhandlable oom] %s", reason);
     MOZ_ReportAssertionFailure(msgbuf, __FILE__, __LINE__);
     MOZ_CRASH();
 }

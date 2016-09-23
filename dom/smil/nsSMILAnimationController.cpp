@@ -424,9 +424,9 @@ nsSMILAnimationController::DoSample(bool aSkipUnchangedContainers)
     return;
   }
 
-  nsCOMPtr<nsIDocument> kungFuDeathGrip(mDocument);  // keeps 'this' alive too
+  nsCOMPtr<nsIDocument> document(mDocument);  // keeps 'this' alive too
   if (isStyleFlushNeeded) {
-    mDocument->FlushPendingNotifications(Flush_Style);
+    document->FlushPendingNotifications(Flush_Style);
   }
 
   // WARNING:
@@ -693,7 +693,7 @@ nsSMILAnimationController::GetTargetIdentifierForAnimation(
           attributeName == nsGkAtoms::height) {
         isCSS = targetElem->GetNameSpaceID() != kNameSpaceID_SVG;
       } else {
-        nsCSSProperty prop =
+        nsCSSPropertyID prop =
           nsCSSProps::LookupProperty(nsDependentAtomString(attributeName),
                                      CSSEnabledState::eForAllContent);
         isCSS = nsSMILCSSProperty::IsPropertyAnimatable(prop);

@@ -2131,55 +2131,6 @@ MacroAssemblerARMCompat::loadFloat32(const BaseIndex& src, FloatRegister dest)
     ma_vldr(Address(scratch, offset), VFPRegister(dest).singleOverlay());
 }
 
-
-void
-MacroAssemblerARMCompat::ma_loadHeapAsmJS(Register ptrReg, int size, bool needsBoundsCheck,
-                                          bool faultOnOOB, FloatRegister output)
-{
-    if (size == 32)
-        output = output.singleOverlay();
-
-    if (!needsBoundsCheck) {
-        ma_vldr(output, HeapReg, ptrReg, 0, Assembler::Always);
-    } else {
-        uint32_t cmpOffset = ma_BoundsCheck(ptrReg).getOffset();
-        append(wasm::BoundsCheck(cmpOffset));
-
-        if (faultOnOOB) {
-            ma_b(wasm::JumpTarget::OutOfBounds, Assembler::AboveOrEqual);
-        }
-        else {
-            size_t nanOffset =
-                size == 32 ? wasm::NaN32GlobalDataOffset : wasm::NaN64GlobalDataOffset;
-            ma_vldr(Address(GlobalReg, nanOffset - AsmJSGlobalRegBias), output,
-                    Assembler::AboveOrEqual);
-        }
-        ma_vldr(output, HeapReg, ptrReg, 0, Assembler::Below);
-    }
-}
-
-void
-MacroAssemblerARMCompat::ma_loadHeapAsmJS(Register ptrReg, int size, bool isSigned,
-                                          bool needsBoundsCheck, bool faultOnOOB,
-                                          Register output)
-{
-    if (!needsBoundsCheck) {
-        ma_dataTransferN(IsLoad, size, isSigned, HeapReg, ptrReg, output, Offset,
-                         Assembler::Always);
-        return;
-    }
-
-    uint32_t cmpOffset = ma_BoundsCheck(ptrReg).getOffset();
-    append(wasm::BoundsCheck(cmpOffset));
-
-    if (faultOnOOB)
-        ma_b(wasm::JumpTarget::OutOfBounds, Assembler::AboveOrEqual);
-    else
-        ma_mov(Imm32(0), output, Assembler::AboveOrEqual);
-
-    ma_dataTransferN(IsLoad, size, isSigned, HeapReg, ptrReg, output, Offset, Assembler::Below);
-}
-
 void
 MacroAssemblerARMCompat::store8(Imm32 imm, const Address& address)
 {
@@ -2354,51 +2305,6 @@ MacroAssemblerARMCompat::storePtr(Register src, AbsoluteAddress dest)
     ScratchRegisterScope scratch(asMasm());
     movePtr(ImmWord(uintptr_t(dest.addr)), scratch);
     storePtr(src, Address(scratch, 0));
-}
-
-void
-MacroAssemblerARMCompat::ma_storeHeapAsmJS(Register ptrReg, int size, bool needsBoundsCheck,
-                                           bool faultOnOOB, FloatRegister value)
-{
-    if (!needsBoundsCheck) {
-        BaseIndex addr(HeapReg, ptrReg, TimesOne, 0);
-        if (size == 32)
-            asMasm().storeFloat32(value, addr);
-        else
-            asMasm().storeDouble(value, addr);
-    } else {
-        uint32_t cmpOffset = ma_BoundsCheck(ptrReg).getOffset();
-        append(wasm::BoundsCheck(cmpOffset));
-
-        if (faultOnOOB)
-            ma_b(wasm::JumpTarget::OutOfBounds, Assembler::AboveOrEqual);
-
-        if (size == 32)
-            value = value.singleOverlay();
-
-        ma_vstr(value, HeapReg, ptrReg, 0, 0, Assembler::Below);
-    }
-}
-
-void
-MacroAssemblerARMCompat::ma_storeHeapAsmJS(Register ptrReg, int size, bool isSigned,
-                                           bool needsBoundsCheck, bool faultOnOOB,
-                                           Register value)
-{
-    if (!needsBoundsCheck) {
-        ma_dataTransferN(IsStore, size, isSigned, HeapReg, ptrReg, value, Offset,
-                         Assembler::Always);
-        return;
-    }
-
-    uint32_t cmpOffset = ma_BoundsCheck(ptrReg).getOffset();
-    append(wasm::BoundsCheck(cmpOffset));
-
-    if (faultOnOOB)
-        ma_b(wasm::JumpTarget::OutOfBounds, Assembler::AboveOrEqual);
-
-    ma_dataTransferN(IsStore, size, isSigned, HeapReg, ptrReg, value, Offset,
-                     Assembler::Below);
 }
 
 // Note: this function clobbers the input register.
@@ -5220,7 +5126,7 @@ MacroAssembler::pushFakeReturnAddress(Register scratch)
 // Branch functions
 
 void
-MacroAssembler::branchPtrInNurseryRange(Condition cond, Register ptr, Register temp,
+MacroAssembler::branchPtrInNurseryChunk(Condition cond, Register ptr, Register temp,
                                         Label* label)
 {
     AutoRegisterScope scratch2(*this, secondScratchReg_);
@@ -5229,13 +5135,10 @@ MacroAssembler::branchPtrInNurseryRange(Condition cond, Register ptr, Register t
     MOZ_ASSERT(ptr != temp);
     MOZ_ASSERT(ptr != scratch2);
 
-    const Nursery& nursery = GetJitContext()->runtime->gcNursery();
-    uintptr_t startChunk = nursery.start() >> Nursery::ChunkShift;
-
-    ma_mov(Imm32(startChunk), scratch2);
-    as_rsb(scratch2, scratch2, lsr(ptr, Nursery::ChunkShift));
-    branch32(cond == Assembler::Equal ? Assembler::Below : Assembler::AboveOrEqual,
-             scratch2, Imm32(nursery.numChunks()), label);
+    ma_lsr(Imm32(gc::ChunkShift), ptr, scratch2);
+    ma_lsl(Imm32(gc::ChunkShift), scratch2, scratch2);
+    load32(Address(scratch2, gc::ChunkLocationOffset), scratch2);
+    branch32(cond, scratch2, Imm32(int32_t(gc::ChunkLocation::Nursery)), label);
 }
 
 void
@@ -5245,10 +5148,10 @@ MacroAssembler::branchValueIsNurseryObject(Condition cond, const Address& addres
     MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
 
     Label done;
-
     branchTestObject(Assembler::NotEqual, address, cond == Assembler::Equal ? &done : label);
+
     loadPtr(address, temp);
-    branchPtrInNurseryRange(cond, temp, InvalidReg, label);
+    branchPtrInNurseryChunk(cond, temp, InvalidReg, label);
 
     bind(&done);
 }
@@ -5260,9 +5163,9 @@ MacroAssembler::branchValueIsNurseryObject(Condition cond, ValueOperand value,
     MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
 
     Label done;
-
     branchTestObject(Assembler::NotEqual, value, cond == Assembler::Equal ? &done : label);
-    branchPtrInNurseryRange(cond, value.payloadReg(), temp, label);
+
+    branchPtrInNurseryChunk(cond, value.payloadReg(), InvalidReg, label);
 
     bind(&done);
 }

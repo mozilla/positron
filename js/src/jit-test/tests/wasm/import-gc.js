@@ -8,12 +8,8 @@ load(libdir + 'asserts.js');
 const Module = WebAssembly.Module;
 const Instance = WebAssembly.Instance;
 
-// Explicitly opt into the new binary format for imports and exports until it
-// is used by default everywhere.
-const textToBinary = str => wasmTextToBinary(str, 'new-format');
-
-const m1 = new Module(textToBinary(`(module (func) (export "f" 0))`));
-const m2 = new Module(textToBinary(`(module (import "a" "f") (func) (export "g" 0))`));
+const m1 = new Module(textToBinary(`(module (func $f) (export "f" $f))`));
+const m2 = new Module(textToBinary(`(module (import "a" "f") (func $f) (export "g" $f))`));
 
 // Imported instance objects should stay alive as long as any importer is alive.
 resetFinalizeCount();

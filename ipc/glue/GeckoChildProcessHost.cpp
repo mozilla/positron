@@ -19,9 +19,13 @@
 #endif
 
 #include "MainThreadUtils.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 #include "prenv.h"
 #include "nsXPCOMPrivate.h"
+
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+#include "nsAppDirectoryServiceDefs.h"
+#endif
 
 #include "nsExceptionHandler.h"
 
@@ -608,6 +612,20 @@ AddAppDirToCommandLine(std::vector<std::string>& aCmdLine)
         aCmdLine.push_back(path.get());
 #endif
       }
+
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+      // Full path to the profile dir
+      nsCOMPtr<nsIFile> profileDir;
+      rv = directoryService->Get(NS_APP_USER_PROFILE_50_DIR,
+                                 NS_GET_IID(nsIFile),
+                                 getter_AddRefs(profileDir));
+      if (NS_SUCCEEDED(rv)) {
+        nsAutoCString path;
+        MOZ_ALWAYS_SUCCEEDS(profileDir->GetNativePath(path));
+        aCmdLine.push_back("-profile");
+        aCmdLine.push_back(path.get());
+      }
+#endif
     }
   }
 }
@@ -711,7 +729,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   // send the child the PID so that it can open a ProcessHandle back to us.
   // probably don't want to do this in the long run
   char pidstring[32];
-  snprintf_literal(pidstring,"%d", base::Process::Current().pid());
+  SprintfLiteral(pidstring,"%d", base::Process::Current().pid());
 
   const char* const childProcessType =
       XRE_ChildProcessTypeToString(mProcessType);

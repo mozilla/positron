@@ -20,7 +20,7 @@
 #include "mozilla/StaticPtr.h"
 #include "mozilla/SyncRunnable.h"
 #include "mozilla/Telemetry.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsCRT.h"
 #include "nsClientAuthRemember.h"
@@ -256,7 +256,7 @@ nsNSSComponent::nsNSSComponent()
 #endif
 {
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("nsNSSComponent::ctor\n"));
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
   NS_ASSERTION( (0 == mInstanceCount), "nsNSSComponent is a singleton, but instantiated multiple times!");
   ++mInstanceCount;
@@ -265,7 +265,7 @@ nsNSSComponent::nsNSSComponent()
 nsNSSComponent::~nsNSSComponent()
 {
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("nsNSSComponent::dtor\n"));
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
   // All cleanup code requiring services needs to happen in xpcom_shutdown
 
@@ -1369,6 +1369,7 @@ static const bool REQUIRE_SAFE_NEGOTIATION_DEFAULT = false;
 static const bool FALSE_START_ENABLED_DEFAULT = true;
 static const bool NPN_ENABLED_DEFAULT = true;
 static const bool ALPN_ENABLED_DEFAULT = false;
+static const bool ENABLED_0RTT_DATA_DEFAULT = false;
 
 static void
 ConfigureTLSSessionIdentifiers()
@@ -1743,8 +1744,6 @@ nsNSSComponent::InitializeNSS()
   }
 
   DisableMD5();
-  // Initialize the certverifier log before calling any functions that library.
-  InitCertVerifierLog();
   LoadLoadableRoots();
 
   MaybeEnableFamilySafetyCompatibility();
@@ -1775,6 +1774,10 @@ nsNSSComponent::InitializeNSS()
   SSL_OptionSetDefault(SSL_ENABLE_ALPN,
                        Preferences::GetBool("security.ssl.enable_alpn",
                                             ALPN_ENABLED_DEFAULT));
+
+  SSL_OptionSetDefault(SSL_ENABLE_0RTT_DATA,
+                       Preferences::GetBool("security.tls.enable_0rtt_data",
+                                            ENABLED_0RTT_DATA_DEFAULT));
 
   if (NS_FAILED(InitializeCipherSuite())) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Error, ("Unable to initialize cipher suite settings\n"));
@@ -1837,7 +1840,7 @@ nsNSSComponent::ShutdownNSS()
   // needs mutex protection.
 
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("nsNSSComponent::ShutdownNSS\n"));
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
   MutexAutoLock lock(mutex);
 
@@ -1881,7 +1884,7 @@ nsNSSComponent::ShutdownNSS()
 nsresult
 nsNSSComponent::Init()
 {
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
   if (!NS_IsMainThread()) {
     return NS_ERROR_NOT_SAME_THREAD;
   }
@@ -1961,6 +1964,10 @@ nsNSSComponent::Observe(nsISupports* aSubject, const char* aTopic,
       SSL_OptionSetDefault(SSL_ENABLE_ALPN,
                            Preferences::GetBool("security.ssl.enable_alpn",
                                                 ALPN_ENABLED_DEFAULT));
+    } else if (prefName.EqualsLiteral("security.tls.enable_0rtt_data")) {
+      SSL_OptionSetDefault(SSL_ENABLE_0RTT_DATA,
+                           Preferences::GetBool("security.tls.enable_0rtt_data",
+                                                ENABLED_0RTT_DATA_DEFAULT));
     } else if (prefName.Equals("security.ssl.disable_session_identifiers")) {
       ConfigureTLSSessionIdentifiers();
     } else if (prefName.EqualsLiteral("security.OCSP.enabled") ||
@@ -2187,7 +2194,6 @@ GetDefaultCertVerifier()
   static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
 
   nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(kNSSComponentCID));
-  RefPtr<SharedCertVerifier> certVerifier;
   if (nssComponent) {
     return nssComponent->GetDefaultCertVerifier();
   }

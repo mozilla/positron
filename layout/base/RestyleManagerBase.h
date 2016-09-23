@@ -9,13 +9,21 @@
 
 #include "mozilla/OverflowChangedTracker.h"
 #include "nsChangeHint.h"
+#include "nsPresContext.h"
 
+class nsCString;
+class nsCSSFrameConstructor;
 class nsStyleChangeList;
 
 namespace mozilla {
 
-class ServoRestyleManager;
+class EventStates;
 class RestyleManager;
+class ServoRestyleManager;
+
+namespace dom {
+class Element;
+}
 
 /**
  * Class for sharing data and logic common to both RestyleManager and
@@ -48,6 +56,8 @@ public:
   static nsCString RestyleHintToString(nsRestyleHint aHint);
 
 #ifdef DEBUG
+  static nsCString ChangeHintToString(nsChangeHint aHint);
+
   /**
    * DEBUG ONLY method to verify integrity of style tree versus frame tree
    */
@@ -121,7 +131,12 @@ private:
   bool mObservingRefreshDriver;
 
 protected:
+  // True if we're in the middle of a nsRefreshDriver refresh
+  bool mInStyleRefresh;
+
   OverflowChangedTracker mOverflowChangedTracker;
+
+  void PostRestyleEventInternal(bool aForLazyConstruction);
 
   /**
    * These are protected static methods that help with the change hint

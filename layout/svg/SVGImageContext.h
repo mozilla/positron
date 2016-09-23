@@ -55,7 +55,8 @@ public:
   bool operator==(const SVGImageContext& aOther) const {
     return mViewportSize == aOther.mViewportSize &&
            mPreserveAspectRatio == aOther.mPreserveAspectRatio &&
-           mGlobalOpacity == aOther.mGlobalOpacity;
+           mGlobalOpacity == aOther.mGlobalOpacity &&
+           mIsPaintingSVGImageElement == aOther.mIsPaintingSVGImageElement;
   }
 
   bool operator!=(const SVGImageContext& aOther) const {
@@ -66,7 +67,8 @@ public:
     return HashGeneric(mViewportSize.width,
                        mViewportSize.height,
                        mPreserveAspectRatio.map(HashPAR).valueOr(0),
-                       HashBytes(&mGlobalOpacity, sizeof(gfxFloat)));
+                       HashBytes(&mGlobalOpacity, sizeof(gfxFloat)),
+                       mIsPaintingSVGImageElement);
   }
 
 private:
@@ -74,6 +76,7 @@ private:
     return aPAR.Hash();
   }
 
+  // NOTE: When adding new member-vars, remember to update Hash() & operator==.
   CSSIntSize                    mViewportSize;
   Maybe<SVGPreserveAspectRatio> mPreserveAspectRatio;
   gfxFloat                      mGlobalOpacity;

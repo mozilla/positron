@@ -140,8 +140,8 @@ BroadcastBlobURLRegistration(const nsACString& aURI,
     return;
   }
 
-  NS_WARN_IF(!cc->SendStoreAndBroadcastBlobURLRegistration(nsCString(aURI), actor,
-                                                           IPC::Principal(aPrincipal)));
+  Unused << NS_WARN_IF(!cc->SendStoreAndBroadcastBlobURLRegistration(
+    nsCString(aURI), actor, IPC::Principal(aPrincipal)));
 }
 
 void
@@ -156,7 +156,8 @@ BroadcastBlobURLUnregistration(const nsACString& aURI, DataInfo* aInfo)
   }
 
   ContentChild* cc = ContentChild::GetSingleton();
-  NS_WARN_IF(!cc->SendUnstoreAndBroadcastBlobURLUnregistration(nsCString(aURI)));
+  Unused << NS_WARN_IF(!cc->SendUnstoreAndBroadcastBlobURLUnregistration(
+    nsCString(aURI)));
 }
 
 class HostObjectURLsReporter final : public nsIMemoryReporter
@@ -169,11 +170,13 @@ class HostObjectURLsReporter final : public nsIMemoryReporter
   NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
                             nsISupports* aData, bool aAnonymize) override
   {
-    return MOZ_COLLECT_REPORT(
+    MOZ_COLLECT_REPORT(
       "host-object-urls", KIND_OTHER, UNITS_COUNT,
       gDataTable ? gDataTable->Count() : 0,
       "The number of host objects stored for access via URLs "
       "(e.g. blobs passed to URL.createObjectURL).");
+
+    return NS_OK;
   }
 };
 
@@ -218,7 +221,6 @@ class BlobURLsReporter final : public nsIMemoryReporter
           "blob cannot be freed until all URLs for it have been explicitly "
           "invalidated with URL.revokeObjectURL.");
         nsAutoCString path, url, owner, specialDesc;
-        nsCOMPtr<nsIURI> principalURI;
         uint64_t size = 0;
         uint32_t refCount = 1;
         DebugOnly<bool> blobImplWasCounted;
@@ -900,7 +902,8 @@ nsFontTableProtocolHandler::NewURI(const nsACString& aSpec,
     // If aSpec is a relative URI -other- than a bare #ref,
     // this will leave uri empty, and we'll return a failure code below.
     uri = new mozilla::net::nsSimpleURI();
-    uri->SetSpec(aSpec);
+    nsresult rv = uri->SetSpec(aSpec);
+    NS_ENSURE_SUCCESS(rv, rv);
   }
 
   bool schemeIs;

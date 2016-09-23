@@ -12,11 +12,11 @@
 const { Heritage } = require("devtools/client/shared/widgets/view-helpers");
 const { AbstractCanvasGraph } = require("devtools/client/shared/widgets/Graphs");
 
-const { colorUtils } = require("devtools/shared/css-color");
+const { colorUtils } = require("devtools/shared/css/color");
 const { getColor } = require("devtools/client/shared/theme");
 const ProfilerGlobal = require("devtools/client/performance/modules/global");
 const { MarkerBlueprintUtils } = require("devtools/client/performance/modules/marker-blueprint-utils");
-const { TickUtils } = require("devtools/client/performance/modules/widgets/waterfall-ticks");
+const { TickUtils } = require("devtools/client/performance/modules/waterfall-ticks");
 const { TIMELINE_BLUEPRINT } = require("devtools/client/performance/modules/markers");
 
 // px

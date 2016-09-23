@@ -198,6 +198,11 @@ protected:
     static BrowserStreamParent* StreamCast(NPP instance, NPStream* s,
                                            PluginAsyncSurrogate** aSurrogate = nullptr);
 
+    virtual bool
+    AnswerNPN_SetValue_NPPVpluginRequiresAudioDeviceChanges(
+                                        const bool& shouldRegister,
+                                        NPError* result) override;
+
 protected:
     void SetChildTimeout(const int32_t aChildTimeout);
     static void TimeoutChanged(const char* aPref, void* aModule);
@@ -207,6 +212,8 @@ protected:
     virtual bool RecvNotifyContentModuleDestroyed() override { return true; }
 
     virtual bool RecvProfile(const nsCString& aProfile) override { return true; }
+
+    virtual bool AnswerGetKeyState(const int32_t& aVirtKey, int16_t* aRet) override;
 
     virtual bool RecvReturnClearSiteData(const NPError& aRv,
                                          const uint64_t& aCallbackId) override;
@@ -303,6 +310,8 @@ public:
 
 #if defined(XP_MACOSX)
     virtual nsresult IsRemoteDrawingCoreAnimation(NPP instance, bool *aDrawing) override;
+#endif
+#if defined(XP_MACOSX) || defined(XP_WIN)
     virtual nsresult ContentsScaleFactorChanged(NPP instance, double aContentsScaleFactor) override;
 #endif
 
@@ -498,6 +507,9 @@ class PluginModuleChromeParent
     virtual bool
     RecvProfile(const nsCString& aProfile) override;
 
+    virtual bool
+    AnswerGetKeyState(const int32_t& aVirtKey, int16_t* aRet) override;
+
 private:
     virtual void
     EnteredCxxStack() override;
@@ -561,6 +573,11 @@ private:
     virtual bool RecvNotifyContentModuleDestroyed() override;
 
     static void CachedSettingChanged(const char* aPref, void* aModule);
+
+    virtual bool
+    AnswerNPN_SetValue_NPPVpluginRequiresAudioDeviceChanges(
+                                        const bool& shouldRegister,
+                                        NPError* result) override;
 
     PluginProcessParent* mSubprocess;
     uint32_t mPluginId;

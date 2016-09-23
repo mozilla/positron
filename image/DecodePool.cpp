@@ -161,14 +161,14 @@ class DecodePoolWorker : public Runnable
 public:
   explicit DecodePoolWorker(DecodePoolImpl* aImpl) : mImpl(aImpl) { }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(!NS_IsMainThread());
 
     mImpl->InitCurrentThread();
 
     nsCOMPtr<nsIThread> thisThread;
-    nsThreadManager::get()->GetCurrentThread(getter_AddRefs(thisThread));
+    nsThreadManager::get().GetCurrentThread(getter_AddRefs(thisThread));
 
     do {
       Work work = mImpl->PopWork();

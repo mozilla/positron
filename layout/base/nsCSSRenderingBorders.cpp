@@ -767,13 +767,8 @@ nsCSSBorderRenderer::GetStraightBorderPoint(mozilla::css::Side aSide,
         // +-------------------------+----
         // |                         |
         // |                         |
-        if (isHorizontal) {
-          P.x += signs[0] * borderWidth / 2.0f;
-          P.y += signs[1] * borderWidth / 2.0f;
-        } else {
-          P.x += signs[0] * borderWidth / 2.0f;
-          P.y += signs[1] * borderWidth / 2.0f;
-        }
+        P.x += signs[0] * borderWidth / 2.0f;
+        P.y += signs[1] * borderWidth / 2.0f;
       } else {
         // Two dots are drawn separately.
         //
@@ -2412,7 +2407,7 @@ nsCSSBorderRenderer::DrawDottedCornerSlow(mozilla::css::Side aSide,
 
     DottedCornerFinder::Result result = finder.Next();
 
-    if (marginedDirtyRect.Contains(result.C)) {
+    if (marginedDirtyRect.Contains(result.C) && result.r > 0) {
       entered = true;
       builder->MoveTo(Point(result.C.x + result.r, result.C.y));
       builder->Arc(result.C, result.r, 0, Float(2.0 * M_PI));

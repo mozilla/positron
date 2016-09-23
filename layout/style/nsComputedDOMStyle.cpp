@@ -87,7 +87,7 @@ struct nsComputedStyleMap
     // Create a pointer-to-member-function type.
     typedef already_AddRefed<CSSValue> (nsComputedDOMStyle::*ComputeMethod)();
 
-    nsCSSProperty mProperty;
+    nsCSSPropertyID mProperty;
     ComputeMethod mGetter;
 
     bool IsLayoutFlushNeeded() const
@@ -128,7 +128,7 @@ struct nsComputedStyleMap
    * that should be exposed on an nsComputedDOMStyle, excluding any
    * disabled properties.
    */
-  nsCSSProperty PropertyAt(uint32_t aIndex)
+  nsCSSPropertyID PropertyAt(uint32_t aIndex)
   {
     Update();
     return kEntries[EntryIndex(aIndex)].mProperty;
@@ -139,7 +139,7 @@ struct nsComputedStyleMap
    * property, or nullptr if the property is not exposed on nsComputedDOMStyle
    * or is currently disabled.
    */
-  const Entry* FindEntryForProperty(nsCSSProperty aPropID)
+  const Entry* FindEntryForProperty(nsCSSPropertyID aPropID)
   {
     Update();
     for (uint32_t i = 0; i < mExposedPropertyCount; i++) {
@@ -308,7 +308,7 @@ NS_IMPL_CYCLE_COLLECTING_ADDREF(nsComputedDOMStyle)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsComputedDOMStyle)
 
 NS_IMETHODIMP
-nsComputedDOMStyle::GetPropertyValue(const nsCSSProperty aPropID,
+nsComputedDOMStyle::GetPropertyValue(const nsCSSPropertyID aPropID,
                                      nsAString& aValue)
 {
   // This is mostly to avoid code duplication with GetPropertyCSSValue(); if
@@ -320,7 +320,7 @@ nsComputedDOMStyle::GetPropertyValue(const nsCSSProperty aPropID,
 }
 
 NS_IMETHODIMP
-nsComputedDOMStyle::SetPropertyValue(const nsCSSProperty aPropID,
+nsComputedDOMStyle::SetPropertyValue(const nsCSSPropertyID aPropID,
                                      const nsAString& aValue)
 {
   return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
@@ -753,7 +753,7 @@ nsComputedDOMStyle::ClearCurrentStyleSources()
 already_AddRefed<CSSValue>
 nsComputedDOMStyle::GetPropertyCSSValue(const nsAString& aPropertyName, ErrorResult& aRv)
 {
-  nsCSSProperty prop =
+  nsCSSPropertyID prop =
     nsCSSProps::LookupProperty(aPropertyName, CSSEnabledState::eForAllContent);
 
   bool needsLayoutFlush;
@@ -770,7 +770,7 @@ nsComputedDOMStyle::GetPropertyCSSValue(const nsAString& aPropertyName, ErrorRes
     // GetQueryablePropertyMap.
     if (prop != eCSSProperty_UNKNOWN &&
         nsCSSProps::PropHasFlags(prop, CSS_PROPERTY_IS_ALIAS)) {
-      const nsCSSProperty* subprops = nsCSSProps::SubpropertyEntryFor(prop);
+      const nsCSSPropertyID* subprops = nsCSSProps::SubpropertyEntryFor(prop);
       MOZ_ASSERT(subprops[1] == eCSSProperty_UNKNOWN,
                  "must have list of length 1");
       prop = subprops[0];
@@ -955,6 +955,13 @@ nsComputedDOMStyle::SetToRGBAColor(nsROCSSPrimitiveValue* aValue,
   alpha->SetNumber(nsStyleUtil::ColorComponentToFloat(a));
 
   aValue->SetColor(rgbColor);
+}
+
+void
+nsComputedDOMStyle::SetValueFromComplexColor(nsROCSSPrimitiveValue* aValue,
+                                             const StyleComplexColor& aColor)
+{
+  SetToRGBAColor(aValue, StyleColor()->CalcComplexColor(aColor));
 }
 
 already_AddRefed<CSSValue>
@@ -1197,11 +1204,11 @@ nsComputedDOMStyle::DoGetCounterIncrement()
     RefPtr<nsROCSSPrimitiveValue> name = new nsROCSSPrimitiveValue;
     RefPtr<nsROCSSPrimitiveValue> value = new nsROCSSPrimitiveValue;
 
-    const nsStyleCounterData *data = content->GetCounterIncrementAt(i);
+    const nsStyleCounterData& data = content->CounterIncrementAt(i);
     nsAutoString escaped;
-    nsStyleUtil::AppendEscapedCSSIdent(data->mCounter, escaped);
+    nsStyleUtil::AppendEscapedCSSIdent(data.mCounter, escaped);
     name->SetString(escaped);
-    value->SetNumber(data->mValue); // XXX This should really be integer
+    value->SetNumber(data.mValue); // XXX This should really be integer
 
     valueList->AppendCSSValue(name.forget());
     valueList->AppendCSSValue(value.forget());
@@ -1441,11 +1448,11 @@ nsComputedDOMStyle::DoGetCounterReset()
     RefPtr<nsROCSSPrimitiveValue> name = new nsROCSSPrimitiveValue;
     RefPtr<nsROCSSPrimitiveValue> value = new nsROCSSPrimitiveValue;
 
-    const nsStyleCounterData *data = content->GetCounterResetAt(i);
+    const nsStyleCounterData& data = content->CounterResetAt(i);
     nsAutoString escaped;
-    nsStyleUtil::AppendEscapedCSSIdent(data->mCounter, escaped);
+    nsStyleUtil::AppendEscapedCSSIdent(data.mCounter, escaped);
     name->SetString(escaped);
-    value->SetNumber(data->mValue); // XXX This should really be integer
+    value->SetNumber(data.mValue); // XXX This should really be integer
 
     valueList->AppendCSSValue(name.forget());
     valueList->AppendCSSValue(value.forget());
@@ -2359,7 +2366,7 @@ nsComputedDOMStyle::DoGetBackgroundOrigin()
 
 void
 nsComputedDOMStyle::SetValueToPositionCoord(
-    const nsStyleImageLayers::Position::PositionCoord& aCoord,
+    const Position::Coord& aCoord,
     nsROCSSPrimitiveValue* aValue)
 {
   if (!aCoord.mHasPercent) {
@@ -2375,7 +2382,7 @@ nsComputedDOMStyle::SetValueToPositionCoord(
 
 void
 nsComputedDOMStyle::SetValueToPosition(
-    const nsStyleImageLayers::Position& aPosition,
+    const Position& aPosition,
     nsDOMCSSValueList* aValueList)
 {
   RefPtr<nsROCSSPrimitiveValue> valX = new nsROCSSPrimitiveValue;
@@ -2531,6 +2538,21 @@ already_AddRefed<CSSValue>
 nsComputedDOMStyle::GetGridTrackSize(const nsStyleCoord& aMinValue,
                                      const nsStyleCoord& aMaxValue)
 {
+  if (aMinValue.GetUnit() == eStyleUnit_None) {
+    // A fit-content() function.
+    RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
+    nsAutoString argumentStr, fitContentStr;
+    fitContentStr.AppendLiteral("fit-content(");
+    MOZ_ASSERT(aMaxValue.IsCoordPercentCalcUnit(),
+               "unexpected unit for fit-content() argument value");
+    SetValueToCoord(val, aMaxValue, true);
+    val->GetCssText(argumentStr);
+    fitContentStr.Append(argumentStr);
+    fitContentStr.Append(char16_t(')'));
+    val->SetString(fitContentStr);
+    return val.forget();
+  }
+
   if (aMinValue == aMaxValue) {
     RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
     SetValueToCoord(val, aMinValue, true,
@@ -2615,8 +2637,8 @@ nsComputedDOMStyle::GetGridTemplateColumnsRows(
     numSizes = aTrackInfo->mSizes.Length();
   }
 
-  // An empty <track-list> is represented as "none" in syntax.
-  if (numSizes == 0) {
+  // An empty <track-list> without repeats is represented as "none" in syntax.
+  if (numSizes == 0 && !aTrackList.HasRepeatAuto()) {
     RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
     val->SetIdent(eCSSKeyword_none);
     return val.forget();
@@ -2632,8 +2654,7 @@ nsComputedDOMStyle::GetGridTemplateColumnsRows(
     const nsTArray<nscoord>& trackSizes = aTrackInfo->mSizes;
     const uint32_t numExplicitTracks = aTrackInfo->mNumExplicitTracks;
     const uint32_t numLeadingImplicitTracks = aTrackInfo->mNumLeadingImplicitTracks;
-    MOZ_ASSERT(numSizes > 0 &&
-               numSizes >= numLeadingImplicitTracks + numExplicitTracks);
+    MOZ_ASSERT(numSizes >= numLeadingImplicitTracks + numExplicitTracks);
 
     // Add any leading implicit tracks.
     for (uint32_t i = 0; i < numLeadingImplicitTracks; ++i) {
@@ -2642,8 +2663,8 @@ nsComputedDOMStyle::GetGridTemplateColumnsRows(
       valueList->AppendCSSValue(val.forget());
     }
 
-    // Then add any explicit tracks.
-    if (numExplicitTracks) {
+    // Then add any explicit tracks and removed auto-fit tracks.
+    if (numExplicitTracks || aTrackList.HasRepeatAuto()) {
       int32_t endOfRepeat = 0;  // first index after any repeat() tracks
       int32_t offsetToLastRepeat = 0;
       if (aTrackList.HasRepeatAuto()) {
@@ -2651,20 +2672,66 @@ nsComputedDOMStyle::GetGridTemplateColumnsRows(
         offsetToLastRepeat = numExplicitTracks + 1 - aTrackList.mLineNameLists.Length();
         endOfRepeat = aTrackList.mRepeatAutoIndex + offsetToLastRepeat + 1;
       }
+
+      uint32_t repeatIndex = 0;
+      uint32_t numRepeatTracks = aTrackInfo->mRemovedRepeatTracks.Length();
+      enum LinePlacement { LinesPrecede, LinesFollow, LinesBetween };
+      auto AppendRemovedAutoFits = [this, aTrackInfo, &valueList, aTrackList,
+                                    &repeatIndex,
+                                    numRepeatTracks](LinePlacement aPlacement)
+      {
+        // Add in removed auto-fit tracks and lines here, if necessary
+        bool atLeastOneTrackReported = false;
+        while (repeatIndex < numRepeatTracks &&
+             aTrackInfo->mRemovedRepeatTracks[repeatIndex]) {
+          if ((aPlacement == LinesPrecede) ||
+              ((aPlacement == LinesBetween) && atLeastOneTrackReported)) {
+            // Precede it with the lines between repeats.
+            AppendGridLineNames(valueList,
+                                aTrackList.mRepeatAutoLineNameListAfter,
+                                aTrackList.mRepeatAutoLineNameListBefore);
+          }
+
+          // Removed 'auto-fit' tracks are reported as 0px.
+          RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
+          val->SetAppUnits(0);
+          valueList->AppendCSSValue(val.forget());
+          atLeastOneTrackReported = true;
+
+          if (aPlacement == LinesFollow) {
+            // Follow it with the lines between repeats.
+            AppendGridLineNames(valueList,
+                                aTrackList.mRepeatAutoLineNameListAfter,
+                                aTrackList.mRepeatAutoLineNameListBefore);
+          }
+          repeatIndex++;
+        }
+        repeatIndex++;
+      };
+
       for (int32_t i = 0;; i++) {
         if (aTrackList.HasRepeatAuto()) {
           if (i == aTrackList.mRepeatAutoIndex) {
             const nsTArray<nsString>& lineNames = aTrackList.mLineNameLists[i];
             if (i == endOfRepeat) {
-              // all auto-fit tracks are empty, so "[a] repeat(...) [b]"
-              // becomes "[a b]"
+              // All auto-fit tracks are empty, but we report them anyway.
               AppendGridLineNames(valueList, lineNames,
+                                  aTrackList.mRepeatAutoLineNameListBefore);
+
+              AppendRemovedAutoFits(LinesBetween);
+
+              AppendGridLineNames(valueList,
+                                  aTrackList.mRepeatAutoLineNameListAfter,
                                   aTrackList.mLineNameLists[i + 1]);
             } else {
               AppendGridLineNames(valueList, lineNames,
                                   aTrackList.mRepeatAutoLineNameListBefore);
+              AppendRemovedAutoFits(LinesFollow);
             }
           } else if (i == endOfRepeat) {
+            // Before appending the last line, finish off any removed auto-fits.
+            AppendRemovedAutoFits(LinesPrecede);
+
             const nsTArray<nsString>& lineNames =
               aTrackList.mLineNameLists[aTrackList.mRepeatAutoIndex + 1];
             AppendGridLineNames(valueList,
@@ -2674,6 +2741,7 @@ nsComputedDOMStyle::GetGridTemplateColumnsRows(
             AppendGridLineNames(valueList,
                                 aTrackList.mRepeatAutoLineNameListAfter,
                                 aTrackList.mRepeatAutoLineNameListBefore);
+            AppendRemovedAutoFits(LinesFollow);
           } else {
             uint32_t j = i > endOfRepeat ? i - offsetToLastRepeat : i;
             const nsTArray<nsString>& lineNames = aTrackList.mLineNameLists[j];
@@ -3767,10 +3835,7 @@ already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetTextEmphasisColor()
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  const nsStyleText* text = StyleText();
-  nscolor color = text->mTextEmphasisColorForeground ?
-    StyleColor()->mColor : text->mTextEmphasisColor;
-  SetToRGBAColor(val, color);
+  SetValueFromComplexColor(val, StyleText()->mTextEmphasisColor);
   return val.forget();
 }
 
@@ -4015,7 +4080,7 @@ already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetWebkitTextFillColor()
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  SetToRGBAColor(val, mStyleContext->GetTextFillColor());
+  SetValueFromComplexColor(val, StyleText()->mWebkitTextFillColor);
   return val.forget();
 }
 
@@ -4023,7 +4088,7 @@ already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetWebkitTextStrokeColor()
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  SetToRGBAColor(val, mStyleContext->GetTextStrokeColor());
+  SetValueFromComplexColor(val, StyleText()->mWebkitTextStrokeColor);
   return val.forget();
 }
 
@@ -4765,7 +4830,7 @@ nsComputedDOMStyle::DoGetHeight()
     calcHeight = true;
 
     const nsStyleDisplay* displayData = StyleDisplay();
-    if (displayData->mDisplay == NS_STYLE_DISPLAY_INLINE &&
+    if (displayData->mDisplay == mozilla::StyleDisplay::Inline &&
         !(mInnerFrame->IsFrameOfType(nsIFrame::eReplaced)) &&
         // An outer SVG frame should behave the same as eReplaced in this case
         mInnerFrame->GetType() != nsGkAtoms::svgOuterSVGFrame) {
@@ -4809,7 +4874,7 @@ nsComputedDOMStyle::DoGetWidth()
     calcWidth = true;
 
     const nsStyleDisplay *displayData = StyleDisplay();
-    if (displayData->mDisplay == NS_STYLE_DISPLAY_INLINE &&
+    if (displayData->mDisplay == mozilla::StyleDisplay::Inline &&
         !(mInnerFrame->IsFrameOfType(nsIFrame::eReplaced)) &&
         // An outer SVG frame should behave the same as eReplaced in this case
         mInnerFrame->GetType() != nsGkAtoms::svgOuterSVGFrame) {
@@ -5411,10 +5476,10 @@ nsComputedDOMStyle::StyleCoordToNSCoord(const nsStyleCoord& aCoord,
         // We can also get a negative value with a percentage value if
         // percentageBase is negative; this isn't expected, but can happen
         // when large length values overflow.
-        NS_WARN_IF_FALSE(percentageBase >= 0,
-                         "percentage base value overflowed to become "
-                         "negative for a property that disallows negative "
-                         "values");
+        NS_WARNING_ASSERTION(
+          percentageBase >= 0,
+          "percentage base value overflowed to become negative for a property "
+          "that disallows negative values");
         MOZ_ASSERT(aCoord.IsCalcUnit() ||
                    (aCoord.HasPercent() && percentageBase < 0),
                    "parser should have rejected value");
@@ -5930,7 +5995,7 @@ nsComputedDOMStyle::CreatePrimitiveValueForBasicShape(
   switch (type) {
     case StyleBasicShapeType::Polygon: {
       bool hasEvenOdd = aStyleBasicShape->GetFillRule() ==
-        NS_STYLE_FILL_RULE_EVENODD;
+        StyleFillRule::Evenodd;
       if (hasEvenOdd) {
         shapeFunctionString.AppendLiteral("evenodd");
       }
@@ -6038,7 +6103,7 @@ nsComputedDOMStyle::GetShapeSource(
       SetValueToFragmentOrURL(aShapeSource.GetURL(), val);
       return val.forget();
     }
-    case StyleShapeSourceType::None_: {
+    case StyleShapeSourceType::None: {
       RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
       val->SetIdent(eCSSKeyword_none);
       return val.forget();
@@ -6148,7 +6213,8 @@ nsComputedDOMStyle::DoGetMask()
       firstLayer.mOrigin != NS_STYLE_IMAGELAYER_ORIGIN_BORDER ||
       firstLayer.mComposite != NS_STYLE_MASK_COMPOSITE_ADD ||
       firstLayer.mMaskMode != NS_STYLE_MASK_MODE_MATCH_SOURCE ||
-      !firstLayer.mPosition.IsInitialValue() ||
+      !nsStyleImageLayers::IsInitialPositionForLayerType(
+        firstLayer.mPosition, nsStyleImageLayers::LayerType::Mask) ||
       !firstLayer.mRepeat.IsInitialValue(nsStyleImageLayers::LayerType::Mask) ||
       !firstLayer.mSize.IsInitialValue() ||
       !(firstLayer.mImage.GetType() == eStyleImageType_Null ||
@@ -6322,7 +6388,7 @@ nsComputedDOMStyle::DoGetTransitionProperty()
   do {
     const StyleTransition *transition = &display->mTransitions[i];
     RefPtr<nsROCSSPrimitiveValue> property = new nsROCSSPrimitiveValue;
-    nsCSSProperty cssprop = transition->GetProperty();
+    nsCSSPropertyID cssprop = transition->GetProperty();
     if (cssprop == eCSSPropertyExtra_all_properties)
       property->SetIdent(eCSSKeyword_all);
     else if (cssprop == eCSSPropertyExtra_no_properties)

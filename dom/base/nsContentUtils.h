@@ -34,6 +34,7 @@
 #include "mozilla/Logging.h"
 #include "mozilla/NotNull.h"
 #include "nsIContentPolicy.h"
+#include "nsIDocument.h"
 #include "nsPIDOMWindow.h"
 
 #if defined(XP_WIN)
@@ -55,7 +56,6 @@ class nsIContent;
 class nsIContentPolicy;
 class nsIContentSecurityPolicy;
 class nsIDocShellTreeItem;
-class nsIDocument;
 class nsIDocumentLoaderFactory;
 class nsIDOMDocument;
 class nsIDOMDocumentFragment;
@@ -119,14 +119,17 @@ class ErrorResult;
 class EventListenerManager;
 
 namespace dom {
+struct CustomElementDefinition;
 class DocumentFragment;
 class Element;
 class EventTarget;
 class IPCDataTransfer;
 class IPCDataTransferItem;
+struct LifecycleCallbackArgs;
 class NodeInfo;
 class nsIContentChild;
 class nsIContentParent;
+class TabChild;
 class Selection;
 class TabParent;
 } // namespace dom
@@ -783,6 +786,18 @@ public:
                                uint32_t *aArgCount, const char*** aArgNames);
 
   /**
+   * Returns origin attributes of the document.
+   **/
+  static mozilla::PrincipalOriginAttributes
+  GetOriginAttributes(nsIDocument* aDoc);
+
+  /**
+   * Returns origin attributes of the load group.
+   **/
+  static mozilla::PrincipalOriginAttributes
+  GetOriginAttributes(nsILoadGroup* aLoadGroup);
+
+  /**
    * Returns true if this document is in a Private Browsing window.
    */
   static bool IsInPrivateBrowsing(nsIDocument* aDoc);
@@ -1015,7 +1030,8 @@ public:
    */
   static bool GetWrapperSafeScriptFilename(nsIDocument *aDocument,
                                              nsIURI *aURI,
-                                             nsACString& aScriptURI);
+                                             nsACString& aScriptURI,
+                                             nsresult* aRv);
 
 
   /**
@@ -1739,9 +1755,6 @@ public:
 
   static JSContext *GetCurrentJSContext();
   static JSContext *GetCurrentJSContextForThread();
-  inline static JSContext *RootingCx() {
-    return mozilla::dom::danger::GetJSContext();
-  }
 
   /**
    * Case insensitive comparison between two strings. However it only ignores
@@ -1954,6 +1967,10 @@ public:
   static already_AddRefed<mozilla::layers::LayerManager>
   PersistentLayerManagerForDocument(nsIDocument *aDoc);
 
+  /* static */
+  static bool AppendLFInSerialization()
+    { return sAppendLFInSerialization; }
+
   /**
    * Determine whether a content node is focused or not,
    *
@@ -2059,6 +2076,14 @@ public:
   static bool ResistFingerprinting()
   {
     return sPrivacyResistFingerprinting;
+  }
+
+  /**
+   * Returns true if the browser should show busy cursor when loading page.
+   */
+  static bool UseActivityCursor()
+  {
+    return sUseActivityCursor;
   }
 
   /**
@@ -2355,18 +2380,6 @@ public:
   static nsIEditor* GetHTMLEditor(nsPresContext* aPresContext);
 
   /**
-   * Check whether a spec feature/version is supported.
-   * @param aObject the object, which should support the feature,
-   *        for example nsIDOMNode or nsIDOMDOMImplementation
-   * @param aFeature the feature ("Views", "Core", "HTML", "Range" ...)
-   * @param aVersion the version ("1.0", "2.0", ...)
-   * @return whether the feature is supported or not
-   */
-  static bool InternalIsSupported(nsISupports* aObject,
-                                  const nsAString& aFeature,
-                                  const nsAString& aVersion);
-
-  /**
    * Returns true if the browser.dom.window.dump.enabled pref is set.
    */
   static bool DOMWindowDumpEnabled();
@@ -2484,6 +2497,13 @@ public:
    */
   static bool IsFlavorImage(const nsACString& aFlavor);
 
+  static nsresult IPCTransferableToTransferable(const mozilla::dom::IPCDataTransfer& aDataTransfer,
+                                                const bool& aIsPrivateData,
+                                                nsIPrincipal* aRequestingPrincipal,
+                                                nsITransferable* aTransferable,
+                                                mozilla::dom::nsIContentParent* aContentParent,
+                                                mozilla::dom::TabChild* aTabChild);
+
   static void TransferablesToIPCTransferables(nsISupportsArray* aTransferables,
                                               nsTArray<mozilla::dom::IPCDataTransfer>& aIPC,
                                               bool aInSyncMessage,
@@ -2545,6 +2565,7 @@ public:
                                  float aX,
                                  float aY,
                                  int32_t aButton,
+                                 int32_t aButtons,
                                  int32_t aClickCount,
                                  int32_t aModifiers,
                                  bool aIgnoreRootScrollFrame,
@@ -2662,6 +2683,38 @@ public:
    */
   static nsIDocShell* GetDocShellForEventTarget(mozilla::dom::EventTarget* aTarget);
 
+  /**
+   * Returns true if the "HTTPS state" of the document should be "modern". See:
+   *
+   * https://html.spec.whatwg.org/#concept-document-https-state
+   * https://fetch.spec.whatwg.org/#concept-response-https-state
+   */
+  static bool HttpsStateIsModern(nsIDocument* aDocument);
+
+  /**
+   * Looking up a custom element definition.
+   * https://html.spec.whatwg.org/#look-up-a-custom-element-definition
+   */
+  static mozilla::dom::CustomElementDefinition*
+    LookupCustomElementDefinition(nsIDocument* aDoc,
+                                  const nsAString& aLocalName,
+                                  uint32_t aNameSpaceID,
+                                  const nsAString* aIs = nullptr);
+
+  static void SetupCustomElement(Element* aElement,
+                                 const nsAString* aTypeExtension = nullptr);
+
+  static void EnqueueLifecycleCallback(nsIDocument* aDoc,
+                                       nsIDocument::ElementCallbackType aType,
+                                       Element* aCustomElement,
+                                       mozilla::dom::LifecycleCallbackArgs* aArgs = nullptr,
+                                       mozilla::dom::CustomElementDefinition* aDefinition = nullptr);
+
+  static void GetCustomPrototype(nsIDocument* aDoc,
+                                 int32_t aNamespaceID,
+                                 nsIAtom* aAtom,
+                                 JS::MutableHandle<JSObject*> prototype);
+
 private:
   static bool InitializeEventTable();
 
@@ -2771,6 +2824,8 @@ private:
   static bool sGettersDecodeURLHash;
   static bool sPrivacyResistFingerprinting;
   static bool sSendPerformanceTimingNotifications;
+  static bool sAppendLFInSerialization;
+  static bool sUseActivityCursor;
   static uint32_t sCookiesLifetimePolicy;
   static uint32_t sCookiesBehavior;
 

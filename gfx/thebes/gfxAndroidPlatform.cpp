@@ -69,9 +69,11 @@ public:
     NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
                               nsISupports* aData, bool aAnonymize) override
     {
-        return MOZ_COLLECT_REPORT(
+        MOZ_COLLECT_REPORT(
             "explicit/freetype", KIND_HEAP, UNITS_BYTES, MemoryAllocated(),
             "Memory used by Freetype.");
+
+        return NS_OK;
     }
 };
 
@@ -121,6 +123,10 @@ already_AddRefed<gfxASurface>
 gfxAndroidPlatform::CreateOffscreenSurface(const IntSize& aSize,
                                            gfxImageFormat aFormat)
 {
+    if (!Factory::AllowedSurfaceSize(aSize)) {
+        return nullptr;
+    }
+
     RefPtr<gfxASurface> newSurface;
     newSurface = new gfxImageSurface(aSize, aFormat);
 
@@ -171,6 +177,7 @@ gfxAndroidPlatform::GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
 {
     static const char kDroidSansJapanese[] = "Droid Sans Japanese";
     static const char kMotoyaLMaru[] = "MotoyaLMaru";
+    static const char kNotoSansCJKJP[] = "Noto Sans CJK JP";
     static const char kNotoColorEmoji[] = "Noto Color Emoji";
 #ifdef MOZ_WIDGET_GONK
     static const char kFirefoxEmoji[] = "Firefox Emoji";
@@ -227,12 +234,14 @@ gfxAndroidPlatform::GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
         case 0xf9: case 0xfa:
             if (IsJapaneseLocale()) {
                 aFontList.AppendElement(kMotoyaLMaru);
+                aFontList.AppendElement(kNotoSansCJKJP);
                 aFontList.AppendElement(kDroidSansJapanese);
             }
             break;
         default:
             if (block >= 0x2e && block <= 0x9f && IsJapaneseLocale()) {
                 aFontList.AppendElement(kMotoyaLMaru);
+                aFontList.AppendElement(kNotoSansCJKJP);
                 aFontList.AppendElement(kDroidSansJapanese);
             }
             break;
@@ -309,15 +318,15 @@ gfxAndroidPlatform::FontHintingEnabled()
     // In "mobile" builds, we sometimes use non-reflow-zoom, so we
     // might not want hinting.  Let's see.
 
-#ifdef MOZ_USING_ANDROID_JAVA_WIDGETS
-    // On android-java, we currently only use gecko to render web
+#ifdef MOZ_WIDGET_ANDROID
+    // On Android, we currently only use gecko to render web
     // content that can always be be non-reflow-zoomed.  So turn off
     // hinting.
     // 
     // XXX when gecko-android-java is used as an "app runtime", we may
     // want to re-enable hinting for non-browser processes there.
     return false;
-#endif //  MOZ_USING_ANDROID_JAVA_WIDGETS
+#endif //  MOZ_WIDGET_ANDROID
 
 #ifdef MOZ_WIDGET_GONK
     // On B2G, the UX preference is currently to keep hinting disabled
@@ -335,8 +344,8 @@ gfxAndroidPlatform::FontHintingEnabled()
 bool
 gfxAndroidPlatform::RequiresLinearZoom()
 {
-#ifdef MOZ_USING_ANDROID_JAVA_WIDGETS
-    // On android-java, we currently only use gecko to render web
+#ifdef MOZ_WIDGET_ANDROID
+    // On Android, we currently only use gecko to render web
     // content that can always be be non-reflow-zoomed.
     //
     // XXX when gecko-android-java is used as an "app runtime", we may

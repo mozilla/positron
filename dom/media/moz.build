@@ -21,6 +21,7 @@ with Files('GetUserMedia*'):
 
 DIRS += [
     'encoder',
+    'flac',
     'gmp',
     'gmp-plugin',
     'gmp-plugin-openh264',
@@ -38,9 +39,6 @@ DIRS += [
     'webvtt',
     'standalone',
 ]
-
-if CONFIG['MOZ_RAW']:
-    DIRS += ['raw']
 
 if CONFIG['MOZ_DIRECTSHOW']:
     DIRS += ['directshow']
@@ -123,6 +121,7 @@ EXPORTS += [
     'MediaRecorder.h',
     'MediaResource.h',
     'MediaResourceCallback.h',
+    'MediaResult.h',
     'MediaSegment.h',
     'MediaStatistics.h',
     'MediaStreamGraph.h',
@@ -138,7 +137,6 @@ EXPORTS += [
     'nsIDocumentActivity.h',
     'PrincipalChangeObserver.h',
     'QueueObject.h',
-    'RtspMediaResource.h',
     'SeekJob.h',
     'SeekTarget.h',
     'SeekTask.h',
@@ -249,7 +247,6 @@ UNIFIED_SOURCES += [
     'MP3FrameParser.cpp',
     'NextFrameSeekTask.cpp',
     'QueueObject.cpp',
-    'RtspMediaResource.cpp',
     'SeekJob.cpp',
     'SeekTask.cpp',
     'StreamTracks.cpp',

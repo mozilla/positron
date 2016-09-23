@@ -1353,11 +1353,6 @@ CodeGeneratorShared::callVM(const VMFunction& fun, LInstruction* ins, const Regi
     }
 #endif
 
-#ifdef JS_TRACE_LOGGING
-    emitTracelogStartEvent(TraceLogger_VM);
-    emitTracelogStartEvent(fun.name(), TraceLogger_VMSpecific);
-#endif
-
     // Stack is:
     //    ... frame ...
     //    [args]
@@ -1404,11 +1399,6 @@ CodeGeneratorShared::callVM(const VMFunction& fun, LInstruction* ins, const Regi
     masm.implicitPop(fun.explicitStackSlots() * sizeof(void*) + framePop);
     // Stack is:
     //    ... frame ...
-
-#ifdef JS_TRACE_LOGGING
-    emitTracelogStopEvent(TraceLogger_VM);
-    emitTracelogStopEvent(fun.name(), TraceLogger_VMSpecific);
-#endif
 }
 
 class OutOfLineTruncateSlow : public OutOfLineCodeBase<CodeGeneratorShared>
@@ -1516,8 +1506,8 @@ CodeGeneratorShared::emitWasmCallBase(LWasmCallBase* ins)
     const wasm::CallSiteDesc& desc = mir->desc();
     const wasm::CalleeDesc& callee = mir->callee();
     switch (callee.which()) {
-      case wasm::CalleeDesc::Internal:
-        masm.call(desc, callee.internalFuncIndex());
+      case wasm::CalleeDesc::Definition:
+        masm.call(desc, callee.funcDefIndex());
         break;
       case wasm::CalleeDesc::Import:
         masm.wasmCallImport(desc, callee);
@@ -1528,6 +1518,9 @@ CodeGeneratorShared::emitWasmCallBase(LWasmCallBase* ins)
         break;
       case wasm::CalleeDesc::Builtin:
         masm.call(callee.builtin());
+        break;
+      case wasm::CalleeDesc::BuiltinInstanceMethod:
+        masm.wasmCallBuiltinInstanceMethod(mir->instanceArg(), callee.builtin());
         break;
     }
 

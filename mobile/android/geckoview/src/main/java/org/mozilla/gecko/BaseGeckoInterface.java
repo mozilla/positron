@@ -67,11 +67,11 @@ public class BaseGeckoInterface implements GeckoAppShell.GeckoInterface {
 
     // Bug 908779: Implement this
     @Override
-    public void addPluginView(final View view, final RectF rect, final boolean isFullScreen) {}
+    public void addPluginView(final View view) {}
 
     // Bug 908781: Implement this
     @Override
-    public void removePluginView(final View view, final boolean isFullScreen) {}
+    public void removePluginView(final View view) {}
 
     // Bug 908783: Implement this
     @Override
@@ -98,12 +98,6 @@ public class BaseGeckoInterface implements GeckoAppShell.GeckoInterface {
     // Bug 908789: Implement this
     @Override
     public void notifyWakeLockChanged(String topic, String state) {}
-
-    // Bug 908790: Implement this
-    @Override
-    public FormAssistPopup getFormAssistPopup() {
-        return null;
-    }
 
     @Override
     public boolean areTabsShown() {

@@ -155,6 +155,7 @@ CSS_STATE_PSEUDO_CLASS(checked, ":checked", 0, "", NS_EVENT_STATE_CHECKED)
 CSS_STATE_PSEUDO_CLASS(disabled, ":disabled", 0, "", NS_EVENT_STATE_DISABLED)
 CSS_STATE_PSEUDO_CLASS(enabled, ":enabled", 0, "", NS_EVENT_STATE_ENABLED)
 CSS_STATE_PSEUDO_CLASS(focus, ":focus", 0, "", NS_EVENT_STATE_FOCUS)
+CSS_STATE_PSEUDO_CLASS(focusWithin, ":focus-within", 0, "", NS_EVENT_STATE_FOCUS_WITHIN)
 CSS_STATE_PSEUDO_CLASS(hover, ":hover", 0, "", NS_EVENT_STATE_HOVER)
 CSS_STATE_PSEUDO_CLASS(mozDragOver, ":-moz-drag-over", 0, "", NS_EVENT_STATE_DRAGOVER)
 CSS_STATE_PSEUDO_CLASS(target, ":target", 0, "", NS_EVENT_STATE_URLTARGET)
@@ -225,6 +226,8 @@ CSS_STATE_PSEUDO_CLASS(invalid, ":invalid", 0, "", NS_EVENT_STATE_INVALID)
 CSS_STATE_PSEUDO_CLASS(inRange, ":in-range", 0, "", NS_EVENT_STATE_INRANGE)
 CSS_STATE_PSEUDO_CLASS(outOfRange, ":out-of-range", 0, "", NS_EVENT_STATE_OUTOFRANGE)
 CSS_STATE_PSEUDO_CLASS(defaultPseudo, ":default", 0, "", NS_EVENT_STATE_DEFAULT)
+CSS_STATE_PSEUDO_CLASS(placeholderShown, ":placeholder-shown", 0, "",
+                       NS_EVENT_STATE_PLACEHOLDERSHOWN)
 CSS_STATE_PSEUDO_CLASS(mozReadOnly, ":-moz-read-only", 0, "",
                        NS_EVENT_STATE_MOZ_READONLY)
 CSS_STATE_PSEUDO_CLASS(mozReadWrite, ":-moz-read-write", 0, "",

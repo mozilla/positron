@@ -33,13 +33,20 @@ BuiltinProvider.prototype = {
       // ⚠ DISCUSSION ON DEV-DEVELOPER-TOOLS REQUIRED BEFORE MODIFYING ⚠
       "": "resource://gre/modules/commonjs/",
       // ⚠ DISCUSSION ON DEV-DEVELOPER-TOOLS REQUIRED BEFORE MODIFYING ⚠
+      // Modules here are intended to have one implementation for
+      // chrome, and a separate implementation for content.  Here we
+      // map the directory to the chrome subdirectory, but the content
+      // loader will map to the content subdirectory.  See the
+      // README.md in devtools/shared/platform.
+      "devtools/shared/platform": "resource://devtools/shared/platform/chrome",
+      // ⚠ DISCUSSION ON DEV-DEVELOPER-TOOLS REQUIRED BEFORE MODIFYING ⚠
       "devtools": "resource://devtools",
       // ⚠ DISCUSSION ON DEV-DEVELOPER-TOOLS REQUIRED BEFORE MODIFYING ⚠
       "gcli": "resource://devtools/shared/gcli/source/lib/gcli",
       // ⚠ DISCUSSION ON DEV-DEVELOPER-TOOLS REQUIRED BEFORE MODIFYING ⚠
-      "acorn": "resource://devtools/acorn",
+      "acorn": "resource://devtools/shared/acorn",
       // ⚠ DISCUSSION ON DEV-DEVELOPER-TOOLS REQUIRED BEFORE MODIFYING ⚠
-      "acorn/util/walk": "resource://devtools/acorn/walk.js",
+      "acorn/util/walk": "resource://devtools/shared/acorn/walk.js",
       // ⚠ DISCUSSION ON DEV-DEVELOPER-TOOLS REQUIRED BEFORE MODIFYING ⚠
       "source-map": "resource://devtools/shared/sourcemap/source-map.js",
       // ⚠ DISCUSSION ON DEV-DEVELOPER-TOOLS REQUIRED BEFORE MODIFYING ⚠

@@ -20,15 +20,17 @@ var connection;
 
 function testSetup() {
   return new Promise(function(aResolve, aReject) {
-    request = new PresentationRequest("http://example.com/");
+    request = new PresentationRequest("https://example.com");
 
     request.getAvailability().then(
       function(aAvailability) {
+        is(aAvailability.value, false, "Sender: should have no available device after setup");
         aAvailability.onchange = function() {
           aAvailability.onchange = null;
           ok(aAvailability.value, "Device should be available.");
           aResolve();
         }
+        gScript.sendAsyncMessage('trigger-device-add');
       },
       function(aError) {
         ok(false, "Error occurred when getting availability: " + aError);
@@ -37,7 +39,6 @@ function testSetup() {
       }
     );
 
-    gScript.sendAsyncMessage('trigger-device-add');
   });
 }
 
@@ -178,7 +179,7 @@ function testReconnect() {
 
     gScript.addMessageListener('start-reconnect', function startReconnectHandler(url) {
       gScript.removeMessageListener('start-reconnect', startReconnectHandler);
-      is(url, "http://example.com/", "URLs should be the same.")
+      is(url, "https://example.com/", "URLs should be the same.")
       gScript.sendAsyncMessage('trigger-reconnected-acked', url);
     });
 
@@ -250,6 +251,7 @@ function runTests() {
 
 SimpleTest.waitForExplicitFinish();
 SpecialPowers.pushPrefEnv({ 'set': [["dom.presentation.enabled", true],
+                                    ["dom.presentation.controller.enabled", true],
                                     ["dom.presentation.session_transport.data_channel.enable", false]]},
                           runTests);
 

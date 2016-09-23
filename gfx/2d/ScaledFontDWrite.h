@@ -23,14 +23,19 @@ public:
     , mFont(nullptr)
     , mFontFamily(nullptr)
     , mFontFace(aFont)
+    , mUseEmbeddedBitmap(false)
+    , mForceGDIMode(false)
   {}
 
   ScaledFontDWrite(IDWriteFont* aFont, IDWriteFontFamily* aFontFamily,
-                   IDWriteFontFace *aFontFace, Float aSize)
+                   IDWriteFontFace *aFontFace, Float aSize, bool aUseEmbeddedBitmap,
+                   bool aForceGDIMode)
     : ScaledFontBase(aSize)
     , mFont(aFont)
     , mFontFamily(aFontFamily)
     , mFontFace(aFontFace)
+    , mUseEmbeddedBitmap(aUseEmbeddedBitmap)
+    , mForceGDIMode(aForceGDIMode)
   {}
 
   virtual FontType GetType() const { return FontType::DWRITE; }
@@ -40,9 +45,14 @@ public:
 
   void CopyGlyphsToSink(const GlyphBuffer &aBuffer, ID2D1GeometrySink *aSink);
 
+  virtual void GetGlyphDesignMetrics(const uint16_t* aGlyphIndices, uint32_t aNumGlyphs, GlyphMetrics* aGlyphMetrics);
+
   virtual bool GetFontFileData(FontFileDataOutput aDataCallback, void *aBaton);
 
-  virtual AntialiasMode GetDefaultAAMode();
+  virtual AntialiasMode GetDefaultAAMode() override;
+
+  bool UseEmbeddedBitmaps() { return mUseEmbeddedBitmap; }
+  bool ForceGDIMode() { return mForceGDIMode; }
 
 #ifdef USE_SKIA
   virtual SkTypeface* GetSkTypeface();
@@ -54,6 +64,8 @@ public:
   RefPtr<IDWriteFont> mFont;
   RefPtr<IDWriteFontFamily> mFontFamily;
   RefPtr<IDWriteFontFace> mFontFace;
+  bool mUseEmbeddedBitmap;
+  bool mForceGDIMode;
 
 protected:
 #ifdef USE_CAIRO_SCALED_FONT

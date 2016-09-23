@@ -38,6 +38,7 @@
 #include "nsContentUtils.h"
 #include "nsILoadContext.h"
 #include "nsIFrame.h"
+#include "nsIScriptSecurityManager.h"
 
 using namespace mozilla::dom;
 
@@ -612,7 +613,6 @@ nsFormFillController::GetInPrivateContext(bool *aInPrivateContext)
   nsCOMPtr<nsIDOMElement> element = do_QueryInterface(mFocusedInput);
   element->GetOwnerDocument(getter_AddRefs(inputDoc));
   nsCOMPtr<nsIDocument> doc = do_QueryInterface(inputDoc);
-  nsCOMPtr<nsIDocShell> docShell = doc->GetDocShell();
   nsCOMPtr<nsILoadContext> loadContext = doc->GetLoadContext();
   *aInPrivateContext = loadContext && loadContext->UsePrivateBrowsing();
   return NS_OK;
@@ -622,6 +622,13 @@ NS_IMETHODIMP
 nsFormFillController::GetNoRollupOnCaretMove(bool *aNoRollupOnCaretMove)
 {
   *aNoRollupOnCaretMove = false;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsFormFillController::GetUserContextId(uint32_t* aUserContextId)
+{
+  *aUserContextId = nsIScriptSecurityManager::DEFAULT_USER_CONTEXT_ID;
   return NS_OK;
 }
 
@@ -725,7 +732,7 @@ public:
     MOZ_ASSERT(mObserver, "You shouldn't call this runnable with a null observer!");
   }
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     mObserver->OnUpdateSearchResult(mSearch, mResult);
     return NS_OK;
   }
@@ -818,8 +825,9 @@ nsFormFillController::HandleEvent(nsIDOMEvent* aEvent)
     return KeyPress(aEvent);
   }
   if (type.EqualsLiteral("input")) {
+    bool unused = false;
     return (!mSuppressOnInput && mController && mFocusedInput) ?
-           mController->HandleText() : NS_OK;
+           mController->HandleText(&unused) : NS_OK;
   }
   if (type.EqualsLiteral("blur")) {
     if (mFocusedInput)
@@ -929,6 +937,7 @@ nsFormFillController::KeyPress(nsIDOMEvent* aEvent)
     return NS_ERROR_FAILURE;
 
   bool cancel = false;
+  bool unused = false;
 
   uint32_t k;
   keyEvent->GetKeyCode(&k);
@@ -938,7 +947,7 @@ nsFormFillController::KeyPress(nsIDOMEvent* aEvent)
     mController->HandleDelete(&cancel);
     break;
   case nsIDOMKeyEvent::DOM_VK_BACK_SPACE:
-    mController->HandleText();
+    mController->HandleText(&unused);
     break;
 #else
   case nsIDOMKeyEvent::DOM_VK_BACK_SPACE:
@@ -946,10 +955,11 @@ nsFormFillController::KeyPress(nsIDOMEvent* aEvent)
       bool isShift = false;
       keyEvent->GetShiftKey(&isShift);
 
-      if (isShift)
+      if (isShift) {
         mController->HandleDelete(&cancel);
-      else
-        mController->HandleText();
+      } else {
+        mController->HandleText(&unused);
+      }
 
       break;
     }
@@ -1059,7 +1069,8 @@ nsFormFillController::MouseDown(nsIDOMEvent* aEvent)
   if (value.Length() > 0) {
     // Show the popup with a filtered result set
     mController->SetSearchString(EmptyString());
-    mController->HandleText();
+    bool unused = false;
+    mController->HandleText(&unused);
   } else {
     // Show the popup with the complete result set.  Can't use HandleText()
     // because it doesn't display the popup if the input is blank.

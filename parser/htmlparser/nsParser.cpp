@@ -117,7 +117,7 @@ public:
     : mParser(aParser)
   {}
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     mParser->HandleParserContinueEvent(this);
     return NS_OK;
@@ -1050,8 +1050,8 @@ nsParser::ContinueInterruptedParsing()
                         mParserContext->mStreamListenerState == eOnStop;
 
   mProcessingNetworkData = true;
-  if (mSink) {
-    mSink->WillParse();
+  if (sinkDeathGrip) {
+    sinkDeathGrip->WillParse();
   }
   result = ResumeParse(true, isFinalChunk); // Ref. bug 57999
   mProcessingNetworkData = false;
@@ -1135,12 +1135,12 @@ nsParser::IsInsertionPointDefined()
 }
 
 void
-nsParser::BeginEvaluatingParserInsertedScript()
+nsParser::PushDefinedInsertionPoint()
 {
 }
 
 void
-nsParser::EndEvaluatingParserInsertedScript()
+nsParser::PopDefinedInsertionPoint()
 {
 }
 
@@ -1694,7 +1694,7 @@ GetNextChar(nsACString::const_iterator& aStart,
   return (++aStart != aEnd) ? *aStart : '\0';
 }
 
-static NS_METHOD
+static nsresult
 NoOpParserWriteFunc(nsIInputStream* in,
                 void* closure,
                 const char* fromRawSegment,
@@ -1719,7 +1719,7 @@ typedef struct {
  * of data in the underlying stream or pipe. Using ReadSegments
  * allows us to avoid copying data to read out of the stream.
  */
-static NS_METHOD
+static nsresult
 ParserWriteFunc(nsIInputStream* in,
                 void* closure,
                 const char* fromRawSegment,
@@ -1836,8 +1836,8 @@ nsParser::OnDataAvailable(nsIRequest *request, nsISupports* aContext,
       nsCOMPtr<nsIParser> kungFuDeathGrip(this);
       nsCOMPtr<nsIContentSink> sinkDeathGrip(mSink);
       mProcessingNetworkData = true;
-      if (mSink) {
-        mSink->WillParse();
+      if (sinkDeathGrip) {
+        sinkDeathGrip->WillParse();
       }
       rv = ResumeParse();
       mProcessingNetworkData = false;

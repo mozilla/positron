@@ -93,7 +93,7 @@ public:
     }
   }
 
-  NS_IMETHODIMP Run()
+  NS_IMETHOD Run() override
   {
     // We need to update the state of all instances atomically before notifying
     // them to make sure that the observed state for all instances inside
@@ -160,6 +160,8 @@ ServiceWorkerInfo::ServiceWorkerInfo(nsIPrincipal* aPrincipal,
   , mSkipWaitingFlag(false)
 {
   MOZ_ASSERT(mPrincipal);
+  // cache origin attributes so we can use them off main thread
+  mOriginAttributes = BasePrincipal::Cast(mPrincipal)->OriginAttributesRef();
   MOZ_ASSERT(!mScope.IsEmpty());
   MOZ_ASSERT(!mScriptSpec.IsEmpty());
   MOZ_ASSERT(!mCacheName.IsEmpty());

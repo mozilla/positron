@@ -49,7 +49,7 @@ public:
                                        nsresult aResult,
                                        bool aLastPart) override;
 
-  void OnSurfaceDiscarded() override;
+  virtual void OnSurfaceDiscarded() override;
 
   /**
    * Callback for SVGRootRenderingObserver.
@@ -83,7 +83,8 @@ private:
   already_AddRefed<gfxDrawable>
     LookupCachedSurface(const SVGDrawingParameters& aParams);
 
-  void CreateSurfaceAndShow(const SVGDrawingParameters& aParams);
+  void CreateSurfaceAndShow(const SVGDrawingParameters& aParams,
+                            gfx::BackendType aBackend);
   void Show(gfxDrawable* aDrawable, const SVGDrawingParameters& aParams);
 
   nsresult Init(const char* aMimeType, uint32_t aFlags);

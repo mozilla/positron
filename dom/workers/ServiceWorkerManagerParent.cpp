@@ -11,7 +11,7 @@
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
 #include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/ipc/BackgroundUtils.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsThreadUtils.h"
 
 namespace mozilla {
@@ -37,8 +37,8 @@ public:
     AssertIsOnBackgroundThread();
   }
 
-  NS_IMETHODIMP
-  Run()
+  NS_IMETHOD
+  Run() override
   {
     AssertIsInMainProcess();
     AssertIsOnBackgroundThread();
@@ -77,8 +77,8 @@ public:
     AssertIsOnBackgroundThread();
   }
 
-  NS_IMETHODIMP
-  Run()
+  NS_IMETHOD
+  Run() override
   {
     AssertIsInMainProcess();
     AssertIsOnBackgroundThread();
@@ -125,7 +125,7 @@ public:
     MOZ_ASSERT(mBackgroundThread);
   }
 
-  NS_IMETHODIMP Run()
+  NS_IMETHOD Run() override
   {
     if (NS_IsMainThread()) {
       nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(mPrincipalInfo);

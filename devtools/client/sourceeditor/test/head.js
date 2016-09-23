@@ -8,8 +8,8 @@ const { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
 const { NetUtil } = require("resource://gre/modules/NetUtil.jsm");
 const Editor = require("devtools/client/sourceeditor/editor");
 const promise = require("promise");
-const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const flags = require("devtools/shared/flags");
+const {getClientCssProperties} = require("devtools/shared/fronts/css-properties");
 
 flags.testing = true;
 SimpleTest.registerCleanupFunction(() => {
@@ -22,18 +22,16 @@ SimpleTest.registerCleanupFunction(() => {
 function addTab(url, callback) {
   waitForExplicitFinish();
 
-  gBrowser.selectedTab = gBrowser.addTab();
-  content.location = url;
-
+  gBrowser.selectedTab = gBrowser.addTab(url);
   let tab = gBrowser.selectedTab;
   let browser = gBrowser.getBrowserForTab(tab);
 
-  function onTabLoad() {
-    browser.removeEventListener("load", onTabLoad, true);
-    callback(browser, tab, browser.contentDocument);
-  }
-
-  browser.addEventListener("load", onTabLoad, true);
+  return BrowserTestUtils.browserLoaded(browser).then(function () {
+    if (typeof(callback) == "function") {
+      callback(browser, tab, browser.contentDocument);
+    }
+    return tab;
+  });
 }
 
 function promiseTab(url) {
@@ -62,8 +60,10 @@ function setup(cb, additionalOpts = {}) {
     value: "Hello.",
     lineNumbers: true,
     foldGutter: true,
-    gutters: ["CodeMirror-linenumbers", "breakpoints", "CodeMirror-foldgutter"]
+    gutters: ["CodeMirror-linenumbers", "breakpoints", "CodeMirror-foldgutter"],
+    cssProperties: getClientCssProperties()
   };
+
   for (let o in additionalOpts) {
     opts[o] = additionalOpts[o];
   }

@@ -11,6 +11,7 @@
 namespace mozilla {
 
 class VideoFrameContainer;
+class MediaResult;
 
 namespace dom {
 class HTMLMediaElement;
@@ -67,7 +68,7 @@ public:
   // resource has a decode error during metadata loading or decoding.
   // The decoder owner should call Shutdown() on the decoder and drop the
   // reference to the decoder to prevent further calls into the decoder.
-  virtual void DecodeError() = 0;
+  virtual void DecodeError(const MediaResult& aError) = 0;
 
   // Return true if media element error attribute is not null.
   virtual bool HasError() const = 0;
@@ -133,12 +134,6 @@ public:
   // Called by the media decoder and the video frame to get the
   // ImageContainer containing the video data.
   virtual VideoFrameContainer* GetVideoFrameContainer() = 0;
-
-  // Called by the decoder object, on the main thread,
-  // when the connection between Rtsp server and client gets lost.
-  // The decoder owner should call Shutdown() on the decoder and drop the
-  // reference to the decoder to prevent further calls into the decoder.
-  virtual void ResetConnectionState() = 0;
 
   // Called by media decoder when the audible state changed
   virtual void SetAudibleState(bool aAudible) = 0;

@@ -25,7 +25,7 @@ public:
   {
   }
   void NetworkError() override {}
-  void DecodeError() override {}
+  void DecodeError(const MediaResult& aError) override {}
   bool HasError() const override { return false; }
   void LoadAborted() override {}
   void PlaybackEnded() override {}
@@ -48,7 +48,6 @@ public:
   {
     return nullptr;
   }
-  void ResetConnectionState() override {}
   void SetAudibleState(bool aAudible) override {}
   void NotifyXPCOMShutdown() override {}
 };

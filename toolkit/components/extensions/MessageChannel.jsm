@@ -145,7 +145,7 @@ class FilteringMessageManager {
     this.callback = callback;
     this.messageManager = messageManager;
 
-    this.messageManager.addMessageListener(this.messageName, this);
+    this.messageManager.addMessageListener(this.messageName, this, true);
 
     this.handlers = new Map();
   }
@@ -155,7 +155,7 @@ class FilteringMessageManager {
    * passes the result to our message callback.
    */
   receiveMessage({data, target}) {
-    let handlers = Array.from(this.getHandlers(data.messageName, data.recipient));
+    let handlers = Array.from(this.getHandlers(data.messageName, data.sender, data.recipient));
 
     data.target = target;
     this.callback(handlers, data);
@@ -167,14 +167,17 @@ class FilteringMessageManager {
    *
    * @param {string|number} messageName
    *     The message for which to return handlers.
+   * @param {object} sender
+   *     The sender data on which to filter handlers.
    * @param {object} recipient
    *     The recipient data on which to filter handlers.
    */
-  * getHandlers(messageName, recipient) {
+  * getHandlers(messageName, sender, recipient) {
     let handlers = this.handlers.get(messageName) || new Set();
     for (let handler of handlers) {
       if (MessageChannel.matchesFilter(handler.messageFilterStrict || {}, recipient) &&
-          MessageChannel.matchesFilter(handler.messageFilterPermissive || {}, recipient, false)) {
+          MessageChannel.matchesFilter(handler.messageFilterPermissive || {}, recipient, false) &&
+          (!handler.filterMessage || handler.filterMessage(sender, recipient))) {
         yield handler;
       }
     }
@@ -188,7 +191,7 @@ class FilteringMessageManager {
    * @param {object} handler
    *     An opaque handler object. The object may have a
    *     `messageFilterStrict` and/or a `messageFilterPermissive`
-   *     property on which to filter messages.
+   *     property and/or a `filterMessage` method on which to filter messages.
    *
    *     Final dispatching is handled by the message callback passed to
    *     the constructor.
@@ -338,6 +341,11 @@ this.MessageChannel = {
   RESPONSE_ALL: 2,
 
   /**
+   * Fire-and-forget: The sender of this message does not expect a reply.
+   */
+  RESPONSE_NONE: 3,
+
+  /**
    * Initializes message handlers for the given message managers if needed.
    *
    * @param {[nsIMessageSender]} messageManagers
@@ -354,7 +362,7 @@ this.MessageChannel = {
   },
 
   /**
-   * Returns true if the peroperties of the `data` object match those in
+   * Returns true if the properties of the `data` object match those in
    * the `filter` object. Matching is done on a strict equality basis,
    * and the behavior varies depending on the value of the `strict`
    * parameter.
@@ -367,7 +375,7 @@ this.MessageChannel = {
    *    If true, all properties in the `filter` object have a
    *    corresponding property in `data` with the same value. If
    *    false, properties present in both objects must have the same
-   *    balue.
+   *    value.
    * @returns {boolean} True if the objects match.
    */
   matchesFilter(filter, data, strict = true) {
@@ -436,6 +444,10 @@ this.MessageChannel = {
    *        object if the `recipient` object passed to `sendMessage`
    *        matches this filter, as determined by `matchesFilter` with
    *        `strict=false`.
+   *
+   *      filterMessage:
+   *        An optional function that prevents the handler from handling a
+   *        message by returning `false`. See `getHandlers` for the parameters.
    */
   addListener(targets, messageName, handler) {
     for (let target of [].concat(targets)) {
@@ -484,7 +496,8 @@ this.MessageChannel = {
    *    for the message to be received.
    * @param {object} [options.sender]
    *    A structured-clone-compatible object to identify the message
-   *    sender. This object may also be used as a filter to prematurely
+   *    sender. This object may also be used to avoid delivering the
+   *    message to the sender, and as a filter to prematurely
    *    abort responses when the sender is being destroyed.
    *    @see `abortResponses`.
    * @param {integer} [options.responseType=RESPONSE_SINGLE]
@@ -497,8 +510,19 @@ this.MessageChannel = {
     let recipient = options.recipient || {};
     let responseType = options.responseType || this.RESPONSE_SINGLE;
 
-    let channelId = gChannelId++;
+    let channelId = `${gChannelId++}-${Services.appinfo.uniqueProcessID}`;
     let message = {messageName, channelId, sender, recipient, data, responseType};
+
+    if (responseType == this.RESPONSE_NONE) {
+      try {
+        target.sendAsyncMessage(MESSAGE_MESSAGE, message);
+      } catch (e) {
+        // Caller is not expecting a reply, so dump the error to the console.
+        Cu.reportError(e);
+        return Promise.reject(e);
+      }
+      return Promise.resolve();  // Not expecting any reply.
+    }
 
     let deferred = PromiseUtils.defer();
     deferred.sender = recipient;
@@ -517,7 +541,11 @@ this.MessageChannel = {
     };
     deferred.promise.then(cleanup, cleanup);
 
-    target.sendAsyncMessage(MESSAGE_MESSAGE, message);
+    try {
+      target.sendAsyncMessage(MESSAGE_MESSAGE, message);
+    } catch (e) {
+      deferred.reject(e);
+    }
     return deferred.promise;
   },
 
@@ -588,6 +616,19 @@ this.MessageChannel = {
     let {target} = data;
     if (!(target instanceof Ci.nsIMessageSender)) {
       target = target.messageManager;
+    }
+
+    if (data.responseType == this.RESPONSE_NONE) {
+      handlers.forEach(handler => {
+        // The sender expects no reply, so dump any errors to the console.
+        new Promise(resolve => {
+          resolve(handler.receiveMessage(data));
+        }).catch(e => {
+          Cu.reportError(e.stack ? `${e}\n${e.stack}` : e.message || e);
+        });
+      });
+      // Note: Unhandled messages are silently dropped.
+      return;
     }
 
     let deferred = {

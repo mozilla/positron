@@ -24,6 +24,8 @@
 #include "nsContentUtils.h"
 #include "nsIURLFormatter.h"
 
+using mozilla::DocShellOriginAttributes;
+
 static const char* gQuitApplicationMessage = "quit-application";
 
 // Limit the list file size to 32mb
@@ -109,11 +111,8 @@ nsUrlClassifierStreamUpdater::FetchUpdate(nsIURI *aUpdateUrl,
 {
 
 #ifdef DEBUG
-  {
-    nsCString spec;
-    aUpdateUrl->GetSpec(spec);
-    LOG(("Fetching update %s from %s", aRequestPayload.Data(), spec.get()));
-  }
+  LOG(("Fetching update %s from %s",
+       aRequestPayload.Data(), aUpdateUrl->GetSpecOrDefault().get()));
 #endif
 
   nsresult rv;
@@ -178,8 +177,9 @@ nsUrlClassifierStreamUpdater::FetchUpdate(nsIURI *aUpdateUrl,
   // Create a custom LoadContext for SafeBrowsing, so we can use callbacks on
   // the channel to query the appId which allows separation of safebrowsing
   // cookies in a separate jar.
-  nsCOMPtr<nsIInterfaceRequestor> sbContext =
-    new mozilla::LoadContext(NECKO_SAFEBROWSING_APP_ID);
+  DocShellOriginAttributes attrs;
+  attrs.mAppId = NECKO_SAFEBROWSING_APP_ID;
+  nsCOMPtr<nsIInterfaceRequestor> sbContext = new mozilla::LoadContext(attrs);
   rv = mChannel->SetNotificationCallbacks(sbContext);
   NS_ENSURE_SUCCESS(rv, rv);
 

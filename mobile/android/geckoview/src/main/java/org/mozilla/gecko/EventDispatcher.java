@@ -4,9 +4,9 @@
 
 package org.mozilla.gecko;
 
+import org.mozilla.gecko.annotation.ReflectionTarget;
 import org.mozilla.gecko.annotation.RobocopTarget;
 import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.util.BundleEventListener;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoEventListener;
@@ -58,6 +58,7 @@ public final class EventDispatcher {
     private final Map<String, List<BundleEventListener>> mBackgroundThreadListeners =
         new HashMap<String, List<BundleEventListener>>(DEFAULT_BACKGROUND_EVENTS_COUNT);
 
+    @ReflectionTarget
     public static EventDispatcher getInstance() {
         return INSTANCE;
     }
@@ -160,6 +161,7 @@ public final class EventDispatcher {
                          mUiThreadListeners, listener, events);
     }
 
+    @ReflectionTarget
     public void registerBackgroundThreadListener(final BundleEventListener listener,
                                                  final String... events) {
         checkNotRegisteredElsewhere(mBackgroundThreadListeners, events);
@@ -233,11 +235,7 @@ public final class EventDispatcher {
         // Check for thread event listeners before checking for JSON event listeners,
         // because checking for thread listeners is very fast and doesn't require us to
         // serialize into JSON and construct a JSONObject.
-        if (dispatchToThread(type, message, callback,
-                             mUiThreadListeners, ThreadUtils.getUiHandler()) ||
-            dispatchToThread(type, message, callback,
-                             mBackgroundThreadListeners, ThreadUtils.getBackgroundHandler())) {
-
+        if (dispatchToThreads(type, message, /* bundle */ null, callback)) {
             // If we found thread listeners, we assume we don't have any other types of listeners
             // and return early. This assumption is checked when registering listeners.
             return;
@@ -253,8 +251,96 @@ public final class EventDispatcher {
         }
     }
 
+    /**
+     * Dispatch event to any registered Bundle listeners (non-Gecko thread listeners).
+     *
+     * @param message Bundle message with "type" value specifying the event type.
+     */
+    public void dispatch(final Bundle message) {
+        dispatch(message, /* callback */ null);
+    }
+
+    /**
+     * Dispatch event to any registered Bundle listeners (non-Gecko thread listeners).
+     *
+     * @param message Bundle message with "type" value specifying the event type.
+     * @param callback Optional object for callbacks from events.
+     */
+    public void dispatch(final Bundle message, final EventCallback callback) {
+        if (message == null) {
+            throw new IllegalArgumentException("Null message");
+        }
+
+        final String type = message.getCharSequence("type").toString();
+        if (type == null) {
+            Log.e(LOGTAG, "Bundle message must have a type property");
+            return;
+        }
+        dispatchToThreads(type, /* js */ null, message, /* callback */ callback);
+    }
+
+    /**
+     * Dispatch event to any registered Bundle listeners (non-Gecko thread listeners).
+     *
+     * @param type Event type
+     * @param message Bundle message
+     */
+    public void dispatch(final String type, final Bundle message) {
+        dispatch(type, message, /* callback */ null);
+    }
+
+    /**
+     * Dispatch event to any registered Bundle listeners (non-Gecko thread listeners).
+     *
+     * @param type Event type
+     * @param message Bundle message
+     * @param callback Optional object for callbacks from events.
+     */
+    public void dispatch(final String type, final Bundle message, final EventCallback callback) {
+        dispatchToThreads(type, /* js */ null, message, /* callback */ callback);
+    }
+
+    private boolean dispatchToThreads(final String type,
+                                      final NativeJSObject jsMessage,
+                                      final Bundle bundleMessage,
+                                      final EventCallback callback) {
+        if (dispatchToThread(type, jsMessage, bundleMessage, callback,
+                             mUiThreadListeners, ThreadUtils.getUiHandler())) {
+            return true;
+        }
+
+        if (dispatchToThread(type, jsMessage, bundleMessage, callback,
+                             mBackgroundThreadListeners, ThreadUtils.getBackgroundHandler())) {
+            return true;
+        }
+
+        if (jsMessage == null) {
+            Log.w(LOGTAG, "No listeners for " + type);
+        }
+
+        if (!AppConstants.RELEASE_BUILD && jsMessage == null) {
+            // We're dispatching a Bundle message. Because Gecko thread listeners are not
+            // supported for Bundle messages, do a sanity check to make sure we don't have
+            // matching Gecko thread listeners.
+            boolean hasGeckoListener = false;
+            synchronized (mGeckoThreadNativeListeners) {
+                hasGeckoListener |= mGeckoThreadNativeListeners.containsKey(type);
+            }
+            synchronized (mGeckoThreadJSONListeners) {
+                hasGeckoListener |= mGeckoThreadJSONListeners.containsKey(type);
+            }
+            if (hasGeckoListener) {
+                throw new IllegalStateException(
+                        "Dispatching Bundle message to Gecko listener " + type);
+            }
+        }
+
+        return false;
+    }
+
     private boolean dispatchToThread(final String type,
-                                     final NativeJSObject message,
+                                     final NativeJSObject jsMessage,
+                                     final Bundle bundleMessage,
                                      final EventCallback callback,
                                      final Map<String, List<BundleEventListener>> listenersMap,
                                      final Handler thread) {
@@ -281,7 +367,7 @@ public final class EventDispatcher {
 
             final Bundle messageAsBundle;
             try {
-                messageAsBundle = message.toBundle();
+                messageAsBundle = jsMessage != null ? jsMessage.toBundle() : bundleMessage;
             } catch (final NativeJSObject.InvalidPropertyException e) {
                 Log.e(LOGTAG, "Exception occurred while handling " + type, e);
                 return true;

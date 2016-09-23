@@ -163,8 +163,6 @@ public:
   nsresult CreatePlaceholderNode();
 
   mozilla::dom::Element* GetRootNode() {
-    if (!mRootNode)
-      CreateRootNode();
     return mRootNode;
   }
   mozilla::dom::Element* GetPlaceholderNode() {
@@ -260,6 +258,7 @@ public:
 
   bool IsSelectionCached() const;
   SelectionProperties& GetSelectionProperties();
+  void SetSelectionProperties(SelectionProperties& aProps);
   void WillInitEagerly() { mSelectionRestoreEagerInit = true; }
   bool HasNeverInitializedBefore() const { return !mEverInited; }
 

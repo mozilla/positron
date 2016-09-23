@@ -6,7 +6,7 @@
 
 #include "nsContentUtils.h"
 #include "nsIDocument.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 #include "nsGlobalWindow.h"
 #include "ScriptSettings.h"
 #include "mozilla/DOMEventTargetHelper.h"
@@ -29,15 +29,15 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(DOMEventTargetHelper)
     char name[512];
     nsAutoString uri;
     if (tmp->mOwnerWindow && tmp->mOwnerWindow->GetExtantDoc()) {
-      tmp->mOwnerWindow->GetExtantDoc()->GetDocumentURI(uri);
+      Unused << tmp->mOwnerWindow->GetExtantDoc()->GetDocumentURI(uri);
     }
 
     nsXPCOMCycleCollectionParticipant* participant = nullptr;
     CallQueryInterface(tmp, &participant);
 
-    snprintf_literal(name, "%s %s",
-                     participant->ClassName(),
-                     NS_ConvertUTF16toUTF8(uri).get());
+    SprintfLiteral(name, "%s %s",
+                   participant->ClassName(),
+                   NS_ConvertUTF16toUTF8(uri).get());
     cb.DescribeRefCountedNode(tmp->mRefCnt.get(), name);
   } else {
     NS_IMPL_CYCLE_COLLECTION_DESCRIBE(DOMEventTargetHelper, tmp->mRefCnt.get())

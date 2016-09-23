@@ -126,7 +126,13 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
       <field name="_value">""</field>
       <field name="gotResultForCurrentQuery">false</field>
-      <field name="handleEnterWhenGotResult">false</field>
+
+      <!--
+        This is set around HandleHenter so it can be used in handleCommand.
+        It is also used to track whether we must handle a delayed handleEnter,
+        by checking if it has been cleared.
+      -->
+      <field name="handleEnterInstance">null</field>
 
       <!--
         For performance reasons we want to limit the size of the text runs we
@@ -366,8 +372,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           }
 
           // Do the command of the selected one-off if it's not an engine.
-          let selectedOneOff =
-            this.popup.oneOffSearchButtons.visuallySelectedButton;
+          let selectedOneOff = this.popup.oneOffSearchButtons.selectedButton;
           if (selectedOneOff && !selectedOneOff.engine) {
             selectedOneOff.doCommand();
             return;
@@ -388,6 +393,10 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           }
 
           let url = this.value;
+          if (!url) {
+            return;
+          }
+
           let mayInheritPrincipal = false;
           let postData = null;
           let lastLocationChange = gBrowser.selectedBrowser.lastLocationChange;
@@ -415,7 +424,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
               case "searchengine":
                 if (selectedOneOff && selectedOneOff.engine) {
                   // Replace the engine with the selected one-off engine.
-                  action.params.engineName = engine.name;
+                  action.params.engineName = selectedOneOff.engine.name;
                 }
                 [url, postData] = this._recordSearchEngineLoad(
                   action.params.engineName,
@@ -435,12 +444,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           // search query (or "keyword" in URI-fixup terminology), then load a
           // search using the one-off's engine.
           if (selectedOneOff && selectedOneOff.engine) {
-            // `url` (which is this.value) may be an autofilled string.  Search
-            // only with the portion that the user typed, if any, by preferring
-            // the autocomplete controller's searchString.
-            let value = this._searchStringOnHandleEnter ||
-                        this.mController.searchString ||
-                        url;
+            let value = this.oneOffSearchQuery;
             let fixup;
             try {
               fixup = Services.uriFixup.getFixupURIInfo(
@@ -458,18 +462,28 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             }
           }
 
-          this._canonizeURL(event, response => {
-            [url, postData, mayInheritPrincipal] = response;
+          url = this._canonizeURL(event, url);
+          getShortcutOrURIAndPostData(url).then(({url, postData, mayInheritPrincipal}) => {
             if (url) {
               matchLastLocationChange =
-                lastLocationChange ==
-                gBrowser.selectedBrowser.lastLocationChange;
+                lastLocationChange == gBrowser.selectedBrowser.lastLocationChange;
               this._loadURL(url, postData, where, openUILinkParams,
                             matchLastLocationChange, mayInheritPrincipal);
             }
           });
         ]]></body>
       </method>
+
+      <property name="oneOffSearchQuery">
+        <getter><![CDATA[
+          // this.textValue may be an autofilled string.  Search only with the
+          // portion that the user typed, if any, by preferring the autocomplete
+          // controller's searchString (including handleEnterInstance.searchString).
+          return (this.handleEnterInstance && this.handleEnterInstance.searchString) ||
+                 this.mController.searchString ||
+                 this.textValue;
+        ]]></getter>
+      </property>
 
       <method name="_loadURL">
         <parameter name="url"/>
@@ -562,13 +576,9 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
       <method name="_canonizeURL">
         <parameter name="aTriggeringEvent"/>
-        <parameter name="aCallback"/>
+        <parameter name="aUrl"/>
         <body><![CDATA[
-          var url = this.value;
-          if (!url) {
-            aCallback(["", null, false]);
-            return;
-          }
+          let url = aUrl;
 
           // Only add the suffix when the URL bar value isn't already "URL-like",
           // and only if we get a keyboard event, to match user expectations.
@@ -619,9 +629,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             }
           }
 
-          getShortcutOrURIAndPostData(url).then(data => {
-            aCallback([data.url, data.postData, data.mayInheritPrincipal]);
-          });
+          return url;
         ]]></body>
       </method>
 
@@ -656,11 +664,12 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       <method name="onDrop">
         <parameter name="aEvent"/>
         <body><![CDATA[
-          let url = browserDragAndDrop.drop(aEvent, { })
+          let links = browserDragAndDrop.dropLinks(aEvent);
 
           // The URL bar automatically handles inputs with newline characters,
           // so we can get away with treating text/x-moz-url flavours as text/plain.
-          if (url) {
+          if (links.length > 0 && links[0].url) {
+            let url = links[0].url;
             aEvent.preventDefault();
             this.value = url;
             SetPageProxyState("invalid");
@@ -1000,8 +1009,12 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             this._value = this.inputField.value;
             gBrowser.userTypedValue = this.value;
             this.valueIsTyped = true;
-            this.gotResultForCurrentQuery = false;
-            this.mController.handleText();
+            // Only wait for a result when we are sure to get one.  In some
+            // cases, like when pasting the same exact text, we may not fire
+            // a new search and we won't get a result.
+            if (this.mController.handleText()) {
+              this.gotResultForCurrentQuery = false;
+            }
           }
           this.resetActionType();
         ]]></body>
@@ -1024,17 +1037,21 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           // However, if the default result is automatically selected, we
           // ensure that it corresponds to the current input.
 
+          // Store the current search string so it can be used in
+          // handleCommand, which will be called as a result of
+          // mController.handleEnter().
+          // Note this is also used to detect if we should perform a delayed
+          // handleEnter, in such a case it won't have been cleared.
+          this.handleEnterInstance = {
+            searchString: this.mController.searchString,
+            event: event
+          };
+
           if (this.popup.selectedIndex != 0 || this.gotResultForCurrentQuery) {
-            // Store the current search string so it can be used in
-            // handleCommand, which will be called as a result of
-            // mController.handleEnter().  handleEnter will reset it.
-            this._searchStringOnHandleEnter = this.mController.searchString;
             let rv = this.mController.handleEnter(false, event);
-            delete this._searchStringOnHandleEnter;
+            this.handleEnterInstance = null;
             return rv;
           }
-
-          this.handleEnterWhenGotResult = true;
 
           return true;
         ]]></body>
@@ -1048,7 +1065,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           // a backspace on the text value instead of removing the result.
           if (this.popup.selectedIndex == 0 &&
               this.popup._isFirstResultHeuristic) {
-            return this.mController.handleText();
+            this.mController.handleText();
+            return false;
           }
           return this.mController.handleDelete();
         ]]></body>
@@ -1292,6 +1310,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                   class="search-one-offs"
                   compact="true"
                   includecurrentengine="true"
+                  disabletab="true"
                   flex="1"/>
       </xul:hbox>
     </content>
@@ -1486,7 +1505,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           this.mInput = aInput;
           this.selectedIndex = this._isFirstResultHeuristic ? 0 : -1;
           this.view = aInput.controller.QueryInterface(Components.interfaces.nsITreeView);
-          this.invalidate();
+          this._invalidate();
 
           var rect = window.document.documentElement.getBoundingClientRect();
           var width = rect.right - rect.left;
@@ -1638,7 +1657,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         </body>
       </method>
 
-      <method name="_visuallySelectedOneOffChanged">
+      <method name="_selectedOneOffChanged">
         <body><![CDATA[
           // Update all searchengine result items to use the newly selected
           // engine.
@@ -1693,8 +1712,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           // reused, always return a non-null name here by falling back to the
           // current engine.
           let engine =
-            (this.oneOffSearchButtons.visuallySelectedButton &&
-             this.oneOffSearchButtons.visuallySelectedButton.engine) ||
+            (this.oneOffSearchButtons.selectedButton &&
+             this.oneOffSearchButtons.selectedButton.engine) ||
              Services.search.currentEngine;
           return engine ? engine.name : null;
         ]]></getter>
@@ -1745,32 +1764,54 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             // If nothing is selected yet, select the first result if it is a
             // pre-selected "heuristic" result.  (See UnifiedComplete.js.)
             if (this.selectedIndex == -1 && this._isFirstResultHeuristic) {
-              // Don't handle this as a user-initiated action.
-              this._ignoreNextSelect = true;
-
               // Don't fire DOMMenuItemActive so that screen readers still see
               // the input as being focused.
               this.richlistbox.suppressMenuItemEvent = true;
-
               this.selectedIndex = 0;
               this.richlistbox.suppressMenuItemEvent = false;
-              this._ignoreNextSelect = false;
             }
 
             this.input.gotResultForCurrentQuery = true;
-            if (this.input.handleEnterWhenGotResult) {
-              this.input.handleEnterWhenGotResult = false;
-              this.input.mController.handleEnter(false);
+
+            // Check if we should perform a delayed handleEnter.
+            if (this.input.handleEnterInstance) {
+              let instance = this.input.handleEnterInstance;
+              this.input.handleEnterInstance = null;
+              // Don't handle this immediately or we could cause a recursive
+              // loop where the controller sets popupOpen and re-enters here.
+              setTimeout(() => {
+                // Safety check: handle only if the search string didn't change.
+                if (this.input.mController.searchString == instance.searchString) {
+                  this.input.mController.handleEnter(false, instance.event);
+                }
+              }, 0);
             }
           ]]>
         </body>
       </method>
 
+      <method name="_onSearchBegin">
+        <body><![CDATA[
+          // Set the selected index to 0 (heuristic) until a result comes back
+          // and we can evaluate it better.
+          //
+          // This is required to properly manage delayed handleEnter:
+          // 1. if a search starts we set selectedIndex to 0 here, and it will
+          //    be updated by onResultsAdded. Since selectedIndex is 0,
+          //    handleEnter will delay the action if a result didn't arrive yet.
+          // 2. if a search doesn't start (for example if autocomplete is
+          //    disabled), this won't be called, and the selectedIndex will be
+          //    the default -1 value. Then handleEnter will know it should not
+          //    delay the action, cause a result wont't ever arrive.
+          this.selectedIndex = 0;
+        ]]></body>
+      </method>
+
     </implementation>
     <handlers>
 
-      <handler event="OneOffsVisuallySelectedButtonChanged"><![CDATA[
-        this._visuallySelectedOneOffChanged();
+      <handler event="SelectedOneOffButtonChanged"><![CDATA[
+        this._selectedOneOffChanged();
       ]]></handler>
 
       <handler event="mousedown"><![CDATA[
@@ -2470,16 +2511,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
            enter activates the button and not this default action -->
       <handler event="keypress" keycode="VK_RETURN" group="system" action="this._accept(event);"/>
     </handlers>
-  </binding>
-
-  <!-- This is the XBL notification definition for the login fill doorhanger,
-       which is empty because the actual panel is not implemented inside an XBL
-       binding, but made of elements added to the notification panel. This
-       allows accessing the full structure while the panel is hidden. -->
-  <binding id="login-fill-notification" extends="chrome://global/content/bindings/notification.xml#popup-notification">
-    <content>
-      <children/>
-    </content>
   </binding>
 
   <binding id="splitmenu">

@@ -11,6 +11,7 @@
 #include "mozilla/mozalloc.h" // for operator new, and new (fallible)
 #include "mozilla/RefPtr.h"
 #include "mozilla/TaskQueue.h"
+#include "mp4_demuxer/AnnexB.h"
 #include "mp4_demuxer/H264.h"
 #include "MP4Decoder.h"
 #include "nsAutoPtr.h"
@@ -34,7 +35,9 @@ public:
     , mCallback(aParams.mCallback)
     , mMaxRefFrames(aParams.mConfig.GetType() == TrackInfo::kVideoTrack &&
                     MP4Decoder::IsH264(aParams.mConfig.mMimeType)
-                    ? mp4_demuxer::H264::ComputeMaxRefFrames(aParams.VideoConfig().mExtraData)
+                    ? mp4_demuxer::AnnexB::HasSPS(aParams.VideoConfig().mExtraData)
+                      ? mp4_demuxer::H264::ComputeMaxRefFrames(aParams.VideoConfig().mExtraData)
+                      : 16
                     : 0)
     , mType(aParams.mConfig.GetType())
   {
@@ -44,11 +47,9 @@ public:
     return InitPromise::CreateAndResolve(mType, __func__);
   }
 
-  nsresult Shutdown() override {
-    return NS_OK;
-  }
+  void Shutdown() override {}
 
-  nsresult Input(MediaRawData* aSample) override
+  void Input(MediaRawData* aSample) override
   {
     RefPtr<MediaData> data =
       mCreator->Create(media::TimeUnit::FromMicroseconds(aSample->mTime),
@@ -56,25 +57,20 @@ public:
                        aSample->mOffset);
 
     OutputFrame(data);
-
-    return NS_OK;
   }
 
-  nsresult Flush() override
+  void Flush() override
   {
     mReorderQueue.Clear();
-
-    return NS_OK;
   }
 
-  nsresult Drain() override
+  void Drain() override
   {
     while (!mReorderQueue.IsEmpty()) {
       mCallback->Output(mReorderQueue.Pop().get());
     }
 
     mCallback->DrainComplete();
-    return NS_OK;
   }
 
   const char* GetDescriptionName() const override
@@ -86,7 +82,7 @@ private:
   void OutputFrame(MediaData* aData)
   {
     if (!aData) {
-      mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
+      mCallback->Error(MediaResult(NS_ERROR_OUT_OF_MEMORY, __func__));
       return;
     }
 
@@ -96,11 +92,7 @@ private:
     while (mReorderQueue.Length() > mMaxRefFrames) {
       mCallback->Output(mReorderQueue.Pop().get());
     }
-
-    if (mReorderQueue.Length() <= mMaxRefFrames) {
-      mCallback->InputExhausted();
-    }
-
+    mCallback->InputExhausted();
   }
 
 private:
@@ -269,9 +261,9 @@ public:
   DecoderNeedsConversion(const TrackInfo& aConfig) const override
   {
     if (aConfig.IsVideo() && MP4Decoder::IsH264(aConfig.mMimeType)) {
-      return kNeedAVCC;
+      return ConversionRequired::kNeedAVCC;
     } else {
-      return kNeedNone;
+      return ConversionRequired::kNeedNone;
     }
   }
 

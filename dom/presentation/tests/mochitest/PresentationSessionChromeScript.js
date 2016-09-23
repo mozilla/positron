@@ -185,6 +185,10 @@ const mockedDevice = {
     sendAsyncMessage('control-channel-established');
     return mockedControlChannel;
   },
+  disconnect: function() {},
+  isRequestedUrlSupported: function(requestedUrl) {
+    return true;
+  },
 };
 
 const mockedDevicePrompt = {
@@ -209,13 +213,14 @@ const mockedDevicePrompt = {
   simulateSelect: function() {
     this._request.select(mockedDevice);
   },
-  simulateCancel: function() {
-    this._request.cancel();
+  simulateCancel: function(result) {
+    this._request.cancel(result);
   }
 };
 
 const mockedSessionTransport = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIPresentationSessionTransport,
+                                         Ci.nsIPresentationSessionTransportBuilder,
                                          Ci.nsIPresentationTCPSessionTransportBuilder,
                                          Ci.nsIPresentationDataChannelSessionTransportBuilder,
                                          Ci.nsIPresentationControlChannelListener,
@@ -236,19 +241,19 @@ const mockedSessionTransport = {
     return this._selfAddress;
   },
   buildTCPSenderTransport: function(transport, listener) {
-    sendAsyncMessage('data-transport-initialized');
     this._listener = listener;
     this._role = Ci.nsIPresentationService.ROLE_CONTROLLER;
+    this._listener.onSessionTransport(this);
+    this._listener = null;
+    sendAsyncMessage('data-transport-initialized');
 
     setTimeout(()=>{
-      this._listener.onSessionTransport(this);
-      this._listener = null;
       this.simulateTransportReady();
     }, 0);
   },
   buildTCPReceiverTransport: function(description, listener) {
     this._listener = listener;
-    this._role = Ci.nsIPresentationService.ROLE_CONTROLLER;
+    this._role = Ci.nsIPresentationService.ROLE_RECEIVER;
 
     var addresses = description.QueryInterface(Ci.nsIPresentationChannelDescription).tcpAddress;
     this._selfAddress = {
@@ -265,7 +270,6 @@ const mockedSessionTransport = {
   },
   // in-process case
   buildDataChannelTransport: function(role, window, listener) {
-    dump("PresentationSessionChromeScript: build data channel transport\n");
     this._listener = listener;
     this._role = role;
 
@@ -292,7 +296,7 @@ const mockedSessionTransport = {
     this._callback.QueryInterface(Ci.nsIPresentationSessionTransportCallback).notifyTransportReady();
   },
   simulateIncomingMessage: function(message) {
-    this._callback.QueryInterface(Ci.nsIPresentationSessionTransportCallback).notifyData(message);
+    this._callback.QueryInterface(Ci.nsIPresentationSessionTransportCallback).notifyData(message, false);
   },
   onOffer: function(aOffer) {
   },
@@ -374,7 +378,7 @@ function tearDown() {
   deviceManager.QueryInterface(Ci.nsIPresentationDeviceListener).removeDevice(mockedDevice);
 
   // Register original factories.
-  for (var data in originalFactoryData) {
+  for (var data of originalFactoryData) {
     registerOriginalFactory(data.contractId, data.mockedClassId,
                             data.mockedFactory, data.originalClassId,
                             data.originalFactory);
@@ -393,8 +397,8 @@ addMessageListener('trigger-device-prompt-select', function() {
   mockedDevicePrompt.simulateSelect();
 });
 
-addMessageListener('trigger-device-prompt-cancel', function() {
-  mockedDevicePrompt.simulateCancel();
+addMessageListener('trigger-device-prompt-cancel', function(result) {
+  mockedDevicePrompt.simulateCancel(result);
 });
 
 addMessageListener('trigger-incoming-session-request', function(url) {

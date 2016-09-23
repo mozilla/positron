@@ -41,9 +41,12 @@
 #include "nsIPermissionManager.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIDOMMutationEvent.h"
+#include "mozilla/Preferences.h"
 
 using namespace mozilla;
 using mozilla::layout::RenderFrameParent;
+
+static bool sShowPreviousPage = true;
 
 static nsIDocument*
 GetDocumentFromView(nsView* aView)
@@ -80,7 +83,7 @@ class AsyncFrameInit : public Runnable
 {
 public:
   explicit AsyncFrameInit(nsIFrame* aFrame) : mFrame(aFrame) {}
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     PROFILER_LABEL("mozilla", "AsyncFrameInit::Run", js::ProfileEntry::Category::OTHER);
     if (mFrame.IsAlive()) {
@@ -106,6 +109,12 @@ nsSubDocumentFrame::Init(nsIContent*       aContent,
   // determine if we are a <frame> or <iframe>
   nsCOMPtr<nsIDOMHTMLFrameElement> frameElem = do_QueryInterface(aContent);
   mIsInline = frameElem ? false : true;
+
+  static bool addedShowPreviousPage = false;
+  if (!addedShowPreviousPage) {
+    Preferences::AddBoolVarCache(&sShowPreviousPage, "layout.show_previous_page", true);
+    addedShowPreviousPage = true;
+  }
 
   nsAtomicContainerFrame::Init(aContent, aParent, aPrevInFlow);
 
@@ -227,7 +236,7 @@ nsSubDocumentFrame::GetSubdocumentPresShellForPainting(uint32_t aFlags)
     }
     if (frame) {
       nsIPresShell* ps = frame->PresContext()->PresShell();
-      if (!presShell || (ps && !ps->IsPaintingSuppressed())) {
+      if (!presShell || (ps && !ps->IsPaintingSuppressed() && sShowPreviousPage)) {
         subdocView = nextView;
         subdocRootFrame = frame;
         presShell = ps;
@@ -942,7 +951,7 @@ public:
     NS_ASSERTION(mPresShell, "Must have a presshell");
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     // Flush frames, to ensure any pending display:none changes are made.
     // Note it can be unsafe to flush if we've destroyed the presentation
@@ -1038,9 +1047,7 @@ nsSubDocumentFrame::FrameLoader()
   if (!mFrameLoader) {
     nsCOMPtr<nsIFrameLoaderOwner> loaderOwner = do_QueryInterface(content);
     if (loaderOwner) {
-      nsCOMPtr<nsIFrameLoader> loader;
-      loaderOwner->GetFrameLoader(getter_AddRefs(loader));
-      mFrameLoader = static_cast<nsFrameLoader*>(loader.get());
+      mFrameLoader = loaderOwner->GetFrameLoader();
     }
   }
   return mFrameLoader;

@@ -31,9 +31,15 @@ const TEST_TABLE_DATA_LIST = [
   }
 ];
 
-// This table has a different update URL (for v4).
+// These tables have a different update URL (for v4).
 const TEST_TABLE_DATA_V4 = {
   tableName: "test-phish-proto",
+  providerName: "google4",
+  updateUrl: "http://localhost:5555/safebrowsing/update?",
+  gethashUrl: "http://localhost:5555/safebrowsing/gethash-v4",
+};
+const TEST_TABLE_DATA_V4_DISABLED = {
+  tableName: "test-unwanted-proto",
   providerName: "google4",
   updateUrl: "http://localhost:5555/safebrowsing/update?",
   gethashUrl: "http://localhost:5555/safebrowsing/gethash-v4",
@@ -62,6 +68,8 @@ let gHttpServV4 = null;
 let gUpdatedCntForTableData = 0; // For TEST_TABLE_DATA_LIST.
 let gIsV4Updated = false;   // For TEST_TABLE_DATA_V4.
 
+const NEW_CLIENT_STATE = 'sta\0te';
+
 prefBranch.setBoolPref("browser.safebrowsing.debug", true);
 
 // Register tables.
@@ -76,6 +84,12 @@ gListManager.registerTable(TEST_TABLE_DATA_V4.tableName,
                            TEST_TABLE_DATA_V4.providerName,
                            TEST_TABLE_DATA_V4.updateUrl,
                            TEST_TABLE_DATA_V4.gethashUrl);
+
+// To test Bug 1302044.
+gListManager.registerTable(TEST_TABLE_DATA_V4_DISABLED.tableName,
+                           TEST_TABLE_DATA_V4_DISABLED.providerName,
+                           TEST_TABLE_DATA_V4_DISABLED.updateUrl,
+                           TEST_TABLE_DATA_V4_DISABLED.gethashUrl);
 
 const SERVER_INVOLVED_TEST_CASE_LIST = [
   // - Do table0 update.
@@ -120,7 +134,12 @@ const SERVER_INVOLVED_TEST_CASE_LIST = [
     TEST_TABLE_DATA_LIST.forEach(function(t) {
       gListManager.enableUpdate(t.tableName);
     });
+
+    // We register two v4 tables but only enable one of them
+    // to verify that the disabled tables are not updated.
+    // See Bug 1302044.
     gListManager.enableUpdate(TEST_TABLE_DATA_V4.tableName);
+    gListManager.disableUpdate(TEST_TABLE_DATA_V4_DISABLED.tableName);
 
     // Expected results for v2.
     gExpectedUpdateRequest = TEST_TABLE_DATA_LIST[0].tableName + ";a:5:s:2-12\n" +
@@ -142,6 +161,22 @@ const SERVER_INVOLVED_TEST_CASE_LIST = [
 ];
 
 SERVER_INVOLVED_TEST_CASE_LIST.forEach(t => add_test(t));
+
+add_test(function test_partialUpdateV4() {
+  disableAllUpdates();
+
+  gListManager.enableUpdate(TEST_TABLE_DATA_V4.tableName);
+
+  // Since the new client state has been responded and saved in
+  // test_update_all_tables, this update request should send
+  // a partial update to the server.
+  let requestV4 = gUrlUtils.makeUpdateRequestV4([TEST_TABLE_DATA_V4.tableName],
+                                                [btoa(NEW_CLIENT_STATE)],
+                                                1);
+  gExpectedQueryV4 = "&$req=" + btoa(requestV4);
+
+  forceTableUpdate();
+});
 
 // Tests nsIUrlListManager.getGethashUrl.
 add_test(function test_getGethashUrl() {
@@ -213,18 +248,44 @@ function run_test() {
     response.setHeader("Content-Type",
                        "application/vnd.google.safebrowsing-update", false);
     response.setStatusLine(request.httpVersion, 200, "OK");
-    let content = "n:1000\n";
+
+    // The protobuf binary represention of response:
+    //
+    // [
+    //   {
+    //     'threat_type': 2, // SOCIAL_ENGINEERING_PUBLIC
+    //     'response_type': 2, // FULL_UPDATE
+    //     'new_client_state': 'sta\x00te' // NEW_CLIENT_STATE
+    //   }
+    // ]
+    //
+    let content = "\x0A\x0C\x08\x02\x20\x02\x3A\x06\x73\x74\x61\x00\x74\x65";
+
     response.bodyOutputStream.write(content, content.length);
 
-    gIsV4Updated = true;
-
-    if (gUpdatedCntForTableData === SERVER_INVOLVED_TEST_CASE_LIST.length) {
-      // All tests are done!
+    if (gIsV4Updated) {
+      // This falls to the case where test_partialUpdateV4 is running.
+      // We are supposed to have verified the update request contains
+      // the state we set in the previous request.
       run_next_test();
       return;
     }
 
-    do_print("Wait for all sever-involved tests to be done ...");
+    // See Bug 1284204. We save the state to pref at the moment to
+    // support partial update until "storing to HashStore" is supported.
+    // Here we poll the pref until the state has been saved.
+    waitUntilStateSavedToPref(NEW_CLIENT_STATE, () => {
+      gIsV4Updated = true;
+
+      if (gUpdatedCntForTableData === SERVER_INVOLVED_TEST_CASE_LIST.length) {
+        // All tests are done!
+        run_next_test();
+        return;
+      }
+
+      do_print("Wait for all sever-involved tests to be done ...");
+    });
+
   });
 
   gHttpServV4.start(5555);
@@ -267,10 +328,21 @@ function readFileToString(aFilename) {
   return buf;
 }
 
-function buildUpdateRequestV4InBase64() {
+function waitUntilStateSavedToPref(expectedState, callback) {
+  const STATE_PREF_NAME_PREFIX = 'browser.safebrowsing.provider.google4.state.';
 
-  let request =  urlUtils.makeUpdateRequestV4([TEST_TABLE_DATA_V4.tableName],
-                                              [""],
-                                              1);
-  return btoa(request);
+  let stateBase64 = '';
+
+  try {
+    stateBase64 =
+      prefBranch.getCharPref(STATE_PREF_NAME_PREFIX + 'test-phish-proto');
+  } catch (e) {}
+
+  if (stateBase64 === btoa(expectedState)) {
+    do_print('State has been saved to pref!');
+    callback();
+    return;
+  }
+
+  do_timeout(1000, waitUntilStateSavedToPref.bind(null, expectedState, callback));
 }

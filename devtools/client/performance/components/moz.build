@@ -6,6 +6,12 @@
 DevToolsModules(
     'jit-optimizations-item.js',
     'jit-optimizations.js',
+    'recording-button.js',
+    'recording-controls.js',
+    'waterfall-header.js',
+    'waterfall-tree-row.js',
+    'waterfall-tree.js',
+    'waterfall.js',
 )
 
 MOCHITEST_CHROME_MANIFESTS += ['test/chrome.ini']

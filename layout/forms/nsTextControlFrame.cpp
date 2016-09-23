@@ -46,6 +46,8 @@
 #include "nsTextNode.h"
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
+#include "mozilla/dom/HTMLInputElement.h"
+#include "mozilla/dom/HTMLTextAreaElement.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/MathAlgorithms.h"
 #include "nsFrameSelection.h"
@@ -348,8 +350,8 @@ nsTextControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
     nsIContent* placeholderNode = txtCtrl->CreatePlaceholderNode();
     NS_ENSURE_TRUE(placeholderNode, NS_ERROR_OUT_OF_MEMORY);
 
-    // Associate ::-moz-placeholder pseudo-element with the placeholder node.
-    CSSPseudoElementType pseudoType = CSSPseudoElementType::mozPlaceholder;
+    // Associate ::placeholder pseudo-element with the placeholder node.
+    CSSPseudoElementType pseudoType = CSSPseudoElementType::placeholder;
 
     // If this is a text input inside a number input then we want to use the
     // main number input as the source of style for the placeholder frame.
@@ -419,8 +421,17 @@ void
 nsTextControlFrame::AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
                                              uint32_t aFilter)
 {
-  nsCOMPtr<nsITextControlElement> txtCtrl = do_QueryInterface(GetContent());
-  NS_ASSERTION(txtCtrl, "Content not a text control element");
+  // This can be called off-main-thread during Servo traversal, so we take care
+  // to avoid QI-ing the DOM node.
+  nsITextControlElement* txtCtrl = nullptr;
+  nsIContent* content = GetContent();
+  if (content->IsHTMLElement(nsGkAtoms::input)) {
+    txtCtrl = static_cast<HTMLInputElement*>(content);
+  } else if (content->IsHTMLElement(nsGkAtoms::textarea)) {
+    txtCtrl = static_cast<HTMLTextAreaElement*>(content);
+  } else {
+    MOZ_CRASH("Unexpected content type for nsTextControlFrame");
+  }
 
   nsIContent* root = txtCtrl->GetRootEditorNode();
   if (root) {
@@ -1453,7 +1464,7 @@ nsTextControlFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 mozilla::dom::Element*
 nsTextControlFrame::GetPseudoElement(CSSPseudoElementType aType)
 {
-  if (aType == CSSPseudoElementType::mozPlaceholder) {
+  if (aType == CSSPseudoElementType::placeholder) {
     nsCOMPtr<nsITextControlElement> txtCtrl = do_QueryInterface(GetContent());
     return txtCtrl->GetPlaceholderNode();
   }

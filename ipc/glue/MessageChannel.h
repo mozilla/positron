@@ -15,7 +15,6 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/Vector.h"
-#include "mozilla/WeakPtr.h"
 #if defined(OS_WIN)
 #include "mozilla/ipc/Neutering.h"
 #endif // defined(OS_WIN)
@@ -356,7 +355,7 @@ class MessageChannel : HasResultCodes
     }
 
     MessageListener *Listener() const {
-        return mListener.get();
+        return mListener;
     }
 
     void DebugAbort(const char* file, int line, const char* cond,
@@ -508,12 +507,7 @@ class MessageChannel : HasResultCodes
             topCount = curCount;
           }
 
-          CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("NumberOfPendingIPC"),
-                                             nsPrintfCString("%zu", q.size()));
-          CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("TopPendingIPCCount"),
-                                             nsPrintfCString("%u", topCount));
-          CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("TopPendingIPCName"),
-                                             nsPrintfCString("%s(0x%x)", topName, topType));
+          CrashReporter::AnnotatePendingIPC(q.size(), topCount, topName, topType);
 
           mozalloc_handle_oom(n * sizeof(T));
         }
@@ -576,7 +570,9 @@ class MessageChannel : HasResultCodes
     };
 
   private:
-    mozilla::WeakPtr<MessageListener> mListener;
+    // Based on presumption the listener owns and overlives the channel,
+    // this is never nullified.
+    MessageListener* mListener;
     ChannelState mChannelState;
     RefPtr<RefCountedMonitor> mMonitor;
     Side mSide;
@@ -781,6 +777,10 @@ class MessageChannel : HasResultCodes
     // Should the channel abort the process from the I/O thread when
     // a channel error occurs?
     bool mAbortOnError;
+
+    // True if the listener has already been notified of a channel close or
+    // error.
+    bool mNotifiedChannelDone;
 
     // See SetChannelFlags
     ChannelFlags mFlags;

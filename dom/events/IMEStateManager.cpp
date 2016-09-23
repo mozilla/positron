@@ -16,7 +16,7 @@
 #include "mozilla/Services.h"
 #include "mozilla/TextComposition.h"
 #include "mozilla/TextEvents.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/HTMLFormElement.h"
 #include "mozilla/dom/TabParent.h"
 
@@ -136,7 +136,7 @@ GetIMEStateSetOpenName(IMEState::Open aOpen)
 }
 
 StaticRefPtr<nsIContent> IMEStateManager::sContent;
-nsPresContext* IMEStateManager::sPresContext = nullptr;
+StaticRefPtr<nsPresContext> IMEStateManager::sPresContext;
 nsIWidget* IMEStateManager::sFocusedIMEWidget = nullptr;
 nsIWidget* IMEStateManager::sActiveInputContextWidget = nullptr;
 StaticRefPtr<TabParent> IMEStateManager::sActiveTabParent;
@@ -285,7 +285,7 @@ IMEStateManager::OnDestroyPresContext(nsPresContext* aPresContext)
   MOZ_LOG(sISMLog, LogLevel::Info,
     ("OnDestroyPresContext(aPresContext=0x%p), "
      "sPresContext=0x%p, sContent=0x%p, sTextCompositions=0x%p",
-     aPresContext, sPresContext, sContent.get(), sTextCompositions));
+     aPresContext, sPresContext.get(), sContent.get(), sTextCompositions));
 
   DestroyIMEContentObserver();
 
@@ -323,7 +323,7 @@ IMEStateManager::OnRemoveContent(nsPresContext* aPresContext,
       // is called during the content being removed.  Then, the native
       // composition events which are caused by following APIs are ignored due
       // to unsafe to run script (in PresShell::HandleEvent()).
-      nsCOMPtr<nsIWidget> widget = aPresContext->GetRootWidget();
+      DebugOnly<void*> widget = aPresContext->GetRootWidget();
       MOZ_ASSERT(widget, "Why is there no widget?");
       nsresult rv =
         compositionInContent->NotifyIME(REQUEST_TO_CANCEL_COMPOSITION);
@@ -341,7 +341,7 @@ IMEStateManager::OnRemoveContent(nsPresContext* aPresContext,
   MOZ_LOG(sISMLog, LogLevel::Info,
     ("OnRemoveContent(aPresContext=0x%p, aContent=0x%p), "
      "sPresContext=0x%p, sContent=0x%p, sTextCompositions=0x%p",
-     aPresContext, aContent, sPresContext, sContent.get(), sTextCompositions));
+     aPresContext, aContent, sPresContext.get(), sContent.get(), sTextCompositions));
 
   DestroyIMEContentObserver();
 
@@ -391,7 +391,7 @@ IMEStateManager::OnChangeFocusInternal(nsPresContext* aPresContext,
      aPresContext, aContent, newTabParent.get(),
      GetActionCauseName(aAction.mCause),
      GetActionFocusChangeName(aAction.mFocusChange),
-     sPresContext, sContent.get(), sActiveTabParent.get(),
+     sPresContext.get(), sContent.get(), sActiveTabParent.get(),
      sActiveIMEContentObserver.get(),
      GetBoolName(sInstalledMenuKeyboardListener)));
 
@@ -567,7 +567,7 @@ IMEStateManager::OnMouseButtonEventInEditor(nsPresContext* aPresContext,
   MOZ_LOG(sISMLog, LogLevel::Info,
     ("OnMouseButtonEventInEditor(aPresContext=0x%p, "
      "aContent=0x%p, aMouseEvent=0x%p), sPresContext=0x%p, sContent=0x%p",
-     aPresContext, aContent, aMouseEvent, sPresContext, sContent.get()));
+     aPresContext, aContent, aMouseEvent, sPresContext.get(), sContent.get()));
 
   if (sPresContext != aPresContext || sContent != aContent) {
     MOZ_LOG(sISMLog, LogLevel::Debug,
@@ -624,7 +624,7 @@ IMEStateManager::OnClickInEditor(nsPresContext* aPresContext,
   MOZ_LOG(sISMLog, LogLevel::Info,
     ("OnClickInEditor(aPresContext=0x%p, aContent=0x%p, aMouseEvent=0x%p), "
      "sPresContext=0x%p, sContent=0x%p",
-     aPresContext, aContent, aMouseEvent, sPresContext, sContent.get()));
+     aPresContext, aContent, aMouseEvent, sPresContext.get(), sContent.get()));
 
   if (sPresContext != aPresContext || sContent != aContent) {
     MOZ_LOG(sISMLog, LogLevel::Debug,
@@ -686,7 +686,7 @@ IMEStateManager::OnFocusInEditor(nsPresContext* aPresContext,
   MOZ_LOG(sISMLog, LogLevel::Info,
     ("OnFocusInEditor(aPresContext=0x%p, aContent=0x%p, aEditor=0x%p), "
      "sPresContext=0x%p, sContent=0x%p, sActiveIMEContentObserver=0x%p",
-     aPresContext, aContent, aEditor, sPresContext, sContent.get(),
+     aPresContext, aContent, aEditor, sPresContext.get(), sContent.get(),
      sActiveIMEContentObserver.get()));
 
   if (sPresContext != aPresContext || sContent != aContent) {
@@ -766,7 +766,7 @@ IMEStateManager::UpdateIMEState(const IMEState& aNewIMEState,
      "sIsGettingNewIMEState=%s",
      GetIMEStateEnabledName(aNewIMEState.mEnabled),
      GetIMEStateSetOpenName(aNewIMEState.mOpen), aContent, aEditor,
-     sPresContext, sContent.get(), sActiveIMEContentObserver.get(),
+     sPresContext.get(), sContent.get(), sActiveIMEContentObserver.get(),
      GetBoolName(sIsGettingNewIMEState)));
 
   if (sIsGettingNewIMEState) {
@@ -934,7 +934,7 @@ IMEStateManager::SetInputContextForChildProcess(
      NS_ConvertUTF16toUTF8(aInputContext.mActionHint).get(),
      GetActionCauseName(aAction.mCause),
      GetActionFocusChangeName(aAction.mFocusChange),
-     sPresContext, sActiveTabParent.get()));
+     sPresContext.get(), sActiveTabParent.get()));
 
   if (aTabParent != sActiveTabParent) {
     MOZ_LOG(sISMLog, LogLevel::Error,
@@ -1565,7 +1565,7 @@ IMEStateManager::CreateIMEContentObserver(nsIEditor* aEditor)
     ("CreateIMEContentObserver(aEditor=0x%p), "
      "sPresContext=0x%p, sContent=0x%p, sActiveIMEContentObserver=0x%p, "
      "sActiveIMEContentObserver->IsManaging(sPresContext, sContent)=%s",
-     aEditor, sPresContext, sContent.get(), sActiveIMEContentObserver.get(),
+     aEditor, sPresContext.get(), sContent.get(), sActiveIMEContentObserver.get(),
      GetBoolName(sActiveIMEContentObserver ?
        sActiveIMEContentObserver->IsManaging(sPresContext, sContent) : false)));
 
@@ -1601,8 +1601,8 @@ IMEStateManager::CreateIMEContentObserver(nsIEditor* aEditor)
   // IMEContentObserver::Init() might create another IMEContentObserver
   // instance.  So, sActiveIMEContentObserver would be replaced with new one.
   // We should hold the current instance here.
-  RefPtr<IMEContentObserver> kungFuDeathGrip(sActiveIMEContentObserver);
-  sActiveIMEContentObserver->Init(widget, sPresContext, sContent, aEditor);
+  RefPtr<IMEContentObserver> activeIMEContentObserver(sActiveIMEContentObserver);
+  activeIMEContentObserver->Init(widget, sPresContext, sContent, aEditor);
 }
 
 // static

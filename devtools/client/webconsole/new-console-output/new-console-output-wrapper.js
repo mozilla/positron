@@ -9,17 +9,36 @@ const ReactDOM = require("devtools/client/shared/vendor/react-dom");
 const { Provider } = require("devtools/client/shared/vendor/react-redux");
 
 const actions = require("devtools/client/webconsole/new-console-output/actions/messages");
-const { store } = require("devtools/client/webconsole/new-console-output/store");
+const { configureStore } = require("devtools/client/webconsole/new-console-output/store");
 
 const ConsoleOutput = React.createFactory(require("devtools/client/webconsole/new-console-output/components/console-output"));
 const FilterBar = React.createFactory(require("devtools/client/webconsole/new-console-output/components/filter-bar"));
 
-function NewConsoleOutputWrapper(parentNode, jsterm) {
-  let childComponent = ConsoleOutput({ jsterm });
+const store = configureStore();
+
+function NewConsoleOutputWrapper(parentNode, jsterm, toolbox, owner) {
+  const sourceMapService = toolbox ? toolbox._sourceMapService : null;
+  let childComponent = ConsoleOutput({
+    jsterm,
+    sourceMapService,
+    onViewSourceInDebugger: frame => toolbox.viewSourceInDebugger.call(
+      toolbox,
+      frame.url,
+      frame.line
+    ),
+    openNetworkPanel: (requestId) => {
+      return toolbox.selectTool("netmonitor").then(panel => {
+        return panel.panelWin.NetMonitorController.inspectRequest(requestId);
+      });
+    },
+    openLink: (url) => {
+      owner.openLink(url);
+    },
+  });
   let filterBar = FilterBar({});
   let provider = React.createElement(
     Provider,
-    { store: store },
+    { store },
     React.DOM.div(
       {className: "webconsole-output-wrapper"},
       filterBar,
@@ -34,7 +53,7 @@ NewConsoleOutputWrapper.prototype = {
   },
   dispatchMessagesClear: () => {
     store.dispatch(actions.messagesClear());
-  }
+  },
 };
 
 // Exports from this module

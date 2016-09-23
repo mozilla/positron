@@ -13,6 +13,7 @@ Cu.import("resource://services-sync/engines/clients.js");
 Cu.import("resource://testing-common/services/sync/utils.js");
 Cu.import("resource://testing-common/services/sync/fxa_utils.js");
 Cu.import("resource://testing-common/services/sync/rotaryengine.js");
+Cu.import("resource://gre/modules/osfile.jsm", this);
 
 Cu.import("resource://gre/modules/PlacesUtils.jsm");
 Cu.import("resource://services-sync/util.js");
@@ -172,7 +173,6 @@ add_task(function *test_uploading() {
     engine.resetClient();
 
     ping = yield sync_engine_and_validate_telem(engine, false);
-
     equal(ping.engines.length, 1);
     equal(ping.engines[0].name, "bookmarks");
     equal(ping.engines[0].outgoing.length, 1);
@@ -342,6 +342,42 @@ add_task(function* test_generic_engine_fail() {
   }
 });
 
+add_task(function* test_engine_fail_ioerror() {
+  Service.engineManager.register(SteamEngine);
+  let engine = Service.engineManager.get("steam");
+  engine.enabled = true;
+  let store  = engine._store;
+  let server = serverForUsers({"foo": "password"}, {
+    meta: {global: {engines: {steam: {version: engine.version,
+                                      syncID: engine.syncID}}}},
+    steam: {}
+  });
+  new SyncTestingInfrastructure(server.server);
+  // create an IOError to re-throw as part of Sync.
+  try {
+    // (Note that fakeservices.js has replaced Utils.jsonMove etc, but for
+    // this test we need the real one so we get real exceptions from the
+    // filesystem.)
+    yield Utils._real_jsonMove("file-does-not-exist", "anything", {});
+  } catch (ex) {
+    engine._errToThrow = ex;
+  }
+  ok(engine._errToThrow, "expecting exception");
+
+  try {
+    let ping = yield sync_and_validate_telem(true);
+    equal(ping.status.service, SYNC_FAILED_PARTIAL);
+    let failureReason = ping.engines.find(e => e.name === "steam").failureReason;
+    equal(failureReason.name, "unexpectederror");
+    // ensure the profile dir in the exception message has been stripped.
+    ok(!failureReason.error.includes(OS.Constants.Path.profileDir), failureReason.error);
+    ok(failureReason.error.includes("[profileDir]"), failureReason.error);
+  } finally {
+    Service.engineManager.unregister(engine);
+    yield cleanAndGo(server);
+  }
+});
+
 add_task(function* test_initial_sync_engines() {
   Service.engineManager.register(SteamEngine);
   let engine = Service.engineManager.get("steam");
@@ -407,3 +443,53 @@ add_task(function* test_nserror() {
     yield cleanAndGo(server);
   }
 });
+
+
+add_identity_test(this, function *test_discarding() {
+  let helper = track_collections_helper();
+  let upd = helper.with_updated_collection;
+  let telem = get_sync_test_telemetry();
+  telem.maxPayloadCount = 2;
+  telem.submissionInterval = Infinity;
+  let oldSubmit = telem.submit;
+
+  let server;
+  try {
+
+    yield configureIdentity({ username: "johndoe" });
+    let handlers = {
+      "/1.1/johndoe/info/collections": helper.handler,
+      "/1.1/johndoe/storage/crypto/keys": upd("crypto", new ServerWBO("keys").handler()),
+      "/1.1/johndoe/storage/meta/global": upd("meta",  new ServerWBO("global").handler())
+    };
+
+    let collections = ["clients", "bookmarks", "forms", "history", "passwords", "prefs", "tabs"];
+
+    for (let coll of collections) {
+      handlers["/1.1/johndoe/storage/" + coll] = upd(coll, new ServerCollection({}, true).handler());
+    }
+
+    server = httpd_setup(handlers);
+    Service.serverURL = server.baseURI;
+    telem.submit = () => ok(false, "Submitted telemetry ping when we should not have");
+
+    for (let i = 0; i < 5; ++i) {
+      Service.sync();
+    }
+    telem.submit = oldSubmit;
+    telem.submissionInterval = -1;
+    let ping = yield sync_and_validate_telem(true, true); // with this we've synced 6 times
+    equal(ping.syncs.length, 2);
+    equal(ping.discarded, 4);
+  } finally {
+    telem.maxPayloadCount = 500;
+    telem.submissionInterval = -1;
+    telem.submit = oldSubmit;
+    if (server) {
+      yield new Promise(resolve => server.stop(resolve));
+    }
+  }
+})
+
+
+

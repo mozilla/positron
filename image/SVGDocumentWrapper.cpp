@@ -350,12 +350,25 @@ SVGDocumentWrapper::SetupViewer(nsIRequest* aRequest,
 
   NS_ENSURE_TRUE(viewer, NS_ERROR_UNEXPECTED);
 
+  // Create a navigation time object and pass it to the SVG document through
+  // the viewer.
+  // The timeline(DocumentTimeline, used in CSS animation) of this SVG
+  // document needs this navigation timing object for time computation, such
+  // as to calculate current time stamp based on the start time of navigation
+  // time object.
+  //
+  // For a root document, DocShell would do these sort of things
+  // automatically. Since there is no DocShell for this wrapped SVG document,
+  // we must set it up manually.
+  RefPtr<nsDOMNavigationTiming> timing = new nsDOMNavigationTiming();
+  timing->NotifyNavigationStart();
+  viewer->SetNavigationTiming(timing);
+
   nsCOMPtr<nsIParser> parser = do_QueryInterface(listener);
   NS_ENSURE_TRUE(parser, NS_ERROR_UNEXPECTED);
 
   // XML-only, because this is for SVG content
-  nsIContentSink* sink = parser->GetContentSink();
-  nsCOMPtr<nsIXMLContentSink> xmlSink = do_QueryInterface(sink);
+  nsCOMPtr<nsIContentSink> sink = parser->GetContentSink();
   NS_ENSURE_TRUE(sink, NS_ERROR_UNEXPECTED);
 
   listener.swap(mListener);

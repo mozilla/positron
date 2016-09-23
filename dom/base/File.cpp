@@ -255,14 +255,13 @@ Blob::ToFile()
 already_AddRefed<File>
 Blob::ToFile(const nsAString& aName, ErrorResult& aRv) const
 {
-  AutoTArray<RefPtr<BlobImpl>, 1> blobImpls;
-  blobImpls.AppendElement(mImpl);
+  AutoTArray<RefPtr<BlobImpl>, 1> blobImpls({mImpl});
 
   nsAutoString contentType;
   mImpl->GetType(contentType);
 
   RefPtr<MultipartBlobImpl> impl =
-    MultipartBlobImpl::Create(blobImpls, aName, contentType, aRv);
+    MultipartBlobImpl::Create(Move(blobImpls), aName, contentType, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
@@ -1082,8 +1081,8 @@ class BlobImplMemoryDataOwnerMemoryReporter final
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
 
-  NS_IMETHOD CollectReports(nsIMemoryReporterCallback *aCallback,
-                            nsISupports *aClosure, bool aAnonymize) override
+  NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
+                            nsISupports* aData, bool aAnonymize) override
   {
     typedef BlobImplMemory::DataOwner DataOwner;
 
@@ -1114,7 +1113,7 @@ public:
           digestString.AppendPrintf("%02x", digest[i]);
         }
 
-        nsresult rv = aCallback->Callback(
+        aHandleReport->Callback(
           /* process */ NS_LITERAL_CSTRING(""),
           nsPrintfCString(
             "explicit/dom/memory-file-data/large/file(length=%llu, sha1=%s)",
@@ -1127,23 +1126,22 @@ public:
             "that is, an N-byte memory file may take up more than N bytes of "
             "memory.",
             owner->mLength, digestString.get()),
-          aClosure);
-        NS_ENSURE_SUCCESS(rv, rv);
+          aData);
       }
     }
 
     if (smallObjectsTotal > 0) {
-      nsresult rv = aCallback->Callback(
+      aHandleReport->Callback(
         /* process */ NS_LITERAL_CSTRING(""),
         NS_LITERAL_CSTRING("explicit/dom/memory-file-data/small"),
         KIND_HEAP, UNITS_BYTES, smallObjectsTotal,
         nsPrintfCString(
-          "Memory used to back small memory files (less than %d bytes each).\n\n"
+          "Memory used to back small memory files (i.e. those taking up less "
+          "than %zu bytes of memory each).\n\n"
           "Note that the allocator may round up a memory file's length -- "
           "that is, an N-byte memory file may take up more than N bytes of "
-          "memory."),
-        aClosure);
-      NS_ENSURE_SUCCESS(rv, rv);
+          "memory.", LARGE_OBJECT_MIN_SIZE),
+        aData);
     }
 
     return NS_OK;

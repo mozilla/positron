@@ -3,13 +3,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const Services = require("Services");
 const {FilterState} = require("devtools/client/webconsole/new-console-output/reducers/filters");
 const {PrefState} = require("devtools/client/webconsole/new-console-output/reducers/prefs");
-const { combineReducers, createStore } = require("devtools/client/shared/vendor/redux");
+const { applyMiddleware, combineReducers, createStore } = require("devtools/client/shared/vendor/redux");
+const { thunk } = require("devtools/client/shared/redux/middleware/thunk");
 const { reducers } = require("./reducers/index");
+const Services = require("Services");
 
-function storeFactory() {
+function configureStore() {
   const initialState = {
     prefs: new PrefState({
       logLimit: Math.max(Services.prefs.getIntPref("devtools.hud.loglimit"), 1),
@@ -19,16 +20,17 @@ function storeFactory() {
       warn: Services.prefs.getBoolPref("devtools.webconsole.filter.warn"),
       info: Services.prefs.getBoolPref("devtools.webconsole.filter.info"),
       log: Services.prefs.getBoolPref("devtools.webconsole.filter.log"),
-      searchText: ""
     })
   };
 
-  return createStore(combineReducers(reducers), initialState);
+  return createStore(
+    combineReducers(reducers),
+    initialState,
+    applyMiddleware(thunk)
+  );
 }
 
-// Provide the single store instance for app code.
-module.exports.store = storeFactory();
 // Provide the store factory for test code so that each test is working with
 // its own instance.
-module.exports.storeFactory = storeFactory;
+module.exports.configureStore = configureStore;
 

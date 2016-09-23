@@ -145,6 +145,34 @@ let InternalFaviconLoader = {
   },
 
   /**
+   * Remove a particular favicon load's loading data from our map tracking
+   * load data per chrome window.
+   *
+   * @param win
+   *        the chrome window in which we should look for this load
+   * @param filterData ({innerWindowID, uri, callback})
+   *        the data we should use to find this particular load to remove.
+   *
+   * @return the loadData object we removed, or null if we didn't find any.
+   */
+  _removeLoadDataFromWindowMap(win, {innerWindowID, uri, callback}) {
+    let loadDataForWindow = gFaviconLoadDataMap.get(win);
+    if (loadDataForWindow) {
+      let itemIndex = loadDataForWindow.findIndex(loadData => {
+        return loadData.innerWindowID == innerWindowID &&
+               loadData.uri.equals(uri) &&
+               loadData.callback.request == callback.request;
+      });
+      if (itemIndex != -1) {
+        let loadData = loadDataForWindow[itemIndex];
+        loadDataForWindow.splice(itemIndex, 1);
+        return loadData;
+      }
+    }
+    return null;
+  },
+
+  /**
    * Create a function to use as a nsIFaviconDataCallback, so we can remove cancelling
    * information when the request succeeds. Note that right now there are some edge-cases,
    * such as about: URIs with chrome:// favicons where the success callback is not invoked.
@@ -154,18 +182,13 @@ let InternalFaviconLoader = {
   _makeCompletionCallback(win, id) {
     return {
       onComplete(uri) {
-        let loadDataForWindow = gFaviconLoadDataMap.get(win);
-        if (loadDataForWindow) {
-          let itemIndex = loadDataForWindow.findIndex(loadData => {
-            return loadData.innerWindowID == id &&
-                   loadData.uri.equals(uri) &&
-                   loadData.callback.request == this.request;
-          });
-          if (itemIndex != -1) {
-            let loadData = loadDataForWindow[itemIndex];
-            clearTimeout(loadData.timerID);
-            loadDataForWindow.splice(itemIndex, 1);
-          }
+        let loadData = InternalFaviconLoader._removeLoadDataFromWindowMap(win, {
+          uri,
+          innerWindowID: id,
+          callback: this,
+        });
+        if (loadData) {
+          clearTimeout(loadData.timerID);
         }
         delete this.request;
       },
@@ -224,6 +247,7 @@ let InternalFaviconLoader = {
     let loadData = {innerWindowID, uri, callback};
     loadData.timerID = setTimeout(() => {
       this._cancelRequest(loadData, "it timed out");
+      this._removeLoadDataFromWindowMap(win, loadData);
     }, FAVICON_REQUEST_TIMEOUT);
     let loadDataForWindow = gFaviconLoadDataMap.get(win);
     loadDataForWindow.push(loadData);
@@ -860,8 +884,7 @@ this.PlacesUIUtils = {
   /**
    * Gives the user a chance to cancel loading lots of tabs at once
    */
-  _confirmOpenInTabs:
-  function PUIU__confirmOpenInTabs(numTabsToOpen, aWindow) {
+  confirmOpenInTabs(numTabsToOpen, aWindow) {
     const WARN_ON_OPEN_PREF = "browser.tabs.warnOnOpen";
     var reallyOpen = true;
 
@@ -964,7 +987,7 @@ this.PlacesUIUtils = {
           urlsToOpen.push({uri: node.uri, isBookmark: false});
         }
 
-        if (this._confirmOpenInTabs(urlsToOpen.length, window)) {
+        if (this.confirmOpenInTabs(urlsToOpen.length, window)) {
           this._openTabset(urlsToOpen, aEvent, window);
         }
       }, Cu.reportError);
@@ -975,7 +998,7 @@ this.PlacesUIUtils = {
     let window = aView.ownerWindow;
 
     let urlsToOpen = PlacesUtils.getURLsForContainerNode(aNode);
-    if (this._confirmOpenInTabs(urlsToOpen.length, window)) {
+    if (this.confirmOpenInTabs(urlsToOpen.length, window)) {
       this._openTabset(urlsToOpen, aEvent, window);
     }
   },
@@ -1380,7 +1403,7 @@ this.PlacesUIUtils = {
     else {
       // If the left pane has already been built, use the name->id map
       // cached in PlacesUIUtils.
-      for (let [name, id] in Iterator(this.leftPaneQueries)) {
+      for (let [name, id] of Object.entries(this.leftPaneQueries)) {
         if (aItemId == id)
           queryName = name;
       }

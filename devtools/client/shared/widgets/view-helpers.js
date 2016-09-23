@@ -5,11 +5,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const { Ci } = require("chrome");
+const {KeyCodes} = require("devtools/client/shared/keycodes");
 
 const PANE_APPEARANCE_DELAY = 50;
 const PAGE_SIZE_ITEM_COUNT_RATIO = 5;
 const WIDGET_FOCUSABLE_NODES = new Set(["vbox", "hbox"]);
+
+var namedTimeoutsStore = new Map();
 
 /**
  * Inheritance helpers from the addon SDK's core/heritage.
@@ -108,8 +110,6 @@ const clearConditionalTimeout = function clearConditionalTimeout(id) {
 };
 exports.clearConditionalTimeout = clearConditionalTimeout;
 
-loader.lazyGetter(this, "namedTimeoutsStore", () => new Map());
-
 /**
  * Helpers for creating and messaging between UI components.
  */
@@ -128,7 +128,7 @@ const ViewHelpers = exports.ViewHelpers = {
    *         called preventDefault.
    */
   dispatchEvent: function (target, type, detail) {
-    if (!(target instanceof Ci.nsIDOMNode)) {
+    if (!(target instanceof Node)) {
       // Event cancelled.
       return true;
     }
@@ -190,9 +190,9 @@ const ViewHelpers = exports.ViewHelpers = {
    *         True if it's a node, false otherwise.
    */
   isNode: function (object) {
-    return object instanceof Ci.nsIDOMNode ||
-           object instanceof Ci.nsIDOMElement ||
-           object instanceof Ci.nsIDOMDocumentFragment;
+    return object instanceof Node ||
+           object instanceof Element ||
+           object instanceof DocumentFragment;
   },
 
   /**
@@ -203,14 +203,14 @@ const ViewHelpers = exports.ViewHelpers = {
    */
   preventScrolling: function (e) {
     switch (e.keyCode) {
-      case e.DOM_VK_UP:
-      case e.DOM_VK_DOWN:
-      case e.DOM_VK_LEFT:
-      case e.DOM_VK_RIGHT:
-      case e.DOM_VK_PAGE_UP:
-      case e.DOM_VK_PAGE_DOWN:
-      case e.DOM_VK_HOME:
-      case e.DOM_VK_END:
+      case KeyCodes.DOM_VK_UP:
+      case KeyCodes.DOM_VK_DOWN:
+      case KeyCodes.DOM_VK_LEFT:
+      case KeyCodes.DOM_VK_RIGHT:
+      case KeyCodes.DOM_VK_PAGE_UP:
+      case KeyCodes.DOM_VK_PAGE_DOWN:
+      case KeyCodes.DOM_VK_HOME:
+      case KeyCodes.DOM_VK_END:
         e.preventDefault();
         e.stopPropagation();
     }
@@ -223,8 +223,8 @@ const ViewHelpers = exports.ViewHelpers = {
    *        The event triggered by a keypress on an element
    */
   isSpaceOrReturn: function (event) {
-    return event.keyCode === event.DOM_VK_SPACE ||
-          event.keyCode === event.DOM_VK_RETURN;
+    return event.keyCode === KeyCodes.DOM_VK_SPACE ||
+          event.keyCode === KeyCodes.DOM_VK_RETURN;
   },
 
   /**
@@ -792,12 +792,12 @@ const WidgetMethods = exports.WidgetMethods = {
     // If the two items were constructed with prebuilt nodes as
     // DocumentFragments, then those DocumentFragments are now
     // empty and need to be reassembled.
-    if (firstPrebuiltTarget instanceof Ci.nsIDOMDocumentFragment) {
+    if (firstPrebuiltTarget instanceof DocumentFragment) {
       for (let node of firstTarget.childNodes) {
         firstPrebuiltTarget.appendChild(node.cloneNode(true));
       }
     }
-    if (secondPrebuiltTarget instanceof Ci.nsIDOMDocumentFragment) {
+    if (secondPrebuiltTarget instanceof DocumentFragment) {
       for (let node of secondTarget.childNodes) {
         secondPrebuiltTarget.appendChild(node.cloneNode(true));
       }
@@ -1503,26 +1503,26 @@ const WidgetMethods = exports.WidgetMethods = {
     ViewHelpers.preventScrolling(event);
 
     switch (event.keyCode) {
-      case event.DOM_VK_UP:
-      case event.DOM_VK_LEFT:
+      case KeyCodes.DOM_VK_UP:
+      case KeyCodes.DOM_VK_LEFT:
         this.focusPrevItem();
         return;
-      case event.DOM_VK_DOWN:
-      case event.DOM_VK_RIGHT:
+      case KeyCodes.DOM_VK_DOWN:
+      case KeyCodes.DOM_VK_RIGHT:
         this.focusNextItem();
         return;
-      case event.DOM_VK_PAGE_UP:
+      case KeyCodes.DOM_VK_PAGE_UP:
         this.focusItemAtDelta(-(this.pageSize ||
                                (this.itemCount / PAGE_SIZE_ITEM_COUNT_RATIO)));
         return;
-      case event.DOM_VK_PAGE_DOWN:
+      case KeyCodes.DOM_VK_PAGE_DOWN:
         this.focusItemAtDelta(+(this.pageSize ||
                                (this.itemCount / PAGE_SIZE_ITEM_COUNT_RATIO)));
         return;
-      case event.DOM_VK_HOME:
+      case KeyCodes.DOM_VK_HOME:
         this.focusFirstVisibleItem();
         return;
-      case event.DOM_VK_END:
+      case KeyCodes.DOM_VK_END:
         this.focusLastVisibleItem();
         return;
     }

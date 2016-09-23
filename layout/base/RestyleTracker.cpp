@@ -27,9 +27,12 @@ static nsCString
 GetDocumentURI(nsIDocument* aDocument)
 {
   nsCString result;
-  nsString url;
-  aDocument->GetDocumentURI(url);
-  result.Append(NS_ConvertUTF16toUTF8(url).get());
+  nsAutoString url;
+  nsresult rv = aDocument->GetDocumentURI(url);
+  if (NS_SUCCEEDED(rv)) {
+    result.Append(NS_ConvertUTF16toUTF8(url).get());
+  }
+
   return result;
 }
 
@@ -106,13 +109,11 @@ RestyleTracker::ProcessOneRestyle(Element* aElement,
 void
 RestyleTracker::DoProcessRestyles()
 {
-  nsAutoCString docURL;
+  nsAutoCString docURL("N/A");
   if (profiler_is_active()) {
     nsIURI *uri = Document()->GetDocumentURI();
     if (uri) {
-      uri->GetSpec(docURL);
-    } else {
-      docURL = "N/A";
+      docURL = uri->GetSpecOrDefault();
     }
   }
   PROFILER_LABEL_PRINTF("RestyleTracker", "ProcessRestyles",

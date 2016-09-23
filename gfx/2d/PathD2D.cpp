@@ -251,6 +251,8 @@ void
 PathBuilderD2D::Arc(const Point &aOrigin, Float aRadius, Float aStartAngle,
                  Float aEndAngle, bool aAntiClockwise)
 {
+  MOZ_ASSERT(aRadius >= 0);
+
   if (aAntiClockwise && aStartAngle < aEndAngle) {
     // D2D does things a little differently, and draws the arc by specifying an
     // beginning and an end point. This means the circle will be the wrong way
@@ -419,7 +421,7 @@ PathD2D::TransformedCopyToBuilder(const Matrix &aTransform, FillRule aFillRule) 
 
   RefPtr<PathBuilderD2D> pathBuilder = new PathBuilderD2D(sink, path, aFillRule, mBackendType);
   
-  pathBuilder->mCurrentPoint = aTransform * mEndPoint;
+  pathBuilder->mCurrentPoint = aTransform.TransformPoint(mEndPoint);
   
   if (mEndedActive) {
     pathBuilder->mFigureActive = true;

@@ -10,6 +10,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "PlacesTestUtils",
   "resource://testing-common/PlacesTestUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "TabCrashHandler",
   "resource:///modules/ContentCrashHandlers.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
+  "resource://gre/modules/Preferences.jsm");
 
 function waitForCondition(condition, nextTest, errorMsg, retryTimes) {
   retryTimes = typeof retryTimes !== 'undefined' ?  retryTimes : 30;
@@ -256,7 +258,7 @@ function is_hidden(element) {
   if (style.visibility != "visible")
     return true;
   if (style.display == "-moz-popup")
-    return ["hiding","closed"].indexOf(element.state) != -1;
+    return ["hiding", "closed"].indexOf(element.state) != -1;
 
   // Hiding a parent element will hide all its children
   if (element.parentNode != element.ownerDocument)

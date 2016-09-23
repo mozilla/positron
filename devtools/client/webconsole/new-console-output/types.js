@@ -7,14 +7,19 @@
 
 const Immutable = require("devtools/client/shared/vendor/immutable");
 
+const {
+  MESSAGE_SOURCE,
+  MESSAGE_TYPE,
+  MESSAGE_LEVEL
+} = require("devtools/client/webconsole/new-console-output/constants");
+
 exports.ConsoleCommand = Immutable.Record({
   id: null,
   allowRepeating: false,
   messageText: null,
-  source: null,
-  type: null,
-  category: null,
-  severity: null,
+  source: MESSAGE_SOURCE.JAVASCRIPT,
+  type: MESSAGE_TYPE.COMMAND,
+  level: MESSAGE_LEVEL.LOG,
 });
 
 exports.ConsoleMessage = Immutable.Record({
@@ -27,6 +32,17 @@ exports.ConsoleMessage = Immutable.Record({
   parameters: null,
   repeat: 1,
   repeatId: null,
-  category: "output",
-  severity: "log",
+  stacktrace: null,
+  frame: null,
+});
+
+exports.NetworkEventMessage = Immutable.Record({
+  id: null,
+  actor: null,
+  level: MESSAGE_LEVEL.LOG,
+  isXHR: false,
+  request: null,
+  response: null,
+  source: MESSAGE_SOURCE.NETWORK,
+  type: MESSAGE_TYPE.LOG,
 });

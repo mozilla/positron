@@ -50,6 +50,7 @@ var publicProperties = [
   "invalidateCertificate",
   "loadAndPoll",
   "localtimeOffsetMsec",
+  "notifyDevices",
   "now",
   "promiseAccountsChangeProfileURI",
   "promiseAccountsForceSigninURI",
@@ -231,7 +232,7 @@ AccountState.prototype = {
   removeCachedToken(token) {
     this._cachePreamble();
     let data = this.oauthTokens;
-    for (let [key, tokenValue] in Iterator(data)) {
+    for (let [key, tokenValue] of Object.entries(data)) {
       if (tokenValue.token == token) {
         delete data[key];
         // And a background save...
@@ -398,6 +399,29 @@ FxAccountsInternal.prototype = {
     let storage = new FxAccountsStorageManager();
     storage.initialize(credentials);
     return new AccountState(storage);
+  },
+
+  /**
+   * Send a message to a set of devices in the same account
+   *
+   * @return Promise
+   */
+  notifyDevices: function(deviceIds, payload, TTL) {
+    if (!Array.isArray(deviceIds)) {
+      deviceIds = [deviceIds];
+    }
+    return this.currentAccountState.getUserAccountData()
+      .then(data => {
+        if (!data) {
+          throw this._error(ERROR_NO_ACCOUNT);
+        }
+        if (!data.sessionToken) {
+          throw this._error(ERROR_AUTH_ERROR,
+            "notifyDevices called without a session token");
+        }
+        return this.fxAccountsClient.notifyDevices(data.sessionToken, deviceIds,
+          payload, TTL);
+    });
   },
 
   /**
@@ -713,7 +737,7 @@ FxAccountsInternal.prototype = {
   _destroyAllOAuthTokens: function(tokenInfos) {
     // let's just destroy them all in parallel...
     let promises = [];
-    for (let [key, tokenInfo] in Iterator(tokenInfos || {})) {
+    for (let [key, tokenInfo] of Object.entries(tokenInfos || {})) {
       promises.push(this._destroyOAuthToken(tokenInfo));
     }
     return Promise.all(promises);

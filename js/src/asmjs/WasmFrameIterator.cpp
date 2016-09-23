@@ -50,6 +50,7 @@ FrameIterator::FrameIterator()
     callsite_(nullptr),
     codeRange_(nullptr),
     fp_(nullptr),
+    pc_(nullptr),
     missingFrameMessage_(false)
 {
     MOZ_ASSERT(done());
@@ -61,6 +62,7 @@ FrameIterator::FrameIterator(const WasmActivation& activation)
     callsite_(nullptr),
     codeRange_(nullptr),
     fp_(activation.fp()),
+    pc_(nullptr),
     missingFrameMessage_(false)
 {
     if (fp_) {
@@ -73,6 +75,7 @@ FrameIterator::FrameIterator(const WasmActivation& activation)
         MOZ_ASSERT(done());
         return;
     }
+    pc_ = (uint8_t*)pc;
 
     code_ = activation_->compartment()->wasm.lookupCode(pc);
     MOZ_ASSERT(code_);
@@ -126,11 +129,13 @@ FrameIterator::settle()
 
     switch (codeRange_->kind()) {
       case CodeRange::Function:
+        pc_ = (uint8_t*)returnAddress;
         callsite_ = code_->lookupCallSite(returnAddress);
         MOZ_ASSERT(callsite_);
         break;
       case CodeRange::Entry:
         fp_ = nullptr;
+        pc_ = nullptr;
         code_ = nullptr;
         codeRange_ = nullptr;
         MOZ_ASSERT(done());
@@ -185,7 +190,7 @@ FrameIterator::functionDisplayAtom() const
 
     MOZ_ASSERT(codeRange_);
 
-    JSAtom* atom = code_->getFuncAtom(cx, codeRange_->funcIndex());
+    JSAtom* atom = code_->getFuncDefAtom(cx, codeRange_->funcDefIndex());
     if (!atom) {
         cx->clearPendingException();
         return cx->names().empty;
@@ -380,12 +385,12 @@ wasm::GenerateFunctionPrologue(MacroAssembler& masm, unsigned framePushed, const
         Register scratch = WasmTableCallScratchReg;
         masm.loadWasmGlobalPtr(sigId.globalDataOffset(), scratch);
         masm.branch32(Assembler::Condition::NotEqual, WasmTableCallSigReg, scratch,
-                      JumpTarget::BadIndirectCall);
+                      JumpTarget::IndirectCallBadSig);
         break;
       }
       case SigIdDesc::Kind::Immediate:
         masm.branch32(Assembler::Condition::NotEqual, WasmTableCallSigReg, Imm32(sigId.immediate()),
-                      JumpTarget::BadIndirectCall);
+                      JumpTarget::IndirectCallBadSig);
         break;
       case SigIdDesc::Kind::None:
         break;
@@ -774,7 +779,7 @@ ProfilingFrameIterator::label() const
     }
 
     switch (codeRange_->kind()) {
-      case CodeRange::Function:         return code_->profilingLabel(codeRange_->funcIndex());
+      case CodeRange::Function:         return code_->profilingLabel(codeRange_->funcDefIndex());
       case CodeRange::Entry:            return "entry trampoline (in asm.js)";
       case CodeRange::ImportJitExit:    return importJitDescription;
       case CodeRange::ImportInterpExit: return importInterpDescription;

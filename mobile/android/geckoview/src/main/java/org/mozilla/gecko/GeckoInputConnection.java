@@ -262,6 +262,7 @@ class GeckoInputConnection
                     v.clearFocus();
                     v.requestFocus();
                 }
+                GeckoAppShell.getLayerView().getDynamicToolbarAnimator().showToolbar(/*immediately*/true);
                 mSoftInputReentrancyGuard = true;
                 imm.showSoftInput(v, 0);
                 mSoftInputReentrancyGuard = false;
@@ -681,14 +682,6 @@ class GeckoInputConnection
         mCurrentInputMethod = InputMethods.getCurrentInputMethod(context);
         if (DEBUG) {
             Log.d(LOGTAG, "IME: CurrentInputMethod=" + mCurrentInputMethod);
-        }
-
-        // If the user has changed IMEs, then notify input method observers.
-        if (!mCurrentInputMethod.equals(prevInputMethod) && GeckoAppShell.getGeckoInterface() != null) {
-            FormAssistPopup popup = GeckoAppShell.getGeckoInterface().getFormAssistPopup();
-            if (popup != null) {
-                popup.onInputMethodChanged(mCurrentInputMethod);
-            }
         }
 
         if (mIMEState == IME_STATE_PLUGIN) {

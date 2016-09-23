@@ -584,8 +584,7 @@ JoinBoxesForSlice(nsIFrame* aFrame, const nsRect& aBorderArea,
 static bool
 IsBoxDecorationSlice(const nsStyleBorder& aStyleBorder)
 {
-  return aStyleBorder.mBoxDecorationBreak ==
-           NS_STYLE_BOX_DECORATION_BREAK_SLICE;
+  return aStyleBorder.mBoxDecorationBreak == StyleBoxDecorationBreak::Slice;
 }
 
 static nsRect
@@ -1053,9 +1052,8 @@ nsCSSRendering::PaintFocus(nsPresContext* aPresContext,
  * that function, except they're for a single coordinate / a single size
  * dimension. (so, x/width vs. y/height)
  */
-typedef nsStyleImageLayers::Position::PositionCoord PositionCoord;
 static void
-ComputeObjectAnchorCoord(const PositionCoord& aCoord,
+ComputeObjectAnchorCoord(const Position::Coord& aCoord,
                          const nscoord aOriginBounds,
                          const nscoord aImageSize,
                          nscoord* aTopLeftCoord,
@@ -1077,7 +1075,7 @@ ComputeObjectAnchorCoord(const PositionCoord& aCoord,
 
 void
 nsImageRenderer::ComputeObjectAnchorPoint(
-  const nsStyleImageLayers::Position& aPos,
+  const Position& aPos,
   const nsSize& aOriginBounds,
   const nsSize& aImageSize,
   nsPoint* aTopLeft,
@@ -1698,11 +1696,8 @@ nsCSSRendering::PaintBGParams::ForAllLayers(nsPresContext& aPresCtx,
 {
   MOZ_ASSERT(aFrame);
 
-  PaintBGParams result(aPresCtx, aRenderingCtx, aDirtyRect, aBorderArea);
-
-  result.frame = aFrame;
-  result.paintFlags = aPaintFlags;
-  result.layer = -1;
+  PaintBGParams result(aPresCtx, aRenderingCtx, aDirtyRect, aBorderArea, aFrame,
+    aPaintFlags, -1, CompositionOp::OP_OVER);
 
   return result;
 }
@@ -1720,13 +1715,8 @@ nsCSSRendering::PaintBGParams::ForSingleLayer(nsPresContext& aPresCtx,
 {
   MOZ_ASSERT(aFrame && (aLayer != -1));
 
-  PaintBGParams result(aPresCtx, aRenderingCtx, aDirtyRect, aBorderArea);
-
-  result.frame = aFrame;
-  result.paintFlags = aPaintFlags;
-
-  result.layer = aLayer;
-  result.compositionOp = aCompositionOp;
+  PaintBGParams result(aPresCtx, aRenderingCtx, aDirtyRect, aBorderArea, aFrame,
+    aPaintFlags, aLayer, aCompositionOp);
 
   return result;
 }
@@ -1822,8 +1812,8 @@ SetupDirtyRects(const nsRect& aBGClipArea, const nsRect& aCallerDirtyRect,
 
   // Compute the Thebes equivalent of the dirtyRect.
   *aDirtyRectGfx = nsLayoutUtils::RectToGfxRect(*aDirtyRect, aAppUnitsPerPixel);
-  NS_WARN_IF_FALSE(aDirtyRect->IsEmpty() || !aDirtyRectGfx->IsEmpty(),
-                   "converted dirty rect should not be empty");
+  NS_WARNING_ASSERTION(aDirtyRect->IsEmpty() || !aDirtyRectGfx->IsEmpty(),
+                       "converted dirty rect should not be empty");
   MOZ_ASSERT(!aDirtyRect->IsEmpty() || aDirtyRectGfx->IsEmpty(),
              "second should be empty if first is");
 }
@@ -2727,7 +2717,7 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
     aGradient->mShape == NS_STYLE_GRADIENT_SHAPE_LINEAR &&
     (lineStart.x == lineEnd.x) != (lineStart.y == lineEnd.y) &&
     aRepeatSize.width == aDest.width && aRepeatSize.height == aDest.height &&
-    !aGradient->mRepeating && !cellContainsFill;
+    !aGradient->mRepeating && !aSrc.IsEmpty() && !cellContainsFill;
 
   gfxMatrix matrix;
   if (forceRepeatToCoverTiles) {
@@ -2746,15 +2736,15 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
 
     // Fit the gradient line exactly into the source rect.
     if (lineStart.x != lineEnd.x) {
-      rectLen = srcSize.width;
+      rectLen = aPresContext->CSSPixelsToDevPixels(aSrc.width);
       offset = ((double)aSrc.x - lineStart.x) / lineLength;
       lineStart.x = aSrc.x;
-      lineEnd.x = aSrc.x + srcSize.width;
+      lineEnd.x = aSrc.x + rectLen;
     } else {
-      rectLen = srcSize.height;
+      rectLen = aPresContext->CSSPixelsToDevPixels(aSrc.height);
       offset = ((double)aSrc.y - lineStart.y) / lineLength;
       lineStart.y = aSrc.y;
-      lineEnd.y = aSrc.y + srcSize.height;
+      lineEnd.y = aSrc.y + rectLen;
     }
 
     // Adjust gradient stop positions for the new gradient line.
@@ -3046,6 +3036,30 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
   }
 }
 
+static CompositionOp
+DetermineCompositionOp(const nsCSSRendering::PaintBGParams& aParams,
+                       const nsStyleImageLayers& aLayers,
+                       uint32_t aLayerIndex)
+{
+  if (aParams.layer >= 0) {
+    // When drawing a single layer, use the specified composition op.
+    return aParams.compositionOp;
+  }
+
+  const nsStyleImageLayers::Layer& layer = aLayers.mLayers[aLayerIndex];
+  // When drawing all layers, get the compositon op from each image layer.
+  if (aParams.paintFlags & nsCSSRendering::PAINTBG_MASK_IMAGE) {
+    // Always using OP_OVER mode while drawing the bottom mask layer.
+    if (aLayerIndex == (aLayers.mImageCount - 1)) {
+      return CompositionOp::OP_OVER;
+    }
+
+    return nsCSSRendering::GetGFXCompositeMode(layer.mComposite);
+  }
+
+  return nsCSSRendering::GetGFXBlendMode(layer.mBlendMode);
+}
+
 DrawResult
 nsCSSRendering::PaintBackgroundWithSC(const PaintBGParams& aParams,
                                       nsStyleContext *aBackgroundSC,
@@ -3236,21 +3250,14 @@ nsCSSRendering::PaintBackgroundWithSC(const PaintBGParams& aParams,
       }
       if ((aParams.layer < 0 || i == (uint32_t)startLayer) &&
           !clipState.mDirtyRectGfx.IsEmpty()) {
-        // When we're drawing a single layer, use the specified composition op,
-        // otherwise get the compositon op from the image layer.
-        CompositionOp co = (aParams.layer >= 0) ? aParams.compositionOp :
-          (paintMask ? GetGFXCompositeMode(layer.mComposite) :
-                       GetGFXBlendMode(layer.mBlendMode));
+        CompositionOp co = DetermineCompositionOp(aParams, layers, i);
         nsBackgroundLayerState state =
           PrepareImageLayer(&aParams.presCtx, aParams.frame,
                             aParams.paintFlags, paintBorderArea, clipState.mBGClipArea,
-                            layer, nullptr, co);
+                            layer, nullptr);
         result &= state.mImageRenderer.PrepareResult();
         if (!state.mFillArea.IsEmpty()) {
-          // Always using OP_OVER mode while drawing the bottom mask layer.
-          bool isBottomMaskLayer = paintMask ?
-                                   (i == (layers.mImageCount - 1)) : false;
-          if (co != CompositionOp::OP_OVER && !isBottomMaskLayer) {
+          if (co != CompositionOp::OP_OVER) {
             NS_ASSERTION(ctx->CurrentOp() == CompositionOp::OP_OVER,
                          "It is assumed the initial op is OP_OVER, when it is restored later");
             ctx->SetOp(co);
@@ -3522,8 +3529,7 @@ nsCSSRendering::PrepareImageLayer(nsPresContext* aPresContext,
                                   const nsRect& aBorderArea,
                                   const nsRect& aBGClipRect,
                                   const nsStyleImageLayers::Layer& aLayer,
-                                  bool* aOutIsTransformedFixed,
-                                  CompositionOp aCompositonOp)
+                                  bool* aOutIsTransformedFixed)
 {
   /*
    * The properties we need to keep in mind when drawing style image
@@ -3599,6 +3605,9 @@ nsCSSRendering::PrepareImageLayer(nsPresContext* aPresContext,
   nsBackgroundLayerState state(aForFrame, &aLayer.mImage, irFlags);
   if (!state.mImageRenderer.PrepareImage()) {
     // There's no image or it's not ready to be painted.
+    if (aOutIsTransformedFixed) {
+      *aOutIsTransformedFixed = false;
+    }
     return state;
   }
 

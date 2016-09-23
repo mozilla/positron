@@ -31,8 +31,6 @@
 
 #ifdef JS_SIMULATOR_MIPS32
 
-#include "jslock.h"
-
 #include "jit/IonTypes.h"
 #include "threading/Mutex.h"
 #include "threading/Thread.h"
@@ -144,7 +142,7 @@ class Simulator {
     };
 
     // Returns nullptr on OOM.
-    static Simulator* Create();
+    static Simulator* Create(JSContext* cx);
 
     static void Destroy(Simulator* simulator);
 

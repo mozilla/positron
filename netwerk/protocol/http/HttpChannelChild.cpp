@@ -10,7 +10,7 @@
 
 #include "nsHttp.h"
 #include "nsICacheEntry.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/ipc/FileDescriptorSetChild.h"
@@ -368,8 +368,7 @@ HttpChannelChild::RecvOnStartRequest(const nsresult& channelStatus,
                                      const NetAddr& selfAddr,
                                      const NetAddr& peerAddr,
                                      const int16_t& redirectCount,
-                                     const uint32_t& cacheKey,
-                                     const bool& contentDecodingWillBeCalledOnParent)
+                                     const uint32_t& cacheKey)
 {
   LOG(("HttpChannelChild::RecvOnStartRequest [this=%p]\n", this));
   // mFlushedForDiversion and mDivertingToParent should NEVER be set at this
@@ -381,10 +380,6 @@ HttpChannelChild::RecvOnStartRequest(const nsresult& channelStatus,
 
 
   mRedirectCount = redirectCount;
-
-  if (contentDecodingWillBeCalledOnParent) {
-    SetApplyConversion(false);
-  }
 
   mEventQ->RunOrEnqueue(new StartRequestEvent(this, channelStatus, responseHead,
                                               useResponseHead, requestHeaders,
@@ -775,8 +770,6 @@ HttpChannelChild::DoOnProgress(nsIRequest* aRequest, int64_t progress, int64_t p
     // OnProgress
     //
     if (progress > 0) {
-      MOZ_ASSERT((progressMax == -1) || (progress <= progressMax),
-                 "unexpected progress values");
       mProgressSink->OnProgress(aRequest, nullptr, progress, progressMax);
     }
   }
@@ -1018,8 +1011,6 @@ HttpChannelChild::OnProgress(const int64_t& progress,
   if (mProgressSink && NS_SUCCEEDED(mStatus) && mIsPending)
   {
     if (progress > 0) {
-      MOZ_ASSERT((progressMax == -1) || (progress <= progressMax),
-                 "unexpected progress values");
       mProgressSink->OnProgress(this, nullptr, progress, progressMax);
     }
   }
@@ -1556,7 +1547,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     mChannel->Redirect3Complete();
     mNewChannel->OverrideWithSynthesizedResponse(mHead, mInput, mListener);
     return NS_OK;
@@ -1758,6 +1749,13 @@ HttpChannelChild::AsyncOpen(nsIStreamListener *listener, nsISupports *aContext)
              "security flags in loadInfo but asyncOpen2() not called");
 
   LOG(("HttpChannelChild::AsyncOpen [this=%p uri=%s]\n", this, mSpec.get()));
+
+  MOZ_ASSERT(mLoadInfo->GetUsePrivateBrowsing() == (mLoadInfo->GetOriginAttributes().mPrivateBrowsingId != 0),
+             "PrivateBrowsing mismatch on LoadInfo.");
+
+#ifdef DEBUG
+  CheckPrivateBrowsing();
+#endif
 
   if (mCanceled)
     return mStatus;
@@ -1992,12 +1990,16 @@ HttpChannelChild::ContinueAsyncOpen()
     return NS_ERROR_FAILURE;
   }
 
+  ContentChild* cc = static_cast<ContentChild*>(gNeckoChild->Manager());
+  if (cc->IsShuttingDown()) {
+    return NS_ERROR_FAILURE;
+  }
+
   // The socket transport in the chrome process now holds a logical ref to us
   // until OnStopRequest, or we do a redirect, or we hit an IPDL error.
   AddIPDLReference();
 
-  PBrowserOrId browser = static_cast<ContentChild*>(gNeckoChild->Manager())
-                         ->GetBrowserOrId(tabChild);
+  PBrowserOrId browser = cc->GetBrowserOrId(tabChild);
   if (!gNeckoChild->SendPHttpChannelConstructor(this, browser,
                                                 IPC::SerializedLoadContext(this),
                                                 openArgs)) {

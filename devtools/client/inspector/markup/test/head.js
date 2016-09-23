@@ -272,18 +272,6 @@ function searchUsingSelectorSearch(selector, inspector) {
 }
 
 /**
- * This shouldn't be used in the tests, but is useful when writing new tests or
- * debugging existing tests in order to introduce delays in the test steps
- * @param {Number} ms The time to wait
- * @return A promise that resolves when the time is passed
- */
-function wait(ms) {
-  let def = defer();
-  setTimeout(def.resolve, ms);
-  return def.promise;
-}
-
-/**
  * Check to see if the inspector menu items for editing are disabled.
  * Things like Edit As HTML, Delete Node, etc.
  * @param {NodeFront} nodeFront
@@ -470,8 +458,8 @@ function createTestHTTPServer() {
  *
  * - moduleUrl {String}: URL of the module that contains actor implementation.
  * - prefix {String}: prefix of the actor.
- * - actorClass {ActorClass}: Constructor object for the actor.
- * - frontClass {FrontClass}: Constructor object for the front part
+ * - actorClass {ActorClassWithSpec}: Constructor object for the actor.
+ * - frontClass {FrontClassWithSpec}: Constructor object for the front part
  * of the registered actor.
  *
  * @returns {Promise} A promise that is resolved when the actor is registered.

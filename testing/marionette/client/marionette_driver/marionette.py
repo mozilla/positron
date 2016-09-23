@@ -541,7 +541,7 @@ class Marionette(object):
     TIMEOUT_SEARCH = 'implicit'
     TIMEOUT_SCRIPT = 'script'
     TIMEOUT_PAGE = 'page load'
-    DEFAULT_SOCKET_TIMEOUT = 360
+    DEFAULT_SOCKET_TIMEOUT = 60
     DEFAULT_STARTUP_TIMEOUT = 120
     DEFAULT_SHUTDOWN_TIMEOUT = 65  # Firefox will kill hanging threads after 60s
 
@@ -739,7 +739,7 @@ class Marionette(object):
         crashed = False
         if self.instance:
             if self.instance.runner.check_for_crashes(
-                    test_name=self.test_name):
+                    test_name=self.test_name or os.path.basename(__file__)):
                 crashed = True
         if returncode is not None:
             print ('PROCESS-CRASH | %s | abnormal termination with exit code %d' %
@@ -757,7 +757,7 @@ class Marionette(object):
             exc, val, tb = sys.exc_info()
 
             # Give the application some time to shutdown
-            returncode = self.instance.runner.wait(timeout=self.DEFAULT_STARTUP_TIMEOUT)
+            returncode = self.instance.runner.wait(timeout=self.DEFAULT_SHUTDOWN_TIMEOUT)
             if returncode is None:
                 self.cleanup()
                 message = ('Process killed because the connection to Marionette server is lost.'
@@ -794,10 +794,10 @@ class Marionette(object):
           'type': arguments[0]
         };
         return value;"""
-        with self.using_context('content'):
-            value = self.execute_script(script, script_args=[perm], sandbox='system')
+        with self.using_context("content"):
+            value = self.execute_script(script, script_args=(perm,), sandbox="system")
 
-        with self.using_context('chrome'):
+        with self.using_context("chrome"):
             permission = self.execute_script("""
                 Components.utils.import("resource://gre/modules/Services.jsm");
                 let perm = arguments[0];
@@ -810,7 +810,7 @@ class Marionette(object):
                 let testPerm = Services.perms.testPermissionFromPrincipal(
                                principal, perm.type);
                 return testPerm;
-                """, script_args=[value])
+                """, script_args=(value,))
         return permission
 
     def push_permission(self, perm, allow):
@@ -850,20 +850,20 @@ class Marionette(object):
         };
         return value;
         """
-        with self.using_context('content'):
-            perm = self.execute_script(script, script_args=[allow, perm], sandbox='system')
+        with self.using_context("content"):
+            perm = self.execute_script(script, script_args=(allow, perm,), sandbox="system")
 
-        current_perm = self.get_permission(perm['type'])
-        if current_perm == perm['action']:
-            with self.using_context('content'):
+        current_perm = self.get_permission(perm["type"])
+        if current_perm == perm["action"]:
+            with self.using_context("content"):
                 self.execute_script("""
                     Components.utils.import("resource://gre/modules/Services.jsm");
                     Services.obs.removeObserver(window.wrappedJSObject.permObserver,
                                                 "perm-changed");
-                    """, sandbox='system')
+                    """, sandbox="system")
             return
 
-        with self.using_context('chrome'):
+        with self.using_context("chrome"):
             self.execute_script("""
                 Components.utils.import("resource://gre/modules/Services.jsm");
                 let perm = arguments[0];
@@ -875,19 +875,17 @@ class Marionette(object):
                                                                                   attrs);
                 Services.perms.addFromPrincipal(principal, perm.type, perm.action);
                 return true;
-                """, script_args=[perm])
+                """, script_args=(perm,))
 
         with self.using_context("content"):
             self.execute_async_script("""
-                let start = new Date();
-                let end = new Date(start.valueOf() + 5000);
                 let wait = function() {
-                  let now = new Date();
-                  if (window.wrappedJSObject.permChanged || end >= now) {
+                  if (window.wrappedJSObject.permChanged) {
                     marionetteScriptFinished();
+                  } else {
+                    window.setTimeout(wait, 100);
                   }
-                };
-                window.setTimeout(wait, 100);
+                }();
                 """, sandbox="system")
 
     @contextmanager
@@ -928,7 +926,7 @@ class Marionette(object):
             pref_value = self.execute_script("""
                 Components.utils.import("resource://gre/modules/Preferences.jsm");
                 return Preferences.get(arguments[0], null);
-                """, script_args=[pref], sandbox="system")
+                """, script_args=(pref,), sandbox="system")
             return pref_value
 
     def clear_pref(self, pref):
@@ -936,7 +934,7 @@ class Marionette(object):
             self.execute_script("""
                Components.utils.import("resource://gre/modules/Preferences.jsm");
                Preferences.reset(arguments[0]);
-               """, script_args=[pref])
+               """, script_args=(pref,))
 
     def set_pref(self, pref, value):
         with self.using_context(self.CONTEXT_CHROME):
@@ -947,29 +945,29 @@ class Marionette(object):
             self.execute_script("""
                 Components.utils.import("resource://gre/modules/Preferences.jsm");
                 Preferences.set(arguments[0], arguments[1]);
-                """, script_args=[pref, value])
+                """, script_args=(pref, value,))
 
     def set_prefs(self, prefs):
-        '''Sets preferences.
+        """Sets preferences.
 
         If the value of the preference to be set is None, reset the preference
         to its default value. If no default value exists, the preference will
         cease to exist.
 
-        :param prefs: A dict containing one or more preferences and their values
-        to be set.
+        :param prefs: A dict containing one or more preferences and
+            their values to be set.
 
         Usage example::
 
-          marionette.set_prefs({'browser.tabs.warnOnClose': True})
+            marionette.set_prefs({"browser.tabs.warnOnClose": True})
 
-        '''
+        """
         for pref, value in prefs.items():
             self.set_pref(pref, value)
 
     @contextmanager
     def using_prefs(self, prefs):
-        '''Sets preferences for code being executed in a `with` block,
+        """Sets preferences for code being executed in a `with` block,
         and restores them on exit.
 
         :param prefs: A dict containing one or more preferences and their values
@@ -977,10 +975,10 @@ class Marionette(object):
 
         Usage example::
 
-          with marionette.using_prefs({'browser.tabs.warnOnClose': True}):
-              # ... do stuff ...
+            with marionette.using_prefs({"browser.tabs.warnOnClose": True}):
+                # ... do stuff ...
 
-        '''
+        """
         original_prefs = {p: self.get_pref(p) for p in prefs}
         self.set_prefs(prefs)
 
@@ -989,10 +987,11 @@ class Marionette(object):
         finally:
             self.set_prefs(original_prefs)
 
+    @do_process_check
     def enforce_gecko_prefs(self, prefs):
-        """
-        Checks if the running instance has the given prefs. If not, it will kill the
-        currently running instance, and spawn a new instance with the requested preferences.
+        """Checks if the running instance has the given prefs. If not,
+        it will kill the currently running instance, and spawn a new
+        instance with the requested preferences.
 
         : param prefs: A dictionary whose keys are preference names.
         """
@@ -1031,63 +1030,92 @@ class Marionette(object):
             self.start_session()
             self.reset_timeouts()
 
-    @do_process_check
-    def quit_in_app(self):
+    def _request_in_app_shutdown(self, shutdown_flags=None):
+        """Terminate the currently running instance from inside the application.
+
+        :param shutdown_flags: If specified use additional flags for the shutdown
+                               of the application. Possible values here correspond
+                               to constants in nsIAppStartup: http://mzl.la/1X0JZsC.
         """
-        This will terminate the currently running instance.
+        flags = set(["eForceQuit"])
+        if shutdown_flags:
+            flags.add(shutdown_flags)
+        self._send_message("quitApplication", {"flags": list(flags)})
+
+        self.delete_session(in_app=True)
+
+    @do_process_check
+    def quit(self, in_app=False):
+        """Terminate the currently running instance.
+
+        This command will delete the active marionette session. It also allows
+        manipulation of eg. the profile data while the application is not running.
+        To start the application again, start_session() has to be called.
+
+        :param in_app: If True, marionette will cause a quit from within the
+                       browser. Otherwise the browser will be quit immediately
+                       by killing the process.
         """
         if not self.instance:
-            raise errors.MarionetteException("quit_in_app() can only be called "
+            raise errors.MarionetteException("quit() can only be called "
                                              "on Gecko instances launched by Marionette")
-        # Values here correspond to constants in nsIAppStartup.
-        # See http://mzl.la/1X0JZsC
-        restart_flags = [
-            "eForceQuit",
-            "eRestart",
-        ]
-        self._send_message("quitApplication", {"flags": restart_flags})
-        self.client.close()
 
-        try:
-            self.raise_for_port(self.wait_for_port())
-        except socket.timeout:
-            if self.instance.runner.returncode is not None:
-                exc, val, tb = sys.exc_info()
-                self.cleanup()
-                raise exc, 'Requested restart of the application was aborted', tb
+        self.reset_timeouts()
 
+        if in_app:
+            self._request_in_app_shutdown()
+
+            # Give the application some time to shutdown
+            self.instance.runner.wait(timeout=self.DEFAULT_SHUTDOWN_TIMEOUT)
+        else:
+            self.delete_session()
+            self.instance.close()
+
+    @do_process_check
     def restart(self, clean=False, in_app=False):
         """
         This will terminate the currently running instance, and spawn a new instance
         with the same profile and then reuse the session id when creating a session again.
 
-        : param clean: If False the same profile will be used after the restart. Note
-                       that the in app initiated restart always maintains the same
-                       profile.
-        : param in_app: If True, marionette will cause a restart from within the
-                        browser. Otherwise the browser will be restarted immediately
-                        by killing the process.
+        :param clean: If False the same profile will be used after the restart. Note
+                      that the in app initiated restart always maintains the same
+                      profile.
+        :param in_app: If True, marionette will cause a restart from within the
+                       browser. Otherwise the browser will be restarted immediately
+                       by killing the process.
         """
         if not self.instance:
             raise errors.MarionetteException("restart() can only be called "
                                              "on Gecko instances launched by Marionette")
+        session_id = self.session_id
+
         if in_app:
             if clean:
                 raise ValueError("An in_app restart cannot be triggered with the clean flag set")
-            self.quit_in_app()
+
+            self._request_in_app_shutdown("eRestart")
+
+            try:
+                self.raise_for_port(self.wait_for_port())
+            except socket.timeout:
+                if self.instance.runner.returncode is not None:
+                    exc, val, tb = sys.exc_info()
+                    self.cleanup()
+                    raise exc, "Requested restart of the application was aborted", tb
+
         else:
             self.delete_session()
             self.instance.restart(clean=clean)
             self.raise_for_port(self.wait_for_port())
 
-        self.start_session(session_id=self.session_id)
+        self.start_session(session_id=session_id)
         self.reset_timeouts()
 
-        if in_app and self.session.get('processId'):
+        if in_app and self.session.get("processId"):
             # In some cases Firefox restarts itself by spawning into a new process group.
             # As long as mozprocess cannot track that behavior (bug 1284864) we assist by
             # informing about the new process id.
-            self.instance.runner.process_handler.check_for_detached(self.session['processId'])
+            self.instance.runner.process_handler.check_for_detached(self.session["processId"])
 
     def absolute_url(self, relative_url):
         '''
@@ -1111,7 +1139,7 @@ class Marionette(object):
 
         :returns: A dict of the capabilities offered."""
         if self.instance:
-            returncode = self.instance.runner.process_handler.proc.returncode
+            returncode = self.instance.runner.returncode
             if returncode is not None:
                 # We're managing a binary which has terminated, so restart it.
                 self.instance.restart()
@@ -1143,9 +1171,15 @@ class Marionette(object):
         self._send_message("setTestName", {"value": test_name})
         self._test_name = test_name
 
-    def delete_session(self):
-        """Close the current session and disconnect from the server."""
-        self._send_message("deleteSession")
+    def delete_session(self, in_app=False):
+        """Close the current session and disconnect from the server.
+
+        :param in_app: False, if the session should be closed from the client.
+                       Otherwise a request to quit or restart the instance from
+                       within the application itself is used.
+        """
+        if not in_app:
+            self._send_message("deleteSession")
         self.session_id = None
         self.session = None
         self.window = None
@@ -1498,15 +1532,15 @@ class Marionette(object):
         """Causes the browser to perform to refresh the current page."""
         self._send_message("refresh")
 
-    def wrapArguments(self, args):
-        if isinstance(args, list):
+    def _to_json(self, args):
+        if isinstance(args, list) or isinstance(args, tuple):
             wrapped = []
             for arg in args:
-                wrapped.append(self.wrapArguments(arg))
+                wrapped.append(self._to_json(arg))
         elif isinstance(args, dict):
             wrapped = {}
             for arg in args:
-                wrapped[arg] = self.wrapArguments(args[arg])
+                wrapped[arg] = self._to_json(args[arg])
         elif type(args) == HTMLElement:
             wrapped = {W3C_WEBELEMENT_KEY: args.id,
                        WEBELEMENT_KEY: args.id}
@@ -1515,11 +1549,11 @@ class Marionette(object):
             wrapped = args
         return wrapped
 
-    def unwrapValue(self, value):
+    def _from_json(self, value):
         if isinstance(value, list):
             unwrapped = []
             for item in value:
-                unwrapped.append(self.unwrapValue(item))
+                unwrapped.append(self._from_json(item))
         elif isinstance(value, dict):
             unwrapped = {}
             for key in value:
@@ -1530,18 +1564,16 @@ class Marionette(object):
                     unwrapped = HTMLElement(self, value[key])
                     break
                 else:
-                    unwrapped[key] = self.unwrapValue(value[key])
+                    unwrapped[key] = self._from_json(value[key])
         else:
             unwrapped = value
         return unwrapped
 
-    def execute_js_script(self, script, script_args=None, async=True,
+    def execute_js_script(self, script, script_args=(), async=True,
                           new_sandbox=True, script_timeout=None,
                           inactivity_timeout=None, filename=None,
                           sandbox='default'):
-        if script_args is None:
-            script_args = []
-        args = self.wrapArguments(script_args)
+        args = self._to_json(script_args)
         body = {"script": script,
                 "args": args,
                 "async": async,
@@ -1551,9 +1583,9 @@ class Marionette(object):
                 "filename": filename,
                 "line": None}
         rv = self._send_message("executeJSScript", body, key="value")
-        return self.unwrapValue(rv)
+        return self._from_json(rv)
 
-    def execute_script(self, script, script_args=None, new_sandbox=True,
+    def execute_script(self, script, script_args=(), new_sandbox=True,
                        sandbox="default", script_timeout=None):
         """Executes a synchronous JavaScript script, and returns the
         result (or None if the script does return a value).
@@ -1563,7 +1595,7 @@ class Marionette(object):
         has not been called.
 
         :param script: A string containing the JavaScript to execute.
-        :param script_args: A list of arguments to pass to the script.
+        :param script_args: An interable of arguments to pass to the script.
         :param sandbox: A tag referring to the sandbox you wish to use;
             if you specify a new tag, a new sandbox will be created.
             If you use the special tag `system`, the sandbox will
@@ -1586,10 +1618,10 @@ class Marionette(object):
         ::
 
             result = marionette.execute_script("return arguments[0] + arguments[1];",
-                                               script_args=[2, 3])
+                                               script_args=(2, 3,))
             assert result == 5
             some_element = marionette.find_element(By.ID, "someElement")
-            sid = marionette.execute_script("return arguments[0].id;", script_args=[some_element])
+            sid = marionette.execute_script("return arguments[0].id;", script_args=(some_element,))
             assert some_element.get_attribute("id") == sid
 
         Scripts wishing to access non-standard properties of the window
@@ -1616,9 +1648,7 @@ class Marionette(object):
             assert result == "foo"
 
         """
-        if script_args is None:
-            script_args = []
-        args = self.wrapArguments(script_args)
+        args = self._to_json(script_args)
         stack = traceback.extract_stack()
         frame = stack[-2:-1][0]  # grab the second-to-last frame
         body = {"script": script,
@@ -1629,9 +1659,9 @@ class Marionette(object):
                 "line": int(frame[1]),
                 "filename": os.path.basename(frame[0])}
         rv = self._send_message("executeScript", body, key="value")
-        return self.unwrapValue(rv)
+        return self._from_json(rv)
 
-    def execute_async_script(self, script, script_args=None, new_sandbox=True,
+    def execute_async_script(self, script, script_args=(), new_sandbox=True,
                              sandbox="default", script_timeout=None,
                              debug_script=False):
         """Executes an asynchronous JavaScript script, and returns the
@@ -1642,7 +1672,7 @@ class Marionette(object):
         set_context() has not been called.
 
         :param script: A string containing the JavaScript to execute.
-        :param script_args: A list of arguments to pass to the script.
+        :param script_args: An interable of arguments to pass to the script.
         :param sandbox: A tag referring to the sandbox you wish to use; if
             you specify a new tag, a new sandbox will be created.  If you
             use the special tag `system`, the sandbox will be created
@@ -1666,9 +1696,7 @@ class Marionette(object):
             ''')
             assert result == 1
         """
-        if script_args is None:
-            script_args = []
-        args = self.wrapArguments(script_args)
+        args = self._to_json(script_args)
         stack = traceback.extract_stack()
         frame = stack[-2:-1][0]  # grab the second-to-last frame
         body = {"script": script,
@@ -1680,7 +1708,7 @@ class Marionette(object):
                 "filename": os.path.basename(frame[0]),
                 "debug_script": debug_script}
         rv = self._send_message("executeAsyncScript", body, key="value")
-        return self.unwrapValue(rv)
+        return self._from_json(rv)
 
     def find_element(self, method, target, id=None):
         """Returns an HTMLElement instances that matches the specified

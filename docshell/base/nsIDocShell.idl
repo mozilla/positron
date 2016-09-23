@@ -6,6 +6,7 @@
 
 #include "domstubs.idl"
 #include "nsIDocShellTreeItem.idl"
+#include "nsIRequest.idl"
 
 %{ C++
 #include "js/TypeDecls.h"
@@ -45,8 +46,6 @@ interface nsITabChild;
 interface nsICommandManager;
 interface nsICommandParams;
 native TabChildRef(already_AddRefed<nsITabChild>);
-
-typedef unsigned long nsLoadFlags;
 
 [scriptable, builtinclass, uuid(049234fe-da10-478b-bc5d-bc6f9a1ba63d)]
 interface nsIDocShell : nsIDocShellTreeItem
@@ -134,6 +133,7 @@ interface nsIDocShell : nsIDocShellTreeItem
    * @param aReferrer            - Referring URI
    * @param aReferrerPolicy      - Referrer policy
    * @param aTriggeringPrincipal - Principal that initiated that load
+   * @param aPrincipalToInherit  - Principal to be inherited for that load
    * @param aFlags               - Any of the load flags defined within above.
    * @param aStopActiveDoc       - Flag indicating whether loading the current
    *                               document should be stopped.
@@ -161,6 +161,7 @@ interface nsIDocShell : nsIDocShellTreeItem
                               in nsIURI aReferrer,
                               in unsigned long aReferrerPolicy,
                               in nsIPrincipal aTriggeringPrincipal,
+                              in nsIPrincipal aPrincipalToInherit,
                               in uint32_t aFlags,
                               in wstring aWindowTarget,
                               in string aTypeHint,
@@ -300,6 +301,15 @@ interface nsIDocShell : nsIDocShellTreeItem
    * Setting allowContentRetargeting also overwrites this value.
    */
   [infallible] attribute boolean allowContentRetargetingOnChildren;
+
+  /**
+   * True if this docShell should inherit the private browsing ID from
+   * its parent when reparented.
+   *
+   * NOTE: This should *not* be set false in new code, or for docShells
+   * inserted anywhere other than as children of panels.
+   */
+  [infallible] attribute boolean inheritPrivateBrowsingId;
 
   /**
    * Get an enumerator over this docShell and its children.
@@ -636,12 +646,6 @@ interface nsIDocShell : nsIDocShellTreeItem
    * like image frame discarding. Docshells are active unless told otherwise.
    */
   attribute boolean isActive;
-
-  /**
-   * Sets whether a docshell is active, as above, but ensuring it does
-   * not discard its layers
-   */
-  void setIsActiveAndForeground(in boolean aIsActive);
 
   /**
    * Puts the docshell in prerendering mode. noscript because we want only
@@ -1073,11 +1077,6 @@ interface nsIDocShell : nsIDocShellTreeItem
    * already be loaded by this docShell.
    */
   [infallible] readonly attribute boolean hasLoadedNonBlankURI;
-
-  /**
-   * Holds the id of the payment request associated with this docshell if any.
-   */
-  attribute DOMString paymentRequestId;
 
   /**
    * Allow usage of -moz-window-dragging:drag for content docshells.

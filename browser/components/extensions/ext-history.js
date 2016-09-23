@@ -115,7 +115,7 @@ function getObserver() {
       onEndUpdateBatch: function() {},
       onTitleChanged: function() {},
       onClearHistory: function() {
-        this.emit("visitRemoved", {allHistory: true});
+        this.emit("visitRemoved", {allHistory: true, urls: []});
       },
       onPageChanged: function() {},
       onFrecencyChanged: function() {},
@@ -130,7 +130,7 @@ function getObserver() {
   return _observer;
 }
 
-extensions.registerSchemaAPI("history", (extension, context) => {
+extensions.registerSchemaAPI("history", "addon_parent", context => {
   return {
     history: {
       addUrl: function(details) {

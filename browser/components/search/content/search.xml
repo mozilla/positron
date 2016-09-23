@@ -1066,6 +1066,7 @@
         <xul:button anonid="search-settings-compact"
                     oncommand="showSettings();"
                     class="searchbar-engine-one-off-item search-setting-button-compact"
+                    tooltiptext="&changeSearchSettings.tooltip;"
                     xbl:inherits="compact"/>
       </xul:description>
       <xul:vbox anonid="add-engines"/>
@@ -1277,12 +1278,11 @@
         <body><![CDATA[
           switch (event.type) {
             case "input":
-              // The urlbar's value property can be a moz-action URI, but we
-              // want the value that the user sees, which is textValue.  So see
-              // if the textbox has a textValue property, and use it if so.
-              this.query = typeof(event.target.textValue) == "string" ?
-                           event.target.textValue :
-                           event.target.value;
+              // Allow the consumer's input to override its value property with
+              // a oneOffSearchQuery property.  That way if the value is not
+              // actually what the user typed (e.g., it's autofilled, or it's a
+              // mozaction URI), the consumer has some way of providing it.
+              this.query = event.target.oneOffSearchQuery || event.target.value;
               break;
             case "popupshowing":
               this._rebuild();
@@ -1290,8 +1290,8 @@
             case "popuphidden":
               Services.tm.mainThread.dispatch(() => {
                 this.selectedButton = null;
+                this._contextEngine = null;
               }, Ci.nsIThread.DISPATCH_NORMAL);
-              this._contextEngine = null;
               break;
           }
         ]]></body>
@@ -1378,7 +1378,8 @@
               let button = document.createElementNS(kXULNS, "button");
               let label = this.bundle.formatStringFromName("cmd_addFoundEngine",
                                                            [engine.title], 1);
-              button.id = "searchbar-add-engine-" + engine.title.replace(/ /g, '-');
+              button.id = this.telemetryOrigin + "-add-engine-" +
+                          engine.title.replace(/ /g, '-');
               button.setAttribute("class", "addengine-item");
               button.setAttribute("label", label);
               button.setAttribute("pack", "start");
@@ -1443,9 +1444,12 @@
           let height = rowCount * 33; // 32px per row, 1px border.
           list.setAttribute("height", height + "px");
 
-          // Ensure we can refer to the settings button by ID:
+          // Ensure we can refer to the settings buttons by ID:
           let settingsEl = document.getAnonymousElementByAttribute(this, "anonid", "search-settings");
-          settingsEl.id = this.id + "-anon-search-settings";
+          settingsEl.id = this.telemetryOrigin + "-anon-search-settings";
+          let compactSettingsEl = document.getAnonymousElementByAttribute(this, "anonid", "search-settings-compact");
+          compactSettingsEl.id = this.telemetryOrigin +
+                                 "-anon-search-settings-compact";
 
           let dummyItems = enginesPerRow - (oneOffCount % enginesPerRow || enginesPerRow);
           for (let i = 0; i < engines.length; ++i) {
@@ -1506,7 +1510,7 @@
       <method name="_buttonIDForEngine">
         <parameter name="engine"/>
         <body><![CDATA[
-          return "searchbar-engine-one-off-item-" +
+          return this.telemetryOrigin + "-engine-one-off-item-" +
                  engine.name.replace(/ /g, '-');
         ]]></body>
       </method>
@@ -1543,11 +1547,15 @@
             else {
               header.selectedIndex = this.query ? 1 : 0;
             }
-            this.setAttribute("aria-activedescendant", val.id);
+            if (this.textbox) {
+              this.textbox.setAttribute("aria-activedescendant", val.id);
+            }
           } else {
             val = null;
             header.selectedIndex = this.query ? 1 : 0;
-            this.removeAttribute("aria-activedescendant");
+            if (this.textbox) {
+              this.textbox.removeAttribute("aria-activedescendant");
+            }
           }
 
           if (aUpdateLogicallySelectedButton) {
@@ -1558,11 +1566,10 @@
               // selected will do the button's command, not search.
               this.popup.selectedIndex = -1;
             }
+            let event = document.createEvent("Events");
+            event.initEvent("SelectedOneOffButtonChanged", true, false);
+            this.dispatchEvent(event);
           }
-
-          let event = document.createEvent("Events");
-          event.initEvent("OneOffsVisuallySelectedButtonChanged", true, false);
-          this.dispatchEvent(event);
         ]]></body>
       </method>
 
@@ -1751,7 +1758,8 @@
           if (event.keyCode == KeyEvent.DOM_VK_TAB &&
               !event.altKey &&
               !event.ctrlKey &&
-              !event.metaKey) {
+              !event.metaKey &&
+              this.getAttribute("disabletab") != "true") {
             stopEvent = this.advanceSelection(!event.shiftKey, false, true);
           }
 
@@ -1773,10 +1781,12 @@
                 if (!allowEmptySelection) {
                   // Wrap around the selection to the last one-off.
                   this.selectedButton = null;
-                  stopEvent = this.advanceSelection(false, true, true);
-                  if (stopEvent) {
-                    this.popup.selectedIndex = -1;
-                  }
+                  this.popup.selectedIndex = -1;
+                  // Call advanceSelection after setting selectedIndex so that
+                  // screen readers see the newly selected one-off. Both trigger
+                  // accessibility events.
+                  this.advanceSelection(false, true, true);
+                  stopEvent = true;
                 }
               } else {
                 let firstButtonSelected =
@@ -1800,16 +1810,17 @@
                 // The autocomplete controller should handle this case.
               } else if (this.popup.selectedIndex == numListItems - 1) {
                 this.selectedButton = null;
-                stopEvent = this.advanceSelection(true, true, true);
-                if (stopEvent) {
-                  stopEvent = !allowEmptySelection;
-                  if (this.textbox && typeof(textboxUserValue) == "string") {
-                    this.textbox.value = textboxUserValue;
-                  }
-                  if (!allowEmptySelection) {
-                    this.popup.selectedIndex = -1;
-                  }
+                if (!allowEmptySelection) {
+                  this.popup.selectedIndex = -1;
+                  stopEvent = true;
                 }
+                if (this.textbox && typeof(textboxUserValue) == "string") {
+                  this.textbox.value = textboxUserValue;
+                }
+                // Call advanceSelection after setting selectedIndex so that
+                // screen readers see the newly selected one-off. Both trigger
+                // accessibility events.
+                this.advanceSelection(true, true, true);
               } else {
                 let buttons = this.getSelectableButtons(true);
                 let lastButtonSelected =
@@ -1911,7 +1922,7 @@
         event.preventDefault();
       ]]></handler>
 
-      <handler event="mouseover"><![CDATA[
+      <handler event="mousemove"><![CDATA[
         let target = event.originalTarget;
         if (target.localName != "button")
           return;

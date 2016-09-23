@@ -139,6 +139,12 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
             "dest": "this_chunk",
             "help": "Number of this chunk"}
          ],
+        [["--allow-software-gl-layers"], {
+            "action": "store_true",
+            "dest": "allow_software_gl_layers",
+            "default": False,
+            "help": "Permits a software GL implementation (such as LLVMPipe) to use the GL compositor."}
+         ],
     ] + copy.deepcopy(testing_config_options) + \
         copy.deepcopy(blobupload_config_options) + \
         copy.deepcopy(code_coverage_config_options)
@@ -398,6 +404,8 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                     option = option % str_format_values
                     if not option.endswith('None'):
                         base_cmd.append(option)
+                if self.structured_output(suite_category):
+                    base_cmd.append("--log-raw=-")
                 return base_cmd
             else:
                 self.warning("Suite options for %s could not be determined."
@@ -480,20 +488,20 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
         """
         c = self.config
 
-        target_unzip_dirs = None
+        extract_dirs = None
         if c['specific_tests_zip_dirs']:
-            target_unzip_dirs = list(c['minimum_tests_zip_dirs'])
+            extract_dirs = list(c['minimum_tests_zip_dirs'])
             for category in c['specific_tests_zip_dirs'].keys():
                 if c['run_all_suites'] or self._query_specified_suites(category) \
                         or 'run-tests' not in self.actions:
-                    target_unzip_dirs.extend(c['specific_tests_zip_dirs'][category])
+                    extract_dirs.extend(c['specific_tests_zip_dirs'][category])
 
         if c.get('run_all_suites'):
             target_categories = SUITE_CATEGORIES
         else:
             target_categories = [cat for cat in SUITE_CATEGORIES
                                  if self._query_specified_suites(cat) is not None]
-        super(DesktopUnittest, self).download_and_extract(target_unzip_dirs=target_unzip_dirs,
+        super(DesktopUnittest, self).download_and_extract(extract_dirs=extract_dirs,
                                                           suite_categories=target_categories)
 
     def stage_files(self):
@@ -647,6 +655,10 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                 env['MINIDUMP_SAVE_PATH'] = self.query_abs_dirs()['abs_blob_upload_dir']
                 if not os.path.isdir(env['MOZ_UPLOAD_DIR']):
                     self.mkdir_p(env['MOZ_UPLOAD_DIR'])
+
+                if self.config['allow_software_gl_layers']:
+                    env['MOZ_LAYERS_ALLOW_SOFTWARE_GL'] = '1'
+
                 env = self.query_env(partial_env=env, log_level=INFO)
                 cmd_timeout = self.get_timeout_for_category(suite_category)
                 return_code = self.run_command(cmd, cwd=dirs['abs_work_dir'],

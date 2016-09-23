@@ -19,10 +19,6 @@
 
 #include "nsDebug.h"
 
-#if !defined(RELEASE_BUILD) || defined(DEBUG)
-#define SENTINEL_CHECKING
-#endif
-
 //------------------------------------------------------------------------------
 
 static_assert(MOZ_ALIGNOF(Pickle::memberAlignmentType) >= MOZ_ALIGNOF(uint32_t),
@@ -400,10 +396,11 @@ bool Pickle::ReadWString(PickleIterator* iter, std::wstring* result) const {
   return true;
 }
 
-bool Pickle::FlattenBytes(PickleIterator* iter, const char** data, uint32_t length,
-                          uint32_t alignment) {
+bool Pickle::ExtractBuffers(PickleIterator* iter, size_t length, BufferList* buffers,
+                            uint32_t alignment) const
+{
   DCHECK(iter);
-  DCHECK(data);
+  DCHECK(buffers);
   DCHECK(alignment == 4 || alignment == 8);
   DCHECK(intptr_t(header_) % alignment == 0);
 
@@ -416,11 +413,11 @@ bool Pickle::FlattenBytes(PickleIterator* iter, const char** data, uint32_t leng
     return false;
   }
 
-  if (!buffers_.FlattenBytes(iter->iter_, data, length)) {
+  bool success;
+  *buffers = const_cast<BufferList*>(&buffers_)->Extract(iter->iter_, length, &success);
+  if (!success) {
     return false;
   }
-
-  header_ = reinterpret_cast<Header*>(buffers_.Start());
 
   return iter->iter_.AdvanceAcrossSegments(buffers_, AlignInt(length) - length);
 }
@@ -437,25 +434,19 @@ bool Pickle::ReadBytesInto(PickleIterator* iter, void* data, uint32_t length) co
   return iter->iter_.AdvanceAcrossSegments(buffers_, AlignInt(length) - length);
 }
 
+#ifdef MOZ_PICKLE_SENTINEL_CHECKING
 bool Pickle::ReadSentinel(PickleIterator* iter, uint32_t sentinel) const {
-#ifdef SENTINEL_CHECKING
   uint32_t found;
   if (!ReadUInt32(iter, &found)) {
     return false;
   }
   return found == sentinel;
-#else
-  return true;
-#endif
 }
 
 bool Pickle::WriteSentinel(uint32_t sentinel) {
-#ifdef SENTINEL_CHECKING
   return WriteUInt32(sentinel);
-#else
-  return true;
-#endif
 }
+#endif
 
 void Pickle::EndRead(PickleIterator& iter) const {
   DCHECK(iter.iter_.Done());

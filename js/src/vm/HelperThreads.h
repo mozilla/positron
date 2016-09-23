@@ -19,7 +19,6 @@
 #include "mozilla/Variant.h"
 
 #include "jscntxt.h"
-#include "jslock.h"
 
 #include "frontend/TokenStream.h"
 #include "jit/Ion.h"
@@ -30,6 +29,7 @@ namespace js {
 
 class AutoLockHelperThreadState;
 class AutoUnlockHelperThreadState;
+class PromiseTask;
 struct HelperThread;
 struct ParseTask;
 namespace jit {
@@ -67,6 +67,7 @@ class GlobalHelperThreadState
     typedef Vector<SourceCompressionTask*, 0, SystemAllocPolicy> SourceCompressionTaskVector;
     typedef Vector<GCHelperState*, 0, SystemAllocPolicy> GCHelperStateVector;
     typedef Vector<GCParallelTask*, 0, SystemAllocPolicy> GCParallelTaskVector;
+    typedef Vector<PromiseTask*, 0, SystemAllocPolicy> PromiseTaskVector;
 
     // List of available threads, or null if the thread state has not been initialized.
     using HelperThreadVector = Vector<HelperThread, 0, SystemAllocPolicy>;
@@ -87,6 +88,10 @@ class GlobalHelperThreadState
     mozilla::Atomic<bool> wasmCompilationInProgress;
 
   private:
+    // Async tasks that, upon completion, are dispatched back to the JSContext's
+    // owner thread via embedding callbacks instead of a finished list.
+    PromiseTaskVector promiseTasks_;
+
     // Script parsing/emitting worklist and finished jobs.
     ParseTaskVector parseWorklist_, parseFinishedList_;
 
@@ -161,6 +166,10 @@ class GlobalHelperThreadState
         return wasmFinishedList_;
     }
 
+    PromiseTaskVector& promiseTasks(const AutoLockHelperThreadState&) {
+        return promiseTasks_;
+    }
+
     ParseTaskVector& parseWorklist(const AutoLockHelperThreadState&) {
         return parseWorklist_;
     }
@@ -184,6 +193,7 @@ class GlobalHelperThreadState
     }
 
     bool canStartWasmCompile(const AutoLockHelperThreadState& lock);
+    bool canStartPromiseTask(const AutoLockHelperThreadState& lock);
     bool canStartIonCompile(const AutoLockHelperThreadState& lock);
     bool canStartParseTask(const AutoLockHelperThreadState& lock);
     bool canStartCompressionTask(const AutoLockHelperThreadState& lock);
@@ -219,6 +229,8 @@ class GlobalHelperThreadState
     void mergeParseTaskCompartment(JSContext* cx, ParseTask* parseTask,
                                    Handle<GlobalObject*> global,
                                    JSCompartment* dest);
+
+    void trace(JSTracer* trc);
 
   private:
     /*
@@ -293,6 +305,7 @@ struct HelperThread
     /* The current task being executed by this thread, if any. */
     mozilla::Maybe<mozilla::Variant<jit::IonBuilder*,
                                     wasm::IonCompileTask*,
+                                    PromiseTask*,
                                     ParseTask*,
                                     SourceCompressionTask*,
                                     GCHelperState*,
@@ -307,7 +320,7 @@ struct HelperThread
         return maybeCurrentTaskAs<jit::IonBuilder*>();
     }
 
-    /* Any wasm data currently being optimized by Ion on this thread. */
+    /* Any wasm data currently being optimized on this thread. */
     wasm::IonCompileTask* wasmTask() {
         return maybeCurrentTaskAs<wasm::IonCompileTask*>();
     }
@@ -347,8 +360,9 @@ struct HelperThread
     }
 
     void handleWasmWorkload(AutoLockHelperThreadState& locked);
+    void handlePromiseTaskWorkload(AutoLockHelperThreadState& locked);
     void handleIonWorkload(AutoLockHelperThreadState& locked);
-    void handleParseWorkload(AutoLockHelperThreadState& locked);
+    void handleParseWorkload(AutoLockHelperThreadState& locked, uintptr_t stackLimit);
     void handleCompressionWorkload(AutoLockHelperThreadState& locked);
     void handleGCHelperWorkload(AutoLockHelperThreadState& locked);
     void handleGCParallelWorkload(AutoLockHelperThreadState& locked);
@@ -380,6 +394,13 @@ PauseCurrentHelperThread();
 /* Perform MIR optimization and LIR generation on a single function. */
 bool
 StartOffThreadWasmCompile(wasm::IonCompileTask* task);
+
+/*
+ * Start executing the given PromiseTask on a helper thread, finishing back on
+ * the originating JSContext's owner thread.
+ */
+bool
+StartPromiseTask(JSContext* cx, UniquePtr<PromiseTask> task);
 
 /*
  * Schedule an Ion compilation for a script, given a builder which has been
@@ -471,7 +492,7 @@ struct ParseTask
     LifoAlloc alloc;
 
     // Rooted pointer to the global object used by 'cx'.
-    PersistentRootedObject exclusiveContextGlobal;
+    JSObject* exclusiveContextGlobal;
 
     // Callback invoked off the main thread when the parse finishes.
     JS::OffThreadCompileCallback callback;
@@ -480,10 +501,10 @@ struct ParseTask
     // Holds the final script between the invocation of the callback and the
     // point where FinishOffThreadScript is called, which will destroy the
     // ParseTask.
-    PersistentRootedScript script;
+    JSScript* script;
 
     // Holds the ScriptSourceObject generated for the script compilation.
-    PersistentRooted<ScriptSourceObject*> sourceObject;
+    ScriptSourceObject* sourceObject;
 
     // Any errors or warnings produced during compilation. These are reported
     // when finishing the script.
@@ -505,6 +526,8 @@ struct ParseTask
     }
 
     virtual ~ParseTask();
+
+    void trace(JSTracer* trc);
 };
 
 struct ScriptParseTask : public ParseTask

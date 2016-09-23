@@ -271,7 +271,8 @@ imgFrame::InitWithDrawable(gfxDrawable* aDrawable,
                            const nsIntSize& aSize,
                            const SurfaceFormat aFormat,
                            SamplingFilter aSamplingFilter,
-                           uint32_t aImageFlags)
+                           uint32_t aImageFlags,
+                           gfx::BackendType aBackend)
 {
   // Assert for properties that should be verified by decoders,
   // warn for properties related to bad content.
@@ -324,8 +325,11 @@ imgFrame::InitWithDrawable(gfxDrawable* aDrawable,
       return NS_ERROR_OUT_OF_MEMORY;
     }
 
-    target = gfxPlatform::GetPlatform()->
-      CreateDrawTargetForData(ptr, mFrameRect.Size(), stride, mFormat);
+    target = gfxPlatform::CreateDrawTargetForData(
+                            ptr,
+                            mFrameRect.Size(),
+                            stride,
+                            mFormat);
   } else {
     // We can't use data surfaces for content, so we'll create an offscreen
     // surface instead.  This means if someone later calls RawAccessRef(), we
@@ -333,8 +337,13 @@ imgFrame::InitWithDrawable(gfxDrawable* aDrawable,
     // the documentation for this method.
     MOZ_ASSERT(!mOptSurface, "Called imgFrame::InitWithDrawable() twice?");
 
-    target = gfxPlatform::GetPlatform()->
-      CreateOffscreenContentDrawTarget(mFrameRect.Size(), mFormat);
+    if (gfxPlatform::GetPlatform()->SupportsAzureContentForType(aBackend)) {
+      target = gfxPlatform::GetPlatform()->
+        CreateDrawTargetForBackend(aBackend, mFrameRect.Size(), mFormat);
+    } else {
+      target = gfxPlatform::GetPlatform()->
+        CreateOffscreenContentDrawTarget(mFrameRect.Size(), mFormat);
+    }
   }
 
   if (!target || !target->IsValid()) {
@@ -391,12 +400,15 @@ imgFrame::CanOptimizeOpaqueImage()
 }
 
 nsresult
-imgFrame::Optimize()
+imgFrame::Optimize(DrawTarget* aTarget)
 {
   MOZ_ASSERT(NS_IsMainThread());
   mMonitor.AssertCurrentThreadOwns();
-  MOZ_ASSERT(mLockCount == 1,
-             "Should only optimize when holding the lock exclusively");
+  
+  if (mLockCount > 0 || !mOptimizable) {
+    // Don't optimize right now.
+    return NS_OK;
+  }
 
   // Check whether image optimization is disabled -- not thread safe!
   static bool gDisableOptimize = false;
@@ -419,7 +431,7 @@ imgFrame::Optimize()
     mImageSurface = CreateLockedSurface(mVBuf, mFrameRect.Size(), mFormat);
   }
 
-  if (!mOptimizable || gDisableOptimize) {
+  if (gDisableOptimize) {
     return NS_OK;
   }
 
@@ -440,18 +452,18 @@ imgFrame::Optimize()
   }
 
   if (mOptSurface) {
+    // There's no reason to keep our volatile buffer around at all if we have an
+    // optimized surface. Release our reference to it. This will leave
+    // |mVBufPtr| and |mImageSurface| as the only things keeping it alive, so
+    // it'll get freed below.
     mVBuf = nullptr;
-    mVBufPtr = nullptr;
-    mImageSurface = nullptr;
   }
 
-#ifdef MOZ_WIDGET_ANDROID
-  // On Android, free mImageSurface unconditionally if we're discardable. This
-  // allows the operating system to free our volatile buffer.
-  // XXX(seth): We'd eventually like to do this on all platforms, but right now
-  // converting raw memory to a SourceSurface is expensive on some backends.
+  // Release all strong references to our volatile buffer's memory. This will
+  // allow the operating system to free the memory if it needs to.
+  mVBufPtr = nullptr;
   mImageSurface = nullptr;
-#endif
+  mOptimizable = false;
 
   return NS_OK;
 }
@@ -546,9 +558,13 @@ bool imgFrame::Draw(gfxContext* aContext, const ImageRegion& aRegion,
 
   MonitorAutoLock lock(mMonitor);
 
+  // Possibly convert this image into a GPU texture, this may also cause our
+  // mImageSurface to be released and the OS to release the underlying memory.
+  Optimize(aContext->GetDrawTarget());
+
   bool doPartialDecode = !AreAllPixelsWritten();
 
-  RefPtr<SourceSurface> surf = GetSurfaceInternal();
+  RefPtr<SourceSurface> surf = GetSourceSurfaceInternal();
   if (!surf) {
     return false;
   }
@@ -747,21 +763,6 @@ imgFrame::AssertImageDataLocked() const
 #endif
 }
 
-class UnlockImageDataRunnable : public Runnable
-{
-public:
-  explicit UnlockImageDataRunnable(imgFrame* aTarget)
-    : mTarget(aTarget)
-  {
-    MOZ_ASSERT(mTarget);
-  }
-
-  NS_IMETHOD Run() { return mTarget->UnlockImageData(); }
-
-private:
-  RefPtr<imgFrame> mTarget;
-};
-
 nsresult
 imgFrame::UnlockImageData()
 {
@@ -774,27 +775,6 @@ imgFrame::UnlockImageData()
 
   MOZ_ASSERT(mLockCount > 1 || mFinished || mAborted,
              "Should have Finish()'d or aborted before unlocking");
-
-  // If we're about to become unlocked, we don't need to hold on to our data
-  // surface anymore. (But we don't need to do anything for paletted images,
-  // which don't have surfaces.)
-  if (mLockCount == 1 && !mPalettedImageData) {
-    // We can't safely optimize off-main-thread, so create a runnable to do it.
-    if (!NS_IsMainThread()) {
-      nsCOMPtr<nsIRunnable> runnable = new UnlockImageDataRunnable(this);
-      NS_DispatchToMainThread(runnable);
-      return NS_OK;
-    }
-
-    // Convert our data surface to a GPU surface if possible. We'll also try to
-    // release mImageSurface.
-    Optimize();
-
-    // Allow the OS to release our data surface. Note that mImageSurface also
-    // keeps our volatile buffer alive, so this doesn't actually work unless we
-    // released mImageSurface in Optimize().
-    mVBufPtr = nullptr;
-  }
 
   mLockCount--;
 
@@ -810,14 +790,14 @@ imgFrame::SetOptimizable()
 }
 
 already_AddRefed<SourceSurface>
-imgFrame::GetSurface()
+imgFrame::GetSourceSurface()
 {
   MonitorAutoLock lock(mMonitor);
-  return GetSurfaceInternal();
+  return GetSourceSurfaceInternal();
 }
 
 already_AddRefed<SourceSurface>
-imgFrame::GetSurfaceInternal()
+imgFrame::GetSourceSurfaceInternal()
 {
   mMonitor.AssertCurrentThreadOwns();
 
