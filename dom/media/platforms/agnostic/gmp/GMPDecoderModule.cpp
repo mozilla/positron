@@ -10,9 +10,9 @@
 #include "GMPVideoDecoder.h"
 #include "MediaDataDecoderProxy.h"
 #include "MediaPrefs.h"
+#include "VideoUtils.h"
 #include "mozIGeckoMediaPluginService.h"
 #include "nsServiceManagerUtils.h"
-#include "mozilla/EMEUtils.h"
 #include "mozilla/StaticMutex.h"
 #include "gmp-audio-decode.h"
 #include "gmp-video-decode.h"
@@ -94,9 +94,9 @@ GMPDecoderModule::DecoderNeedsConversion(const TrackInfo& aConfig) const
 {
   // GMPVideoCodecType::kGMPVideoCodecH264 specifies that encoded frames must be in AVCC format.
   if (aConfig.IsVideo() && MP4Decoder::IsH264(aConfig.mMimeType)) {
-    return kNeedAVCC;
+    return ConversionRequired::kNeedAVCC;
   } else {
-    return kNeedNone;
+    return ConversionRequired::kNeedNone;
   }
 }
 
@@ -142,7 +142,7 @@ HasGMPFor(const nsACString& aAPI,
 StaticMutex sGMPCodecsMutex;
 
 struct GMPCodecs {
-  const char* mKeySystem;
+  const nsLiteralCString mKeySystem;
   bool mHasAAC;
   bool mHasH264;
   bool mHasVP8;
@@ -164,16 +164,16 @@ GMPDecoderModule::UpdateUsableCodecs()
   for (GMPCodecs& gmp : sGMPCodecs) {
     gmp.mHasAAC = HasGMPFor(NS_LITERAL_CSTRING(GMP_API_AUDIO_DECODER),
                             NS_LITERAL_CSTRING("aac"),
-                            nsDependentCString(gmp.mKeySystem));
+                            gmp.mKeySystem);
     gmp.mHasH264 = HasGMPFor(NS_LITERAL_CSTRING(GMP_API_VIDEO_DECODER),
                              NS_LITERAL_CSTRING("h264"),
-                             nsDependentCString(gmp.mKeySystem));
+                             gmp.mKeySystem);
     gmp.mHasVP8 = HasGMPFor(NS_LITERAL_CSTRING(GMP_API_VIDEO_DECODER),
-                             NS_LITERAL_CSTRING("vp8"),
-                             nsDependentCString(gmp.mKeySystem));
+                            NS_LITERAL_CSTRING("vp8"),
+                            gmp.mKeySystem);
     gmp.mHasVP9 = HasGMPFor(NS_LITERAL_CSTRING(GMP_API_VIDEO_DECODER),
-                             NS_LITERAL_CSTRING("vp9"),
-                             nsDependentCString(gmp.mKeySystem));
+                            NS_LITERAL_CSTRING("vp9"),
+                            gmp.mKeySystem);
   }
 }
 
@@ -195,16 +195,16 @@ GMPDecoderModule::PreferredGMP(const nsACString& aMimeType)
   Maybe<nsCString> rv;
   if (aMimeType.EqualsLiteral("audio/mp4a-latm")) {
     switch (MediaPrefs::GMPAACPreferred()) {
-      case 1: rv.emplace(nsCString(kEMEKeySystemClearkey)); break;
-      case 2: rv.emplace(nsCString(kEMEKeySystemPrimetime)); break;
+      case 1: rv.emplace(kEMEKeySystemClearkey); break;
+      case 2: rv.emplace(kEMEKeySystemPrimetime); break;
       default: break;
     }
   }
 
   if (MP4Decoder::IsH264(aMimeType)) {
     switch (MediaPrefs::GMPH264Preferred()) {
-      case 1: rv.emplace(nsCString(kEMEKeySystemClearkey)); break;
-      case 2: rv.emplace(nsCString(kEMEKeySystemPrimetime)); break;
+      case 1: rv.emplace(kEMEKeySystemClearkey); break;
+      case 2: rv.emplace(kEMEKeySystemPrimetime); break;
       default: break;
     }
   }
@@ -223,7 +223,7 @@ GMPDecoderModule::SupportsMimeType(const nsACString& aMimeType,
          (MP4Decoder::IsH264(aMimeType) && gmp.mHasH264) ||
          (VPXDecoder::IsVP8(aMimeType) && gmp.mHasVP8) ||
          (VPXDecoder::IsVP9(aMimeType) && gmp.mHasVP9)) &&
-        (aGMP.isNothing() || aGMP.value().EqualsASCII(gmp.mKeySystem))) {
+        (aGMP.isNothing() || aGMP.value().Equals(gmp.mKeySystem))) {
       return true;
     }
   }

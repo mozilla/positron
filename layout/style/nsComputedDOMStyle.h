@@ -11,6 +11,7 @@
 #include "mozilla/ArenaRefPtr.h"
 #include "mozilla/ArenaRefPtrInlines.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/StyleComplexColor.h"
 #include "nsCOMPtr.h"
 #include "nscore.h"
 #include "nsCSSProps.h"
@@ -583,14 +584,15 @@ private:
 
   /* Helper functions */
   void SetToRGBAColor(nsROCSSPrimitiveValue* aValue, nscolor aColor);
+  void SetValueFromComplexColor(nsROCSSPrimitiveValue* aValue,
+                                const mozilla::StyleComplexColor& aColor);
   void SetValueToStyleImage(const nsStyleImage& aStyleImage,
                             nsROCSSPrimitiveValue* aValue);
-  void SetValueToPositionCoord(
-    const nsStyleImageLayers::Position::PositionCoord& aCoord,
-    nsROCSSPrimitiveValue* aValue);
-  void SetValueToPosition(const nsStyleImageLayers::Position& aPosition,
+  void SetValueToPositionCoord(const mozilla::Position::Coord& aCoord,
+                               nsROCSSPrimitiveValue* aValue);
+  void SetValueToPosition(const mozilla::Position& aPosition,
                           nsDOMCSSValueList* aValueList);
-  void SetValueToFragmentOrURL(const FragmentOrURL* aFragmentOrURL,
+  void SetValueToFragmentOrURL(const mozilla::FragmentOrURL* aFragmentOrURL,
                                nsROCSSPrimitiveValue* aValue);
 
   /**

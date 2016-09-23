@@ -141,25 +141,20 @@ AudioBufferMemoryTracker::UnregisterAudioBufferInternal(const AudioBuffer* aAudi
 MOZ_DEFINE_MALLOC_SIZE_OF(AudioBufferMemoryTrackerMallocSizeOf)
 
 NS_IMETHODIMP
-AudioBufferMemoryTracker::CollectReports(nsIHandleReportCallback* handleReport,
-                                         nsISupports* data, bool)
+AudioBufferMemoryTracker::CollectReports(nsIHandleReportCallback* aHandleReport,
+                                         nsISupports* aData, bool)
 {
- size_t amount = 0;
- nsresult rv;
+  size_t amount = 0;
 
- for (auto iter = mBuffers.Iter(); !iter.Done(); iter.Next()) {
-   amount += iter.Get()->GetKey()->SizeOfIncludingThis(AudioBufferMemoryTrackerMallocSizeOf);
- }
+  for (auto iter = mBuffers.Iter(); !iter.Done(); iter.Next()) {
+    amount += iter.Get()->GetKey()->SizeOfIncludingThis(AudioBufferMemoryTrackerMallocSizeOf);
+  }
 
- rv = handleReport->Callback(EmptyCString(),
-                             NS_LITERAL_CSTRING("explicit/webaudio/audiobuffer"),
-                             KIND_HEAP, UNITS_BYTES, amount,
-                             NS_LITERAL_CSTRING("Memory used by AudioBuffer"
-                                                " objects (Web Audio)"),
-                             data);
- NS_ENSURE_SUCCESS(rv, rv);
+  MOZ_COLLECT_REPORT(
+    "explicit/webaudio/audiobuffer", KIND_HEAP, UNITS_BYTES, amount,
+    "Memory used by AudioBuffer objects (Web Audio).");
 
- return NS_OK;
+  return NS_OK;
 }
 
 AudioBuffer::AudioBuffer(AudioContext* aContext, uint32_t aNumberOfChannels,
@@ -182,13 +177,13 @@ AudioBuffer::~AudioBuffer()
 {
   AudioBufferMemoryTracker::UnregisterAudioBuffer(this);
   ClearJSChannels();
+  mozilla::DropJSObjects(this);
 }
 
 void
 AudioBuffer::ClearJSChannels()
 {
   mJSChannels.Clear();
-  mozilla::DropJSObjects(this);
 }
 
 /* static */ already_AddRefed<AudioBuffer>
@@ -376,12 +371,18 @@ AudioBuffer::StealJSArrayDataIntoSharedChannels(JSContext* aJSContext)
   RefPtr<ThreadSharedFloatArrayBufferList> result =
     new ThreadSharedFloatArrayBufferList(mJSChannels.Length());
   for (uint32_t i = 0; i < mJSChannels.Length(); ++i) {
+    if (mJSChannels[i]) {
+      JS::ExposeObjectToActiveJS(mJSChannels[i]);
+    }
     JS::Rooted<JSObject*> arrayBufferView(aJSContext, mJSChannels[i]);
     bool isSharedMemory;
     JS::Rooted<JSObject*> arrayBuffer(aJSContext,
                                       JS_GetArrayBufferViewBuffer(aJSContext,
                                                                   arrayBufferView,
                                                                   &isSharedMemory));
+    if (arrayBuffer) {
+      JS::ExposeObjectToActiveJS(arrayBuffer);
+    }
     // The channel data arrays should all have originated in
     // RestoreJSChannelData, where they are created unshared.
     MOZ_ASSERT(!isSharedMemory);

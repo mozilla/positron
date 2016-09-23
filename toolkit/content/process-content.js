@@ -21,12 +21,64 @@ Services.cpmm.addMessageListener("gmp-plugin-crash", msg => {
   gmpservice.RunPluginCrashCallbacks(msg.data.pluginID, msg.data.pluginName);
 });
 
-// Forward inner-window-destroyed notifications with the inner window ID,
-// so that code in the parent that should do something when content
-// windows go away can do it
 if (gInContentProcess) {
-  Services.obs.addObserver((subject, topic, data) => {
-    let innerWindowID = subject.QueryInterface(Ci.nsISupportsPRUint64).data;
-    Services.cpmm.sendAsyncMessage("Toolkit:inner-window-destroyed", innerWindowID);
-  }, "inner-window-destroyed", false);
+  let ProcessObserver = {
+    TOPICS: [
+      "inner-window-destroyed",
+      "xpcom-shutdown",
+    ],
+
+    init() {
+      for (let topic of this.TOPICS) {
+        Services.obs.addObserver(this, topic, false);
+        Services.cpmm.addMessageListener("Memory:GetSummary", this);
+      }
+    },
+
+    uninit() {
+      for (let topic of this.TOPICS) {
+        Services.obs.removeObserver(this, topic);
+        Services.cpmm.removeMessageListener("Memory:GetSummary", this);
+      }
+    },
+
+    receiveMessage(msg) {
+      if (msg.name != "Memory:GetSummary") {
+        return;
+      }
+      let pid = Services.appinfo.processID;
+      let memMgr = Cc["@mozilla.org/memory-reporter-manager;1"]
+                     .getService(Ci.nsIMemoryReporterManager);
+      let rss = memMgr.resident;
+      let uss = memMgr.residentUnique;
+      Services.cpmm.sendAsyncMessage("Memory:Summary", {
+        pid,
+        summary: {
+          uss,
+          rss,
+        }
+      });
+    },
+
+    observe(subject, topic, data) {
+      switch (topic) {
+        case "inner-window-destroyed": {
+          // Forward inner-window-destroyed notifications with the
+          // inner window ID, so that code in the parent that should
+          // do something when content windows go away can do it
+          let innerWindowID =
+            subject.QueryInterface(Ci.nsISupportsPRUint64).data;
+          Services.cpmm.sendAsyncMessage("Toolkit:inner-window-destroyed",
+                                         innerWindowID);
+          break;
+        }
+        case "xpcom-shutdown": {
+          this.uninit();
+          break;
+        }
+      }
+    },
+  };
+
+  ProcessObserver.init();
 }

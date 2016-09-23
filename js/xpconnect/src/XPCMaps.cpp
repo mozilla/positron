@@ -43,7 +43,7 @@ HashNativeKey(const void* data)
 // implement JSObject2WrappedJSMap...
 
 void
-JSObject2WrappedJSMap::UpdateWeakPointersAfterGC(XPCJSRuntime* runtime)
+JSObject2WrappedJSMap::UpdateWeakPointersAfterGC(XPCJSContext* context)
 {
     // Check all wrappers and update their JSObject pointer if it has been
     // moved. Release any wrappers whose weakly held JSObject has died.
@@ -202,6 +202,33 @@ IID2NativeInterfaceMap::SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) 
 // implement ClassInfo2NativeSetMap...
 
 // static
+bool ClassInfo2NativeSetMap::Entry::Match(const PLDHashEntryHdr* aEntry,
+                                          const void* aKey)
+{
+    return static_cast<const Entry*>(aEntry)->key == aKey;
+}
+
+// static
+void ClassInfo2NativeSetMap::Entry::Clear(PLDHashTable* aTable,
+                                          PLDHashEntryHdr* aEntry)
+{
+    auto entry = static_cast<Entry*>(aEntry);
+    NS_RELEASE(entry->value);
+
+    entry->key = nullptr;
+    entry->value = nullptr;
+}
+
+const PLDHashTableOps ClassInfo2NativeSetMap::Entry::sOps =
+{
+    PLDHashTable::HashVoidPtrKeyStub,
+    Match,
+    PLDHashTable::MoveEntryStub,
+    Clear,
+    nullptr
+};
+
+// static
 ClassInfo2NativeSetMap*
 ClassInfo2NativeSetMap::newMap(int length)
 {
@@ -209,7 +236,7 @@ ClassInfo2NativeSetMap::newMap(int length)
 }
 
 ClassInfo2NativeSetMap::ClassInfo2NativeSetMap(int length)
-  : mTable(PLDHashTable::StubOps(), sizeof(Entry), length)
+  : mTable(&ClassInfo2NativeSetMap::Entry::sOps, sizeof(Entry), length)
 {
 }
 
@@ -278,24 +305,17 @@ NativeSetMap::Entry::Match(const PLDHashEntryHdr* entry, const void* key)
     if (!Addition && Set == SetInTable)
         return true;
 
-    uint16_t count = Set->GetInterfaceCount() + (Addition ? 1 : 0);
-    if (count != SetInTable->GetInterfaceCount())
+    uint16_t count = Set->GetInterfaceCount();
+    if (count + (Addition ? 1 : 0) != SetInTable->GetInterfaceCount())
         return false;
 
-    uint16_t Position = Key->GetPosition();
     XPCNativeInterface** CurrentInTable = SetInTable->GetInterfaceArray();
     XPCNativeInterface** Current = Set->GetInterfaceArray();
     for (uint16_t i = 0; i < count; i++) {
-        if (Addition && i == Position) {
-            if (Addition != *(CurrentInTable++))
-                return false;
-        } else {
-            if (*(Current++) != *(CurrentInTable++))
-                return false;
-        }
+        if (*(Current++) != *(CurrentInTable++))
+            return false;
     }
-
-    return true;
+    return !Addition || Addition == *(CurrentInTable++);
 }
 
 const struct PLDHashTableOps NativeSetMap::Entry::sOps =
@@ -440,12 +460,13 @@ XPCNativeScriptableSharedMap::GetNewOrUsed(uint32_t flags,
     NS_PRECONDITION(name,"bad param");
     NS_PRECONDITION(si,"bad param");
 
-    XPCNativeScriptableShared key(flags, name, /* populate = */ false);
-    auto entry = static_cast<Entry*>(mTable.Add(&key, fallible));
+    RefPtr<XPCNativeScriptableShared> key =
+        new XPCNativeScriptableShared(flags, name, /* populate = */ false);
+    auto entry = static_cast<Entry*>(mTable.Add(key, fallible));
     if (!entry)
         return false;
 
-    XPCNativeScriptableShared* shared = entry->key;
+    RefPtr<XPCNativeScriptableShared> shared = entry->key;
 
     // XXX: this XPCNativeScriptableShared is heap-allocated, which means the
     // js::Class it contains is also heap-allocated. This causes problems for
@@ -457,11 +478,11 @@ XPCNativeScriptableSharedMap::GetNewOrUsed(uint32_t flags,
     // StatsCellCallback() should be reinstated.
     //
     if (!shared) {
-        entry->key = shared =
-            new XPCNativeScriptableShared(flags, key.TransferNameOwnership(),
-                                          /* populate = */ true);
+        shared = new XPCNativeScriptableShared(flags, key->TransferNameOwnership(),
+                                               /* populate = */ true);
+        entry->key = shared;
     }
-    si->SetScriptableShared(shared);
+    si->SetScriptableShared(shared.forget());
     return true;
 }
 

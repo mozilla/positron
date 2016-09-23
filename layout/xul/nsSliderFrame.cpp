@@ -207,7 +207,7 @@ public:
     mValue(aValue), mUserChanged(aUserChanged)
   {}
 
-  NS_IMETHODIMP Run()
+  NS_IMETHOD Run() override
   {
     return mListener->ValueChanged(nsDependentAtomString(mWhich),
                                    mValue, mUserChanged);
@@ -228,7 +228,7 @@ public:
     mDragBeginning(aDragBeginning)
   {}
 
-  NS_IMETHODIMP Run()
+  NS_IMETHOD Run() override
   {
     return mListener->DragStateChanged(mDragBeginning);
   }
@@ -878,7 +878,6 @@ nsSliderFrame::SetCurrentPositionInternal(nsIContent* aScrollbar, int32_t aNewPo
     // See if we have a mediator.
     nsIScrollbarMediator* mediator = scrollbarFrame->GetScrollbarMediator();
     if (mediator) {
-      nsCOMPtr<nsIContent> content = GetContent();
       nscoord oldPos = nsPresContext::CSSPixelsToAppUnits(GetCurrentPosition(scrollbar));
       nscoord newPos = nsPresContext::CSSPixelsToAppUnits(aNewPos);
       mediator->ThumbMoved(scrollbarFrame, oldPos, newPos);

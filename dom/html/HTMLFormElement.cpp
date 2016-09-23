@@ -87,7 +87,7 @@ static const uint8_t NS_FORM_AUTOCOMPLETE_OFF = 0;
 static const nsAttrValue::EnumTable kFormAutocompleteTable[] = {
   { "on",  NS_FORM_AUTOCOMPLETE_ON },
   { "off", NS_FORM_AUTOCOMPLETE_OFF },
-  { 0 }
+  { nullptr, 0 }
 };
 // Default autocomplete value is 'on'.
 static const nsAttrValue::EnumTable* kFormDefaultAutocomplete = &kFormAutocompleteTable[0];
@@ -119,6 +119,8 @@ HTMLFormElement::HTMLFormElement(already_AddRefed<mozilla::dom::NodeInfo>& aNode
     mInvalidElementsCount(0),
     mEverTriedInvalidSubmit(false)
 {
+  // We start out valid.
+  AddStatesSilently(NS_EVENT_STATE_VALID);
 }
 
 HTMLFormElement::~HTMLFormElement()
@@ -1535,7 +1537,7 @@ HTMLFormElement::NamedGetter(const nsAString& aName, bool &aFound)
 void
 HTMLFormElement::GetSupportedNames(nsTArray<nsString >& aRetval)
 {
-  // TODO https://www.w3.org/Bugs/Public/show_bug.cgi?id=22320
+  // TODO https://github.com/whatwg/html/issues/1731
 }
 
 already_AddRefed<nsISupports>

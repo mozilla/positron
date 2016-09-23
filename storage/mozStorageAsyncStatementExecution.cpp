@@ -62,7 +62,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     NS_ASSERTION(mCallback, "Trying to notify about results without a callback!");
 
@@ -70,10 +70,9 @@ public:
       // Hold a strong reference to the callback while notifying it, so that if
       // it spins the event loop, the callback won't be released and freed out
       // from under us.
-      nsCOMPtr<mozIStorageStatementCallback> callback =
-        do_QueryInterface(mCallback);
+      nsCOMPtr<mozIStorageStatementCallback> callback = mCallback;
 
-      (void)mCallback->HandleResult(mResults);
+      (void)callback->HandleResult(mResults);
     }
 
     return NS_OK;
@@ -100,16 +99,15 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     if (mEventStatus->shouldNotify() && mCallback) {
       // Hold a strong reference to the callback while notifying it, so that if
       // it spins the event loop, the callback won't be released and freed out
       // from under us.
-      nsCOMPtr<mozIStorageStatementCallback> callback =
-        do_QueryInterface(mCallback);
+      nsCOMPtr<mozIStorageStatementCallback> callback = mCallback;
 
-      (void)mCallback->HandleError(mErrorObj);
+      (void)callback->HandleError(mErrorObj);
     }
 
     return NS_OK;
@@ -140,7 +138,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     if (mCallback) {
       (void)mCallback->HandleCompletion(mReason);
@@ -459,7 +457,7 @@ AsyncExecuteStatements::notifyComplete()
     else {
       DebugOnly<nsresult> rv =
         mConnection->rollbackTransactionInternal(mNativeConnection);
-      NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "Transaction failed to rollback");
+      NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Transaction failed to rollback");
     }
     mHasTransaction = false;
   }

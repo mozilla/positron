@@ -28,6 +28,18 @@ MacroAssembler::moveGPRToFloat32(Register src, FloatRegister dest)
     vmovd(src, dest);
 }
 
+void
+MacroAssembler::move8SignExtend(Register src, Register dest)
+{
+    movsbl(src, dest);
+}
+
+void
+MacroAssembler::move16SignExtend(Register src, Register dest)
+{
+    movswl(src, dest);
+}
+
 // ===============================================================
 // Logical instructions
 
@@ -628,9 +640,9 @@ MacroAssembler::branchDouble(DoubleCondition cond, FloatRegister lhs, FloatRegis
     j(ConditionFromDoubleCondition(cond), label);
 }
 
-template <typename T>
+template <typename T, typename L>
 void
-MacroAssembler::branchAdd32(Condition cond, T src, Register dest, Label* label)
+MacroAssembler::branchAdd32(Condition cond, T src, Register dest, L label)
 {
     addl(src, dest);
     j(cond, label);
@@ -1228,14 +1240,14 @@ MacroAssembler::truncateDoubleToInt64(Address src, Address dest, Register temp)
     freeStack(2*sizeof(int32_t));
 }
 
-//}}} check_macroassembler_style
 // ===============================================================
+// Clamping functions.
 
 void
-MacroAssemblerX86Shared::clampIntToUint8(Register reg)
+MacroAssembler::clampIntToUint8(Register reg)
 {
     Label inRange;
-    asMasm().branchTest32(Assembler::Zero, reg, Imm32(0xffffff00), &inRange);
+    branchTest32(Assembler::Zero, reg, Imm32(0xffffff00), &inRange);
     {
         sarl(Imm32(31), reg);
         notl(reg);
@@ -1243,6 +1255,9 @@ MacroAssemblerX86Shared::clampIntToUint8(Register reg)
     }
     bind(&inRange);
 }
+
+//}}} check_macroassembler_style
+// ===============================================================
 
 } // namespace jit
 } // namespace js

@@ -244,7 +244,7 @@ public:
                const nsAString& aStringBody)
   : WorkerThreadProxySyncRunnable(aWorkerPrivate, aProxy)
   , StructuredCloneHolder(CloningSupported, TransferringNotSupported,
-                          SameProcessDifferentThread)
+                          StructuredCloneScope::SameProcessDifferentThread)
   , mStringBody(aStringBody)
   , mHasUploadListeners(false)
   {
@@ -476,7 +476,7 @@ class EventRunnable final : public MainThreadProxyRunnable
   nsString mType;
   nsString mResponseType;
   JS::Heap<JS::Value> mResponse;
-  nsString mResponseText;
+  XMLHttpRequestStringSnapshot mResponseText;
   nsString mResponseURL;
   nsCString mStatusText;
   uint64_t mLoaded;
@@ -502,26 +502,26 @@ public:
                 JS::Handle<JSObject*> aScopeObj)
   : MainThreadProxyRunnable(aProxy->mWorkerPrivate, aProxy),
     StructuredCloneHolder(CloningSupported, TransferringNotSupported,
-                          SameProcessDifferentThread),
+                          StructuredCloneScope::SameProcessDifferentThread),
     mType(aType), mResponse(JS::UndefinedValue()), mLoaded(aLoaded),
     mTotal(aTotal), mEventStreamId(aProxy->mInnerEventStreamId), mStatus(0),
     mReadyState(0), mUploadEvent(aUploadEvent), mProgressEvent(true),
     mLengthComputable(aLengthComputable), mUseCachedArrayBufferResponse(false),
     mResponseTextResult(NS_OK), mStatusResult(NS_OK), mResponseResult(NS_OK),
-    mScopeObj(GetJSRuntime(), aScopeObj)
+    mScopeObj(RootingCx(), aScopeObj)
   { }
 
   EventRunnable(Proxy* aProxy, bool aUploadEvent, const nsString& aType,
                 JS::Handle<JSObject*> aScopeObj)
   : MainThreadProxyRunnable(aProxy->mWorkerPrivate, aProxy),
     StructuredCloneHolder(CloningSupported, TransferringNotSupported,
-                          SameProcessDifferentThread),
+                          StructuredCloneScope::SameProcessDifferentThread),
     mType(aType), mResponse(JS::UndefinedValue()), mLoaded(0), mTotal(0),
     mEventStreamId(aProxy->mInnerEventStreamId), mStatus(0), mReadyState(0),
     mUploadEvent(aUploadEvent), mProgressEvent(false), mLengthComputable(0),
     mUseCachedArrayBufferResponse(false), mResponseTextResult(NS_OK),
     mStatusResult(NS_OK), mResponseResult(NS_OK),
-    mScopeObj(GetJSRuntime(), aScopeObj)
+    mScopeObj(RootingCx(), aScopeObj)
   { }
 
 private:
@@ -1129,7 +1129,10 @@ EventRunnable::PreDispatch(WorkerPrivate* /* unused */)
     MOZ_ASSERT(false, "This should never fail!");
   }
 
-  mResponseTextResult = xhr->GetResponseText(mResponseText);
+  ErrorResult rv;
+  xhr->GetResponseText(mResponseText, rv);
+  mResponseTextResult = rv.StealNSResult();
+
   if (NS_SUCCEEDED(mResponseTextResult)) {
     mResponseResult = mResponseTextResult;
     if (mResponseText.IsVoid()) {
@@ -1172,7 +1175,6 @@ EventRunnable::PreDispatch(WorkerPrivate* /* unused */)
         }
 
         if (doClone) {
-          ErrorResult rv;
           Write(cx, response, transferable, rv);
           if (NS_WARN_IF(rv.Failed())) {
             NS_WARNING("Failed to clone response!");
@@ -1186,7 +1188,6 @@ EventRunnable::PreDispatch(WorkerPrivate* /* unused */)
 
   mStatusResult = xhr->GetStatus(&mStatus);
 
-  ErrorResult rv;
   xhr->GetStatusText(mStatusText, rv);
   MOZ_ASSERT(!rv.Failed());
 
@@ -1261,6 +1262,7 @@ EventRunnable::WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
   JS::Rooted<UniquePtr<XMLHttpRequestWorker::StateData>> state(aCx, new XMLHttpRequestWorker::StateData());
 
   state->mResponseTextResult = mResponseTextResult;
+
   state->mResponseText = mResponseText;
 
   if (NS_SUCCEEDED(mResponseTextResult)) {
@@ -1425,7 +1427,10 @@ OpenRunnable::MainThreadRunInternal()
   mProxy->mInOpen = true;
 
   ErrorResult rv2;
-  mProxy->mXHR->Open(mMethod, mURL, true, mUser, mPassword, rv2);
+  mProxy->mXHR->Open(mMethod, mURL, true,
+                     mUser.WasPassed() ? mUser.Value() : NullString(),
+                     mPassword.WasPassed() ? mPassword.Value() : NullString(),
+                     rv2);
 
   MOZ_ASSERT(mProxy->mInOpen);
   mProxy->mInOpen = false;
@@ -1611,7 +1616,7 @@ XMLHttpRequestWorker::ReleaseProxy(ReleaseType aType)
         new AsyncTeardownRunnable(mProxy);
       mProxy = nullptr;
 
-      if (NS_FAILED(NS_DispatchToMainThread(runnable))) {
+      if (NS_FAILED(mWorkerPrivate->DispatchToMainThread(runnable.forget()))) {
         NS_ERROR("Failed to dispatch teardown runnable!");
       }
     } else {
@@ -1645,7 +1650,7 @@ XMLHttpRequestWorker::MaybePin(ErrorResult& aRv)
     return;
   }
 
-  if (!HoldWorker(mWorkerPrivate)) {
+  if (!HoldWorker(mWorkerPrivate, Canceling)) {
     aRv.Throw(NS_ERROR_FAILURE);
     return;
   }
@@ -1847,9 +1852,11 @@ XMLHttpRequestWorker::Notify(Status aStatus)
 }
 
 void
-XMLHttpRequestWorker::Open(const nsACString& aMethod, const nsAString& aUrl,
-                           bool aAsync, const Optional<nsAString>& aUser,
-                           const Optional<nsAString>& aPassword, ErrorResult& aRv)
+XMLHttpRequestWorker::Open(const nsACString& aMethod,
+                           const nsAString& aUrl, bool aAsync,
+                           const Optional<nsAString>& aUser,
+                           const Optional<nsAString>& aPassword,
+                           ErrorResult& aRv)
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
 
@@ -2390,10 +2397,11 @@ XMLHttpRequestWorker::GetResponse(JSContext* /* unused */,
       mStateData.mResponse =
         JS_GetEmptyStringValue(mWorkerPrivate->GetJSContext());
     } else {
+      XMLHttpRequestStringSnapshotReaderHelper helper(mStateData.mResponseText);
+
       JSString* str =
         JS_NewUCStringCopyN(mWorkerPrivate->GetJSContext(),
-                            mStateData.mResponseText.get(),
-                            mStateData.mResponseText.Length());
+                            helper.Buffer(), helper.Length());
 
       if (!str) {
         aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
@@ -2413,7 +2421,14 @@ void
 XMLHttpRequestWorker::GetResponseText(nsAString& aResponseText, ErrorResult& aRv)
 {
   aRv = mStateData.mResponseTextResult;
-  aResponseText = mStateData.mResponseText;
+  if (aRv.Failed()) {
+    return;
+  }
+
+  if (!mStateData.mResponseText.GetAsString(aResponseText)) {
+    aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
 }
 
 void
@@ -2432,6 +2447,8 @@ XMLHttpRequestWorker::UpdateState(const StateData& aStateData,
   else {
     mStateData = aStateData;
   }
+
+  XMLHttpRequestBinding::ClearCachedResponseTextValue(this);
 }
 
 } // dom namespace

@@ -21,7 +21,7 @@
 #include "nsReadLine.h"
 #include "nsIClassInfoImpl.h"
 #include "mozilla/ipc/InputStreamUtils.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/FileUtils.h"
 #include "nsNetCID.h"
 #include "nsXULAppAPI.h"
@@ -629,7 +629,8 @@ nsFileInputStream::Deserialize(const InputStreamParams& aParams,
     FileDescriptor fd;
     if (fileDescriptorIndex < aFileDescriptors.Length()) {
         fd = aFileDescriptors[fileDescriptorIndex];
-        NS_WARN_IF_FALSE(fd.IsValid(), "Received an invalid file descriptor!");
+        NS_WARNING_ASSERTION(fd.IsValid(),
+                             "Received an invalid file descriptor!");
     } else {
         NS_WARNING("Received a bad file descriptor index!");
     }

@@ -16,7 +16,7 @@
 #include "mozilla/dom/ImageData.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Scoped.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "ScopedGLHelpers.h"
 #include "TexUnpackBlob.h"
 #include "WebGLContext.h"
@@ -184,6 +184,9 @@ ValidateUnpackBytes(WebGLContext* webgl, const char* funcName, uint32_t width,
                     uint32_t height, uint32_t depth, const webgl::PackingInfo& pi,
                     uint32_t byteCount, webgl::TexUnpackBlob* blob)
 {
+    if (!width || !height || !depth)
+        return true;
+
     const auto bytesPerPixel = webgl::BytesPerPixel(pi);
     const auto bytesPerRow = CheckedUint32(blob->mRowLength) * bytesPerPixel;
     const auto rowStride = RoundUpToMultipleOf(bytesPerRow, blob->mAlignment);
@@ -227,7 +230,7 @@ WebGLTexture::TexOrSubImage(bool isSubImage, const char* funcName, TexImageTarge
                             GLint yOffset, GLint zOffset, GLsizei rawWidth,
                             GLsizei rawHeight, GLsizei rawDepth, GLint border,
                             GLenum unpackFormat, GLenum unpackType,
-                            const dom::Nullable<dom::ArrayBufferView>& maybeView)
+                            const dom::ArrayBufferView* view)
 {
     uint32_t width, height, depth;
     if (!ValidateExtents(mContext, funcName, rawWidth, rawHeight, rawDepth, border,
@@ -246,21 +249,16 @@ WebGLTexture::TexOrSubImage(bool isSubImage, const char* funcName, TexImageTarge
     const uint8_t* bytes = nullptr;
     uint32_t byteCount = 0;
 
-    if (!maybeView.IsNull()) {
-        const auto& view = maybeView.Value();
+    if (view) {
+        view->ComputeLengthAndData();
+        bytes = view->DataAllowShared();
+        byteCount = view->LengthAllowShared();
 
-        const auto jsType = JS_GetArrayBufferViewType(view.Obj());
+        const auto& jsType = view->Type();
         if (!DoesJSTypeMatchUnpackType(pi.type, jsType)) {
             mContext->ErrorInvalidOperation("%s: `pixels` not compatible with `type`.",
                                             funcName);
             return;
-        }
-
-        if (width && height && depth) {
-            view.ComputeLengthAndData();
-
-            bytes = view.DataAllowShared();
-            byteCount = view.LengthAllowShared();
         }
     } else if (isSubImage) {
         mContext->ErrorInvalidValue("%s: `pixels` must not be null.", funcName);
@@ -336,16 +334,16 @@ WebGLTexture::TexOrSubImage(bool isSubImage, const char* funcName, TexImageTarge
 
 static already_AddRefed<gfx::DataSourceSurface>
 FromImageData(WebGLContext* webgl, const char* funcName, GLenum unpackType,
-              dom::ImageData* imageData, dom::Uint8ClampedArray* scopedArr)
+              const dom::ImageData& imageData, dom::Uint8ClampedArray* scopedArr)
 {
-    DebugOnly<bool> inited = scopedArr->Init(imageData->GetDataObject());
+    DebugOnly<bool> inited = scopedArr->Init(imageData.GetDataObject());
     MOZ_ASSERT(inited);
 
     scopedArr->ComputeLengthAndData();
     const DebugOnly<size_t> dataSize = scopedArr->Length();
     const void* const data = scopedArr->Data();
 
-    const gfx::IntSize size(imageData->Width(), imageData->Height());
+    const gfx::IntSize size(imageData.Width(), imageData.Height());
     const size_t stride = size.width * 4;
     const gfx::SurfaceFormat surfFormat = gfx::SurfaceFormat::R8G8B8A8;
 
@@ -370,25 +368,19 @@ void
 WebGLTexture::TexOrSubImage(bool isSubImage, const char* funcName, TexImageTarget target,
                             GLint level, GLenum internalFormat, GLint xOffset,
                             GLint yOffset, GLint zOffset, GLenum unpackFormat,
-                            GLenum unpackType, dom::ImageData* imageData)
+                            GLenum unpackType, const dom::ImageData& imageData)
 {
     const bool usePBOs = false;
     webgl::PackingInfo pi;
     if (!mContext->ValidateUnpackInfo(funcName, usePBOs, unpackFormat, unpackType, &pi))
         return;
 
-    if (!imageData) {
-        // Spec says to generate an INVALID_VALUE error
-        mContext->ErrorInvalidValue("%s: Null ImageData.", funcName);
-        return;
-    }
-
     // Eventually, these will be args.
-    const uint32_t width = imageData->Width();
-    const uint32_t height = imageData->Height();
+    const uint32_t width = imageData.Width();
+    const uint32_t height = imageData.Height();
     const uint32_t depth = 1;
 
-    dom::RootedTypedArray<dom::Uint8ClampedArray> scopedArr(nsContentUtils::RootingCx());
+    dom::RootedTypedArray<dom::Uint8ClampedArray> scopedArr(dom::RootingCx());
     const RefPtr<gfx::DataSourceSurface> surf = FromImageData(mContext, funcName,
                                                               unpackType, imageData,
                                                               &scopedArr);
@@ -403,7 +395,7 @@ WebGLTexture::TexOrSubImage(bool isSubImage, const char* funcName, TexImageTarge
     webgl::TexUnpackSurface blob(mContext, target, width, height, depth, surf,
                                  isAlphaPremult);
 
-    const uint32_t fullRows = imageData->Height();
+    const uint32_t fullRows = imageData.Height();
     const uint32_t tailPixels = 0;
     if (!mContext->ValidateUnpackPixels(funcName, fullRows, tailPixels, &blob))
         return;
@@ -419,7 +411,7 @@ void
 WebGLTexture::TexOrSubImage(bool isSubImage, const char* funcName, TexImageTarget target,
                             GLint level, GLenum internalFormat, GLint xOffset,
                             GLint yOffset, GLint zOffset, GLenum unpackFormat,
-                            GLenum unpackType, dom::Element* elem,
+                            GLenum unpackType, const dom::Element& elem,
                             ErrorResult* const out_error)
 {
     const bool usePBOs = false;
@@ -439,7 +431,8 @@ WebGLTexture::TexOrSubImage(bool isSubImage, const char* funcName, TexImageTarge
         flags |= nsLayoutUtils::SFE_PREFER_NO_PREMULTIPLY_ALPHA;
 
     RefPtr<gfx::DrawTarget> idealDrawTarget = nullptr; // Don't care for now.
-    auto sfer = nsLayoutUtils::SurfaceFromElement(elem, flags, idealDrawTarget);
+    auto sfer = nsLayoutUtils::SurfaceFromElement(const_cast<dom::Element*>(&elem), flags,
+                                                  idealDrawTarget);
 
     //////
 
@@ -2072,17 +2065,24 @@ WebGLTexture::CopyTexImage2D(TexImageTarget target, GLint level, GLenum internal
     Intersect(srcWidth, x, width, &readX, &writeX, &rwWidth);
     Intersect(srcHeight, y, height, &readY, &writeY, &rwHeight);
 
-    GLenum error;
-    if (rwWidth == uint32_t(width) && rwHeight == uint32_t(height)) {
-        error = DoCopyTexImage2D(gl, target, level, internalFormat, x, y, width, height);
-    } else {
+    const auto& idealUnpack = dstUsage->idealUnpack;
+    const auto& driverInternalFormat = idealUnpack->internalFormat;
+
+    GLenum error = DoCopyTexImage2D(gl, target, level, driverInternalFormat, x, y, width,
+                                    height);
+    do {
+        if (rwWidth == uint32_t(width) && rwHeight == uint32_t(height))
+            break;
+
+        if (error)
+            break;
+
         // 1. Zero the texture data.
         // 2. CopyTexSubImage the subrect.
 
-        const bool respecifyTexture = true;
         const uint8_t zOffset = 0;
-        if (!ZeroTextureData(mContext, funcName, respecifyTexture, mGLName, target, level,
-                             dstUsage, 0, 0, zOffset, width, height, depth))
+        if (!ZeroTextureData(mContext, funcName, mGLName, target, level, dstUsage, 0, 0,
+                             zOffset, width, height, depth))
         {
             mContext->ErrorOutOfMemory("%s: Failed to zero texture data.", funcName);
             MOZ_ASSERT(false, "Failed to zero texture data.");
@@ -2097,7 +2097,7 @@ WebGLTexture::CopyTexImage2D(TexImageTarget target, GLint level, GLenum internal
 
         error = DoCopyTexSubImage(gl, target, level, writeX, writeY, zOffset, readX,
                                   readY, rwWidth, rwHeight);
-    }
+    } while (false);
 
     if (error == LOCAL_GL_OUT_OF_MEMORY) {
         mContext->ErrorOutOfMemory("%s: Ran out of memory during texture copy.",

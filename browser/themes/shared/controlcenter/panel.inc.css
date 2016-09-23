@@ -82,7 +82,7 @@
 }
 
 #identity-popup-multiView > .panel-viewcontainer > .panel-viewstack > .panel-subviews {
-  background: var(--panel-arrowcontent-background);
+  background: var(--arrowpanel-background);
   padding: 0;
 }
 
@@ -156,11 +156,11 @@
 }
 
 .identity-popup-expander:hover {
-  background-color: hsla(210,4%,10%,.07);
+  background-color: var(--arrowpanel-dimmed);
 }
 
 .identity-popup-expander:hover:active {
-  background-color: hsla(210,4%,10%,.12);
+  background-color: var(--arrowpanel-dimmed-further);
   box-shadow: 0 1px 0 hsla(210,4%,10%,.05) inset;
 }
 
@@ -232,7 +232,7 @@
 
 #identity-popup[connection^=secure] #identity-popup-securityView,
 #identity-popup[connection^=secure] #identity-popup-security-content {
-  background-image: url(chrome://browser/skin/controlcenter/conn-secure.svg);
+  background-image: url(chrome://browser/skin/controlcenter/connection.svg#connection-secure);
 }
 
 /* Use [isbroken] to make sure we don't show a lock on an http page. See Bug 1192162. */
@@ -240,12 +240,12 @@
 #identity-popup[ciphers=weak] #identity-popup-security-content,
 #identity-popup[mixedcontent~=passive-loaded][isbroken] #identity-popup-securityView,
 #identity-popup[mixedcontent~=passive-loaded][isbroken] #identity-popup-security-content {
-  background-image: url(chrome://browser/skin/controlcenter/conn-degraded.svg);
+  background-image: url(chrome://browser/skin/controlcenter/connection.svg#connection-degraded);
 }
 
 #identity-popup[connection=secure-cert-user-overridden] #identity-popup-securityView,
 #identity-popup[connection=secure-cert-user-overridden] #identity-popup-security-content {
-  background-image: url(chrome://browser/skin/identity-mixed-passive-loaded.svg);
+  background-image: url(chrome://browser/skin/connection-mixed-passive-loaded.svg#icon);
 }
 
 #identity-popup[loginforms=insecure] #identity-popup-securityView,
@@ -278,26 +278,26 @@
 
 #identity-popup-securityView-footer {
   margin-top: 1em;
-  background-color: hsla(210,4%,10%,.07);
+  background-color: var(--arrowpanel-dimmed);
 }
 
 #identity-popup-securityView-footer > button {
   -moz-appearance: none;
   margin: 0;
   border: none;
-  border-top: 1px solid #ccc;
+  border-top: 1px solid var(--panel-separator-color);
   padding: 8px 20px;
-  color: ButtonText;
+  color: inherit;
   background-color: transparent;
 }
 
 #identity-popup-securityView-footer > button:hover,
 #identity-popup-securityView-footer > button:focus {
-  background-color: hsla(210,4%,10%,.07);
+  background-color: var(--arrowpanel-dimmed);
 }
 
 #identity-popup-securityView-footer > button:hover:active {
-  background-color: hsla(210,4%,10%,.12);
+  background-color: var(--arrowpanel-dimmed-further);
 }
 
 #identity-popup-content-verifier ~ description {
@@ -320,11 +320,11 @@ description#identity-popup-content-verifier,
 /* TRACKING PROTECTION */
 
 #tracking-protection-content {
-  background-image: url("chrome://browser/skin/controlcenter/tracking-protection.svg");
+  background-image: url("chrome://browser/skin/controlcenter/tracking-protection.svg#enabled");
 }
 
 #tracking-protection-content[state="loaded-tracking-content"]  {
-  background-image: url("chrome://browser/skin/controlcenter/tracking-protection-disabled.svg");
+  background-image: url("chrome://browser/skin/controlcenter/tracking-protection.svg#disabled");
 }
 
 #tracking-action-block,
@@ -372,13 +372,19 @@ description#identity-popup-content-verifier,
   margin-top: 5px;
 }
 
-#identity-popup-permission-list:not(:empty) + description {
-  display: none;
-}
-
 .identity-popup-permission-icon {
   width: 16px;
   height: 16px;
+}
+
+.identity-popup-permission-icon.in-use {
+  fill: rgb(224, 41, 29);
+  opacity: 1;
+  animation: 1.5s ease in-use-blink infinite;
+}
+
+@keyframes in-use-blink {
+  50% { opacity: 0; }
 }
 
 .identity-popup-permission-label {
@@ -388,7 +394,7 @@ description#identity-popup-content-verifier,
 .identity-popup-permission-state-label {
   margin-inline-end: 5px;
   text-align: end;
-  opacity: 0.6;
+  color: graytext;
 }
 
 .identity-popup-permission-remove-button {
@@ -402,8 +408,8 @@ description#identity-popup-content-verifier,
 }
 
 .identity-popup-permission-remove-button > .button-box {
-  border-width: 0;
   padding: 0;
+  -moz-appearance: none;
 }
 
 .identity-popup-permission-remove-button > .button-box > .button-icon {
@@ -412,21 +418,22 @@ description#identity-popup-content-verifier,
   height: 16px;
   list-style-image: url(chrome://browser/skin/panel-icons.svg#cancel);
   filter: url(chrome://browser/skin/filters.svg#fill);
-  fill: #999;
+  fill: graytext;
 }
 
 .identity-popup-permission-remove-button > .button-box > .button-text {
   display: none;
 }
 
-.identity-popup-permission-remove-button:hover {
-  background-color: #999;
+/* swap foreground / background colors on hover */
+.identity-popup-permission-remove-button:not(:-moz-focusring):hover {
+  background-color: graytext;
 }
 
-.identity-popup-permission-remove-button:hover > .button-box > .button-icon {
-  fill: #fff;
+.identity-popup-permission-remove-button:not(:-moz-focusring):hover > .button-box > .button-icon {
+  fill: -moz-field;
 }
 
-.identity-popup-permission-remove-button:hover:active {
-  background-color: #808080;
+.identity-popup-permission-remove-button:not(:-moz-focusring):hover:active {
+  background-color: -moz-fieldtext;
 }

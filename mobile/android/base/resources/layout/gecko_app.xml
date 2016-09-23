@@ -26,10 +26,11 @@
                         android:layout_below="@+id/tablet_tab_strip"
                         android:layout_above="@+id/find_in_page">
 
-            <org.mozilla.gecko.GeckoView android:id="@+id/layer_view"
-                                         android:layout_width="match_parent"
-                                         android:layout_height="match_parent"
-                                         android:scrollbars="none"/>
+            <fragment class="org.mozilla.gecko.GeckoViewFragment"
+                      android:id="@+id/layer_view"
+                      android:layout_width="match_parent"
+                      android:layout_height="match_parent"
+                      android:scrollbars="none"/>
 
             <AbsoluteLayout android:id="@+id/plugin_container"
                             android:background="@android:color/transparent"
@@ -49,6 +50,11 @@
                          android:layout_alignParentRight="true"
                          android:layout_alignParentBottom="true">
             </FrameLayout>
+
+            <view class="org.mozilla.gecko.media.VideoPlayer" android:id="@+id/video_player"
+                         android:layout_height="match_parent"
+                         android:layout_width="match_parent">
+            </view>
 
             <ViewStub android:id="@+id/zoomed_view_stub"
                       android:inflatedId="@+id/zoomed_view"
@@ -88,7 +94,6 @@
                   android:layout_width="match_parent"
                   android:layout_height="match_parent"
                   android:background="@color/dark_transparent_overlay"
-                  android:visibility="gone"
                   android:alpha="0"
                   android:layerType="hardware"/>
 

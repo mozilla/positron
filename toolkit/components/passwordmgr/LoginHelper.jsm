@@ -89,8 +89,7 @@ this.LoginHelper = {
    * @throws String with English message in case validation failed.
    */
   checkLoginValues(aLogin) {
-    function badCharacterPresent(l, c)
-    {
+    function badCharacterPresent(l, c) {
       return ((l.formSubmitURL && l.formSubmitURL.indexOf(c) != -1) ||
               (l.httpRealm     && l.httpRealm.indexOf(c)     != -1) ||
                                   l.hostname.indexOf(c)      != -1  ||
@@ -393,7 +392,7 @@ this.LoginHelper = {
     const KEY_DELIMITER = ":";
 
     if (!preferredOrigin && resolveBy.includes("scheme")) {
-      throw new Error("dedupeLogins: `preferredOrigin` is required in order to "+
+      throw new Error("dedupeLogins: `preferredOrigin` is required in order to " +
                       "prefer schemes which match it.");
     }
 
@@ -692,6 +691,26 @@ this.LoginHelper = {
     let hasMP = slot.status != Ci.nsIPKCS11Slot.SLOT_UNINITIALIZED &&
                 slot.status != Ci.nsIPKCS11Slot.SLOT_READY;
     return hasMP;
+  },
+
+  /**
+   * Send a notification when stored data is changed.
+   */
+  notifyStorageChanged(changeType, data) {
+    let dataObject = data;
+    // Can't pass a raw JS string or array though notifyObservers(). :-(
+    if (Array.isArray(data)) {
+      dataObject = Cc["@mozilla.org/array;1"].
+                   createInstance(Ci.nsIMutableArray);
+      for (let i = 0; i < data.length; i++) {
+        dataObject.appendElement(data[i], false);
+      }
+    } else if (typeof(data) == "string") {
+      dataObject = Cc["@mozilla.org/supports-string;1"].
+                   createInstance(Ci.nsISupportsString);
+      dataObject.data = data;
+    }
+    Services.obs.notifyObservers(dataObject, "passwordmgr-storage-changed", changeType);
   }
 };
 

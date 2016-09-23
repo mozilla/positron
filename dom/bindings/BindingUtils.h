@@ -14,7 +14,7 @@
 #include "mozilla/Alignment.h"
 #include "mozilla/Array.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/CycleCollectedJSRuntime.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/DeferredFinalize.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/CallbackObject.h"
@@ -38,6 +38,7 @@
 #include "qsObjectHelper.h"
 #include "xpcpublic.h"
 #include "nsIVariant.h"
+#include "mozilla/dom/FakeString.h"
 
 #include "nsWrapperCacheInlines.h"
 
@@ -489,8 +490,8 @@ struct VerifyTraceProtoAndIfaceCacheCalledTracer : public JS::CallbackTracer
 {
   bool ok;
 
-  explicit VerifyTraceProtoAndIfaceCacheCalledTracer(JSRuntime *rt)
-    : JS::CallbackTracer(rt), ok(false)
+  explicit VerifyTraceProtoAndIfaceCacheCalledTracer(JSContext* cx)
+    : JS::CallbackTracer(cx), ok(false)
   {}
 
   void onChild(const JS::GCCellPtr&) override {
@@ -798,9 +799,9 @@ MaybeWrapObjectValue(JSContext* cx, JS::MutableHandle<JS::Value> rval)
     return TryToOuterize(rval);
   }
 
-  // It's not a WebIDL object.  But it might be an XPConnect one, in which case
-  // we may need to outerize here, so make sure to call JS_WrapValue.
-  return JS_WrapValue(cx, rval);
+  // It's not a WebIDL object, so it's OK to just leave it as-is: only WebIDL
+  // objects (specifically only windows) require outerization.
+  return true;
 }
 
 // Like MaybeWrapObjectValue, but also allows null
@@ -1900,146 +1901,6 @@ AppendNamedPropertyIds(JSContext* cx, JS::Handle<JSObject*> proxy,
 
 namespace binding_detail {
 
-// A struct that has the same layout as an nsString but much faster
-// constructor and destructor behavior. FakeString uses inline storage
-// for small strings and a nsStringBuffer for longer strings.
-struct FakeString {
-  FakeString() :
-    mFlags(nsString::F_TERMINATED)
-  {
-  }
-
-  ~FakeString() {
-    if (mFlags & nsString::F_SHARED) {
-      nsStringBuffer::FromData(mData)->Release();
-    }
-  }
-
-  void Rebind(const nsString::char_type* aData, nsString::size_type aLength) {
-    MOZ_ASSERT(mFlags == nsString::F_TERMINATED);
-    mData = const_cast<nsString::char_type*>(aData);
-    mLength = aLength;
-  }
-
-  // Share aString's string buffer, if it has one; otherwise, make this string
-  // depend upon aString's data.  aString should outlive this instance of
-  // FakeString.
-  void ShareOrDependUpon(const nsAString& aString) {
-    RefPtr<nsStringBuffer> sharedBuffer = nsStringBuffer::FromString(aString);
-    if (!sharedBuffer) {
-      Rebind(aString.Data(), aString.Length());
-    } else {
-      AssignFromStringBuffer(sharedBuffer.forget());
-      mLength = aString.Length();
-    }
-  }
-
-  void Truncate() {
-    MOZ_ASSERT(mFlags == nsString::F_TERMINATED);
-    mData = nsString::char_traits::sEmptyBuffer;
-    mLength = 0;
-  }
-
-  void SetIsVoid(bool aValue) {
-    MOZ_ASSERT(aValue,
-               "We don't support SetIsVoid(false) on FakeString!");
-    Truncate();
-    mFlags |= nsString::F_VOIDED;
-  }
-
-  const nsString::char_type* Data() const
-  {
-    return mData;
-  }
-
-  nsString::char_type* BeginWriting()
-  {
-    return mData;
-  }
-
-  nsString::size_type Length() const
-  {
-    return mLength;
-  }
-
-  // Reserve space to write aLength chars, not including null-terminator.
-  bool SetLength(nsString::size_type aLength, mozilla::fallible_t const&) {
-    // Use mInlineStorage for small strings.
-    if (aLength < sInlineCapacity) {
-      SetData(mInlineStorage);
-    } else {
-      RefPtr<nsStringBuffer> buf = nsStringBuffer::Alloc((aLength + 1) * sizeof(nsString::char_type));
-      if (MOZ_UNLIKELY(!buf)) {
-        return false;
-      }
-
-      AssignFromStringBuffer(buf.forget());
-    }
-    mLength = aLength;
-    mData[mLength] = char16_t(0);
-    return true;
-  }
-
-  // If this ever changes, change the corresponding code in the
-  // Optional<nsAString> specialization as well.
-  const nsAString* ToAStringPtr() const {
-    return reinterpret_cast<const nsString*>(this);
-  }
-
-operator const nsAString& () const {
-    return *reinterpret_cast<const nsString*>(this);
-  }
-
-private:
-  nsAString* ToAStringPtr() {
-    return reinterpret_cast<nsString*>(this);
-  }
-
-  nsString::char_type* mData;
-  nsString::size_type mLength;
-  uint32_t mFlags;
-
-  static const size_t sInlineCapacity = 64;
-  nsString::char_type mInlineStorage[sInlineCapacity];
-
-  FakeString(const FakeString& other) = delete;
-  void operator=(const FakeString& other) = delete;
-
-  void SetData(nsString::char_type* aData) {
-    MOZ_ASSERT(mFlags == nsString::F_TERMINATED);
-    mData = const_cast<nsString::char_type*>(aData);
-  }
-  void AssignFromStringBuffer(already_AddRefed<nsStringBuffer> aBuffer) {
-    SetData(static_cast<nsString::char_type*>(aBuffer.take()->Data()));
-    mFlags = nsString::F_SHARED | nsString::F_TERMINATED;
-  }
-
-  friend class NonNull<nsAString>;
-
-  // A class to use for our static asserts to ensure our object layout
-  // matches that of nsString.
-  class StringAsserter;
-  friend class StringAsserter;
-
-  class StringAsserter : public nsString {
-  public:
-    static void StaticAsserts() {
-      static_assert(offsetof(FakeString, mInlineStorage) ==
-                      sizeof(nsString),
-                    "FakeString should include all nsString members");
-      static_assert(offsetof(FakeString, mData) ==
-                      offsetof(StringAsserter, mData),
-                    "Offset of mData should match");
-      static_assert(offsetof(FakeString, mLength) ==
-                      offsetof(StringAsserter, mLength),
-                    "Offset of mLength should match");
-      static_assert(offsetof(FakeString, mFlags) ==
-                      offsetof(StringAsserter, mFlags),
-                    "Offset of mFlags should match");
-    }
-  };
-};
-
 class FastErrorResult :
     public mozilla::binding_danger::TErrorResult<
       mozilla::binding_danger::JustAssertCleanupPolicy>
@@ -2127,24 +1988,6 @@ template<typename T>
 void DoTraceSequence(JSTracer* trc, FallibleTArray<T>& seq);
 template<typename T>
 void DoTraceSequence(JSTracer* trc, InfallibleTArray<T>& seq);
-
-// Class for simple sequence arguments, only used internally by codegen.
-namespace binding_detail {
-
-template<typename T>
-class AutoSequence : public AutoTArray<T, 16>
-{
-public:
-  AutoSequence() : AutoTArray<T, 16>()
-  {}
-
-  // Allow converting to const sequences as needed
-  operator const Sequence<T>&() const {
-    return *reinterpret_cast<const Sequence<T>*>(this);
-  }
-};
-
-} // namespace binding_detail
 
 // Class used to trace sequences, with specializations for various
 // sequence types.
@@ -3063,15 +2906,15 @@ struct CreateGlobalOptions<nsGlobalWindow>
 nsresult
 RegisterDOMNames();
 
-// The return value is whatever the ProtoHandleGetter we used
-// returned.  This should be the DOM prototype for the global.
+// The return value is true if we created and successfully performed our part of
+// the setup for the global, false otherwise.
 //
 // Typically this method's caller will want to ensure that
 // xpc::InitGlobalObjectOptions is called before, and xpc::InitGlobalObject is
 // called after, this method, to ensure that this global object and its
 // compartment are consistent with other global objects.
 template <class T, ProtoHandleGetter GetProto>
-JS::Handle<JSObject*>
+bool
 CreateGlobal(JSContext* aCx, T* aNative, nsWrapperCache* aCache,
              const JSClass* aClass, JS::CompartmentOptions& aOptions,
              JSPrincipals* aPrincipal, bool aInitStandardClasses,
@@ -3086,7 +2929,7 @@ CreateGlobal(JSContext* aCx, T* aNative, nsWrapperCache* aCache,
                                  JS::DontFireOnNewGlobalHook, aOptions));
   if (!aGlobal) {
     NS_WARNING("Failed to create global");
-    return nullptr;
+    return false;
   }
 
   JSAutoCompartment ac(aCx, aGlobal);
@@ -3101,31 +2944,31 @@ CreateGlobal(JSContext* aCx, T* aNative, nsWrapperCache* aCache,
                                     CreateGlobalOptions<T>::ProtoAndIfaceCacheKind);
 
     if (!CreateGlobalOptions<T>::PostCreateGlobal(aCx, aGlobal)) {
-      return nullptr;
+      return false;
     }
   }
 
   if (aInitStandardClasses &&
       !JS_InitStandardClasses(aCx, aGlobal)) {
     NS_WARNING("Failed to init standard classes");
-    return nullptr;
+    return false;
   }
 
   JS::Handle<JSObject*> proto = GetProto(aCx);
   if (!proto || !JS_SplicePrototype(aCx, aGlobal, proto)) {
     NS_WARNING("Failed to set proto");
-    return nullptr;
+    return false;
   }
 
   bool succeeded;
   if (!JS_SetImmutablePrototype(aCx, aGlobal, &succeeded)) {
-    return nullptr;
+    return false;
   }
   MOZ_ASSERT(succeeded,
              "making a fresh global object's [[Prototype]] immutable can "
              "internally fail, but it should never be unsuccessful");
 
-  return proto;
+  return true;
 }
 
 /*
@@ -3243,8 +3086,7 @@ WrappedJSToDictionary(nsISupports* aObject, T& aDictionary)
 {
   nsCOMPtr<nsIXPConnectWrappedJS> wrappedObj = do_QueryInterface(aObject);
   NS_ENSURE_TRUE(wrappedObj, false);
-  JS::Rooted<JSObject*> obj(CycleCollectedJSRuntime::Get()->Runtime(),
-                            wrappedObj->GetJSObject());
+  JS::Rooted<JSObject*> obj(RootingCx(), wrappedObj->GetJSObject());
   NS_ENSURE_TRUE(obj, false);
 
   nsIGlobalObject* global = xpc::NativeGlobal(obj);

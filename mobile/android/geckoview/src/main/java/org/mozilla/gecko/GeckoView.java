@@ -47,6 +47,8 @@ public class GeckoView extends LayerView
 
     private InputConnectionListener mInputConnectionListener;
 
+    private boolean onAttachedToWindowCalled;
+
     @Override
     public void handleMessage(final String event, final JSONObject message) {
         ThreadUtils.postToUiThread(new Runnable() {
@@ -106,15 +108,17 @@ public class GeckoView extends LayerView
         }
     }
 
-    @WrapForJNI
+    @WrapForJNI(dispatchTo = "proxy")
     private static final class Window extends JNIObject {
-        static native void open(Window instance, GeckoView view, Compositor compositor,
-                                String chromeURI,
-                                int width, int height);
+        @WrapForJNI(skip = true)
+        /* package */ Window() {}
+
+        static native void open(Window instance, GeckoView view, Object compositor,
+                                String chromeURI, int width, int height);
 
         @Override protected native void disposeNative();
         native void close();
-        native void reattach(GeckoView view, Compositor compositor);
+        native void reattach(GeckoView view, Object compositor);
         native void loadUri(String uri, int flags);
     }
 
@@ -205,14 +209,43 @@ public class GeckoView extends LayerView
     protected void onRestoreInstanceState(final Parcelable state)
     {
         final StateBinder stateBinder = (StateBinder) state;
-        // We have to always call super.onRestoreInstanceState because View keeps
-        // track of these calls and throws an exception when we don't call it.
-        super.onRestoreInstanceState(stateBinder.superState);
 
         if (stateBinder.window != null) {
             this.window = stateBinder.window;
         }
         stateSaved = false;
+
+        if (onAttachedToWindowCalled) {
+            reattachWindow();
+        }
+
+        // We have to always call super.onRestoreInstanceState because View keeps
+        // track of these calls and throws an exception when we don't call it.
+        super.onRestoreInstanceState(stateBinder.superState);
+    }
+
+    private void openWindow() {
+        final DisplayMetrics metrics = getContext().getResources().getDisplayMetrics();
+
+        final String chromeURI = getGeckoInterface().getDefaultChromeURI();
+
+        if (GeckoThread.isStateAtLeast(GeckoThread.State.PROFILE_READY)) {
+            Window.open(window, this, getCompositor(),
+                        chromeURI, metrics.widthPixels, metrics.heightPixels);
+        } else {
+            GeckoThread.queueNativeCallUntil(GeckoThread.State.PROFILE_READY, Window.class,
+                    "open", window, GeckoView.class, this, Object.class, getCompositor(),
+                    String.class, chromeURI, metrics.widthPixels, metrics.heightPixels);
+        }
+    }
+
+    private void reattachWindow() {
+        if (GeckoThread.isStateAtLeast(GeckoThread.State.PROFILE_READY)) {
+            window.reattach(this, getCompositor());
+        } else {
+            GeckoThread.queueNativeCallUntil(GeckoThread.State.PROFILE_READY,
+                    window, "reattach", GeckoView.class, this, Object.class, getCompositor());
+        }
     }
 
     @Override
@@ -223,28 +256,14 @@ public class GeckoView extends LayerView
         if (window == null) {
             // Open a new nsWindow if we didn't have one from before.
             window = new Window();
-            final String chromeURI = getGeckoInterface().getDefaultChromeURI();
-
-            if (GeckoThread.isStateAtLeast(GeckoThread.State.PROFILE_READY)) {
-                Window.open(window, this, getCompositor(),
-                            chromeURI,
-                            metrics.widthPixels, metrics.heightPixels);
-            } else {
-                GeckoThread.queueNativeCallUntil(GeckoThread.State.PROFILE_READY, Window.class,
-                        "open", window, GeckoView.class, this, getCompositor(),
-                        String.class, chromeURI,
-                        metrics.widthPixels, metrics.heightPixels);
-            }
+            openWindow();
         } else {
-            if (GeckoThread.isStateAtLeast(GeckoThread.State.PROFILE_READY)) {
-                window.reattach(this, getCompositor());
-            } else {
-                GeckoThread.queueNativeCallUntil(GeckoThread.State.PROFILE_READY,
-                        window, "reattach", GeckoView.class, this, getCompositor());
-            }
+            reattachWindow();
         }
 
         super.onAttachedToWindow();
+
+        onAttachedToWindowCalled = true;
     }
 
     @Override
@@ -267,6 +286,8 @@ public class GeckoView extends LayerView
             GeckoThread.queueNativeCallUntil(GeckoThread.State.PROFILE_READY,
                     window, "disposeNative");
         }
+
+        onAttachedToWindowCalled = false;
     }
 
     @WrapForJNI public static final int LOAD_DEFAULT = 0;
@@ -365,13 +386,7 @@ public class GeckoView extends LayerView
         throw new IllegalArgumentException("Must import script from 'resources://android/assets/' location.");
     }
 
-    public void connectToGecko() {
-        GeckoAppShell.notifyObservers("Viewport:Flush", null);
-    }
-
     private void handleReady(final JSONObject message) {
-        connectToGecko();
-
         if (mChromeDelegate != null) {
             mChromeDelegate.onReady(this);
         }

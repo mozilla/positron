@@ -80,9 +80,9 @@ HashableValue::operator==(const HashableValue& other) const
 
 #ifdef DEBUG
     bool same;
-    PerThreadData* data = TlsPerThreadData.get();
-    RootedValue valueRoot(data, value);
-    RootedValue otherRoot(data, other.value);
+    JS::RootingContext* rcx = GetJSContextFromMainThread();
+    RootedValue valueRoot(rcx, value);
+    RootedValue otherRoot(rcx, other.value);
     MOZ_ASSERT(SameValue(nullptr, valueRoot, otherRoot, &same));
     MOZ_ASSERT(same == b);
 #endif
@@ -117,7 +117,8 @@ static const ClassOps MapIteratorObjectClassOps = {
 
 const Class MapIteratorObject::class_ = {
     "Map Iterator",
-    JSCLASS_HAS_RESERVED_SLOTS(MapIteratorObject::SlotCount),
+    JSCLASS_HAS_RESERVED_SLOTS(MapIteratorObject::SlotCount) |
+    JSCLASS_FOREGROUND_FINALIZE,
     &MapIteratorObjectClassOps
 };
 
@@ -150,8 +151,11 @@ GlobalObject::initMapIteratorProto(JSContext* cx, Handle<GlobalObject*> global)
     RootedPlainObject proto(cx, NewObjectWithGivenProto<PlainObject>(cx, base));
     if (!proto)
         return false;
-    if (!JS_DefineFunctions(cx, proto, MapIteratorObject::methods))
+    if (!JS_DefineFunctions(cx, proto, MapIteratorObject::methods) ||
+        !DefineToStringTag(cx, proto, cx->names().MapIterator))
+    {
         return false;
+    }
     global->setReservedSlot(MAP_ITERATOR_PROTO, ObjectValue(*proto));
     return true;
 }
@@ -183,6 +187,7 @@ MapIteratorObject::create(JSContext* cx, HandleObject mapobj, ValueMap* data,
 void
 MapIteratorObject::finalize(FreeOp* fop, JSObject* obj)
 {
+    MOZ_ASSERT(fop->onMainThread());
     fop->delete_(MapIteratorObjectRange(static_cast<NativeObject*>(obj)));
 }
 
@@ -269,7 +274,8 @@ const ClassOps MapObject::classOps_ = {
 const Class MapObject::class_ = {
     "Map",
     JSCLASS_HAS_PRIVATE |
-    JSCLASS_HAS_CACHED_PROTO(JSProto_Map),
+    JSCLASS_HAS_CACHED_PROTO(JSProto_Map) |
+    JSCLASS_FOREGROUND_FINALIZE,
     &MapObject::classOps_
 };
 
@@ -333,6 +339,10 @@ MapObject::initClass(JSContext* cx, JSObject* obj)
         RootedValue funval(cx, ObjectValue(*fun));
         RootedId iteratorId(cx, SYMBOL_TO_JSID(cx->wellKnownSymbols().iterator));
         if (!JS_DefinePropertyById(cx, proto, iteratorId, funval, 0))
+            return nullptr;
+
+        // Define Map.prototype[@@toStringTag].
+        if (!DefineToStringTag(cx, proto, cx->names().Map))
             return nullptr;
     }
     return proto;
@@ -467,6 +477,7 @@ MapObject::create(JSContext* cx, HandleObject proto /* = nullptr */)
 void
 MapObject::finalize(FreeOp* fop, JSObject* obj)
 {
+    MOZ_ASSERT(fop->onMainThread());
     if (ValueMap* map = obj->as<MapObject>().getData())
         fop->delete_(map);
 }
@@ -856,7 +867,8 @@ static const ClassOps SetIteratorObjectClassOps = {
 
 const Class SetIteratorObject::class_ = {
     "Set Iterator",
-    JSCLASS_HAS_RESERVED_SLOTS(SetIteratorObject::SlotCount),
+    JSCLASS_HAS_RESERVED_SLOTS(SetIteratorObject::SlotCount) |
+    JSCLASS_FOREGROUND_FINALIZE,
     &SetIteratorObjectClassOps
 };
 
@@ -888,8 +900,11 @@ GlobalObject::initSetIteratorProto(JSContext* cx, Handle<GlobalObject*> global)
     RootedPlainObject proto(cx, NewObjectWithGivenProto<PlainObject>(cx, base));
     if (!proto)
         return false;
-    if (!JS_DefineFunctions(cx, proto, SetIteratorObject::methods))
+    if (!JS_DefineFunctions(cx, proto, SetIteratorObject::methods) ||
+        !DefineToStringTag(cx, proto, cx->names().SetIterator))
+    {
         return false;
+    }
     global->setReservedSlot(SET_ITERATOR_PROTO, ObjectValue(*proto));
     return true;
 }
@@ -921,6 +936,7 @@ SetIteratorObject::create(JSContext* cx, HandleObject setobj, ValueSet* data,
 void
 SetIteratorObject::finalize(FreeOp* fop, JSObject* obj)
 {
+    MOZ_ASSERT(fop->onMainThread());
     fop->delete_(obj->as<SetIteratorObject>().range());
 }
 
@@ -1001,7 +1017,8 @@ const ClassOps SetObject::classOps_ = {
 const Class SetObject::class_ = {
     "Set",
     JSCLASS_HAS_PRIVATE |
-    JSCLASS_HAS_CACHED_PROTO(JSProto_Set),
+    JSCLASS_HAS_CACHED_PROTO(JSProto_Set) |
+    JSCLASS_FOREGROUND_FINALIZE,
     &SetObject::classOps_
 };
 
@@ -1045,6 +1062,10 @@ SetObject::initClass(JSContext* cx, JSObject* obj)
 
         RootedId iteratorId(cx, SYMBOL_TO_JSID(cx->wellKnownSymbols().iterator));
         if (!JS_DefinePropertyById(cx, proto, iteratorId, funval, 0))
+            return nullptr;
+
+        // Define Set.prototype[@@toStringTag].
+        if (!DefineToStringTag(cx, proto, cx->names().Set))
             return nullptr;
     }
     return proto;
@@ -1115,6 +1136,7 @@ SetObject::mark(JSTracer* trc, JSObject* obj)
 void
 SetObject::finalize(FreeOp* fop, JSObject* obj)
 {
+    MOZ_ASSERT(fop->onMainThread());
     SetObject* setobj = static_cast<SetObject*>(obj);
     if (ValueSet* set = setobj->getData())
         fop->delete_(set);

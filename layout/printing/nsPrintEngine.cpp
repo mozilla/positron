@@ -1218,10 +1218,10 @@ nsPrintEngine::GetDocumentTitleAndURL(nsIDocument* aDoc,
   if (!exposableURI) return;
 
   nsAutoCString urlCStr;
-  exposableURI->GetSpec(urlCStr);
+  nsresult rv = exposableURI->GetSpec(urlCStr);
+  if (NS_FAILED(rv)) return;
 
-  nsresult rv;
-  nsCOMPtr<nsITextToSubURI> textToSubURI = 
+  nsCOMPtr<nsITextToSubURI> textToSubURI =
     do_GetService(NS_ITEXTTOSUBURI_CONTRACTID, &rv);
   if (NS_FAILED(rv)) return;
 
@@ -1872,8 +1872,6 @@ nsPrintEngine::OnStateChange(nsIWebProgress* aWebProgress,
     return NS_OK;
   }
   if (aStateFlags & STATE_START) {
-    nsCOMPtr<nsIChannel> channel = do_QueryInterface(aRequest);
-
     ++mLoadCounter;
   } else if (aStateFlags & STATE_STOP) {
     mDidLoadDataForPrinting = true;
@@ -3385,7 +3383,7 @@ nsPrintEngine::TurnScriptingOn(bool aDoTurnOn)
 
     if (nsCOMPtr<nsPIDOMWindowInner> window = doc->GetInnerWindow()) {
       nsCOMPtr<nsIGlobalObject> go = do_QueryInterface(window);
-      NS_WARN_IF_FALSE(go && go->GetGlobalJSObject(), "Can't get global");
+      NS_WARNING_ASSERTION(go && go->GetGlobalJSObject(), "Can't get global");
       nsresult propThere = NS_PROPTABLE_PROP_NOT_THERE;
       doc->GetProperty(nsGkAtoms::scriptEnabledBeforePrintOrPreview,
                        &propThere);
@@ -3560,6 +3558,26 @@ nsPrintEngine::FirePrintCompletionEvent()
   nsCOMPtr<nsIRunnable> event = new nsPrintCompletionEvent(mDocViewerPrint);
   if (NS_FAILED(NS_DispatchToCurrentThread(event)))
     NS_WARNING("failed to dispatch print completion event");
+}
+
+bool
+nsPrintEngine::MayHavePluginFrames()
+{
+  nsPrintData* prt = mPrt;
+  if (!mPrt) {
+    prt = mPrtPreview;
+    if (!prt) {
+      prt = mOldPrtPreview;
+    }
+  }
+  if (prt) {
+    for (uint32_t i = 0; i < prt->mPrintDocList.Length(); ++i) {
+      if (prt->mPrintDocList[i]->MayHavePluginFrames()) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 //---------------------------------------------------------------

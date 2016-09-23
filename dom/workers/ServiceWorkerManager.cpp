@@ -45,10 +45,11 @@
 #include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/Request.h"
 #include "mozilla/dom/RootedDictionary.h"
+#include "mozilla/dom/TypedArray.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/EnumSet.h"
 
 #include "nsContentPolicyUtils.h"
@@ -80,10 +81,6 @@
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
 #include "WorkerScope.h"
-
-#ifndef MOZ_SIMPLEPUSH
-#include "mozilla/dom/TypedArray.h"
-#endif
 
 #ifdef PostMessage
 #undef PostMessage
@@ -201,7 +198,7 @@ public:
     MOZ_ASSERT(mActor);
   }
 
-  NS_IMETHODIMP Run() override
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(mActor);
     mActor->SendShutdown();
@@ -654,8 +651,8 @@ public:
     : mWindow(aWindow), mPromise(aPromise)
   {}
 
-  NS_IMETHODIMP
-  Run()
+  NS_IMETHOD
+  Run() override
   {
     RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
 
@@ -696,6 +693,12 @@ public:
     }
 
     for (uint32_t i = 0; i < data->mOrderedScopes.Length(); ++i) {
+      RefPtr<ServiceWorkerRegistrationInfo> info =
+        data->mInfos.GetWeak(data->mOrderedScopes[i]);
+      if (info->mPendingUninstall) {
+        continue;
+      }
+
       NS_ConvertUTF8toUTF16 scope(data->mOrderedScopes[i]);
 
       nsCOMPtr<nsIURI> scopeURI;
@@ -772,8 +775,8 @@ public:
     : mWindow(aWindow), mPromise(aPromise), mDocumentURL(aDocumentURL)
   {}
 
-  NS_IMETHODIMP
-  Run()
+  NS_IMETHOD
+  Run() override
   {
     RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
 
@@ -813,7 +816,7 @@ public:
       swm->GetServiceWorkerRegistrationInfo(principal, uri);
 
     if (!registration) {
-      mPromise->MaybeResolve(JS::UndefinedHandleValue);
+      mPromise->MaybeResolveWithUndefined();
       return NS_OK;
     }
 
@@ -872,8 +875,8 @@ public:
     : mWindow(aWindow), mPromise(aPromise)
   {}
 
-  NS_IMETHODIMP
-  Run()
+  NS_IMETHOD
+  Run() override
   {
     RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
 
@@ -921,9 +924,6 @@ ServiceWorkerManager::SendPushEvent(const nsACString& aOriginAttributes,
                                     const nsAString& aMessageId,
                                     const Maybe<nsTArray<uint8_t>>& aData)
 {
-#ifdef MOZ_SIMPLEPUSH
-  return NS_ERROR_NOT_AVAILABLE;
-#else
   PrincipalOriginAttributes attrs;
   if (!attrs.PopulateFromSuffix(aOriginAttributes)) {
     return NS_ERROR_INVALID_ARG;
@@ -939,16 +939,12 @@ ServiceWorkerManager::SendPushEvent(const nsACString& aOriginAttributes,
 
   return serviceWorker->WorkerPrivate()->SendPushEvent(aMessageId, aData,
                                                        registration);
-#endif // MOZ_SIMPLEPUSH
 }
 
 NS_IMETHODIMP
 ServiceWorkerManager::SendPushSubscriptionChangeEvent(const nsACString& aOriginAttributes,
                                                       const nsACString& aScope)
 {
-#ifdef MOZ_SIMPLEPUSH
-  return NS_ERROR_NOT_AVAILABLE;
-#else
   PrincipalOriginAttributes attrs;
   if (!attrs.PopulateFromSuffix(aOriginAttributes)) {
     return NS_ERROR_INVALID_ARG;
@@ -959,7 +955,6 @@ ServiceWorkerManager::SendPushSubscriptionChangeEvent(const nsACString& aOriginA
     return NS_ERROR_FAILURE;
   }
   return info->WorkerPrivate()->SendPushSubscriptionChangeEvent();
-#endif
 }
 
 nsresult
@@ -1304,9 +1299,16 @@ ServiceWorkerManager::WorkerIsIdle(ServiceWorkerInfo* aWorker)
     return;
   }
 
-  if (reg->GetActive() == aWorker) {
-    reg->TryToActivateAsync();
+  if (reg->GetActive() != aWorker) {
+    return;
   }
+
+  if (!reg->IsControllingDocuments() && reg->mPendingUninstall) {
+    RemoveRegistration(reg);
+    return;
+  }
+
+  reg->TryToActivateAsync();
 }
 
 already_AddRefed<ServiceWorkerJobQueue>
@@ -1537,6 +1539,98 @@ ServiceWorkerManager::LocalizeAndReportToAllClients(
   } else {
     NS_WARNING("Failed to format and therefore report localized error.");
   }
+}
+
+void
+ServiceWorkerManager::FlushReportsToAllClients(const nsACString& aScope,
+                                               nsIConsoleReportCollector* aReporter)
+{
+  AutoTArray<uint64_t, 16> windows;
+
+  // Report errors to every controlled document.
+  for (auto iter = mControlledDocuments.Iter(); !iter.Done(); iter.Next()) {
+    ServiceWorkerRegistrationInfo* reg = iter.UserData();
+    MOZ_ASSERT(reg);
+    if (!reg->mScope.Equals(aScope)) {
+      continue;
+    }
+
+    nsCOMPtr<nsIDocument> doc = do_QueryInterface(iter.Key());
+    if (!doc || !doc->IsCurrentActiveDocument() || !doc->GetWindow()) {
+      continue;
+    }
+
+    windows.AppendElement(doc->InnerWindowID());
+
+    aReporter->FlushConsoleReports(doc,
+                                   nsIConsoleReportCollector::ReportAction::Save);
+  }
+
+  // Report to any documents that have called .register() for this scope.  They
+  // may not be controlled, but will still want to see error reports.
+  WeakDocumentList* regList = mRegisteringDocuments.Get(aScope);
+  if (regList) {
+    for (int32_t i = regList->Length() - 1; i >= 0; --i) {
+      nsCOMPtr<nsIDocument> doc = do_QueryReferent(regList->ElementAt(i));
+      if (!doc) {
+        regList->RemoveElementAt(i);
+        continue;
+      }
+
+      if (!doc->IsCurrentActiveDocument()) {
+        continue;
+      }
+
+      uint64_t innerWindowId = doc->InnerWindowID();
+      if (windows.Contains(innerWindowId)) {
+        continue;
+      }
+
+      windows.AppendElement(innerWindowId);
+
+      aReporter->FlushConsoleReports(doc,
+                                     nsIConsoleReportCollector::ReportAction::Save);
+    }
+
+    if (regList->IsEmpty()) {
+      regList = nullptr;
+      nsAutoPtr<WeakDocumentList> doomed;
+      mRegisteringDocuments.RemoveAndForget(aScope, doomed);
+    }
+  }
+
+  nsresult rv;
+  InterceptionList* intList = mNavigationInterceptions.Get(aScope);
+  if (intList) {
+    for (uint32_t i = 0; i < intList->Length(); ++i) {
+      nsCOMPtr<nsIInterceptedChannel> channel = intList->ElementAt(i);
+
+      nsCOMPtr<nsIChannel> inner;
+      rv = channel->GetChannel(getter_AddRefs(inner));
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        continue;
+      }
+
+      uint64_t innerWindowId = nsContentUtils::GetInnerWindowID(inner);
+      if (innerWindowId == 0 || windows.Contains(innerWindowId)) {
+        continue;
+      }
+
+      windows.AppendElement(innerWindowId);
+
+      aReporter->FlushReportsByWindowId(innerWindowId,
+                                        nsIConsoleReportCollector::ReportAction::Save);
+    }
+  }
+
+  // If there are no documents to report to, at least report something to the
+  // browser console.
+  if (windows.IsEmpty()) {
+    aReporter->FlushConsoleReports((nsIDocument*)nullptr);
+    return;
+  }
+
+  aReporter->ClearConsoleReports();
 }
 
 void
@@ -2001,17 +2095,20 @@ void
 ServiceWorkerManager::StopControllingADocument(ServiceWorkerRegistrationInfo* aRegistration)
 {
   aRegistration->StopControllingADocument();
-  if (!aRegistration->IsControllingDocuments()) {
-    if (aRegistration->mPendingUninstall) {
-      RemoveRegistration(aRegistration);
-    } else {
-      // We use to aggressively terminate the worker at this point, but it
-      // caused problems.  There are more uses for a service worker than actively
-      // controlled documents.  We need to let the worker naturally terminate
-      // in case its handling push events, message events, etc.
-      aRegistration->TryToActivateAsync();
-    }
+  if (aRegistration->IsControllingDocuments() || !aRegistration->IsIdle()) {
+    return;
   }
+
+  if (aRegistration->mPendingUninstall) {
+    RemoveRegistration(aRegistration);
+    return;
+  }
+
+  // We use to aggressively terminate the worker at this point, but it
+  // caused problems.  There are more uses for a service worker than actively
+  // controlled documents.  We need to let the worker naturally terminate
+  // in case its handling push events, message events, etc.
+  aRegistration->TryToActivateAsync();
 }
 
 NS_IMETHODIMP
@@ -2190,7 +2287,8 @@ public:
     AssertIsOnMainThread();
     NS_WARNING("Unexpected error while dispatching fetch event!");
     DebugOnly<nsresult> rv = mChannel->ResetInterception();
-    NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "Failed to resume intercepted network request");
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                         "Failed to resume intercepted network request");
   }
 
   NS_IMETHOD

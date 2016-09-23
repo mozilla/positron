@@ -87,7 +87,7 @@ const PROP_JSON_FIELDS = ["id", "syncGUID", "location", "version", "type",
                           "softDisabled", "foreignInstall", "hasBinaryComponents",
                           "strictCompatibility", "locales", "targetApplications",
                           "targetPlatforms", "multiprocessCompatible", "signedState",
-                          "seen", "dependencies"];
+                          "seen", "dependencies", "hasEmbeddedWebExtension"];
 
 // Properties that should be migrated where possible from an old database. These
 // shouldn't include properties that can be read directly from install.rdf files
@@ -2038,14 +2038,10 @@ this.XPIDatabaseReconcile = {
     let addons = currentAddons.get(KEY_APP_SYSTEM_ADDONS) || new Map();
 
     let hideLocation;
-    if (systemAddonLocation.isActive() && systemAddonLocation.isValid(addons)) {
-      // Hide the system add-on defaults
-      logger.info("Hiding the default system add-ons.");
-      hideLocation = KEY_APP_SYSTEM_DEFAULTS;
-    }
-    else {
-      // Hide the system add-on updates
-      logger.info("Hiding the updated system add-ons.");
+
+    if (!systemAddonLocation.isValid(addons)) {
+      // Hide the system add-on updates if any are invalid.
+      logger.info("One or more updated system add-ons invalid, falling back to defaults.");
       hideLocation = KEY_APP_SYSTEM_ADDONS;
     }
 
@@ -2160,6 +2156,7 @@ this.XPIDatabaseReconcile = {
           multiprocessCompatible: currentAddon.multiprocessCompatible,
           runInSafeMode: canRunInSafeMode(currentAddon),
           dependencies: currentAddon.dependencies,
+          hasEmbeddedWebExtension: currentAddon.hasEmbeddedWebExtension,
         };
       }
 

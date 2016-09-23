@@ -10,6 +10,7 @@
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/RuleNodeCacheConditions.h"
 #include "mozilla/StyleAnimationValue.h"
+#include "mozilla/Tuple.h"
 #include "mozilla/UniquePtr.h"
 #include "nsStyleTransformMatrix.h"
 #include "nsAutoPtr.h"
@@ -33,6 +34,7 @@
 #include "gfx2DGlue.h"
 
 using namespace mozilla;
+using namespace mozilla::css;
 using namespace mozilla::gfx;
 
 // HELPER METHODS
@@ -53,7 +55,7 @@ using namespace mozilla::gfx;
  */
 static
 StyleAnimationValue::Unit
-GetCommonUnit(nsCSSProperty aProperty,
+GetCommonUnit(nsCSSPropertyID aProperty,
               StyleAnimationValue::Unit aFirstUnit,
               StyleAnimationValue::Unit aSecondUnit)
 {
@@ -68,6 +70,15 @@ GetCommonUnit(nsCSSProperty aProperty,
       // We can use calc() as the common unit.
       return StyleAnimationValue::eUnit_Calc;
     }
+    if ((aFirstUnit == StyleAnimationValue::eUnit_Color ||
+         aFirstUnit == StyleAnimationValue::eUnit_CurrentColor ||
+         aFirstUnit == StyleAnimationValue::eUnit_ComplexColor) &&
+        (aSecondUnit == StyleAnimationValue::eUnit_Color ||
+         aSecondUnit == StyleAnimationValue::eUnit_CurrentColor ||
+         aSecondUnit == StyleAnimationValue::eUnit_ComplexColor)) {
+      // We can use complex color as the common unit.
+      return StyleAnimationValue::eUnit_ComplexColor;
+    }
     return StyleAnimationValue::eUnit_Null;
   }
   return aFirstUnit;
@@ -75,7 +86,7 @@ GetCommonUnit(nsCSSProperty aProperty,
 
 static
 nsCSSUnit
-GetCommonUnit(nsCSSProperty aProperty,
+GetCommonUnit(nsCSSPropertyID aProperty,
               nsCSSUnit aFirstUnit,
               nsCSSUnit aSecondUnit)
 {
@@ -291,9 +302,13 @@ FragmentOrURLToURLValue(FragmentOrURL* aUrl, nsIDocument* aDoc)
   nsString path;
   aUrl->GetSourceString(path);
   RefPtr<nsStringBuffer> uriStringBuffer = nsCSSValue::BufferFromString(path);
+  // XXXheycam We should store URLValue objects inside FragmentOrURLs so that
+  // we can extract the original base URI, referrer and principal to pass in
+  // here.
   RefPtr<mozilla::css::URLValue> result =
     new mozilla::css::URLValue(aUrl->GetSourceURL(), uriStringBuffer,
-                               aDoc->GetDocumentURI(), aDoc->NodePrincipal());
+                               aUrl->GetSourceURL(), aDoc->GetDocumentURI(),
+                               aDoc->NodePrincipal());
 
   return result.forget();
 }
@@ -482,8 +497,79 @@ CalcPositionCoordSquareDistance(const nsCSSValue& aPos1,
 // CLASS METHODS
 // -------------
 
+static RGBAColorData
+ExtractColor(const nsCSSValue& aValue)
+{
+  MOZ_ASSERT(aValue.IsNumericColorUnit(), "The unit should be color");
+  // PercentageRGBColor and PercentageRGBAColor component value might be
+  // greater than 1.0 in case when the color value is accumulated, so we
+  // can't use nsCSSValue::GetColorValue() here because that function
+  // clamps its values.
+  if (aValue.GetUnit() == eCSSUnit_PercentageRGBColor ||
+      aValue.GetUnit() == eCSSUnit_PercentageRGBAColor) {
+    nsCSSValueFloatColor* floatColor = aValue.GetFloatColorValue();
+    return {
+      floatColor->Comp1(),
+      floatColor->Comp2(),
+      floatColor->Comp3(),
+      floatColor->Alpha()
+    };
+  }
+  return RGBAColorData(aValue.GetColorValue());
+}
+
+static RGBAColorData
+ExtractColor(const StyleAnimationValue& aValue)
+{
+  MOZ_ASSERT(aValue.GetUnit() == StyleAnimationValue::eUnit_Color);
+  nsCSSValue* value = aValue.GetCSSValueValue();
+  MOZ_ASSERT(value, "CSS value must be valid");
+  return ExtractColor(*value);
+}
+
+static ComplexColorData
+ExtractComplexColor(const StyleAnimationValue& aValue)
+{
+  switch (aValue.GetUnit()) {
+    case StyleAnimationValue::eUnit_Color:
+      return ComplexColorData(ExtractColor(aValue), 0.0f);
+    case StyleAnimationValue::eUnit_CurrentColor:
+      return ComplexColorData({0, 0, 0, 0}, 1.0f);
+    case StyleAnimationValue::eUnit_ComplexColor:
+      return ComplexColorData(aValue.GetComplexColorData());
+    default:
+      MOZ_ASSERT_UNREACHABLE("Unknown unit");
+      return ComplexColorData({0, 0, 0, 0}, 0.0f);
+  }
+}
+
+double
+StyleAnimationValue::ComputeColorDistance(const RGBAColorData& aStartColor,
+                                          const RGBAColorData& aEndColor)
+{
+  // http://www.w3.org/TR/smil-animation/#animateColorElement says
+  // that we should use Euclidean RGB cube distance.  However, we
+  // have to extend that to RGBA.  For now, we'll just use the
+  // Euclidean distance in the (part of the) 4-cube of premultiplied
+  // colors.
+  double startA = aStartColor.mA;
+  double startR = aStartColor.mR * startA;
+  double startG = aStartColor.mG * startA;
+  double startB = aStartColor.mB * startA;
+  double endA = aEndColor.mA;
+  double endR = aEndColor.mR * endA;
+  double endG = aEndColor.mG * endA;
+  double endB = aEndColor.mB * endA;
+
+  double diffA = startA - endA;
+  double diffR = startR - endR;
+  double diffG = startG - endG;
+  double diffB = startB - endB;
+  return sqrt(diffA * diffA + diffR * diffR + diffG * diffG + diffB * diffB);
+}
+
 bool
-StyleAnimationValue::ComputeDistance(nsCSSProperty aProperty,
+StyleAnimationValue::ComputeDistance(nsCSSPropertyID aProperty,
                                      const StyleAnimationValue& aStartValue,
                                      const StyleAnimationValue& aEndValue,
                                      double& aDistance)
@@ -498,7 +584,7 @@ StyleAnimationValue::ComputeDistance(nsCSSProperty aProperty,
     case eUnit_Normal:
     case eUnit_UnparsedString:
     case eUnit_URL:
-    case eUnit_CurrentColor:
+    case eUnit_DiscreteCSSValue:
       return false;
 
     case eUnit_Enumerated:
@@ -552,40 +638,33 @@ StyleAnimationValue::ComputeDistance(nsCSSProperty aProperty,
       return true;
     }
     case eUnit_Color: {
-      // http://www.w3.org/TR/smil-animation/#animateColorElement says
-      // that we should use Euclidean RGB cube distance.  However, we
-      // have to extend that to RGBA.  For now, we'll just use the
-      // Euclidean distance in the (part of the) 4-cube of premultiplied
-      // colors.
-      // FIXME (spec): The CSS transitions spec doesn't say whether
-      // colors are premultiplied, but things work better when they are,
-      // so use premultiplication.  Spec issue is still open per
-      // http://lists.w3.org/Archives/Public/www-style/2009Jul/0050.html
-      nscolor startColor = aStartValue.GetColorValue();
-      nscolor endColor = aEndValue.GetColorValue();
-
-      // Get a color component on a 0-1 scale, which is much easier to
-      // deal with when working with alpha.
-      #define GET_COMPONENT(component_, color_) \
-        (NS_GET_##component_(color_) * (1.0 / 255.0))
-
-      double startA = GET_COMPONENT(A, startColor);
-      double startR = GET_COMPONENT(R, startColor) * startA;
-      double startG = GET_COMPONENT(G, startColor) * startA;
-      double startB = GET_COMPONENT(B, startColor) * startA;
-      double endA = GET_COMPONENT(A, endColor);
-      double endR = GET_COMPONENT(R, endColor) * endA;
-      double endG = GET_COMPONENT(G, endColor) * endA;
-      double endB = GET_COMPONENT(B, endColor) * endA;
-
-      #undef GET_COMPONENT
-
-      double diffA = startA - endA;
-      double diffR = startR - endR;
-      double diffG = startG - endG;
-      double diffB = startB - endB;
-      aDistance = sqrt(diffA * diffA + diffR * diffR +
-                       diffG * diffG + diffB * diffB);
+      aDistance = ComputeColorDistance(ExtractColor(aStartValue),
+                                       ExtractColor(aEndValue));
+      return true;
+    }
+    case eUnit_CurrentColor: {
+      aDistance = 0;
+      return true;
+    }
+    case eUnit_ComplexColor: {
+      ComplexColorData color1 = ExtractComplexColor(aStartValue);
+      ComplexColorData color2 = ExtractComplexColor(aEndValue);
+      // Common case is interpolating between a color and a currentcolor
+      if (color1.IsNumericColor() && color2.IsCurrentColor()) {
+        double dist = ComputeColorDistance(color1.mColor, NS_RGBA(0, 0, 0, 0));
+        aDistance = sqrt(dist * dist + 1);
+        return true;
+      }
+      if (color1.IsCurrentColor() && color2.IsNumericColor()) {
+        double dist = ComputeColorDistance(NS_RGBA(0, 0, 0, 0), color2.mColor);
+        aDistance = sqrt(dist * dist + 1);
+        return true;
+      }
+      // If we ever reach here, we may want to use the code in
+      // bug 1299741 comment 79 to compute it.
+      MOZ_ASSERT_UNREACHABLE("We shouldn't get here as we only call "
+                             "ComputeDistance on pre-interpolation values");
+      aDistance = 0.0;
       return true;
     }
     case eUnit_Calc: {
@@ -842,19 +921,8 @@ StyleAnimationValue::ComputeDistance(nsCSSProperty aProperty,
 #endif
 
         if (color1.GetUnit() != eCSSUnit_Null) {
-          StyleAnimationValue color1Value
-            (color1.GetColorValue(), StyleAnimationValue::ColorConstructor);
-          StyleAnimationValue color2Value
-            (color2.GetColorValue(), StyleAnimationValue::ColorConstructor);
-          double colorDistance;
-
-        #ifdef DEBUG
-          bool ok =
-        #endif
-            StyleAnimationValue::ComputeDistance(eCSSProperty_color,
-                                                 color1Value, color2Value,
-                                                 colorDistance);
-          MOZ_ASSERT(ok, "should not fail");
+          double colorDistance = ComputeColorDistance(color1.GetColorValue(),
+                                                      color2.GetColorValue());
           squareDistance += colorDistance * colorDistance;
         }
 
@@ -956,17 +1024,6 @@ StyleAnimationValue::ComputeDistance(nsCSSProperty aProperty,
   return false;
 }
 
-#define MAX_PACKED_COLOR_COMPONENT 255
-
-inline uint8_t ClampColor(double aColor)
-{
-  if (aColor >= MAX_PACKED_COLOR_COMPONENT)
-    return MAX_PACKED_COLOR_COMPONENT;
-  if (aColor <= 0.0)
-    return 0;
-  return NSToIntRound(aColor);
-}
-
 // Ensure that a float/double value isn't NaN by returning zero instead
 // (NaN doesn't have a sign) as a general restriction for floating point
 // values in RestrictValue.
@@ -1017,7 +1074,7 @@ RestrictValue(uint32_t aRestrictions, T aValue)
 
 template <typename T>
 T
-RestrictValue(nsCSSProperty aProperty, T aValue)
+RestrictValue(nsCSSPropertyID aProperty, T aValue)
 {
   return RestrictValue(nsCSSProps::ValueRestrictions(aProperty), aValue);
 }
@@ -1159,10 +1216,81 @@ AddCSSValuePercentNumber(const uint32_t aValueRestrictions,
                         eCSSUnit_Number);
 }
 
-static bool
-AddShadowItems(double aCoeff1, const nsCSSValue &aValue1,
-               double aCoeff2, const nsCSSValue &aValue2,
-               nsCSSValueList **&aResultTail)
+enum class ColorAdditionType {
+  Clamped, // Clamp each color channel after adding.
+  Unclamped // Do not clamp color channels after adding.
+};
+
+// Unclamped AddWeightedColors.
+static RGBAColorData
+AddWeightedColors(double aCoeff1, const RGBAColorData& aValue1,
+                  double aCoeff2, const RGBAColorData& aValue2)
+{
+  float factor1 = aValue1.mA * aCoeff1;
+  float factor2 = aValue2.mA * aCoeff2;
+  float resultA = factor1 + factor2;
+  if (resultA <= 0.0) {
+    return {0, 0, 0, 0};
+  }
+
+  if (resultA > 1.0) {
+    resultA = 1.0;
+  }
+
+  float resultFactor = 1.0f / resultA;
+  return RGBAColorData(
+    (aValue1.mR * factor1 + aValue2.mR * factor2) * resultFactor,
+    (aValue1.mG * factor1 + aValue2.mG * factor2) * resultFactor,
+    (aValue1.mB * factor1 + aValue2.mB * factor2) * resultFactor,
+    resultA);
+}
+
+// Multiplies |aValue| color by |aDilutionRation|.
+static nscolor
+DiluteColor(const RGBAColorData& aValue, double aDilutionRatio)
+{
+  MOZ_ASSERT(aDilutionRatio >= 0.0 && aDilutionRatio <= 1.0,
+             "Dilution ratio should be in [0, 1]");
+  float resultA = aValue.mA * aDilutionRatio;
+  return resultA <= 0.0 ? NS_RGBA(0, 0, 0, 0)
+                        : aValue.WithAlpha(resultA).ToColor();
+}
+
+// Clamped AddWeightedColors.
+static nscolor
+AddWeightedColorsAndClamp(double aCoeff1, const RGBAColorData& aValue1,
+                          double aCoeff2, const RGBAColorData& aValue2)
+{
+  // We are using AddWeighted() with a zero aCoeff2 for colors to
+  // pretend AddWeighted() against transparent color, i.e. rgba(0, 0, 0, 0).
+  // But unpremultiplication in AddWeightedColors() does not work well
+  // for such cases, so we use another function named DiluteColor() which
+  // has a similar logic to AddWeightedColors().
+  return aCoeff2 == 0.0
+    ? DiluteColor(aValue1, aCoeff1)
+    : AddWeightedColors(aCoeff1, aValue1, aCoeff2, aValue2).ToColor();
+}
+
+void
+AppendToCSSValueList(UniquePtr<nsCSSValueList>& aHead,
+                     UniquePtr<nsCSSValueList>&& aValueToAppend,
+                     nsCSSValueList** aTail)
+{
+  MOZ_ASSERT(!aHead == !*aTail,
+             "Can't have head w/o tail, & vice versa");
+
+  if (!aHead) {
+    aHead = Move(aValueToAppend);
+    *aTail = aHead.get();
+  } else {
+    (*aTail) = (*aTail)->mNext = aValueToAppend.release();
+  }
+}
+
+static UniquePtr<nsCSSValueList>
+AddWeightedShadowItems(double aCoeff1, const nsCSSValue &aValue1,
+                       double aCoeff2, const nsCSSValue &aValue2,
+                       ColorAdditionType aColorAdditionType)
 {
   // X, Y, Radius, Spread, Color, Inset
   MOZ_ASSERT(aValue1.GetUnit() == eCSSUnit_Array,
@@ -1180,42 +1308,39 @@ AddShadowItems(double aCoeff1, const nsCSSValue &aValue1,
                      (i == 2) ? CSS_PROPERTY_VALUE_NONNEGATIVE : 0);
   }
 
-  const nsCSSValue& color1 = array1->Item(4);
-  const nsCSSValue& color2 = array2->Item(4);
+  const nsCSSValue& colorValue1 = array1->Item(4);
+  const nsCSSValue& colorValue2 = array2->Item(4);
   const nsCSSValue& inset1 = array1->Item(5);
   const nsCSSValue& inset2 = array2->Item(5);
-  if (color1.GetUnit() != color2.GetUnit() ||
+  if ((colorValue1.GetUnit() != colorValue2.GetUnit() &&
+       (!colorValue1.IsNumericColorUnit() ||
+        !colorValue2.IsNumericColorUnit())) ||
       inset1.GetUnit() != inset2.GetUnit()) {
     // We don't know how to animate between color and no-color, or
     // between inset and not-inset.
-    return false;
+    // NOTE: In case when both colors' units are eCSSUnit_Null, that means
+    // neither color value was specified, so we can interpolate.
+    return nullptr;
   }
 
-  if (color1.GetUnit() != eCSSUnit_Null) {
-    StyleAnimationValue color1Value
-      (color1.GetColorValue(), StyleAnimationValue::ColorConstructor);
-    StyleAnimationValue color2Value
-      (color2.GetColorValue(), StyleAnimationValue::ColorConstructor);
-    StyleAnimationValue resultColorValue;
-  #ifdef DEBUG
-    bool ok =
-  #endif
-      StyleAnimationValue::AddWeighted(eCSSProperty_color,
-                                       aCoeff1, color1Value,
-                                       aCoeff2, color2Value,
-                                       resultColorValue);
-    MOZ_ASSERT(ok, "should not fail");
-    resultArray->Item(4).SetColorValue(resultColorValue.GetColorValue());
+  if (colorValue1.GetUnit() != eCSSUnit_Null) {
+    RGBAColorData color1 = ExtractColor(colorValue1);
+    RGBAColorData color2 = ExtractColor(colorValue2);
+    if (aColorAdditionType == ColorAdditionType::Clamped) {
+      resultArray->Item(4).SetColorValue(
+        AddWeightedColorsAndClamp(aCoeff1, color1, aCoeff2, color2));
+    } else {
+      resultArray->Item(4).SetRGBAColorValue(
+        AddWeightedColors(aCoeff1, color1, aCoeff2, color2));
+    }
   }
 
   MOZ_ASSERT(inset1 == inset2, "should match");
   resultArray->Item(5) = inset1;
 
-  nsCSSValueList *resultItem = new nsCSSValueList;
+  auto resultItem = MakeUnique<nsCSSValueList>();
   resultItem->mValue.SetArrayValue(resultArray, eCSSUnit_Array);
-  *aResultTail = resultItem;
-  aResultTail = &resultItem->mNext;
-  return true;
+  return resultItem;
 }
 
 static void
@@ -1675,13 +1800,13 @@ TransformFunctionsMatch(nsCSSKeyword func1, nsCSSKeyword func2)
   return ToPrimitive(func1) == ToPrimitive(func2);
 }
 
-static bool
-AddFilterFunctionImpl(double aCoeff1, const nsCSSValueList* aList1,
-                      double aCoeff2, const nsCSSValueList* aList2,
-                      nsCSSValueList**& aResultTail)
+static UniquePtr<nsCSSValueList>
+AddWeightedFilterFunctionImpl(double aCoeff1, const nsCSSValueList* aList1,
+                              double aCoeff2, const nsCSSValueList* aList2,
+                              ColorAdditionType aColorAdditionType)
 {
-  // AddFilterFunction should be our only caller, and it should ensure that both
-  // args are non-null.
+  // AddWeightedFilterFunction should be our only caller, and it should ensure
+  // that both args are non-null.
   MOZ_ASSERT(aList1, "expected filter list");
   MOZ_ASSERT(aList2, "expected filter list");
   MOZ_ASSERT(aList1->mValue.GetUnit() == eCSSUnit_Function,
@@ -1691,12 +1816,13 @@ AddFilterFunctionImpl(double aCoeff1, const nsCSSValueList* aList1,
   RefPtr<nsCSSValue::Array> a1 = aList1->mValue.GetArrayValue(),
                               a2 = aList2->mValue.GetArrayValue();
   nsCSSKeyword filterFunction = a1->Item(0).GetKeywordValue();
-  if (filterFunction != a2->Item(0).GetKeywordValue())
-    return false; // Can't add two filters of different types.
+  if (filterFunction != a2->Item(0).GetKeywordValue()) {
+    return nullptr; // Can't add two filters of different types.
+  }
 
-  nsAutoPtr<nsCSSValueList> resultListEntry(new nsCSSValueList);
+  auto resultList = MakeUnique<nsCSSValueList>();
   nsCSSValue::Array* result =
-    resultListEntry->mValue.InitFunction(filterFunction, 1);
+    resultList->mValue.InitFunction(filterFunction, 1);
 
   // "hue-rotate" is the only filter-function that accepts negative values, and
   // we don't use this "restrictions" variable in its clause below.
@@ -1719,7 +1845,7 @@ AddFilterFunctionImpl(double aCoeff1, const nsCSSValueList* aList1,
                                        aCoeff1, funcArg1,
                                        aCoeff2, funcArg2,
                                        resultArg)) {
-        return false;
+        return nullptr;
       }
       break;
     }
@@ -1744,51 +1870,52 @@ AddFilterFunctionImpl(double aCoeff1, const nsCSSValueList* aList1,
                        resultArg);
       break;
     case eCSSKeyword_drop_shadow: {
-      nsCSSValueList* resultShadow = resultArg.SetListValue();
-      nsAutoPtr<nsCSSValueList> shadowValue;
-      nsCSSValueList **shadowTail = getter_Transfers(shadowValue);
       MOZ_ASSERT(!funcArg1.GetListValue()->mNext &&
                  !funcArg2.GetListValue()->mNext,
                  "drop-shadow filter func doesn't support lists");
-      if (!AddShadowItems(aCoeff1, funcArg1.GetListValue()->mValue,
-                          aCoeff2, funcArg2.GetListValue()->mValue,
-                          shadowTail)) {
-        return false;
+      UniquePtr<nsCSSValueList> shadowValue =
+        AddWeightedShadowItems(aCoeff1,
+                               funcArg1.GetListValue()->mValue,
+                               aCoeff2,
+                               funcArg2.GetListValue()->mValue,
+                               aColorAdditionType);
+      if (!shadowValue) {
+        return nullptr;
       }
-      *resultShadow = *shadowValue;
+      resultArg.AdoptListValue(Move(shadowValue));
       break;
     }
     default:
       MOZ_ASSERT(false, "unknown filter function");
-      return false;
+      return nullptr;
   }
 
-  *aResultTail = resultListEntry.forget();
-  aResultTail = &(*aResultTail)->mNext;
-
-  return true;
+  return resultList;
 }
 
-static bool
-AddFilterFunction(double aCoeff1, const nsCSSValueList* aList1,
-                  double aCoeff2, const nsCSSValueList* aList2,
-                  nsCSSValueList**& aResultTail)
+static UniquePtr<nsCSSValueList>
+AddWeightedFilterFunction(double aCoeff1, const nsCSSValueList* aList1,
+                          double aCoeff2, const nsCSSValueList* aList2,
+                          ColorAdditionType aColorAdditionType)
 {
   MOZ_ASSERT(aList1 || aList2,
              "one function list item must not be null");
   // Note that one of our arguments could be null, indicating that
   // it's the initial value. Rather than adding special null-handling
   // logic, we just check for null values and replace them with
-  // 0 * the other value. That way, AddFilterFunctionImpl can assume
+  // 0 * the other value. That way, AddWeightedFilterFunctionImpl can assume
   // its args are non-null.
   if (!aList1) {
-    return AddFilterFunctionImpl(aCoeff2, aList2, 0, aList2, aResultTail);
+    return AddWeightedFilterFunctionImpl(aCoeff2, aList2, 0, aList2,
+                                         aColorAdditionType);
   }
   if (!aList2) {
-    return AddFilterFunctionImpl(aCoeff1, aList1, 0, aList1, aResultTail);
+    return AddWeightedFilterFunctionImpl(aCoeff1, aList1, 0, aList1,
+                                         aColorAdditionType);
   }
 
-  return AddFilterFunctionImpl(aCoeff1, aList1, aCoeff2, aList2, aResultTail);
+  return AddWeightedFilterFunctionImpl(aCoeff1, aList1, aCoeff2, aList2,
+                                       aColorAdditionType);
 }
 
 static inline uint32_t
@@ -1839,7 +1966,7 @@ AddPositions(double aCoeff1, const nsCSSValue& aPos1,
 }
 
 static Maybe<nsCSSValuePair>
-AddCSSValuePair(nsCSSProperty aProperty, uint32_t aRestrictions,
+AddCSSValuePair(nsCSSPropertyID aProperty, uint32_t aRestrictions,
                 double aCoeff1, const nsCSSValuePair* aPair1,
                 double aCoeff2, const nsCSSValuePair* aPair2)
 {
@@ -1878,7 +2005,7 @@ AddCSSValuePair(nsCSSProperty aProperty, uint32_t aRestrictions,
 }
 
 static UniquePtr<nsCSSValuePairList>
-AddCSSValuePairList(nsCSSProperty aProperty,
+AddCSSValuePairList(nsCSSPropertyID aProperty,
                     double aCoeff1, const nsCSSValuePairList* aList1,
                     double aCoeff2, const nsCSSValuePairList* aList2)
 {
@@ -1930,7 +2057,7 @@ AddCSSValuePairList(nsCSSProperty aProperty,
 }
 
 static already_AddRefed<nsCSSValue::Array>
-AddShapeFunction(nsCSSProperty aProperty,
+AddShapeFunction(nsCSSPropertyID aProperty,
                  double aCoeff1, const nsCSSValue::Array* aArray1,
                  double aCoeff2, const nsCSSValue::Array* aArray2)
 {
@@ -1944,8 +2071,11 @@ AddShapeFunction(nsCSSProperty aProperty,
              "expected geometry-box");
   MOZ_ASSERT(aArray2->Item(1).GetUnit() == eCSSUnit_Enumerated,
              "expected geometry-box");
-  MOZ_ASSERT(aArray1->Item(1).GetIntValue() == aArray2->Item(1).GetIntValue(),
-             "expected matching geometry-box values");
+
+  if (aArray1->Item(1).GetIntValue() != aArray2->Item(1).GetIntValue()) {
+    return nullptr; // Both shapes must use the same reference box.
+  }
+
   const nsCSSValue::Array* func1 = aArray1->Item(0).GetArrayValue();
   const nsCSSValue::Array* func2 = aArray2->Item(0).GetArrayValue();
   nsCSSKeyword shapeFuncName = func1->Item(0).GetKeywordValue();
@@ -2243,8 +2373,100 @@ AddPositionCoords(double aCoeff1, const nsCSSValue& aPos1,
                            aCoeff2, v2, vr);
 }
 
+static UniquePtr<nsCSSValueList>
+AddWeightedShadowList(double aCoeff1,
+                      const nsCSSValueList* aShadow1,
+                      double aCoeff2,
+                      const nsCSSValueList* aShadow2,
+                      ColorAdditionType aColorAdditionType)
+{
+  // This is implemented according to:
+  // http://dev.w3.org/csswg/css3-transitions/#animation-of-property-types-
+  // and the third item in the summary of:
+  // http://lists.w3.org/Archives/Public/www-style/2009Jul/0050.html
+  UniquePtr<nsCSSValueList> result;
+  nsCSSValueList* tail = nullptr;
+  while (aShadow1 && aShadow2) {
+    UniquePtr<nsCSSValueList> shadowValue =
+      AddWeightedShadowItems(aCoeff1, aShadow1->mValue,
+                             aCoeff2, aShadow2->mValue,
+                             aColorAdditionType);
+    if (!shadowValue) {
+      return nullptr;
+    }
+    aShadow1 = aShadow1->mNext;
+    aShadow2 = aShadow2->mNext;
+    AppendToCSSValueList(result, Move(shadowValue), &tail);
+  }
+  if (aShadow1 || aShadow2) {
+    const nsCSSValueList *longShadow;
+    double longCoeff;
+    if (aShadow1) {
+      longShadow = aShadow1;
+      longCoeff = aCoeff1;
+    } else {
+      longShadow = aShadow2;
+      longCoeff = aCoeff2;
+    }
+
+    while (longShadow) {
+      // Passing coefficients that add to less than 1 produces the
+      // desired result of interpolating "0 0 0 transparent" with
+      // the current shadow.
+      UniquePtr<nsCSSValueList> shadowValue =
+        AddWeightedShadowItems(longCoeff, longShadow->mValue,
+                               0.0, longShadow->mValue,
+                               aColorAdditionType);
+      if (!shadowValue) {
+        return nullptr;
+      }
+
+      longShadow = longShadow->mNext;
+      AppendToCSSValueList(result, Move(shadowValue), &tail);
+    }
+  }
+  return result;
+}
+
+static UniquePtr<nsCSSValueList>
+AddWeightedFilterList(double aCoeff1, const nsCSSValueList* aList1,
+                      double aCoeff2, const nsCSSValueList* aList2,
+                      ColorAdditionType aColorAdditionType)
+{
+  UniquePtr<nsCSSValueList> result;
+  nsCSSValueList* tail = nullptr;
+  while (aList1 || aList2) {
+    if ((aList1 && aList1->mValue.GetUnit() != eCSSUnit_Function) ||
+        (aList2 && aList2->mValue.GetUnit() != eCSSUnit_Function)) {
+      // If we don't have filter-functions, we must have filter-URLs, which
+      // we can't add or interpolate.
+      return nullptr;
+    }
+
+    UniquePtr<nsCSSValueList> resultFunction =
+      AddWeightedFilterFunction(aCoeff1, aList1, aCoeff2, aList2,
+                                aColorAdditionType);
+    if (!resultFunction) {
+      // filter function mismatch
+      return nullptr;
+    }
+
+    AppendToCSSValueList(result, Move(resultFunction), &tail);
+
+    // move to next aList items
+    if (aList1) {
+      aList1 = aList1->mNext;
+    }
+    if (aList2) {
+      aList2 = aList2->mNext;
+    }
+  }
+
+  return result;
+}
+
 bool
-StyleAnimationValue::AddWeighted(nsCSSProperty aProperty,
+StyleAnimationValue::AddWeighted(nsCSSPropertyID aProperty,
                                  double aCoeff1,
                                  const StyleAnimationValue& aValue1,
                                  double aCoeff2,
@@ -2265,7 +2487,7 @@ StyleAnimationValue::AddWeighted(nsCSSProperty aProperty,
     case eUnit_Normal:
     case eUnit_UnparsedString:
     case eUnit_URL:
-    case eUnit_CurrentColor:
+    case eUnit_DiscreteCSSValue:
       return false;
 
     case eUnit_Enumerated:
@@ -2341,39 +2563,44 @@ StyleAnimationValue::AddWeighted(nsCSSProperty aProperty,
       return true;
     }
     case eUnit_Color: {
-      nscolor color1 = aValue1.GetColorValue();
-      nscolor color2 = aValue2.GetColorValue();
-      // FIXME (spec): The CSS transitions spec doesn't say whether
-      // colors are premultiplied, but things work better when they are,
-      // so use premultiplication.  Spec issue is still open per
-      // http://lists.w3.org/Archives/Public/www-style/2009Jul/0050.html
-
-      // To save some math, scale the alpha down to a 0-1 scale, but
-      // leave the color components on a 0-255 scale.
-      double A1 = NS_GET_A(color1) * (1.0 / 255.0);
-      double R1 = NS_GET_R(color1) * A1;
-      double G1 = NS_GET_G(color1) * A1;
-      double B1 = NS_GET_B(color1) * A1;
-      double A2 = NS_GET_A(color2) * (1.0 / 255.0);
-      double R2 = NS_GET_R(color2) * A2;
-      double G2 = NS_GET_G(color2) * A2;
-      double B2 = NS_GET_B(color2) * A2;
-      double Aresf = (A1 * aCoeff1 + A2 * aCoeff2);
-      nscolor resultColor;
-      if (Aresf <= 0.0) {
-        resultColor = NS_RGBA(0, 0, 0, 0);
+      RGBAColorData color1 = ExtractColor(aValue1);
+      RGBAColorData color2 = ExtractColor(aValue2);
+      auto resultColor = MakeUnique<nsCSSValue>();
+      resultColor->SetColorValue(
+        AddWeightedColorsAndClamp(aCoeff1, color1, aCoeff2, color2));
+      aResultValue.SetAndAdoptCSSValueValue(resultColor.release(), eUnit_Color);
+      return true;
+    }
+    case eUnit_CurrentColor: {
+      aResultValue.SetCurrentColorValue();
+      return true;
+    }
+    case eUnit_ComplexColor: {
+      ComplexColorData color1 = ExtractComplexColor(aValue1);
+      ComplexColorData color2 = ExtractComplexColor(aValue2);
+      RefPtr<ComplexColorValue> result = new ComplexColorValue;
+      // Common case is interpolating between a color and a currentcolor.
+      if (color1.IsNumericColor() && color2.IsCurrentColor()) {
+        result->mColor = color1.mColor;
+        result->mForegroundRatio = aCoeff2;
+      } else if (color1.IsCurrentColor() && color2.IsNumericColor()) {
+        result->mColor = color2.mColor;
+        result->mForegroundRatio = aCoeff1;
       } else {
-        if (Aresf > 1.0) {
-          Aresf = 1.0;
-        }
-        double factor = 1.0 / Aresf;
-        uint8_t Ares = NSToIntRound(Aresf * 255.0);
-        uint8_t Rres = ClampColor((R1 * aCoeff1 + R2 * aCoeff2) * factor);
-        uint8_t Gres = ClampColor((G1 * aCoeff1 + G2 * aCoeff2) * factor);
-        uint8_t Bres = ClampColor((B1 * aCoeff1 + B2 * aCoeff2) * factor);
-        resultColor = NS_RGBA(Rres, Gres, Bres, Ares);
+        float ratio1 = 1.0f - color1.mForegroundRatio;
+        float ratio2 = 1.0f - color2.mForegroundRatio;
+        float alpha1 = color1.mColor.mA * ratio1;
+        float alpha2 = color2.mColor.mA * ratio2;
+        RGBAColorData resultColor =
+          AddWeightedColors(aCoeff1, color1.mColor.WithAlpha(alpha1),
+                            aCoeff2, color2.mColor.WithAlpha(alpha2));
+        float resultRatio = color1.mForegroundRatio * aCoeff1 +
+                            color2.mForegroundRatio * aCoeff2;
+        float resultAlpha = resultColor.mA / (1.0f - resultRatio);
+        result->mColor = resultColor.WithAlpha(resultAlpha);
+        result->mForegroundRatio = resultRatio;
       }
-      aResultValue.SetColorValue(resultColor);
+      aResultValue.SetComplexColorValue(result.forget());
       return true;
     }
     case eUnit_Calc: {
@@ -2555,48 +2782,16 @@ StyleAnimationValue::AddWeighted(nsCSSProperty aProperty,
       return true;
     }
     case eUnit_Shadow: {
-      // This is implemented according to:
-      // http://dev.w3.org/csswg/css3-transitions/#animation-of-property-types-
-      // and the third item in the summary of:
-      // http://lists.w3.org/Archives/Public/www-style/2009Jul/0050.html
-      const nsCSSValueList *shadow1 = aValue1.GetCSSValueListValue();
-      const nsCSSValueList *shadow2 = aValue2.GetCSSValueListValue();
-      nsAutoPtr<nsCSSValueList> result;
-      nsCSSValueList **resultTail = getter_Transfers(result);
-      while (shadow1 && shadow2) {
-        if (!AddShadowItems(aCoeff1, shadow1->mValue,
-                            aCoeff2, shadow2->mValue,
-                            resultTail)) {
-          return false;
-        }
-        shadow1 = shadow1->mNext;
-        shadow2 = shadow2->mNext;
+      UniquePtr<nsCSSValueList> result =
+        AddWeightedShadowList(aCoeff1,
+                              aValue1.GetCSSValueListValue(),
+                              aCoeff2,
+                              aValue2.GetCSSValueListValue(),
+                              ColorAdditionType::Clamped);
+      if (!result) {
+        return false;
       }
-      if (shadow1 || shadow2) {
-        const nsCSSValueList *longShadow;
-        double longCoeff;
-        if (shadow1) {
-          longShadow = shadow1;
-          longCoeff = aCoeff1;
-        } else {
-          longShadow = shadow2;
-          longCoeff = aCoeff2;
-        }
-
-        while (longShadow) {
-          // Passing coefficients that add to less than 1 produces the
-          // desired result of interpolating "0 0 0 transparent" with
-          // the current shadow.
-          if (!AddShadowItems(longCoeff, longShadow->mValue,
-                              0.0, longShadow->mValue,
-                              resultTail)) {
-            return false;
-          }
-
-          longShadow = longShadow->mNext;
-        }
-      }
-      aResultValue.SetAndAdoptCSSValueListValue(result.forget(), eUnit_Shadow);
+      aResultValue.SetAndAdoptCSSValueListValue(result.release(), eUnit_Shadow);
       return true;
     }
     case eUnit_Shape: {
@@ -2611,38 +2806,15 @@ StyleAnimationValue::AddWeighted(nsCSSProperty aProperty,
       return true;
     }
     case eUnit_Filter: {
-      const nsCSSValueList *list1 = aValue1.GetCSSValueListValue();
-      const nsCSSValueList *list2 = aValue2.GetCSSValueListValue();
-
-      nsAutoPtr<nsCSSValueList> result;
-      nsCSSValueList **resultTail = getter_Transfers(result);
-      while (list1 || list2) {
-        MOZ_ASSERT(!*resultTail,
-          "resultTail isn't pointing to the tail (may leak)");
-        if ((list1 && list1->mValue.GetUnit() != eCSSUnit_Function) ||
-            (list2 && list2->mValue.GetUnit() != eCSSUnit_Function)) {
-          // If we don't have filter-functions, we must have filter-URLs, which
-          // we can't add or interpolate.
-          return false;
-        }
-
-        if (!AddFilterFunction(aCoeff1, list1, aCoeff2, list2, resultTail)) {
-          // filter function mismatch
-          return false;
-        }
-
-        // move to next list items
-        if (list1) {
-          list1 = list1->mNext;
-        }
-        if (list2) {
-          list2 = list2->mNext;
-        }
+      UniquePtr<nsCSSValueList> result =
+        AddWeightedFilterList(aCoeff1, aValue1.GetCSSValueListValue(),
+                              aCoeff2, aValue2.GetCSSValueListValue(),
+                              ColorAdditionType::Clamped);
+      if (!result) {
+        return false;
       }
-      MOZ_ASSERT(!*resultTail,
-                 "resultTail isn't pointing to the tail (may leak)");
 
-      aResultValue.SetAndAdoptCSSValueListValue(result.forget(),
+      aResultValue.SetAndAdoptCSSValueListValue(result.release(),
                                                 eUnit_Filter);
       return true;
     }
@@ -2752,8 +2924,56 @@ StyleAnimationValue::AddWeighted(nsCSSProperty aProperty,
   return false;
 }
 
+bool
+StyleAnimationValue::Accumulate(nsCSSPropertyID aProperty,
+                                StyleAnimationValue& aDest,
+                                const StyleAnimationValue& aValueToAccumulate,
+                                uint64_t aCount)
+{
+  Unit commonUnit =
+    GetCommonUnit(aProperty, aDest.GetUnit(), aValueToAccumulate.GetUnit());
+  switch (commonUnit) {
+    case eUnit_Filter: {
+      UniquePtr<nsCSSValueList> result =
+        AddWeightedFilterList(1.0, aDest.GetCSSValueListValue(),
+                              aCount, aValueToAccumulate.GetCSSValueListValue(),
+                              ColorAdditionType::Unclamped);
+      if (!result) {
+        return false;
+      }
+
+      aDest.SetAndAdoptCSSValueListValue(result.release(), eUnit_Filter);
+      return true;
+    }
+    case eUnit_Shadow: {
+      UniquePtr<nsCSSValueList> result =
+        AddWeightedShadowList(1.0, aDest.GetCSSValueListValue(),
+                              aCount, aValueToAccumulate.GetCSSValueListValue(),
+                              ColorAdditionType::Unclamped);
+      if (!result) {
+        return false;
+      }
+      aDest.SetAndAdoptCSSValueListValue(result.release(), eUnit_Shadow);
+      return true;
+    }
+    case eUnit_Color: {
+      RGBAColorData color1 = ExtractColor(aDest);
+      RGBAColorData color2 = ExtractColor(aValueToAccumulate);
+      auto resultColor = MakeUnique<nsCSSValue>();
+      resultColor->SetRGBAColorValue(
+        AddWeightedColors(1.0, color1, aCount, color2));
+      aDest.SetAndAdoptCSSValueValue(resultColor.release(), eUnit_Color);
+      return true;
+    }
+    default:
+      return Add(aProperty, aDest, aValueToAccumulate, aCount);
+  }
+  MOZ_ASSERT_UNREACHABLE("Can't accumulate using the given common unit");
+  return false;
+}
+
 already_AddRefed<css::StyleRule>
-BuildStyleRule(nsCSSProperty aProperty,
+BuildStyleRule(nsCSSPropertyID aProperty,
                dom::Element* aTargetElement,
                const nsAString& aSpecifiedValue,
                bool aUseSVGMode)
@@ -2767,7 +2987,7 @@ BuildStyleRule(nsCSSProperty aProperty,
   nsCOMPtr<nsIURI> baseURI = aTargetElement->GetBaseURI();
   nsCSSParser parser(doc->CSSLoader());
 
-  nsCSSProperty propertyToCheck = nsCSSProps::IsShorthand(aProperty) ?
+  nsCSSPropertyID propertyToCheck = nsCSSProps::IsShorthand(aProperty) ?
     nsCSSProps::SubpropertyEntryFor(aProperty)[0] : aProperty;
 
   // Get a parser, parse the property, and check for CSS parsing errors.
@@ -2788,7 +3008,7 @@ BuildStyleRule(nsCSSProperty aProperty,
 }
 
 already_AddRefed<css::StyleRule>
-BuildStyleRule(nsCSSProperty aProperty,
+BuildStyleRule(nsCSSPropertyID aProperty,
                dom::Element* aTargetElement,
                const nsCSSValue& aSpecifiedValue,
                bool aUseSVGMode)
@@ -2817,7 +3037,7 @@ BuildStyleRule(nsCSSProperty aProperty,
 }
 
 static bool
-ComputeValuesFromStyleRule(nsCSSProperty aProperty,
+ComputeValuesFromStyleRule(nsCSSPropertyID aProperty,
                            CSSEnabledState aEnabledState,
                            dom::Element* aTargetElement,
                            nsStyleContext* aStyleContext,
@@ -2905,7 +3125,7 @@ ComputeValuesFromStyleRule(nsCSSProperty aProperty,
 }
 
 /* static */ bool
-StyleAnimationValue::ComputeValue(nsCSSProperty aProperty,
+StyleAnimationValue::ComputeValue(nsCSSPropertyID aProperty,
                                   dom::Element* aTargetElement,
                                   nsStyleContext* aStyleContext,
                                   const nsAString& aSpecifiedValue,
@@ -2956,7 +3176,7 @@ StyleAnimationValue::ComputeValue(nsCSSProperty aProperty,
 template <class T>
 bool
 ComputeValuesFromSpecifiedValue(
-    nsCSSProperty aProperty,
+    nsCSSPropertyID aProperty,
     CSSEnabledState aEnabledState,
     dom::Element* aTargetElement,
     nsStyleContext* aStyleContext,
@@ -2984,7 +3204,7 @@ ComputeValuesFromSpecifiedValue(
 
 /* static */ bool
 StyleAnimationValue::ComputeValues(
-    nsCSSProperty aProperty,
+    nsCSSPropertyID aProperty,
     CSSEnabledState aEnabledState,
     dom::Element* aTargetElement,
     nsStyleContext* aStyleContext,
@@ -3000,7 +3220,7 @@ StyleAnimationValue::ComputeValues(
 
 /* static */ bool
 StyleAnimationValue::ComputeValues(
-    nsCSSProperty aProperty,
+    nsCSSPropertyID aProperty,
     CSSEnabledState aEnabledState,
     dom::Element* aTargetElement,
     nsStyleContext* aStyleContext,
@@ -3015,7 +3235,7 @@ StyleAnimationValue::ComputeValues(
 }
 
 bool
-StyleAnimationValue::UncomputeValue(nsCSSProperty aProperty,
+StyleAnimationValue::UncomputeValue(nsCSSPropertyID aProperty,
                                     const StyleAnimationValue& aComputedValue,
                                     nsCSSValue& aSpecifiedValue)
 {
@@ -3049,25 +3269,31 @@ StyleAnimationValue::UncomputeValue(nsCSSProperty aProperty,
       aSpecifiedValue.
         SetFloatValue(aComputedValue.GetFloatValue(), eCSSUnit_Number);
       break;
-    case eUnit_Color:
-      // colors can be alone, or part of a paint server
-      aSpecifiedValue.SetColorValue(aComputedValue.GetColorValue());
-      break;
     case eUnit_CurrentColor:
       aSpecifiedValue.SetIntValue(NS_COLOR_CURRENTCOLOR, eCSSUnit_EnumColor);
       break;
     case eUnit_Calc:
+    case eUnit_Color:
     case eUnit_ObjectPosition:
-    case eUnit_URL: {
+    case eUnit_URL:
+    case eUnit_DiscreteCSSValue: {
       nsCSSValue* val = aComputedValue.GetCSSValueValue();
       // Sanity-check that the underlying unit in the nsCSSValue is what we
       // expect for our StyleAnimationValue::Unit:
       MOZ_ASSERT((unit == eUnit_Calc && val->GetUnit() == eCSSUnit_Calc) ||
+                 (unit == eUnit_Color &&
+                  nsCSSValue::IsNumericColorUnit(val->GetUnit())) ||
                  (unit == eUnit_ObjectPosition &&
                   val->GetUnit() == eCSSUnit_Array) ||
-                 (unit == eUnit_URL && val->GetUnit() == eCSSUnit_URL),
+                 (unit == eUnit_URL && val->GetUnit() == eCSSUnit_URL) ||
+                 unit == eUnit_DiscreteCSSValue,
                  "unexpected unit");
       aSpecifiedValue = *val;
+      break;
+    }
+    case eUnit_ComplexColor: {
+      aSpecifiedValue.SetComplexColorValue(
+        do_AddRef(aComputedValue.mValue.mComplexColor));
       break;
     }
     case eUnit_CSSValuePair: {
@@ -3131,7 +3357,7 @@ StyleAnimationValue::UncomputeValue(nsCSSProperty aProperty,
 }
 
 bool
-StyleAnimationValue::UncomputeValue(nsCSSProperty aProperty,
+StyleAnimationValue::UncomputeValue(nsCSSPropertyID aProperty,
                                     StyleAnimationValue&& aComputedValue,
                                     nsCSSValue& aSpecifiedValue)
 {
@@ -3166,7 +3392,7 @@ StyleAnimationValue::UncomputeValue(nsCSSProperty aProperty,
 }
 
 bool
-StyleAnimationValue::UncomputeValue(nsCSSProperty aProperty,
+StyleAnimationValue::UncomputeValue(nsCSSPropertyID aProperty,
                                     const StyleAnimationValue& aComputedValue,
                                     nsAString& aSpecifiedValue)
 {
@@ -3185,27 +3411,12 @@ StyleAnimationValue::UncomputeValue(nsCSSProperty aProperty,
   return true;
 }
 
-inline const void*
+template<typename T>
+inline const T&
 StyleDataAtOffset(const void* aStyleStruct, ptrdiff_t aOffset)
 {
-  return reinterpret_cast<const char*>(aStyleStruct) + aOffset;
-}
-
-inline void*
-StyleDataAtOffset(void* aStyleStruct, ptrdiff_t aOffset)
-{
-  return reinterpret_cast<char*>(aStyleStruct) + aOffset;
-}
-
-static void
-SetCurrentOrActualColor(bool aIsForeground, nscolor aActualColor,
-                        StyleAnimationValue& aComputedValue)
-{
-  if (aIsForeground) {
-    aComputedValue.SetCurrentColorValue();
-  } else {
-    aComputedValue.SetColorValue(aActualColor);
-  }
+  return *reinterpret_cast<const T*>(
+    reinterpret_cast<const uint8_t*>(aStyleStruct) + aOffset);
 }
 
 static void
@@ -3303,7 +3514,7 @@ StyleCoordToCSSValue(const nsStyleCoord& aCoord, nsCSSValue& aCSSValue)
 }
 
 static void
-SetPositionValue(const nsStyleImageLayers::Position& aPos, nsCSSValue& aCSSValue)
+SetPositionValue(const Position& aPos, nsCSSValue& aCSSValue)
 {
   RefPtr<nsCSSValue::Array> posArray = nsCSSValue::Array::Create(4);
   aCSSValue.SetArrayValue(posArray.get(), eCSSUnit_Array);
@@ -3321,7 +3532,7 @@ SetPositionValue(const nsStyleImageLayers::Position& aPos, nsCSSValue& aCSSValue
 }
 
 static void
-SetPositionCoordValue(const nsStyleImageLayers::Position::PositionCoord& aPosCoord,
+SetPositionCoordValue(const Position::Coord& aPosCoord,
                       nsCSSValue& aCSSValue)
 {
   RefPtr<nsCSSValue::Array> posArray = nsCSSValue::Array::Create(2);
@@ -3584,7 +3795,7 @@ StyleClipBasicShapeToCSSArray(const StyleClipPath& aClipPath,
 }
 
 bool
-StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
+StyleAnimationValue::ExtractComputedValue(nsCSSPropertyID aProperty,
                                           nsStyleContext* aStyleContext,
                                           StyleAnimationValue& aComputedValue)
 {
@@ -3594,8 +3805,11 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
     aStyleContext->StyleData(nsCSSProps::kSIDTable[aProperty]);
   ptrdiff_t ssOffset = nsCSSProps::kStyleStructOffsetTable[aProperty];
   nsStyleAnimType animType = nsCSSProps::kAnimTypeTable[aProperty];
-  MOZ_ASSERT(0 <= ssOffset || animType == eStyleAnimType_Custom,
-             "must be dealing with animatable property");
+  MOZ_ASSERT(0 <= ssOffset ||
+             animType == eStyleAnimType_Custom ||
+             animType == eStyleAnimType_Discrete,
+             "all animation types other than Custom and Discrete must " \
+             "specify a style struct offset to extract values from");
   switch (animType) {
     case eStyleAnimType_Custom:
       switch (aProperty) {
@@ -3615,7 +3829,7 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
         BORDER_WIDTH_CASE(eCSSProperty_border_top_width, top)
         #undef BORDER_WIDTH_CASE
 
-        case eCSSProperty__moz_column_rule_width:
+        case eCSSProperty_column_rule_width:
           aComputedValue.SetCoordValue(
             static_cast<const nsStyleColumn*>(styleStruct)->
               GetComputedColumnRuleWidth());
@@ -3648,7 +3862,7 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
           break;
         }
 
-        case eCSSProperty__moz_column_rule_color: {
+        case eCSSProperty_column_rule_color: {
           const nsStyleColumn *styleColumn =
             static_cast<const nsStyleColumn*>(styleStruct);
           nscolor color;
@@ -3661,7 +3875,7 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
           break;
         }
 
-        case eCSSProperty__moz_column_count: {
+        case eCSSProperty_column_count: {
           const nsStyleColumn *styleColumn =
             static_cast<const nsStyleColumn*>(styleStruct);
           if (styleColumn->mColumnCount == NS_STYLE_COLUMN_COUNT_AUTO) {
@@ -3699,30 +3913,6 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
             static_cast<const nsStyleTextReset*>(styleStruct)->
               GetDecorationStyle();
           aComputedValue.SetIntValue(decorationStyle, eUnit_Enumerated);
-          break;
-        }
-
-        case eCSSProperty_text_emphasis_color: {
-          auto styleText = static_cast<const nsStyleText*>(styleStruct);
-          SetCurrentOrActualColor(styleText->mTextEmphasisColorForeground,
-                                  styleText->mTextEmphasisColor,
-                                  aComputedValue);
-          break;
-        }
-
-        case eCSSProperty__webkit_text_fill_color: {
-          auto styleText = static_cast<const nsStyleText*>(styleStruct);
-          SetCurrentOrActualColor(styleText->mWebkitTextFillColorForeground,
-                                  styleText->mWebkitTextFillColor,
-                                  aComputedValue);
-          break;
-        }
-
-        case eCSSProperty__webkit_text_stroke_color: {
-          auto styleText = static_cast<const nsStyleText*>(styleStruct);
-          SetCurrentOrActualColor(styleText->mWebkitTextStrokeColorForeground,
-                                  styleText->mWebkitTextStrokeColor,
-                                  aComputedValue);
           break;
         }
 
@@ -3975,7 +4165,7 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
             aComputedValue.SetCSSValueArrayValue(result, eUnit_Shape);
 
           } else {
-            MOZ_ASSERT(type == StyleShapeSourceType::None_, "unknown type");
+            MOZ_ASSERT(type == StyleShapeSourceType::None, "unknown type");
             aComputedValue.SetNoneValue();
           }
           break;
@@ -4065,8 +4255,8 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
       };
       return true;
     case eStyleAnimType_Coord: {
-      const nsStyleCoord& coord = *static_cast<const nsStyleCoord*>(
-        StyleDataAtOffset(styleStruct, ssOffset));
+      const nsStyleCoord& coord =
+        StyleDataAtOffset<nsStyleCoord>(styleStruct, ssOffset);
       if (nsCSSProps::PropHasFlags(aProperty, CSS_PROPERTY_NUMBERS_ARE_PIXELS) &&
           coord.GetUnit() == eStyleUnit_Coord) {
         // For SVG properties where number means the same thing as length,
@@ -4089,8 +4279,8 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
        NS_SIDE_LEFT   == eStyleAnimType_Sides_Left  -eStyleAnimType_Sides_Top,
        "box side constants out of sync with animation side constants");
 
-      const nsStyleCoord &coord = static_cast<const nsStyleSides*>(
-        StyleDataAtOffset(styleStruct, ssOffset))->
+      const nsStyleCoord &coord =
+        StyleDataAtOffset<nsStyleSides>(styleStruct, ssOffset).
           Get(mozilla::css::Side(animType - eStyleAnimType_Sides_Top));
       return StyleCoordToValue(coord, aComputedValue);
     }
@@ -4109,13 +4299,13 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
                                  eStyleAnimType_Corner_TopLeft,
        "box corner constants out of sync with animation corner constants");
 
-      const nsStyleCorners *corners = static_cast<const nsStyleCorners*>(
-        StyleDataAtOffset(styleStruct, ssOffset));
+      const nsStyleCorners& corners =
+        StyleDataAtOffset<nsStyleCorners>(styleStruct, ssOffset);
       uint8_t fullCorner = animType - eStyleAnimType_Corner_TopLeft;
       const nsStyleCoord &horiz =
-        corners->Get(NS_FULL_TO_HALF_CORNER(fullCorner, false));
+        corners.Get(NS_FULL_TO_HALF_CORNER(fullCorner, false));
       const nsStyleCoord &vert =
-        corners->Get(NS_FULL_TO_HALF_CORNER(fullCorner, true));
+        corners.Get(NS_FULL_TO_HALF_CORNER(fullCorner, true));
       nsAutoPtr<nsCSSValuePair> pair(new nsCSSValuePair);
       if (!StyleCoordToCSSValue(horiz, pair->mXValue) ||
           !StyleCoordToCSSValue(vert, pair->mYValue)) {
@@ -4126,20 +4316,12 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
       return true;
     }
     case eStyleAnimType_nscoord:
-      aComputedValue.SetCoordValue(*static_cast<const nscoord*>(
-        StyleDataAtOffset(styleStruct, ssOffset)));
-      return true;
-    case eStyleAnimType_EnumU8:
-      aComputedValue.SetIntValue(*static_cast<const uint8_t*>(
-        StyleDataAtOffset(styleStruct, ssOffset)), eUnit_Enumerated);
-      if (aProperty == eCSSProperty_visibility) {
-        aComputedValue.SetIntValue(aComputedValue.GetIntValue(),
-                                   eUnit_Visibility);
-      }
+      aComputedValue.SetCoordValue(
+        StyleDataAtOffset<nscoord>(styleStruct, ssOffset));
       return true;
     case eStyleAnimType_float:
-      aComputedValue.SetFloatValue(*static_cast<const float*>(
-        StyleDataAtOffset(styleStruct, ssOffset)));
+      aComputedValue.SetFloatValue(
+        StyleDataAtOffset<float>(styleStruct, ssOffset));
       if (aProperty == eCSSProperty_font_size_adjust &&
           aComputedValue.GetFloatValue() == -1.0f) {
         // In nsStyleFont, we set mFont.sizeAdjust to -1.0 to represent
@@ -4150,12 +4332,17 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
       }
       return true;
     case eStyleAnimType_Color:
-      aComputedValue.SetColorValue(*static_cast<const nscolor*>(
-        StyleDataAtOffset(styleStruct, ssOffset)));
+      aComputedValue.SetColorValue(
+        StyleDataAtOffset<nscolor>(styleStruct, ssOffset));
       return true;
+    case eStyleAnimType_ComplexColor: {
+      aComputedValue.SetComplexColorValue(
+        StyleDataAtOffset<StyleComplexColor>(styleStruct, ssOffset));
+      return true;
+    }
     case eStyleAnimType_PaintServer: {
-      const nsStyleSVGPaint &paint = *static_cast<const nsStyleSVGPaint*>(
-        StyleDataAtOffset(styleStruct, ssOffset));
+      const nsStyleSVGPaint& paint =
+        StyleDataAtOffset<nsStyleSVGPaint>(styleStruct, ssOffset);
       if (paint.mType == eStyleSVGPaintType_Color) {
         aComputedValue.SetColorValue(paint.mPaint.mColor);
         return true;
@@ -4194,9 +4381,8 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
       return true;
     }
     case eStyleAnimType_Shadow: {
-      const nsCSSShadowArray *shadowArray =
-        *static_cast<const RefPtr<nsCSSShadowArray>*>(
-          StyleDataAtOffset(styleStruct, ssOffset));
+      const nsCSSShadowArray* shadowArray =
+        StyleDataAtOffset<RefPtr<nsCSSShadowArray>>(styleStruct, ssOffset);
       if (!shadowArray) {
         aComputedValue.SetAndAdoptCSSValueListValue(nullptr, eUnit_Shadow);
         return true;
@@ -4208,6 +4394,20 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
       }
       aComputedValue.SetAndAdoptCSSValueListValue(result.forget(),
                                                   eUnit_Shadow);
+      return true;
+    }
+    case eStyleAnimType_Discrete: {
+      if (aProperty == eCSSProperty_visibility) {
+        aComputedValue.SetIntValue(
+          static_cast<const nsStyleVisibility*>(styleStruct)->mVisible,
+          eUnit_Visibility);
+        return true;
+      }
+      auto cssValue = MakeUnique<nsCSSValue>(eCSSUnit_Unset);
+      aStyleContext->RuleNode()->GetDiscretelyAnimatedCSSValue(aProperty,
+                                                               cssValue.get());
+      aComputedValue.SetAndAdoptCSSValueValue(cssValue.release(),
+                                              eUnit_DiscreteCSSValue);
       return true;
     }
     case eStyleAnimType_None:
@@ -4276,7 +4476,8 @@ StyleAnimationValue::StyleAnimationValue(float aFloat, FloatConstructorType)
 StyleAnimationValue::StyleAnimationValue(nscolor aColor, ColorConstructorType)
 {
   mUnit = eUnit_Color;
-  mValue.mColor = aColor;
+  mValue.mCSSValue = new nsCSSValue();
+  mValue.mCSSValue->SetColorValue(aColor);
 }
 
 StyleAnimationValue&
@@ -4309,12 +4510,11 @@ StyleAnimationValue::operator=(const StyleAnimationValue& aOther)
       mValue.mFloat = aOther.mValue.mFloat;
       MOZ_ASSERT(!mozilla::IsNaN(mValue.mFloat));
       break;
-    case eUnit_Color:
-      mValue.mColor = aOther.mValue.mColor;
-      break;
     case eUnit_Calc:
+    case eUnit_Color:
     case eUnit_ObjectPosition:
     case eUnit_URL:
+    case eUnit_DiscreteCSSValue:
       MOZ_ASSERT(IsCSSValueUnit(mUnit),
                  "This clause is for handling nsCSSValue-backed units");
       MOZ_ASSERT(aOther.mValue.mCSSValue, "values may not be null");
@@ -4366,6 +4566,11 @@ StyleAnimationValue::operator=(const StyleAnimationValue& aOther)
       MOZ_ASSERT(aOther.mValue.mString, "expecting non-null string");
       mValue.mString = aOther.mValue.mString;
       mValue.mString->AddRef();
+      break;
+    case eUnit_ComplexColor:
+      MOZ_ASSERT(aOther.mValue.mComplexColor);
+      mValue.mComplexColor = aOther.mValue.mComplexColor;
+      mValue.mComplexColor->AddRef();
       break;
   }
 
@@ -4433,7 +4638,8 @@ StyleAnimationValue::SetColorValue(nscolor aColor)
 {
   FreeValue();
   mUnit = eUnit_Color;
-  mValue.mColor = aColor;
+  mValue.mCSSValue = new nsCSSValue();
+  mValue.mCSSValue->SetColorValue(aColor);
 }
 
 void
@@ -4441,6 +4647,27 @@ StyleAnimationValue::SetCurrentColorValue()
 {
   FreeValue();
   mUnit = eUnit_CurrentColor;
+}
+
+void
+StyleAnimationValue::SetComplexColorValue(const StyleComplexColor& aColor)
+{
+  if (aColor.IsCurrentColor()) {
+    SetCurrentColorValue();
+  } else if (aColor.IsNumericColor()) {
+    SetColorValue(aColor.mColor);
+  } else {
+    SetComplexColorValue(do_AddRef(new ComplexColorValue(aColor)));
+  }
+}
+
+void
+StyleAnimationValue::SetComplexColorValue(
+  already_AddRefed<ComplexColorValue> aValue)
+{
+  FreeValue();
+  mUnit = eUnit_ComplexColor;
+  mValue.mComplexColor = aValue.take();
 }
 
 void
@@ -4561,6 +4788,8 @@ StyleAnimationValue::FreeValue()
   } else if (IsStringUnit(mUnit)) {
     MOZ_ASSERT(mValue.mString, "expecting non-null string");
     mValue.mString->Release();
+  } else if (mUnit == eUnit_ComplexColor) {
+    mValue.mComplexColor->Release();
   }
 }
 
@@ -4587,11 +4816,11 @@ StyleAnimationValue::operator==(const StyleAnimationValue& aOther) const
     case eUnit_Percent:
     case eUnit_Float:
       return mValue.mFloat == aOther.mValue.mFloat;
-    case eUnit_Color:
-      return mValue.mColor == aOther.mValue.mColor;
     case eUnit_Calc:
+    case eUnit_Color:
     case eUnit_ObjectPosition:
     case eUnit_URL:
+    case eUnit_DiscreteCSSValue:
       MOZ_ASSERT(IsCSSValueUnit(mUnit),
                  "This clause is for handling nsCSSValue-backed units");
       return *mValue.mCSSValue == *aOther.mValue.mCSSValue;
@@ -4617,6 +4846,8 @@ StyleAnimationValue::operator==(const StyleAnimationValue& aOther) const
     case eUnit_UnparsedString:
       return (NS_strcmp(GetStringBufferValue(),
                         aOther.GetStringBufferValue()) == 0);
+    case eUnit_ComplexColor:
+      return *mValue.mComplexColor == *aOther.mValue.mComplexColor;
   }
 
   NS_NOTREACHED("incomplete case");

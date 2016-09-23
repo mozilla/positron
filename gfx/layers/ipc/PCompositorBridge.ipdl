@@ -8,6 +8,8 @@
 include LayersSurfaces;
 include LayersMessages;
 include PlatformWidgetTypes;
+include protocol PAPZ;
+include protocol PAPZCTreeManager;
 include protocol PBrowser;
 include protocol PCompositable;
 include protocol PCompositorWidget;
@@ -30,7 +32,6 @@ using mozilla::ipc::SharedMemoryBasic::Handle from "mozilla/ipc/SharedMemoryBasi
 using mozilla::CSSIntRegion from "Units.h";
 using mozilla::LayoutDeviceIntPoint from "Units.h";
 using mozilla::LayoutDeviceIntRegion from "Units.h";
-using mozilla::VisibilityCounter from "VisibilityIPC.h";
 using class mozilla::TimeStamp from "mozilla/TimeStamp.h";
 using class mozilla::layers::FrameUniformityData from "mozilla/layers/FrameUniformityData.h";
 using mozilla::layers::TextureFlags from "mozilla/layers/CompositorTypes.h";
@@ -46,6 +47,8 @@ namespace layers {
  */
 sync protocol PCompositorBridge
 {
+  manages PAPZ;
+  manages PAPZCTreeManager;
   // A Compositor manages a single Layer Manager (PLayerTransaction)
   manages PLayerTransaction;
   manages PTexture;
@@ -119,6 +122,13 @@ parent:
   // When out-of-process, this must be called to finish initialization.
   sync Initialize(uint64_t rootLayerTreeId);
 
+  // Returns whether this Compositor has APZ enabled or not.
+  sync AsyncPanZoomEnabled(uint64_t layersId) returns (bool aHasAPZ);
+
+  // Must be called after Initialize(), and only succeeds if AsyncPanZoomEnabled() is true.
+  async PAPZ(uint64_t layersId);
+  async PAPZCTreeManager(uint64_t layersId);
+
   /**
    * Confirmation callback for UpdatePluginConfigurations and HideAllPlugins.
    */
@@ -144,6 +154,12 @@ parent:
 
   async NotifyChildCreated(uint64_t id);
   async AdoptChild(uint64_t id);
+
+  // Same as NotifyChildCreated, but used when child processes need to
+  // reassociate layers. This must be synchronous to ensure that the
+  // association happens before PLayerTransactions are sent over the
+  // cross-process bridge.
+  sync NotifyChildRecreated(uint64_t id);
 
   // Make a snapshot of the content that would have been drawn to our
   // render target at the time this message is received.  If the size
@@ -185,18 +201,15 @@ parent:
    */
   async RequestNotifyAfterRemotePaint();
 
-  // The child sends a request to clear the visible regions (approximate,
-  // in-displayport, etc.) associated with the provided layers ID and pres shell
-  // ID (i.e., the regions for all view IDs associated with those IDs).
-  async ClearVisibleRegions(uint64_t layersId, uint32_t presShellId);
+  // The child clears the 'approximately visible' regions associated with the
+  // provided layers ID and pres shell ID (i.e., the regions for all view IDs
+  // associated with those IDs).
+  async ClearApproximatelyVisibleRegions(uint64_t layersId, uint32_t presShellId);
 
   // The child sends a region containing rects associated with the provided
-  // scrollable layer GUID that the child considers visible in the sense
-  // specified by |counter|.
+  // scrollable layer GUID that the child considers 'approximately visible'.
   // We visualize this information in the APZ minimap.
-  async UpdateVisibleRegion(VisibilityCounter counter,
-                            ScrollableLayerGuid guid,
-                            CSSIntRegion region);
+  async NotifyApproximatelyVisibleRegion(ScrollableLayerGuid guid, CSSIntRegion region);
 
   /**
    * Sent when the child has finished CaptureAllPlugins.

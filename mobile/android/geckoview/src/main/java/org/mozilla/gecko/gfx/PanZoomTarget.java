@@ -5,14 +5,11 @@
 
 package org.mozilla.gecko.gfx;
 
-import org.mozilla.gecko.ZoomConstraints;
-
 import android.graphics.Matrix;
 import android.graphics.PointF;
 
 public interface PanZoomTarget {
     public ImmutableViewportMetrics getViewportMetrics();
-    public ZoomConstraints getZoomConstraints();
     public FullScreenState getFullScreenState();
     public PointF getVisibleEndOfLayerView();
 
@@ -23,6 +20,7 @@ public interface PanZoomTarget {
     /** This triggers an (asynchronous) viewport update/redraw. */
     public void forceRedraw(DisplayPortMetrics displayPort);
 
+    public boolean isGeckoReady();
     public boolean post(Runnable action);
     public void postRenderTask(RenderTask task);
     public void removeRenderTask(RenderTask task);

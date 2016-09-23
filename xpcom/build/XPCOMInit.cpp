@@ -147,9 +147,6 @@ extern nsresult nsStringInputStreamConstructor(nsISupports*, REFNSIID, void**);
 #endif
 #include "vpx_mem/vpx_mem.h"
 #endif
-#ifdef MOZ_WEBM
-#include "nestegg/nestegg.h"
-#endif
 
 #include "GeckoProfiler.h"
 
@@ -251,7 +248,7 @@ nsThreadManagerGetSingleton(nsISupports* aOuter,
     return NS_ERROR_NO_AGGREGATION;
   }
 
-  return nsThreadManager::get()->QueryInterface(aIID, aInstancePtr);
+  return nsThreadManager::get().QueryInterface(aIID, aInstancePtr);
 }
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsThreadPool)
@@ -302,12 +299,15 @@ CreateINIParserFactory(const mozilla::Module& aModule,
 }
 
 #define COMPONENT(NAME, Ctor) static NS_DEFINE_CID(kNS_##NAME##_CID, NS_##NAME##_CID);
+#define COMPONENT_M(NAME, Ctor, Selector) static NS_DEFINE_CID(kNS_##NAME##_CID, NS_##NAME##_CID);
 #include "XPCOMModule.inc"
 #undef COMPONENT
+#undef COMPONENT_M
 
 #define COMPONENT(NAME, Ctor) { &kNS_##NAME##_CID, false, nullptr, Ctor },
+#define COMPONENT_M(NAME, Ctor, Selector) { &kNS_##NAME##_CID, false, nullptr, Ctor, Selector },
 const mozilla::Module::CIDEntry kXPCOMCIDEntries[] = {
-  { &kComponentManagerCID, true, nullptr, nsComponentManagerImpl::Create },
+  { &kComponentManagerCID, true, nullptr, nsComponentManagerImpl::Create, Module::ALLOW_IN_GPU_PROCESS },
   { &kINIParserFactoryCID, false, CreateINIParserFactory },
 #include "XPCOMModule.inc"
   { &kNS_CHROMEREGISTRY_CID, false, nullptr, nsChromeRegistryConstructor },
@@ -316,8 +316,10 @@ const mozilla::Module::CIDEntry kXPCOMCIDEntries[] = {
   { nullptr }
 };
 #undef COMPONENT
+#undef COMPONENT_M
 
 #define COMPONENT(NAME, Ctor) { NS_##NAME##_CONTRACTID, &kNS_##NAME##_CID },
+#define COMPONENT_M(NAME, Ctor, Selector) { NS_##NAME##_CONTRACTID, &kNS_##NAME##_CID, Selector },
 const mozilla::Module::ContractIDEntry kXPCOMContracts[] = {
 #include "XPCOMModule.inc"
   { NS_CHROMEREGISTRY_CONTRACTID, &kNS_CHROMEREGISTRY_CID },
@@ -327,9 +329,15 @@ const mozilla::Module::ContractIDEntry kXPCOMContracts[] = {
   { nullptr }
 };
 #undef COMPONENT
+#undef COMPONENT_M
 
 const mozilla::Module kXPCOMModule = {
-  mozilla::Module::kVersion, kXPCOMCIDEntries, kXPCOMContracts
+  mozilla::Module::kVersion, kXPCOMCIDEntries, kXPCOMContracts,
+  nullptr,
+  nullptr,
+  nullptr,
+  nullptr,
+  Module::ALLOW_IN_GPU_PROCESS
 };
 
 // gDebug will be freed during shutdown.
@@ -371,13 +379,15 @@ public:
   }
 
 private:
-  NS_IMETHODIMP
+  NS_IMETHOD
   CollectReports(nsIHandleReportCallback* aHandleReport, nsISupports* aData,
                  bool aAnonymize) override
   {
-    return MOZ_COLLECT_REPORT(
+    MOZ_COLLECT_REPORT(
       "explicit/icu", KIND_HEAP, UNITS_BYTES, MemoryAllocated(),
       "Memory used by ICU, a Unicode and globalization support library.");
+
+    return NS_OK;
   }
 
   ~ICUReporter() {}
@@ -396,13 +406,16 @@ public:
   NS_DECL_ISUPPORTS
 
 private:
-  NS_IMETHODIMP
+  NS_IMETHOD
   CollectReports(nsIHandleReportCallback* aHandleReport, nsISupports* aData,
                  bool aAnonymize) override
   {
-    return MOZ_COLLECT_REPORT(
+    MOZ_COLLECT_REPORT(
       "explicit/media/libogg", KIND_HEAP, UNITS_BYTES, MemoryAllocated(),
-      "Memory allocated through libogg for Ogg, Theora, and related media files.");
+      "Memory allocated through libogg for Ogg, Theora, and related media "
+      "files.");
+
+    return NS_OK;
   }
 
   ~OggReporter() {}
@@ -422,13 +435,15 @@ public:
   NS_DECL_ISUPPORTS
 
 private:
-  NS_IMETHODIMP
+  NS_IMETHOD
   CollectReports(nsIHandleReportCallback* aHandleReport, nsISupports* aData,
                  bool aAnonymize) override
   {
-    return MOZ_COLLECT_REPORT(
+    MOZ_COLLECT_REPORT(
       "explicit/media/libvpx", KIND_HEAP, UNITS_BYTES, MemoryAllocated(),
       "Memory allocated through libvpx for WebM media files.");
+
+    return NS_OK;
   }
 
   ~VPXReporter() {}
@@ -440,39 +455,14 @@ NS_IMPL_ISUPPORTS(VPXReporter, nsIMemoryReporter)
 CountingAllocatorBase<VPXReporter>::sAmount(0);
 #endif /* MOZ_VPX */
 
-#ifdef MOZ_WEBM
-class NesteggReporter final
-  : public nsIMemoryReporter
-  , public CountingAllocatorBase<NesteggReporter>
-{
-public:
-  NS_DECL_ISUPPORTS
-
-private:
-  NS_IMETHODIMP
-  CollectReports(nsIHandleReportCallback* aHandleReport, nsISupports* aData,
-                 bool aAnonymize) override
-  {
-    return MOZ_COLLECT_REPORT(
-      "explicit/media/libnestegg", KIND_HEAP, UNITS_BYTES, MemoryAllocated(),
-      "Memory allocated through libnestegg for WebM media files.");
-  }
-
-  ~NesteggReporter() {}
-};
-
-NS_IMPL_ISUPPORTS(NesteggReporter, nsIMemoryReporter)
-
-/* static */ template<> Atomic<size_t>
-CountingAllocatorBase<NesteggReporter>::sAmount(0);
-#endif /* MOZ_WEBM */
-
 static double
 TimeSinceProcessCreation()
 {
   bool ignore;
   return (TimeStamp::Now() - TimeStamp::ProcessCreation(ignore)).ToMilliseconds();
 }
+
+static bool sInitializedJS = false;
 
 // Note that on OSX, aBinDirectory will point to .app/Contents/Resources/browser
 EXPORT_XPCOM_API(nsresult)
@@ -552,7 +542,7 @@ NS_InitXPCOM2(nsIServiceManager** aResult,
   }
 
   // Establish the main thread here.
-  rv = nsThreadManager::get()->Init();
+  rv = nsThreadManager::get().Init();
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -685,14 +675,6 @@ NS_InitXPCOM2(nsIServiceManager** aResult,
                         memmove);
 #endif
 
-#ifdef MOZ_WEBM
-  // And for libnestegg.
-  // libnestegg expects that its realloc implementation will free
-  // the pointer argument when a size of 0 is passed in, so we need
-  // the special version of the counting realloc.
-  nestegg_set_halloc_func(NesteggReporter::CountingFreeingRealloc);
-#endif
-
 #if EXPOSE_INTL_API && defined(MOZ_ICU_DATA_ARCHIVE)
   nsCOMPtr<nsIFile> greDir;
   nsDirectoryService::gService->Get(NS_GRE_DIR,
@@ -709,6 +691,7 @@ NS_InitXPCOM2(nsIServiceManager** aResult,
   if (jsInitFailureReason) {
     NS_RUNTIMEABORT(jsInitFailureReason);
   }
+  sInitializedJS = true;
 
   rv = nsComponentManagerImpl::gComponentManager->Init();
   if (NS_FAILED(rv)) {
@@ -764,9 +747,6 @@ NS_InitXPCOM2(nsIServiceManager** aResult,
 #ifdef MOZ_VPX
   RegisterStrongMemoryReporter(new VPXReporter());
 #endif
-#ifdef MOZ_WEBM
-  RegisterStrongMemoryReporter(new NesteggReporter());
-#endif
 
   mozilla::Telemetry::Init();
 
@@ -782,6 +762,47 @@ NS_InitXPCOM2(nsIServiceManager** aResult,
   return NS_OK;
 }
 
+EXPORT_XPCOM_API(nsresult)
+NS_InitMinimalXPCOM()
+{
+  mozPoisonValueInit();
+  NS_SetMainThread();
+  mozilla::TimeStamp::Startup();
+  NS_LogInit();
+  NS_InitAtomTable();
+  mozilla::LogModule::Init();
+
+  char aLocal;
+  profiler_init(&aLocal);
+
+  nsresult rv = nsThreadManager::get().Init();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  // Set up the timer globals/timer thread.
+  rv = nsTimerImpl::Startup();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  // Create the Component/Service Manager
+  nsComponentManagerImpl::gComponentManager = new nsComponentManagerImpl();
+  NS_ADDREF(nsComponentManagerImpl::gComponentManager);
+
+  rv = nsComponentManagerImpl::gComponentManager->Init();
+  if (NS_FAILED(rv)) {
+    NS_RELEASE(nsComponentManagerImpl::gComponentManager);
+    return rv;
+  }
+
+  // Global cycle collector initialization.
+  if (!nsCycleCollector_init()) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  return NS_OK;
+}
 
 //
 // NS_ShutdownXPCOM()
@@ -893,7 +914,7 @@ ShutdownXPCOM(nsIServiceManager* aServMgr)
     // Shutdown all remaining threads.  This method does not return until
     // all threads created using the thread manager (with the exception of
     // the main thread) have exited.
-    nsThreadManager::get()->Shutdown();
+    nsThreadManager::get().Shutdown();
 
     NS_ProcessPendingEvents(thread);
 
@@ -963,7 +984,13 @@ ShutdownXPCOM(nsIServiceManager* aServMgr)
     moduleLoaders = nullptr;
   }
 
-  nsCycleCollector_shutdown();
+  bool shutdownCollect;
+#ifdef NS_FREE_PERMANENT_DATA
+  shutdownCollect = true;
+#else
+  shutdownCollect = !!PR_GetEnv("MOZ_CC_RUN_DURING_SHUTDOWN");
+#endif
+  nsCycleCollector_shutdown(shutdownCollect);
 
   PROFILER_MARKER("Shutdown xpcom");
   // If we are doing any shutdown checks, poison writes.
@@ -992,19 +1019,22 @@ ShutdownXPCOM(nsIServiceManager* aServMgr)
 #ifdef MOZ_ENABLE_PROFILER_SPS
   // In optimized builds we don't do shutdown collections by default, so
   // uncollected (garbage) objects may keep the nsXPConnect singleton alive,
-  // and its XPCJSRuntime along with it. However, we still destroy various
+  // and its XPCJSContext along with it. However, we still destroy various
   // bits of state in JS_ShutDown(), so we need to make sure the profiler
   // can't access them when it shuts down. This call nulls out the
-  // JS pseudo-stack's internal reference to the main thread JSRuntime,
-  // duplicating the call in XPCJSRuntime::~XPCJSRuntime() in case that
+  // JS pseudo-stack's internal reference to the main thread JSContext,
+  // duplicating the call in XPCJSContext::~XPCJSContext() in case that
   // never fired.
   if (PseudoStack* stack = mozilla_get_pseudo_stack()) {
-    stack->sampleRuntime(nullptr);
+    stack->sampleContext(nullptr);
   }
 #endif
 
-  // Shut down the JS engine.
-  JS_ShutDown();
+  if (sInitializedJS) {
+    // Shut down the JS engine.
+    JS_ShutDown();
+    sInitializedJS = false;
+  }
 
   // Release our own singletons
   // Do this _after_ shutting down the component manager, because the

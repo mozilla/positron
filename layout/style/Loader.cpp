@@ -38,6 +38,7 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsContentPolicyUtils.h"
 #include "nsIHttpChannel.h"
+#include "nsIHttpChannelInternal.h"
 #include "nsIClassOfService.h"
 #include "nsIScriptError.h"
 #include "nsMimeTypes.h"
@@ -55,6 +56,7 @@
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/StyleSheetHandle.h"
 #include "mozilla/StyleSheetHandleInlines.h"
+#include "mozilla/ConsoleReportCollector.h"
 
 #ifdef MOZ_XUL
 #include "nsXULPrototypeCache.h"
@@ -277,9 +279,7 @@ static mozilla::LazyLogModule gSriPRLog("SRI");
   PR_BEGIN_MACRO                                    \
     NS_ASSERTION(uri, "Logging null uri");          \
     if (LOG_ENABLED()) {                            \
-      nsAutoCString _logURISpec;                    \
-      uri->GetSpec(_logURISpec);                    \
-      LOG((format, _logURISpec.get()));             \
+      LOG((format, uri->GetSpecOrDefault().get())); \
     }                                               \
   PR_END_MACRO
 
@@ -522,6 +522,7 @@ Loader::Loader(StyleBackendType aType)
   , mCompatMode(eCompatibility_FullStandards)
   , mStyleBackendType(Some(aType))
   , mEnabled(true)
+  , mReporter(new ConsoleReportCollector())
 #ifdef DEBUG
   , mSyncCallback(false)
 #endif
@@ -533,6 +534,7 @@ Loader::Loader(nsIDocument* aDocument)
   , mDatasToNotifyOn(0)
   , mCompatMode(eCompatibility_FullStandards)
   , mEnabled(true)
+  , mReporter(new ConsoleReportCollector())
 #ifdef DEBUG
   , mSyncCallback(false)
 #endif
@@ -913,10 +915,8 @@ SheetLoadData::OnStreamComplete(nsIUnicharStreamLoader* aLoader,
       errorFlag = nsIScriptError::errorFlag;
     }
 
-    nsAutoCString spec;
-    channelURI->GetSpec(spec);
-
-    const nsAFlatString& specUTF16 = NS_ConvertUTF8toUTF16(spec);
+    const nsAFlatString& specUTF16 =
+      NS_ConvertUTF8toUTF16(channelURI->GetSpecOrDefault());
     const nsAFlatString& ctypeUTF16 = NS_ConvertASCIItoUTF16(contentType);
     const char16_t *strings[] = { specUTF16.get(), ctypeUTF16.get() };
 
@@ -941,9 +941,7 @@ SheetLoadData::OnStreamComplete(nsIUnicharStreamLoader* aLoader,
   mSheet->GetIntegrity(sriMetadata);
   if (sriMetadata.IsEmpty()) {
     nsCOMPtr<nsILoadInfo> loadInfo = channel->GetLoadInfo();
-    bool enforceSRI = false;
-    loadInfo->GetEnforceSRI(&enforceSRI);
-    if (enforceSRI) {
+    if (loadInfo->GetEnforceSRI()) {
       LOG(("  Load was blocked by SRI"));
       MOZ_LOG(gSriPRLog, mozilla::LogLevel::Debug,
               ("css::Loader::OnStreamComplete, required SRI not found"));
@@ -961,9 +959,13 @@ SheetLoadData::OnStreamComplete(nsIUnicharStreamLoader* aLoader,
       return NS_OK;
     }
   } else {
-    nsresult rv = SRICheck::VerifyIntegrity(sriMetadata, aLoader,
-                                            mSheet->GetCORSMode(), aBuffer,
-                                            mLoader->mDocument);
+    nsAutoCString sourceUri;
+    if (mLoader->mDocument && mLoader->mDocument->GetDocumentURI()) {
+      mLoader->mDocument->GetDocumentURI()->GetAsciiSpec(sourceUri);
+    }
+    nsresult rv = SRICheck::VerifyIntegrity(sriMetadata, aLoader, aBuffer,
+                                            sourceUri, mLoader->mReporter);
+    mLoader->mReporter->FlushConsoleReports(mLoader->mDocument);
     if (NS_FAILED(rv)) {
       LOG(("  Load was blocked by SRI"));
       MOZ_LOG(gSriPRLog, mozilla::LogLevel::Debug,
@@ -1242,7 +1244,12 @@ Loader::CreateSheet(nsIURI* aURI,
       MOZ_LOG(gSriPRLog, mozilla::LogLevel::Debug,
               ("css::Loader::CreateSheet, integrity=%s",
                NS_ConvertUTF16toUTF8(aIntegrity).get()));
-      SRICheck::IntegrityMetadata(aIntegrity, mDocument, &sriMetadata);
+      nsAutoCString sourceUri;
+      if (mDocument && mDocument->GetDocumentURI()) {
+        mDocument->GetDocumentURI()->GetAsciiSpec(sourceUri);
+      }
+      SRICheck::IntegrityMetadata(aIntegrity, sourceUri, mReporter,
+                                  &sriMetadata);
     }
 
     if (GetStyleBackendType() == StyleBackendType::Gecko) {
@@ -1680,6 +1687,11 @@ Loader::LoadSheet(SheetLoadData* aLoadData,
       httpChannel->SetReferrerWithPolicy(referrerURI,
                                          aLoadData->mSheet->GetReferrerPolicy());
 
+    nsCOMPtr<nsIHttpChannelInternal> internalChannel = do_QueryInterface(httpChannel);
+    if (internalChannel) {
+      internalChannel->SetIntegrityMetadata(sriMetadata.GetIntegrityString());
+    }
+
     // Set the initiator type
     nsCOMPtr<nsITimedChannel> timedChannel(do_QueryInterface(httpChannel));
     if (timedChannel) {
@@ -1763,10 +1775,10 @@ Loader::ParseSheet(const nsAString& aInput,
                            aLoadData->mSheet->Principal(),
                            aLoadData->mLineNumber);
   } else {
-    aLoadData->mSheet->AsServo()->ParseSheet(aInput, sheetURI, baseURI,
-                                             aLoadData->mSheet->Principal(),
-                                             aLoadData->mLineNumber);
-    rv = NS_OK;
+    rv =
+      aLoadData->mSheet->AsServo()->ParseSheet(aInput, sheetURI, baseURI,
+                                               aLoadData->mSheet->Principal(),
+                                               aLoadData->mLineNumber);
   }
 
   mParsingDatas.RemoveElementAt(mParsingDatas.Length() - 1);

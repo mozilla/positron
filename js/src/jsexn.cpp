@@ -12,6 +12,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/Sprintf.h"
 
 #include <string.h>
 
@@ -84,7 +85,8 @@ static const ClassOps ErrorObjectClassOps = {
     { \
         js_Error_str, /* yes, really */ \
         JSCLASS_HAS_CACHED_PROTO(JSProto_##name) | \
-        JSCLASS_HAS_RESERVED_SLOTS(ErrorObject::RESERVED_SLOTS), \
+        JSCLASS_HAS_RESERVED_SLOTS(ErrorObject::RESERVED_SLOTS) | \
+        JSCLASS_BACKGROUND_FINALIZE, \
         &ErrorObjectClassOps, \
         classSpecPtr \
     }
@@ -260,6 +262,7 @@ js::ComputeStackString(JSContext* cx)
 static void
 exn_finalize(FreeOp* fop, JSObject* obj)
 {
+    MOZ_ASSERT(fop->maybeOffMainThread());
     if (JSErrorReport* report = obj->as<ErrorObject>().getErrorReport())
         fop->free_(report);
 }
@@ -701,12 +704,11 @@ ErrorReport::ReportAddonExceptionToTelementry(JSContext* cx)
         filename = "FILE_NOT_FOUND";
     }
     char histogramKey[64];
-    snprintf(histogramKey, sizeof(histogramKey),
-            "%s %s %s %u",
-            addonIdChars.get(),
-            funname,
-            filename,
-            (reportp ? reportp->lineno : 0) );
+    SprintfLiteral(histogramKey, "%s %s %s %u",
+                   addonIdChars.get(),
+                   funname,
+                   filename,
+                   (reportp ? reportp->lineno : 0) );
     cx->runtime()->addTelemetry(JS_TELEMETRY_ADDON_EXCEPTIONS, 1, histogramKey);
 }
 

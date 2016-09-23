@@ -584,7 +584,7 @@ protected:
    * from a non-main thread, it will redispatch itself to the main thread, and
    * use the latest metrics during the redispatch.
    */
-  void RequestContentRepaint();
+  void RequestContentRepaint(bool aUserAction = true);
 
   /**
    * Send the provided metrics to Gecko to trigger a repaint. This function
@@ -861,11 +861,11 @@ private:
   void CancelAnimationAndGestureState();
 
   RefPtr<InputQueue> mInputQueue;
-  CancelableBlockState* CurrentInputBlock() const;
-  TouchBlockState* CurrentTouchBlock() const;
+  CancelableBlockState* GetCurrentInputBlock() const;
+  TouchBlockState* GetCurrentTouchBlock() const;
   bool HasReadyTouchBlock() const;
 
-  PanGestureBlockState* CurrentPanGestureBlock() const;
+  PanGestureBlockState* GetCurrentPanGestureBlock() const;
 
 private:
   /* ===================================================================

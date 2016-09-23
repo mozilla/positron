@@ -9,6 +9,7 @@ include protocol PImageBridge;
 include protocol PVRManager;
 include protocol PVsyncBridge;
 
+using base::ProcessId from "base/process.h";
 using mozilla::TimeDuration from "mozilla/TimeStamp.h";
 using mozilla::CSSToLayoutDeviceScale from "Units.h";
 using mozilla::gfx::IntSize from "mozilla/gfx/2D.h";
@@ -32,7 +33,9 @@ sync protocol PGPU
 {
 parent:
   // Sent by the UI process to initiate core settings.
-  async Init(GfxPrefSetting[] prefs, GfxVarUpdate[] vars);
+  async Init(GfxPrefSetting[] prefs,
+             GfxVarUpdate[] vars,
+             DevicePrefs devicePrefs);
 
   async InitVsyncBridge(Endpoint<PVsyncBridgeParent> endpoint);
   async InitImageBridge(Endpoint<PImageBridgeParent> endpoint);
@@ -53,6 +56,20 @@ parent:
   async NewContentCompositorBridge(Endpoint<PCompositorBridgeParent> endpoint);
   async NewContentImageBridge(Endpoint<PImageBridgeParent> endpoint);
   async NewContentVRManager(Endpoint<PVRManagerParent> endpoint);
+
+  async DeallocateLayerTreeId(uint64_t layersId);
+
+  // Called to notify the GPU process of who owns a layersId.
+  sync AddLayerTreeIdMapping(uint64_t layersId, ProcessId ownerId);
+
+  // Request the current DeviceStatus from the GPU process. This blocks until
+  // one is available (i.e., Init has completed).
+  sync GetDeviceStatus() returns (GPUDeviceData status);
+
+child:
+  // Sent when the GPU process has initialized devices. This occurs once, after
+  // Init().
+  async InitComplete(GPUDeviceData data);
 };
 
 } // namespace gfx

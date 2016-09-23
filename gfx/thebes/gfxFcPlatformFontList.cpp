@@ -13,6 +13,7 @@
 #include "gfxPlatform.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/Sprintf.h"
 #include "mozilla/TimeStamp.h"
 #include "nsGkAtoms.h"
 #include "nsILanguageAtomService.h"
@@ -378,8 +379,8 @@ gfxFontconfigFontEntry::ReadCMAP(FontInfoData *aFontInfoData)
                   charmap->mHash, mCharacterMap == charmap ? " new" : ""));
     if (LOG_CMAPDATA_ENABLED()) {
         char prefix[256];
-        sprintf(prefix, "(cmapdata) name: %.220s",
-                NS_ConvertUTF16toUTF8(mName).get());
+        SprintfLiteral(prefix, "(cmapdata) name: %.220s",
+                       NS_ConvertUTF16toUTF8(mName).get());
         charmap->Dump(prefix, eGfxLog_cmapdata);
     }
 
@@ -421,7 +422,7 @@ gfxFontconfigFontEntry::GetFontTable(uint32_t aTableTag)
 {
     // for data fonts, read directly from the font data
     if (mFontData) {
-        return GetTableFromFontData(mFontData, aTableTag);
+        return gfxFontUtils::GetTableFromFontData(mFontData, aTableTag);
     }
 
     return gfxFontEntry::GetFontTable(aTableTag);
@@ -792,11 +793,19 @@ gfxFontconfigFontEntry::CreateFontInstance(const gfxFontStyle *aFontStyle,
                                            bool aNeedsBold)
 {
     nsAutoRef<FcPattern> pattern(FcPatternCreate());
+    if (!pattern) {
+        NS_WARNING("Failed to create Fontconfig pattern for font instance");
+        return nullptr;
+    }
     FcPatternAddDouble(pattern, FC_PIXEL_SIZE, aFontStyle->size);
 
     PreparePattern(pattern, aFontStyle->printerFont);
     nsAutoRef<FcPattern> renderPattern
         (FcFontRenderPrepare(nullptr, pattern, mFontPattern));
+    if (!renderPattern) {
+        NS_WARNING("Failed to prepare Fontconfig pattern for font instance");
+        return nullptr;
+    }
 
     cairo_scaled_font_t* scaledFont =
         CreateScaledFont(renderPattern, aFontStyle, aNeedsBold);

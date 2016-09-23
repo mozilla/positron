@@ -484,7 +484,7 @@ public:
     return NS_DispatchToMainThread(this);
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     // Discard the resumption if the spell checker was disabled after the
     // resumption was scheduled.
@@ -912,8 +912,9 @@ nsresult
 mozInlineSpellChecker::SpellCheckRange(nsIDOMRange* aRange)
 {
   if (!mSpellCheck) {
-    NS_WARN_IF_FALSE(mPendingSpellCheck,
-                     "Trying to spellcheck, but checking seems to be disabled");
+    NS_WARNING_ASSERTION(
+      mPendingSpellCheck,
+      "Trying to spellcheck, but checking seems to be disabled");
     return NS_ERROR_NOT_INITIALIZED;
   }
 
@@ -1804,7 +1805,6 @@ nsresult mozInlineSpellChecker::GetSpellCheckSelection(nsISelection ** aSpellChe
   nsresult rv = editor->GetSelectionController(getter_AddRefs(selcon));
   NS_ENSURE_SUCCESS(rv, rv); 
 
-  nsCOMPtr<nsISelection> spellCheckSelection;
   return selcon->GetSelection(nsISelectionController::SELECTION_SPELLCHECK, aSpellCheckSelection);
 }
 

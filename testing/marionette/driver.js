@@ -333,8 +333,15 @@ GeckoDriver.prototype.whenBrowserStarted = function(win, isNewSession) {
       // with no children, we don't have a hope of coming back from this call,
       // so send the ack here. Otherwise, make a note of how many child scripts
       // will be loaded so we known when it's safe to return.
+      // Child managers may not have child scripts yet (e.g. socialapi), only
+      // count child managers that have children, but only count the top level
+      // children as they are the ones that we expect a response from.
       if (mm.childCount !== 0) {
-        this.curBrowser.frameRegsPending = mm.childCount;
+        this.curBrowser.frameRegsPending = 0;
+        for (let i = 0; i < mm.childCount; i++) {
+          if (mm.getChildAt(i).childCount !== 0)
+            this.curBrowser.frameRegsPending += 1;
+        }
       }
     }
 
@@ -2015,36 +2022,7 @@ GeckoDriver.prototype.sendKeysToElement = function*(cmd, resp) {
       break;
 
     case Context.CONTENT:
-      let err;
-      let listener = function(msg) {
-        this.mm.removeMessageListener("Marionette:setElementValue", listener);
-
-        let val = msg.data.value;
-        let el = msg.objects.element;
-        let win = this.getCurrentWindow();
-
-        if (el.type == "file") {
-          Cu.importGlobalProperties(["File"]);
-          let fs = Array.prototype.slice.call(el.files);
-          let file;
-          try {
-            file = new File(val);
-          } catch (e) {
-            err = new InvalidArgumentError(`File not found: ${val}`);
-          }
-          fs.push(file);
-          el.mozSetFileArray(fs);
-        } else {
-          el.value = val;
-        }
-      }.bind(this);
-
-      this.mm.addMessageListener("Marionette:setElementValue", listener);
-      yield this.listener.sendKeysToElement({id: id, value: value});
-      this.mm.removeMessageListener("Marionette:setElementValue", listener);
-      if (err) {
-        throw err;
-      }
+      yield this.listener.sendKeysToElement(id, value);
       break;
   }
 };
@@ -2290,7 +2268,12 @@ GeckoDriver.prototype.sessionTearDown = function(cmd, resp) {
   // reset frame to the top-most frame
   this.curFrame = null;
   if (this.mainFrame) {
-    this.mainFrame.focus();
+    try {
+      this.mainFrame.focus();
+    }
+    catch (e) {
+      this.mainFrame = null;
+    }
   }
 
   this.sessionId = null;
@@ -2593,7 +2576,7 @@ GeckoDriver.prototype.quitApplication = function(cmd, resp) {
   }
 
   let flags = Ci.nsIAppStartup.eAttemptQuit;
-  for (let k of cmd.parameters.flags) {
+  for (let k of cmd.parameters.flags || []) {
     flags |= Ci.nsIAppStartup[k];
   }
 
@@ -2688,23 +2671,6 @@ GeckoDriver.prototype.receiveMessage = function(message) {
         } while (hostname.indexOf(".") != -1);
       }
       return results;
-
-    case "Marionette:getFiles":
-      // Generates file objects to send back to the content script
-      // for handling file uploads.
-      let val = message.json.value;
-      let command_id = message.json.command_id;
-      Cu.importGlobalProperties(["File"]);
-      try {
-        let file = new File(val);
-        this.sendAsync("receiveFiles",
-                       {file: file, command_id: command_id});
-      } catch (e) {
-        let err = `File not found: ${val}`;
-        this.sendAsync("receiveFiles",
-                       {error: err, command_id: command_id});
-      }
-      break;
 
     case "Marionette:emitTouchEvent":
       globalMessageManager.broadcastAsyncMessage(

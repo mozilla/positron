@@ -652,7 +652,7 @@ gfxDownloadedFcFontEntry::GetFontTable(uint32_t aTableTag)
     // so we can just return a blob that "wraps" the appropriate chunk of it.
     // The blob should not attempt to free its data, as the entire sfnt data
     // will be freed when the font entry is deleted.
-    return GetTableFromFontData(mFontData, aTableTag);
+    return gfxFontUtils::GetTableFromFontData(mFontData, aTableTag);
 }
 
 /*
@@ -1470,10 +1470,8 @@ gfxPangoFontGroup::UpdateUserFonts()
 
     mFonts[0] = FamilyFace();
     mFontSets.Clear();
-    mCachedEllipsisTextRun = nullptr;
-    mUnderlineOffset = UNDERLINE_OFFSET_NOT_SET;
+    ClearCachedData();
     mCurrGeneration = newGeneration;
-    mSkipDrawing = false;
 }
 
 already_AddRefed<gfxFcFontSet>

@@ -53,6 +53,7 @@ JSCompartment::JSCompartment(Zone* zone, const JS::CompartmentOptions& options =
     isSelfHosting(false),
     marked(true),
     warnedAboutExprClosure(false),
+    warnedAboutForEach(false),
 #ifdef DEBUG
     firedOnNewGlobalObject(false),
 #endif
@@ -66,22 +67,20 @@ JSCompartment::JSCompartment(Zone* zone, const JS::CompartmentOptions& options =
     globalWriteBarriered(0),
     detachedTypedObjects(0),
     objectMetadataState(ImmediateMetadata()),
-    propertyTree(thisForCtor()),
-    baseShapes(zone, BaseShapeSet()),
-    initialShapes(zone, InitialShapeSet()),
     selfHostingScriptSource(nullptr),
     objectMetadataTable(nullptr),
     innerViews(zone, InnerViewTable()),
     lazyArrayBuffers(nullptr),
     wasm(zone),
-    nonSyntacticLexicalScopes_(nullptr),
+    nonSyntacticLexicalEnvironments_(nullptr),
     gcIncomingGrayPointers(nullptr),
     debugModeBits(0),
     watchpointMap(nullptr),
     scriptCountsMap(nullptr),
     debugScriptMap(nullptr),
-    debugScopes(nullptr),
+    debugEnvs(nullptr),
     enumerators(nullptr),
+    lastCachedNativeIterator(nullptr),
     compartmentStats_(nullptr),
     scheduledForDestruction(false),
     maybeAlive(true),
@@ -109,10 +108,10 @@ JSCompartment::~JSCompartment()
     js_delete(watchpointMap);
     js_delete(scriptCountsMap);
     js_delete(debugScriptMap);
-    js_delete(debugScopes);
+    js_delete(debugEnvs);
     js_delete(objectMetadataTable);
     js_delete(lazyArrayBuffers);
-    js_delete(nonSyntacticLexicalScopes_),
+    js_delete(nonSyntacticLexicalEnvironments_),
     js_free(enumerators);
 
     runtime_->numCompartments--;
@@ -145,7 +144,7 @@ JSCompartment::init(JSContext* maybecx)
     if (!enumerators)
         return false;
 
-    if (!savedStacks_.init()) {
+    if (!savedStacks_.init() || !varNames_.init()) {
         if (maybecx)
             ReportOutOfMemory(maybecx);
         return false;
@@ -209,44 +208,6 @@ JSCompartment::ensureJitCompartmentExists(JSContext* cx)
     return true;
 }
 
-/*
- * This class is used to add a post barrier on the crossCompartmentWrappers map,
- * as the key is calculated based on objects which may be moved by generational
- * GC.
- */
-class WrapperMapRef : public BufferableRef
-{
-    WrapperMap* map;
-    CrossCompartmentKey key;
-
-  public:
-    WrapperMapRef(WrapperMap* map, const CrossCompartmentKey& key)
-      : map(map), key(key) {}
-
-    struct TraceFunctor {
-        JSTracer* trc_;
-        const char* name_;
-        TraceFunctor(JSTracer *trc, const char* name) : trc_(trc), name_(name) {}
-
-        template <class T> void operator()(T* t) { TraceManuallyBarrieredEdge(trc_, t, name_); }
-    };
-    void trace(JSTracer* trc) override {
-        CrossCompartmentKey prior = key;
-        key.applyToWrapped(TraceFunctor(trc, "ccw wrapped"));
-        key.applyToDebugger(TraceFunctor(trc, "ccw debugger"));
-        if (key == prior)
-            return;
-
-        /* Look for the original entry, which might have been removed. */
-        WrapperMap::Ptr p = map->lookup(prior);
-        if (!p)
-            return;
-
-        /* Rekey the entry. */
-        map->rekeyAs(prior, key, key);
-    }
-};
-
 #ifdef JSGC_HASH_TABLE_CHECKS
 namespace {
 struct CheckGCThingAfterMovingGCFunctor {
@@ -272,12 +233,6 @@ JSCompartment::checkWrapperMapAfterMovingGC()
 }
 #endif
 
-namespace {
-struct IsInsideNurseryFunctor {
-    template <class T> bool operator()(T tp) { return IsInsideNursery(*tp); }
-};
-} // namespace (anonymous)
-
 bool
 JSCompartment::putWrapper(JSContext* cx, const CrossCompartmentKey& wrapped,
                           const js::Value& wrapper)
@@ -285,19 +240,9 @@ JSCompartment::putWrapper(JSContext* cx, const CrossCompartmentKey& wrapped,
     MOZ_ASSERT(wrapped.is<JSString*>() == wrapper.isString());
     MOZ_ASSERT_IF(!wrapped.is<JSString*>(), wrapper.isObject());
 
-    /* There's no point allocating wrappers in the nursery since we will tenure them anyway. */
-    MOZ_ASSERT(!IsInsideNursery(static_cast<gc::Cell*>(wrapper.toGCThing())));
-
-    if (!crossCompartmentWrappers.put(wrapped, ReadBarriered<Value>(wrapper))) {
+    if (!crossCompartmentWrappers.put(wrapped, wrapper)) {
         ReportOutOfMemory(cx);
         return false;
-    }
-
-    if (const_cast<CrossCompartmentKey&>(wrapped).applyToWrapped(IsInsideNurseryFunctor()) ||
-        const_cast<CrossCompartmentKey&>(wrapped).applyToDebugger(IsInsideNurseryFunctor()))
-    {
-        WrapperMapRef ref(&crossCompartmentWrappers, wrapped);
-        cx->runtime()->gc.storeBuffer.putGeneric(ref);
     }
 
     return true;
@@ -464,7 +409,7 @@ JSCompartment::wrap(JSContext* cx, MutableHandleObject obj, HandleObject existin
     // recursion here, so we do a check - see bug 809295.
     JS_CHECK_SYSTEM_RECURSION(cx, return false);
     if (cb->preWrap) {
-        obj.set(cb->preWrap(cx, global, obj, objectPassedToWrap));
+        cb->preWrap(cx, global, obj, objectPassedToWrap, obj);
         if (!obj)
             return false;
         MOZ_ASSERT_IF(!existingArg, !ObjectIsMarkedGray(obj));
@@ -549,46 +494,54 @@ JSCompartment::wrap(JSContext* cx, MutableHandle<GCVector<Value>> vec)
     return true;
 }
 
-ClonedBlockObject*
-JSCompartment::getOrCreateNonSyntacticLexicalScope(JSContext* cx,
-                                                   HandleObject enclosingStatic,
-                                                   HandleObject enclosingScope)
+LexicalEnvironmentObject*
+JSCompartment::getOrCreateNonSyntacticLexicalEnvironment(JSContext* cx, HandleObject enclosing)
 {
-    if (!nonSyntacticLexicalScopes_) {
-        nonSyntacticLexicalScopes_ = cx->new_<ObjectWeakMap>(cx);
-        if (!nonSyntacticLexicalScopes_ || !nonSyntacticLexicalScopes_->init())
+    if (!nonSyntacticLexicalEnvironments_) {
+        nonSyntacticLexicalEnvironments_ = cx->new_<ObjectWeakMap>(cx);
+        if (!nonSyntacticLexicalEnvironments_ || !nonSyntacticLexicalEnvironments_->init())
             return nullptr;
     }
 
     // The key is the unwrapped dynamic scope, as we may be creating different
-    // DynamicWithObject wrappers each time.
-    MOZ_ASSERT(!enclosingScope->as<DynamicWithObject>().isSyntactic());
-    RootedObject key(cx, &enclosingScope->as<DynamicWithObject>().object());
-    RootedObject lexicalScope(cx, nonSyntacticLexicalScopes_->lookup(key));
+    // WithEnvironmentObject wrappers each time.
+    MOZ_ASSERT(!enclosing->as<WithEnvironmentObject>().isSyntactic());
+    RootedObject key(cx, &enclosing->as<WithEnvironmentObject>().object());
+    RootedObject lexicalEnv(cx, nonSyntacticLexicalEnvironments_->lookup(key));
 
-    if (!lexicalScope) {
-        lexicalScope = ClonedBlockObject::createNonSyntactic(cx, enclosingStatic, enclosingScope);
-        if (!lexicalScope)
+    if (!lexicalEnv) {
+        lexicalEnv = LexicalEnvironmentObject::createNonSyntactic(cx, enclosing);
+        if (!lexicalEnv)
             return nullptr;
-        if (!nonSyntacticLexicalScopes_->add(cx, key, lexicalScope))
+        if (!nonSyntacticLexicalEnvironments_->add(cx, key, lexicalEnv))
             return nullptr;
     }
 
-    return &lexicalScope->as<ClonedBlockObject>();
+    return &lexicalEnv->as<LexicalEnvironmentObject>();
 }
 
-ClonedBlockObject*
-JSCompartment::getNonSyntacticLexicalScope(JSObject* enclosingScope) const
+LexicalEnvironmentObject*
+JSCompartment::getNonSyntacticLexicalEnvironment(JSObject* enclosing) const
 {
-    if (!nonSyntacticLexicalScopes_)
+    if (!nonSyntacticLexicalEnvironments_)
         return nullptr;
-    if (!enclosingScope->is<DynamicWithObject>())
+    if (!enclosing->is<WithEnvironmentObject>())
         return nullptr;
-    JSObject* key = &enclosingScope->as<DynamicWithObject>().object();
-    JSObject* lexicalScope = nonSyntacticLexicalScopes_->lookup(key);
-    if (!lexicalScope)
+    JSObject* key = &enclosing->as<WithEnvironmentObject>().object();
+    JSObject* lexicalEnv = nonSyntacticLexicalEnvironments_->lookup(key);
+    if (!lexicalEnv)
         return nullptr;
-    return &lexicalScope->as<ClonedBlockObject>();
+    return &lexicalEnv->as<LexicalEnvironmentObject>();
+}
+
+bool
+JSCompartment::addToVarNames(JSContext* cx, JS::Handle<JSAtom*> name)
+{
+    if (varNames_.put(name.get()))
+        return true;
+
+    ReportOutOfMemory(cx);
+    return false;
 }
 
 void
@@ -614,6 +567,7 @@ JSCompartment::traceOutgoingCrossCompartmentWrappers(JSTracer* trc)
 /* static */ void
 JSCompartment::traceIncomingCrossCompartmentEdgesForZoneGC(JSTracer* trc)
 {
+    gcstats::AutoPhase ap(trc->runtime()->gc.stats, gcstats::PHASE_MARK_CCWS);
     MOZ_ASSERT(trc->runtime()->isHeapMajorCollecting());
     for (CompartmentsIter c(trc->runtime(), SkipAtoms); !c.done(); c.next()) {
         if (!c->zone()->isCollecting())
@@ -626,6 +580,10 @@ void
 JSCompartment::trace(JSTracer* trc)
 {
     savedStacks_.trace(trc);
+
+    // Atoms are always tenured.
+    if (!trc->runtime()->isHeapMinorCollecting())
+        varNames_.trace(trc);
 }
 
 void
@@ -662,8 +620,8 @@ JSCompartment::traceRoots(JSTracer* trc, js::gc::GCRuntime::TraceOrMarkRuntime t
     }
 
     /* Mark debug scopes, if present */
-    if (debugScopes)
-        debugScopes->mark(trc);
+    if (debugEnvs)
+        debugEnvs->mark(trc);
 
     if (lazyArrayBuffers)
         lazyArrayBuffers->trace(trc);
@@ -696,19 +654,42 @@ JSCompartment::traceRoots(JSTracer* trc, js::gc::GCRuntime::TraceOrMarkRuntime t
         }
     }
 
-    if (nonSyntacticLexicalScopes_)
-        nonSyntacticLexicalScopes_->trace(trc);
+    if (nonSyntacticLexicalEnvironments_)
+        nonSyntacticLexicalEnvironments_->trace(trc);
 
     wasm.trace(trc);
 }
 
 void
-JSCompartment::sweepAfterMinorGC()
+JSCompartment::finishRoots()
+{
+    if (watchpointMap)
+        watchpointMap->clear();
+
+    if (debugEnvs)
+        debugEnvs->finish();
+
+    if (lazyArrayBuffers)
+        lazyArrayBuffers->clear();
+
+    if (objectMetadataTable)
+        objectMetadataTable->clear();
+
+    clearScriptCounts();
+
+    if (nonSyntacticLexicalEnvironments_)
+        nonSyntacticLexicalEnvironments_->clear();
+}
+
+void
+JSCompartment::sweepAfterMinorGC(JSTracer* trc)
 {
     globalWriteBarriered = 0;
 
     if (innerViews.needsSweepAfterMinorGC())
         innerViews.sweepAfterMinorGC();
+
+    crossCompartmentWrappers.sweepAfterMinorGC(trc);
 }
 
 void
@@ -756,11 +737,11 @@ JSCompartment::sweepRegExps()
 }
 
 void
-JSCompartment::sweepDebugScopes()
+JSCompartment::sweepDebugEnvironments()
 {
     JSRuntime* rt = runtimeFromAnyThread();
-    if (debugScopes)
-        debugScopes->sweep(rt);
+    if (debugEnvs)
+        debugEnvs->sweep(rt);
 }
 
 void
@@ -840,10 +821,9 @@ JSCompartment::fixupCrossCompartmentWrappersAfterMovingGC(JSTracer* trc)
 void
 JSCompartment::fixupAfterMovingGC()
 {
+    purge();
     fixupGlobal();
-    fixupInitialShapeTable();
     objectGroups.fixupTablesAfterMovingGC();
-    dtoaCache.purge();
     fixupScriptMapsAfterMovingGC();
 }
 
@@ -912,6 +892,7 @@ void
 JSCompartment::purge()
 {
     dtoaCache.purge();
+    lastCachedNativeIterator = nullptr;
 }
 
 void
@@ -924,17 +905,15 @@ JSCompartment::clearTables()
     // compartment and zone.
     MOZ_ASSERT(crossCompartmentWrappers.empty());
     MOZ_ASSERT(!jitCompartment_);
-    MOZ_ASSERT(!debugScopes);
+    MOZ_ASSERT(!debugEnvs);
     MOZ_ASSERT(enumerators->next() == enumerators);
     MOZ_ASSERT(regExps.empty());
 
     objectGroups.clearTables();
-    if (baseShapes.initialized())
-        baseShapes.clear();
-    if (initialShapes.initialized())
-        initialShapes.clear();
     if (savedStacks_.initialized())
         savedStacks_.clear();
+    if (varNames_.initialized())
+        varNames_.clear();
 }
 
 void
@@ -978,7 +957,7 @@ AddInnerLazyFunctionsFromScript(JSScript* script, AutoObjectVector& lazyFunction
     if (!script->hasObjects())
         return true;
     ObjectArray* objects = script->objects();
-    for (size_t i = script->innerObjectsStart(); i < objects->length; i++) {
+    for (size_t i = 0; i < objects->length; i++) {
         JSObject* obj = objects->vector[i];
         if (obj->is<JSFunction>() && obj->as<JSFunction>().isInterpretedLazy()) {
             if (!lazyFunctions.append(obj))
@@ -1103,7 +1082,7 @@ JSCompartment::unsetIsDebuggee()
 {
     if (isDebuggee()) {
         debugModeBits &= ~DebuggerObservesMask;
-        DebugScopes::onCompartmentUnsetIsDebuggee(this);
+        DebugEnvironments::onCompartmentUnsetIsDebuggee(this);
     }
 }
 
@@ -1193,7 +1172,8 @@ JSCompartment::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                                       size_t* crossCompartmentWrappersArg,
                                       size_t* regexpCompartment,
                                       size_t* savedStacksSet,
-                                      size_t* nonSyntacticLexicalScopesArg,
+                                      size_t* varNamesSet,
+                                      size_t* nonSyntacticLexicalEnvironmentsArg,
                                       size_t* jitCompartment,
                                       size_t* privateData)
 {
@@ -1202,8 +1182,6 @@ JSCompartment::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                                         tiArrayTypeTables, tiObjectTypeTables,
                                         compartmentTables);
     wasm.addSizeOfExcludingThis(mallocSizeOf, compartmentTables);
-    *compartmentTables += baseShapes.sizeOfExcludingThis(mallocSizeOf)
-                        + initialShapes.sizeOfExcludingThis(mallocSizeOf);
     *innerViewsArg += innerViews.sizeOfExcludingThis(mallocSizeOf);
     if (lazyArrayBuffers)
         *lazyArrayBuffersArg += lazyArrayBuffers->sizeOfIncludingThis(mallocSizeOf);
@@ -1212,8 +1190,10 @@ JSCompartment::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
     *crossCompartmentWrappersArg += crossCompartmentWrappers.sizeOfExcludingThis(mallocSizeOf);
     *regexpCompartment += regExps.sizeOfExcludingThis(mallocSizeOf);
     *savedStacksSet += savedStacks_.sizeOfExcludingThis(mallocSizeOf);
-    if (nonSyntacticLexicalScopes_)
-        *nonSyntacticLexicalScopesArg += nonSyntacticLexicalScopes_->sizeOfIncludingThis(mallocSizeOf);
+    *varNamesSet += varNames_.sizeOfExcludingThis(mallocSizeOf);
+    if (nonSyntacticLexicalEnvironments_)
+        *nonSyntacticLexicalEnvironmentsArg +=
+            nonSyntacticLexicalEnvironments_->sizeOfIncludingThis(mallocSizeOf);
     if (jitCompartment_)
         *jitCompartment += jitCompartment_->sizeOfIncludingThis(mallocSizeOf);
 

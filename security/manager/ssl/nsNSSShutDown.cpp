@@ -2,8 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Casting.h"
 #include "nsNSSShutDown.h"
+
+#include "mozilla/Casting.h"
 #include "nsCOMPtr.h"
 
 using namespace mozilla;
@@ -127,7 +128,7 @@ nsresult nsNSSShutDownList::doPK11Logout()
 
 nsresult nsNSSShutDownList::evaporateAllNSSResources()
 {
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
   if (!NS_IsMainThread()) {
     return NS_ERROR_NOT_SAME_THREAD;
   }
@@ -172,7 +173,7 @@ nsresult nsNSSShutDownList::evaporateAllNSSResources()
     auto entry = static_cast<ObjectHashEntry*>(iter.Get());
     {
       StaticMutexAutoUnlock unlock(sListLock);
-      entry->obj->shutdown(nsNSSShutDownObject::calledFromList);
+      entry->obj->shutdown(nsNSSShutDownObject::ShutdownCalledFrom::List);
     }
     iter.Remove();
   }
@@ -212,7 +213,7 @@ bool nsNSSShutDownList::construct(const StaticMutexAutoLock& /*proofOfLock*/)
 
 void nsNSSShutDownList::shutdown()
 {
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
   StaticMutexAutoLock lock(sListLock);
   sInShutdown = true;
 

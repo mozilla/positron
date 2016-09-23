@@ -7,10 +7,11 @@ description = "Testing code for libgkrust"
 
 [dependencies]
 mp4parse-gtest = { path = "../../../../dom/media/gtest" }
+nsstring-gtest = { path = "../../../../xpcom/rust/nsstring/gtest" }
 
 [lib]
 path = "lib.rs"
-crate-type = ["staticlib"]
+crate-type = ["rlib"]
 test = false
 doctest = false
 bench = false
@@ -26,6 +27,7 @@ rpath = false
 lto = false
 debug-assertions = true
 codegen-units = 1
+panic = "abort"
 
 [profile.release]
 opt-level = 2
@@ -38,3 +40,4 @@ rpath = false
 lto = false
 debug-assertions = false
 codegen-units = 1
+panic = "abort"

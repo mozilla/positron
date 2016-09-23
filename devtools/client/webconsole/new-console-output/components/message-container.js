@@ -23,6 +23,7 @@ const componentMap = new Map([
   ["ConsoleCommand", require("./message-types/console-command").ConsoleCommand],
   ["DefaultRenderer", require("./message-types/default-renderer").DefaultRenderer],
   ["EvaluationResult", require("./message-types/evaluation-result").EvaluationResult],
+  ["NetworkEventMessage", require("./message-types/network-event-message").NetworkEventMessage],
   ["PageError", require("./message-types/page-error").PageError]
 ]);
 
@@ -30,17 +31,46 @@ const MessageContainer = createClass({
   displayName: "MessageContainer",
 
   propTypes: {
-    message: PropTypes.object.isRequired
+    message: PropTypes.object.isRequired,
+    sourceMapService: PropTypes.object,
+    onViewSourceInDebugger: PropTypes.func.isRequired,
+    openNetworkPanel: PropTypes.func.isRequired,
+    openLink: PropTypes.func.isRequired,
+    open: PropTypes.bool.isRequired,
+  },
+
+  getDefaultProps: function () {
+    return {
+      open: false
+    };
   },
 
   shouldComponentUpdate(nextProps, nextState) {
-    return this.props.message.repeat !== nextProps.message.repeat;
+    return this.props.message.repeat !== nextProps.message.repeat
+      || this.props.open !== nextProps.open;
   },
 
   render() {
-    const { message } = this.props;
+    const {
+      dispatch,
+      message,
+      sourceMapService,
+      onViewSourceInDebugger,
+      openNetworkPanel,
+      openLink,
+      open,
+    } = this.props;
+
     let MessageComponent = createFactory(getMessageComponent(message));
-    return MessageComponent({ message });
+    return MessageComponent({
+      dispatch,
+      message,
+      sourceMapService,
+      onViewSourceInDebugger,
+      openNetworkPanel,
+      openLink,
+      open,
+    });
   }
 });
 
@@ -48,6 +78,8 @@ function getMessageComponent(message) {
   switch (message.source) {
     case MESSAGE_SOURCE.CONSOLE_API:
       return componentMap.get("ConsoleApiCall");
+    case MESSAGE_SOURCE.NETWORK:
+      return componentMap.get("NetworkEventMessage");
     case MESSAGE_SOURCE.JAVASCRIPT:
       switch (message.type) {
         case MESSAGE_TYPE.COMMAND:
@@ -61,7 +93,7 @@ function getMessageComponent(message) {
         case MESSAGE_TYPE.LOG:
           return componentMap.get("PageError");
         default:
-          componentMap.get("DefaultRenderer");
+          return componentMap.get("DefaultRenderer");
       }
   }
 

@@ -24,7 +24,6 @@ namespace mozilla {
 class InputEvent;
 
 namespace layers {
-class APZCTreeManager;
 class AsyncDragMetrics;
 class TargetConfig;
 struct TextureFactoryIdentifier;
@@ -84,6 +83,8 @@ public:
   inline uint64_t GetLayersId() { return mLayersId; }
 
   void TakeFocusForClickFromTap();
+
+  void EnsureLayersConnected();
 
 protected:
   void ActorDestroy(ActorDestroyReason why) override;

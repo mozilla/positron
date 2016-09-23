@@ -51,6 +51,7 @@ namespace layers {
 class APZChild;
 class APZEventState;
 class AsyncDragMetrics;
+class IAPZCTreeManager;
 class ImageCompositeNotification;
 } // namespace layers
 
@@ -242,6 +243,9 @@ public:
    */
   static already_AddRefed<TabChild> FindTabChild(const TabId& aTabId);
 
+  // Return a list of all active TabChildren.
+  static nsTArray<RefPtr<TabChild>> GetAll();
+
 public:
   /**
    * Create a new TabChild object.
@@ -387,10 +391,6 @@ public:
                             const int32_t& aModifiers,
                             const bool& aPreventDefault) override;
 
-  virtual bool RecvMouseScrollTestEvent(const uint64_t& aLayersId,
-                                        const FrameMetrics::ViewID& aScrollId,
-                                        const nsString& aEvent) override;
-
   virtual bool RecvNativeSynthesisResponse(const uint64_t& aObserverId,
                                            const nsCString& aResponse) override;
 
@@ -401,6 +401,11 @@ public:
 
   virtual bool
   RecvSelectionEvent(const mozilla::WidgetSelectionEvent& aEvent) override;
+
+  virtual bool
+  RecvPasteTransferable(const IPCDataTransfer& aDataTransfer,
+                        const bool& aIsPrivateData,
+                        const IPC::Principal& aRequestingPrincipal) override;
 
   virtual bool
   RecvActivateFrameEvent(const nsString& aType, const bool& aCapture) override;
@@ -556,6 +561,7 @@ public:
 
   void ClearCachedResources();
   void InvalidateLayers();
+  void ReinitRendering();
   void CompositorUpdated(const TextureFactoryIdentifier& aNewIdentifier);
 
   static inline TabChild* GetFrom(nsIDOMWindow* aWindow)
@@ -587,6 +593,8 @@ public:
 
   virtual bool RecvPrint(const uint64_t& aOuterWindowID,
                          const PrintData& aPrintData) override;
+
+  virtual bool RecvUpdateNativeWindowHandle(const uintptr_t& aNewHandle) override;
 
   /**
    * Native widget remoting protocol for use with windowed plugins with e10s.
@@ -646,6 +654,13 @@ public:
       mAPZChild = aAPZChild;
   }
 
+  // Request that the docshell be marked as active.
+  void ForcePaint(uint64_t aLayerObserverEpoch);
+
+#if defined(XP_WIN) && defined(ACCESSIBILITY)
+  uintptr_t GetNativeWindowHandle() const { return mNativeWindowHandle; }
+#endif
+
 protected:
   virtual ~TabChild();
 
@@ -658,7 +673,8 @@ protected:
   virtual bool RecvSetUpdateHitRegion(const bool& aEnabled) override;
 
   virtual bool RecvSetDocShellIsActive(const bool& aIsActive,
-                                       const bool& aIsHidden) override;
+                                       const bool& aIsHidden,
+                                       const uint64_t& aLayerObserverEpoch) override;
 
   virtual bool RecvNavigateByKey(const bool& aForward,
                                  const bool& aForDocumentNavigation) override;
@@ -685,12 +701,13 @@ private:
   void HandleDoubleTap(const CSSPoint& aPoint, const Modifiers& aModifiers,
                        const ScrollableLayerGuid& aGuid);
 
-  // Notify others that our TabContext has been updated.  (At the moment, this
-  // sets the appropriate origin attributes on our docshell.)
+  // Notify others that our TabContext has been updated.
   //
   // You should call this after calling TabContext::SetTabContext().  We also
   // call this during Init().
-  void NotifyTabContextUpdated();
+  //
+  // @param aIsPreallocated  true if this is called for Preallocated Tab.
+  void NotifyTabContextUpdated(bool aIsPreallocated);
 
   // Update the frameType on our docshell.
   void UpdateFrameType();
@@ -774,9 +791,18 @@ private:
 
   AutoTArray<bool, NUMBER_OF_AUDIO_CHANNELS> mAudioChannelsActive;
 
+  RefPtr<layers::IAPZCTreeManager> mApzcTreeManager;
   // APZChild clears this pointer from its destructor, so it shouldn't be a
   // dangling pointer.
   layers::APZChild* mAPZChild;
+
+  // The most recently seen layer observer epoch in RecvSetDocShellIsActive.
+  uint64_t mLayerObserverEpoch;
+
+#if defined(XP_WIN) && defined(ACCESSIBILITY)
+  // The handle associated with the native window that contains this tab
+  uintptr_t mNativeWindowHandle;
+#endif // defined(XP_WIN)
 
   DISALLOW_EVIL_CONSTRUCTORS(TabChild);
 };

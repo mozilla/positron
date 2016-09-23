@@ -86,8 +86,10 @@ ArgumentsObject::MaybeForwardToCallObject(AbstractFramePtr frame, ArgumentsObjec
     JSScript* script = frame.script();
     if (frame.callee()->needsCallObject() && script->argumentsAliasesFormals()) {
         obj->initFixedSlot(MAYBE_CALL_SLOT, ObjectValue(frame.callObj()));
-        for (AliasedFormalIter fi(script); fi; fi++)
-            data->args[fi.frameIndex()] = MagicScopeSlotValue(fi.scopeSlot());
+        for (PositionalFormalParameterIter fi(script); fi; fi++) {
+            if (fi.closedOver())
+                data->args[fi.argumentSlot()] = MagicEnvSlotValue(fi.location().slot());
+        }
     }
 }
 
@@ -100,8 +102,10 @@ ArgumentsObject::MaybeForwardToCallObject(jit::JitFrameLayout* frame, HandleObje
     if (callee->needsCallObject() && script->argumentsAliasesFormals()) {
         MOZ_ASSERT(callObj && callObj->is<CallObject>());
         obj->initFixedSlot(MAYBE_CALL_SLOT, ObjectValue(*callObj.get()));
-        for (AliasedFormalIter fi(script); fi; fi++)
-            data->args[fi.frameIndex()] = MagicScopeSlotValue(fi.scopeSlot());
+        for (PositionalFormalParameterIter fi(script); fi; fi++) {
+            if (fi.closedOver())
+                data->args[fi.argumentSlot()] = MagicEnvSlotValue(fi.location().slot());
+        }
     }
 }
 
@@ -379,7 +383,9 @@ ArgumentsObject::finishForIon(JSContext* cx, jit::JitFrameLayout* frame,
     ArgumentsData* data =
         reinterpret_cast<ArgumentsData*>(AllocateObjectBuffer<uint8_t>(cx, obj, numBytes));
     if (!data) {
-        // Make the object safe for GC.
+        // Make the object safe for GC. Don't report OOM, the slow path will
+        // retry the allocation.
+        cx->recoverFromOutOfMemory();
         obj->initFixedSlot(DATA_SLOT, PrivateValue(nullptr));
         return nullptr;
     }

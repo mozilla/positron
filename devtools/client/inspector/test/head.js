@@ -34,6 +34,9 @@ Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/devtools/client/inspector/test/shared-head.js",
   this);
 
+const {LocalizationHelper} = require("devtools/shared/l10n");
+const INSPECTOR_L10N = new LocalizationHelper("devtools/locale/inspector.properties");
+
 flags.testing = true;
 registerCleanupFunction(() => {
   flags.testing = false;
@@ -62,41 +65,6 @@ var navigateTo = function (toolbox, url) {
   let activeTab = toolbox.target.activeTab;
   return activeTab.navigateTo(url);
 };
-
-/**
- * Simple DOM node accesor function that takes either a node or a string css
- * selector as argument and returns the corresponding node
- * @param {String|DOMNode} nodeOrSelector
- * @param {Object} options
- *        An object containing any of the following options:
- *        - document: HTMLDocument that should be queried for the selector.
- *                    Default: content.document.
- *        - expectNoMatch: If true and a node matches the given selector, a
- *                         failure is logged for an unexpected match.
- *                         If false and nothing matches the given selector, a
- *                         failure is logged for a missing match.
- *                         Default: false.
- * @return {DOMNode}
- */
-function getNode(nodeOrSelector, options = {}) {
-  let document = options.document || content.document;
-  let noMatches = !!options.expectNoMatch;
-
-  if (typeof nodeOrSelector === "string") {
-    info("Looking for a node that matches selector " + nodeOrSelector);
-    let node = document.querySelector(nodeOrSelector);
-    if (noMatches) {
-      ok(!node, "Selector " + nodeOrSelector + " didn't match any nodes.");
-    } else {
-      ok(node, "Selector " + nodeOrSelector + " matched a node.");
-    }
-
-    return node;
-  }
-
-  info("Looking for a node but selector was not a string.");
-  return nodeOrSelector;
-}
 
 /**
  * Start the element picker and focus the content window.
@@ -228,9 +196,8 @@ var focusSearchBoxUsingShortcut = Task.async(function* (panelWin, callback) {
   let focused = once(searchBox, "focus");
 
   panelWin.focus();
-  let strings = Services.strings.createBundle(
-    "chrome://devtools/locale/inspector.properties");
-  synthesizeKeyShortcut(strings.GetStringFromName("inspector.searchHTML.key"));
+
+  synthesizeKeyShortcut(INSPECTOR_L10N.getStr("inspector.searchHTML.key"));
 
   yield focused;
 
@@ -395,6 +362,28 @@ function* getNodeFrontForSelector(selector, inspector) {
 }
 
 /**
+ * A simple polling helper that executes a given function until it returns true.
+ * @param {Function} check A generator function that is expected to return true at some
+ * stage.
+ * @param {String} desc A text description to be displayed when the polling starts.
+ * @param {Number} attemptes Optional number of times we poll. Defaults to 10.
+ * @param {Number} timeBetweenAttempts Optional time to wait between each attempt.
+ * Defaults to 200ms.
+ */
+function* poll(check, desc, attempts = 10, timeBetweenAttempts = 200) {
+  info(desc);
+
+  for (let i = 0; i < attempts; i++) {
+    if (yield check()) {
+      return;
+    }
+    yield new Promise(resolve => setTimeout(resolve, timeBetweenAttempts));
+  }
+
+  throw new Error(`Timeout while: ${desc}`);
+}
+
+/**
  * Encapsulate some common operations for highlighter's tests, to have
  * the tests cleaner, without exposing directly `inspector`, `highlighter`, and
  * `testActor` if not needed.
@@ -460,13 +449,25 @@ const getHighlighterHelperFor = (type) => Task.async(
           prefix + id, name, highlighter);
       },
 
+      waitForElementAttributeSet: function* (id, name) {
+        yield poll(function* () {
+          let value = yield testActor.getHighlighterNodeAttribute(
+            prefix + id, name, highlighter);
+          return !!value;
+        }, `Waiting for element ${id} to have attribute ${name} set`);
+      },
+
+      waitForElementAttributeRemoved: function* (id, name) {
+        yield poll(function* () {
+          let value = yield testActor.getHighlighterNodeAttribute(
+            prefix + id, name, highlighter);
+          return !value;
+        }, `Waiting for element ${id} to have attribute ${name} removed`);
+      },
+
       synthesizeMouse: function* (options) {
         options = Object.assign({selector: ":root"}, options);
         yield testActor.synthesizeMouse(options);
-      },
-
-      synthesizeKey: function* (options) {
-        yield testActor.synthesizeKey(options);
       },
 
       // This object will synthesize any "mouse" prefixed event to the
@@ -583,23 +584,6 @@ function waitForStyleEditor(toolbox, href) {
 }
 
 /**
- * @see SimpleTest.waitForClipboard
- *
- * @param {Function} setup
- *        Function to execute before checking for the
- *        clipboard content
- * @param {String|Function} expected
- *        An expected string or validator function
- * @return a promise that resolves when the expected string has been found or
- * the validator function has returned true, rejects otherwise.
- */
-function waitForClipboard(setup, expected) {
-  let def = defer();
-  SimpleTest.waitForClipboard(expected, setup, def.resolve, def.reject);
-  return def.promise;
-}
-
-/**
  * Checks if document's active element is within the given element.
  * @param  {HTMLDocument}  doc document with active element in question
  * @param  {DOMNode}       container element tested on focus containment
@@ -626,8 +610,7 @@ var waitForTab = Task.async(function* () {
   info("Waiting for a tab to open");
   yield once(gBrowser.tabContainer, "TabOpen");
   let tab = gBrowser.selectedTab;
-  let browser = tab.linkedBrowser;
-  yield once(browser, "load", true);
+  yield BrowserTestUtils.browserLoaded(tab.linkedBrowser);
   info("The tab load completed");
   return tab;
 });

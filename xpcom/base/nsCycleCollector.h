@@ -18,7 +18,7 @@ template<class T> struct already_AddRefed;
 #include "js/SliceBudget.h"
 
 namespace mozilla {
-class CycleCollectedJSRuntime;
+class CycleCollectedJSContext;
 } // namespace mozilla
 
 bool nsCycleCollector_init();
@@ -51,11 +51,14 @@ void nsCycleCollector_collectSlice(js::SliceBudget& budget,
                                    bool aPreferShorterSlices = false);
 
 uint32_t nsCycleCollector_suspectedCount();
-void nsCycleCollector_shutdown();
+
+// If aDoCollect is true, then run the GC and CC a few times before
+// shutting down the CC completely.
+void nsCycleCollector_shutdown(bool aDoCollect = true);
 
 // Helpers for interacting with JS
-void nsCycleCollector_registerJSRuntime(mozilla::CycleCollectedJSRuntime* aRt);
-void nsCycleCollector_forgetJSRuntime();
+void nsCycleCollector_registerJSContext(mozilla::CycleCollectedJSContext* aCx);
+void nsCycleCollector_forgetJSContext();
 
 #define NS_CYCLE_COLLECTOR_LOGGER_CID \
 { 0x58be81b4, 0x39d2, 0x437c, \

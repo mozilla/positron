@@ -62,7 +62,7 @@ public:
   virtual void UnbindFromTree(bool aDeep, bool aNullParent) override;
   virtual EventStates IntrinsicState() const override;
 
-  NS_IMETHODIMP Notify(imgIRequest *aRequest, int32_t aType, const nsIntRect* aData) override;
+  NS_IMETHOD Notify(imgIRequest *aRequest, int32_t aType, const nsIntRect* aData) override;
 
   void MaybeLoadSVGImage();
 
@@ -82,9 +82,9 @@ protected:
   virtual SVGAnimatedPreserveAspectRatio *GetPreserveAspectRatio() override;
   virtual StringAttributesInfo GetStringInfo() override;
 
-  enum { RESULT, HREF };
-  nsSVGString mStringAttributes[2];
-  static StringInfo sStringInfo[2];
+  enum { RESULT, HREF, XLINK_HREF };
+  nsSVGString mStringAttributes[3];
+  static StringInfo sStringInfo[3];
 
   SVGAnimatedPreserveAspectRatio mPreserveAspectRatio;
 };

@@ -8,8 +8,8 @@
 #define mozilla_a11y_DocAccessibleParent_h
 
 #include "nsAccessibilityService.h"
-#include "ProxyAccessible.h"
 #include "mozilla/a11y/PDocAccessibleParent.h"
+#include "mozilla/a11y/ProxyAccessible.h"
 #include "nsClassHashtable.h"
 #include "nsHashKeys.h"
 #include "nsISupportsImpl.h"
@@ -50,8 +50,13 @@ public:
   virtual bool RecvEvent(const uint64_t& aID, const uint32_t& aType)
     override;
 
+#if defined(XP_WIN)
+  virtual bool RecvShowEventInfo(const ShowEventData& aData,
+                                 nsTArray<MsaaMapping>* aNewMsaaIds) override;
+#else
   virtual bool RecvShowEvent(const ShowEventData& aData, const bool& aFromUser)
     override;
+#endif // defined(XP_WIN)
   virtual bool RecvHideEvent(const uint64_t& aRootID, const bool& aFromUser)
     override;
   virtual bool RecvStateChangeEvent(const uint64_t& aID,
@@ -142,6 +147,12 @@ public:
   const DocAccessibleParent* ChildDocAt(size_t aIdx) const
     { return mChildDocs[aIdx]; }
 
+#if defined(XP_WIN)
+  virtual bool RecvCOMProxy(const IAccessibleHolder& aCOMProxy,
+                            IAccessibleHolder* aParentCOMProxy,
+                            uint32_t* aMsaaID) override;
+#endif
+
 private:
 
   class ProxyEntry : public PLDHashEntryHdr
@@ -169,7 +180,11 @@ private:
 
   uint32_t AddSubtree(ProxyAccessible* aParent,
                       const nsTArray<AccessibleData>& aNewTree, uint32_t aIdx,
-                      uint32_t aIdxInParent);
+                      uint32_t aIdxInParent
+#if defined(XP_WIN)
+                      , nsTArray<MsaaMapping>* aNewMsaaIds
+#endif // defined(XP_WIN)
+                      );
   MOZ_MUST_USE bool CheckDocTree() const;
   xpcAccessibleGeneric* GetXPCAccessible(ProxyAccessible* aProxy);
 

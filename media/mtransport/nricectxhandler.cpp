@@ -11,6 +11,7 @@ extern "C" {
 // Local includes
 #include "nricectxhandler.h"
 #include "nricemediastream.h"
+#include "nriceresolver.h"
 
 namespace mozilla {
 
@@ -31,7 +32,6 @@ NrIceCtxHandler::Create(const std::string& name,
                         bool allow_loopback,
                         bool tcp_enabled,
                         bool allow_link_local,
-                        bool hide_non_default,
                         NrIceCtx::Policy policy)
 {
   // InitializeGlobals only executes once
@@ -41,7 +41,7 @@ NrIceCtxHandler::Create(const std::string& name,
 
   if (ctx == nullptr ||
       ctx->current_ctx == nullptr ||
-      !ctx->current_ctx->Initialize(hide_non_default)) {
+      !ctx->current_ctx->Initialize()) {
     return nullptr;
   }
 
@@ -61,18 +61,15 @@ NrIceCtxHandler::CreateStream(const std::string& name, int components)
 
 
 RefPtr<NrIceCtx>
-NrIceCtxHandler::CreateCtx(bool hide_non_default) const
+NrIceCtxHandler::CreateCtx() const
 {
-  return CreateCtx(NrIceCtx::GetNewUfrag(),
-                   NrIceCtx::GetNewPwd(),
-                   hide_non_default);
+  return CreateCtx(NrIceCtx::GetNewUfrag(), NrIceCtx::GetNewPwd());
 }
 
 
 RefPtr<NrIceCtx>
 NrIceCtxHandler::CreateCtx(const std::string& ufrag,
-                           const std::string& pwd,
-                           bool hide_non_default) const
+                           const std::string& pwd) const
 {
   RefPtr<NrIceCtx> new_ctx = new NrIceCtx(this->current_ctx->name(),
                                           true, // offerer (hardcoded per bwc)
@@ -81,8 +78,40 @@ NrIceCtxHandler::CreateCtx(const std::string& ufrag,
     return nullptr;
   }
 
-  if (!new_ctx->Initialize(hide_non_default, ufrag, pwd)) {
+  if (!new_ctx->Initialize(ufrag, pwd)) {
     return nullptr;
+  }
+
+  // copy the stun, and turn servers from the current context
+  int r = nr_ice_ctx_set_stun_servers(new_ctx->ctx_,
+                                      this->current_ctx->ctx_->stun_servers,
+                                      this->current_ctx->ctx_->stun_server_ct);
+  if (r) {
+    MOZ_MTLOG(ML_ERROR, "Error while setting STUN servers in CreateCtx"
+                        << " (likely ice restart related)");
+    return nullptr;
+  }
+
+  r = nr_ice_ctx_copy_turn_servers(new_ctx->ctx_,
+                                   this->current_ctx->ctx_->turn_servers,
+                                   this->current_ctx->ctx_->turn_server_ct);
+  if (r) {
+    MOZ_MTLOG(ML_ERROR, "Error while copying TURN servers in CreateCtx"
+                        << " (likely ice restart related)");
+    return nullptr;
+  }
+
+  // grab the NrIceResolver stashed in the nr_resolver and allocate another
+  // for the new ctx.  Note: there may not be an nr_resolver.
+  if (this->current_ctx->ctx_->resolver) {
+    NrIceResolver* resolver =
+      static_cast<NrIceResolver*>(this->current_ctx->ctx_->resolver->obj);
+    if (!resolver ||
+        NS_FAILED(new_ctx->SetResolver(resolver->AllocateResolver()))) {
+      MOZ_MTLOG(ML_ERROR, "Error while setting dns resolver in CreateCtx"
+                          << " (likely ice restart related)");
+      return nullptr;
+    }
   }
 
   return new_ctx;

@@ -56,7 +56,7 @@
 #include "jit/JitFrames-inl.h"
 #include "jit/shared/Lowering-shared-inl.h"
 #include "vm/Debugger-inl.h"
-#include "vm/ScopeObject-inl.h"
+#include "vm/EnvironmentObject-inl.h"
 #include "vm/Stack-inl.h"
 
 using namespace js;
@@ -224,7 +224,7 @@ JitRuntime::~JitRuntime()
 bool
 JitRuntime::initialize(JSContext* cx, AutoLockForExclusiveAccess& lock)
 {
-    AutoCompartment ac(cx, cx->atomsCompartment(lock));
+    AutoCompartment ac(cx, cx->atomsCompartment(lock), &lock);
 
     JitContext jctx(cx, nullptr);
 
@@ -358,7 +358,7 @@ JitRuntime::debugTrapHandler(JSContext* cx)
         // JitRuntime code stubs are shared across compartments and have to
         // be allocated in the atoms compartment.
         AutoLockForExclusiveAccess lock(cx);
-        AutoCompartment ac(cx, cx->runtime()->atomsCompartment(lock));
+        AutoCompartment ac(cx, cx->runtime()->atomsCompartment(lock), &lock);
         debugTrapHandler_ = generateDebugTrapHandler(cx);
     }
     return debugTrapHandler_;
@@ -613,6 +613,12 @@ jit::LazyLinkTopActivation(JSContext* cx)
 JitRuntime::Mark(JSTracer* trc, AutoLockForExclusiveAccess& lock)
 {
     MOZ_ASSERT(!trc->runtime()->isHeapMinorCollecting());
+
+    // Shared stubs are allocated in the atoms compartment, so do not iterate
+    // them after the atoms heap after it has been "finished."
+    if (trc->runtime()->atomsAreFinished())
+        return;
+
     Zone* zone = trc->runtime()->atomsCompartment(lock)->zone();
     for (auto i = zone->cellIter<JitCode>(); !i.done(); i.next()) {
         JitCode* code = i;
@@ -2105,11 +2111,11 @@ TrackPropertiesForSingletonScopes(JSContext* cx, JSScript* script, BaselineFrame
     while (environment && !environment->is<GlobalObject>()) {
         if (environment->is<CallObject>() && environment->isSingleton())
             TrackAllProperties(cx, environment);
-        environment = environment->enclosingScope();
+        environment = environment->enclosingEnvironment();
     }
 
     if (baselineFrame) {
-        JSObject* scope = baselineFrame->scopeChain();
+        JSObject* scope = baselineFrame->environmentChain();
         if (scope->is<CallObject>() && scope->isSingleton())
             TrackAllProperties(cx, scope);
     }
@@ -2357,6 +2363,15 @@ CheckScript(JSContext* cx, JSScript* script, bool osr)
         // object as scope chain, this is not valid when the script has a
         // non-syntactic global scope.
         TrackAndSpewIonAbort(cx, script, "has non-syntactic global scope");
+        return false;
+    }
+
+    if (script->functionHasExtraBodyVarScope() &&
+        script->functionExtraBodyVarScope()->hasEnvironment())
+    {
+        // This restriction will be lifted when intra-function scope chains
+        // are compilable by Ion. See bug 1273858.
+        TrackAndSpewIonAbort(cx, script, "has extra var environment");
         return false;
     }
 
@@ -2820,7 +2835,7 @@ EnterIon(JSContext* cx, EnterJitData& data)
         nogc.reset();
 #endif
         CALL_GENERATED_CODE(enter, data.jitcode, data.maxArgc, data.maxArgv, /* osrFrame = */nullptr, data.calleeToken,
-                            /* scopeChain = */ nullptr, 0, data.result.address());
+                            /* envChain = */ nullptr, 0, data.result.address());
     }
 
     MOZ_ASSERT(!cx->runtime()->jitRuntime()->hasIonReturnOverride());
@@ -2852,7 +2867,7 @@ jit::SetEnterJitData(JSContext* cx, EnterJitData& data, RunState& state,
         data.constructing = state.asInvoke()->constructing();
         data.numActualArgs = args.length();
         data.maxArgc = Max(args.length(), numFormals) + 1;
-        data.scopeChain = nullptr;
+        data.envChain = nullptr;
         data.calleeToken = CalleeToToken(&args.callee().as<JSFunction>(), data.constructing);
 
         if (data.numActualArgs >= numFormals) {
@@ -2882,7 +2897,7 @@ jit::SetEnterJitData(JSContext* cx, EnterJitData& data, RunState& state,
         data.numActualArgs = 0;
         data.maxArgc = 0;
         data.maxArgv = nullptr;
-        data.scopeChain = state.asExecute()->scopeChain();
+        data.envChain = state.asExecute()->environmentChain();
 
         data.calleeToken = CalleeToToken(state.script());
 
@@ -2961,7 +2976,7 @@ jit::FastInvoke(JSContext* cx, HandleFunction fun, CallArgs& args)
     nogc.reset();
 #endif
     CALL_GENERATED_CODE(enter, jitcode, args.length() + 1, args.array() - 1, /* osrFrame = */nullptr,
-                        calleeToken, /* scopeChain = */ nullptr, 0, result.address());
+                        calleeToken, /* envChain = */ nullptr, 0, result.address());
 
     MOZ_ASSERT(!cx->runtime()->jitRuntime()->hasIonReturnOverride());
 

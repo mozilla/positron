@@ -305,8 +305,8 @@ public:
     if (mPathBuilder) {
       mPathBuilder->MoveTo(mozilla::gfx::Point(ToFloat(aX), ToFloat(aY)));
     } else {
-      mDSPathBuilder->MoveTo(mTarget->GetTransform() *
-                             mozilla::gfx::Point(ToFloat(aX), ToFloat(aY)));
+      mDSPathBuilder->MoveTo(mTarget->GetTransform().TransformPoint(
+                             mozilla::gfx::Point(ToFloat(aX), ToFloat(aY))));
     }
   }
 
@@ -326,10 +326,10 @@ public:
                                       mozilla::gfx::Point(ToFloat(aX), ToFloat(aY)));
     } else {
       mozilla::gfx::Matrix transform = mTarget->GetTransform();
-      mDSPathBuilder->QuadraticBezierTo(transform *
-                                        mozilla::gfx::Point(ToFloat(aCpx), ToFloat(aCpy)),
-                                        transform *
-                                        mozilla::gfx::Point(ToFloat(aX), ToFloat(aY)));
+      mDSPathBuilder->QuadraticBezierTo(transform.TransformPoint(
+                                          mozilla::gfx::Point(ToFloat(aCpx), ToFloat(aCpy))),
+                                        transform.TransformPoint(
+                                          mozilla::gfx::Point(ToFloat(aX), ToFloat(aY))));
     }
   }
 
@@ -429,6 +429,7 @@ public:
 
   virtual int32_t GetWidth() const override;
   virtual int32_t GetHeight() const override;
+  gfx::IntSize GetSize() const { return gfx::IntSize(mWidth, mHeight); }
 
   // nsICanvasRenderingContextInternal
   /**
@@ -445,7 +446,7 @@ public:
   }
   NS_IMETHOD SetDimensions(int32_t aWidth, int32_t aHeight) override;
   NS_IMETHOD InitializeWithDrawTarget(nsIDocShell* aShell,
-                                      gfx::DrawTarget* aTarget) override;
+                                      NotNull<gfx::DrawTarget*> aTarget) override;
 
   NS_IMETHOD GetInputStream(const char* aMimeType,
                             const char16_t* aEncoderOptions,
@@ -463,7 +464,6 @@ public:
   NS_IMETHOD SetIsOpaque(bool aIsOpaque) override;
   bool GetIsOpaque() override { return mOpaque; }
   NS_IMETHOD Reset() override;
-  mozilla::layers::PersistentBufferProvider* GetBufferProvider(mozilla::layers::LayerManager* aManager);
   already_AddRefed<Layer> GetCanvasLayer(nsDisplayListBuilder* aBuilder,
                                          Layer* aOldLayer,
                                          LayerManager* aManager,
@@ -517,7 +517,7 @@ public:
     if (mPathBuilder) {
       mPathBuilder->LineTo(aPoint);
     } else {
-      mDSPathBuilder->LineTo(mTarget->GetTransform() * aPoint);
+      mDSPathBuilder->LineTo(mTarget->GetTransform().TransformPoint(aPoint));
     }
   }
 
@@ -529,9 +529,9 @@ public:
       mPathBuilder->BezierTo(aCP1, aCP2, aCP3);
     } else {
       mozilla::gfx::Matrix transform = mTarget->GetTransform();
-      mDSPathBuilder->BezierTo(transform * aCP1,
-                                transform * aCP2,
-                                transform * aCP3);
+      mDSPathBuilder->BezierTo(transform.TransformPoint(aCP1),
+                               transform.TransformPoint(aCP2),
+                               transform.TransformPoint(aCP3));
     }
   }
 
@@ -573,6 +573,8 @@ protected:
   static uint32_t sNumLivingContexts;
 
   static mozilla::gfx::DrawTarget* sErrorTarget;
+
+  void SetTransformInternal(const mozilla::gfx::Matrix& aTransform);
 
   // Some helpers.  Doesn't modify a color on failure.
   void SetStyleFromUnion(const StringOrCanvasGradientOrCanvasPattern& aValue,
@@ -641,6 +643,23 @@ protected:
   RenderingMode EnsureTarget(const gfx::Rect* aCoveredRect = nullptr,
                              RenderingMode aRenderMode = RenderingMode::DefaultBackendMode);
 
+  void RestoreClipsAndTransformToTarget();
+
+  bool TrySkiaGLTarget(RefPtr<gfx::DrawTarget>& aOutDT,
+                       RefPtr<layers::PersistentBufferProvider>& aOutProvider);
+
+  bool TrySharedTarget(RefPtr<gfx::DrawTarget>& aOutDT,
+                       RefPtr<layers::PersistentBufferProvider>& aOutProvider);
+
+  bool TryBasicTarget(RefPtr<gfx::DrawTarget>& aOutDT,
+                      RefPtr<layers::PersistentBufferProvider>& aOutProvider);
+
+  void RegisterAllocation();
+
+  void SetInitialState();
+
+  void SetErrorState();
+
   /**
    * This method is run at the end of the event-loop spin where
    * ScheduleStableStateCallback was called.
@@ -663,7 +682,7 @@ protected:
    * Returns the target to the buffer provider. i.e. this will queue a frame for
    * rendering.
    */
-  void ReturnTarget();
+  void ReturnTarget(bool aForceReset = false);
 
   /**
    * Check if the target is valid after calling EnsureTarget.
@@ -917,6 +936,22 @@ protected:
 
   bool CheckSizeForSkiaGL(mozilla::gfx::IntSize aSize);
 
+  // A clip or a transform, recorded and restored in order.
+  struct ClipState {
+    explicit ClipState(mozilla::gfx::Path* aClip)
+      : clip(aClip)
+    {}
+
+    explicit ClipState(const mozilla::gfx::Matrix& aTransform)
+      : transform(aTransform)
+    {}
+
+    bool IsClip() const { return !!clip; }
+
+    RefPtr<mozilla::gfx::Path> clip;
+    mozilla::gfx::Matrix transform;
+  };
+
   // state stack handling
   class ContextState {
   public:
@@ -1009,7 +1044,7 @@ protected:
       return std::min(SIGMA_MAX, shadowBlur / 2.0f);
     }
 
-    nsTArray<RefPtr<mozilla::gfx::Path> > clipsPushed;
+    nsTArray<ClipState> clipsAndTransforms;
 
     RefPtr<gfxFontGroup> fontGroup;
     nsCOMPtr<nsIAtom> fontLanguage;

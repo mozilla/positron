@@ -133,12 +133,23 @@ class MachCommands(MachCommandBase):
                      dest='pushlog_id',
                      required=True,
                      default=0)
+    @CommandArgument('--pushdate',
+                     dest='pushdate',
+                     required=True,
+                     type=int,
+                     default=0)
     @CommandArgument('--owner',
                      required=True,
                      help='email address of who owns this graph')
     @CommandArgument('--level',
                      required=True,
                      help='SCM level of this repository')
+    @CommandArgument('--triggered-by',
+                     choices=['nightly', 'push'],
+                     default='push',
+                     help='Source of execution of the decision graph')
+    @CommandArgument('--target-tasks-method',
+                     help='method for selecting the target tasks to generate')
     def taskgraph_decision(self, **options):
         """Run the decision task: generate a task graph and submit to
         TaskCluster.  This is only meant to be called within decision tasks,

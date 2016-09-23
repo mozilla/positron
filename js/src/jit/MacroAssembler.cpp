@@ -1003,42 +1003,51 @@ MacroAssembler::fillSlotsWithUninitialized(Address base, Register temp, uint32_t
 }
 
 static void
-FindStartOfUndefinedAndUninitializedSlots(NativeObject* templateObj, uint32_t nslots,
-                                          uint32_t* startOfUndefined, uint32_t* startOfUninitialized)
+FindStartOfUninitializedAndUndefinedSlots(NativeObject* templateObj, uint32_t nslots,
+                                          uint32_t* startOfUninitialized,
+                                          uint32_t* startOfUndefined)
 {
     MOZ_ASSERT(nslots == templateObj->lastProperty()->slotSpan(templateObj->getClass()));
     MOZ_ASSERT(nslots > 0);
+
     uint32_t first = nslots;
     for (; first != 0; --first) {
-        if (!IsUninitializedLexical(templateObj->getSlot(first - 1)))
+        if (templateObj->getSlot(first - 1) != UndefinedValue())
             break;
     }
-    *startOfUninitialized = first;
-    for (; first != 0; --first) {
-        if (templateObj->getSlot(first - 1) != UndefinedValue()) {
-            *startOfUndefined = first;
-            return;
+    *startOfUndefined = first;
+
+    if (first != 0 && IsUninitializedLexical(templateObj->getSlot(first - 1))) {
+        for (; first != 0; --first) {
+            if (!IsUninitializedLexical(templateObj->getSlot(first - 1)))
+                break;
         }
+        *startOfUninitialized = first;
+    } else {
+        *startOfUninitialized = *startOfUndefined;
     }
-    *startOfUndefined = 0;
 }
 
 static void
-AllocateObjectBufferWithInit(JSContext* cx, TypedArrayObject* obj, uint32_t count)
+AllocateObjectBufferWithInit(JSContext* cx, TypedArrayObject* obj, int32_t count)
 {
     JS::AutoCheckCannotGC nogc(cx);
 
     obj->initPrivate(nullptr);
-    obj->setFixedSlot(TypedArrayObject::LENGTH_SLOT, Int32Value(count));
 
     // Typed arrays with a non-compile-time known size that have a count of zero
     // eventually are essentially typed arrays with inline elements. The bounds
     // check will make sure that no elements are read or written to that memory.
-    if (count == 0) {
-        obj->setInlineElements();
+    // Negative numbers will bail out to the slow path, which in turn will raise
+    // an invalid argument exception.
+    if (count <= 0) {
+        if (count == 0)
+            obj->setInlineElements();
+        obj->setFixedSlot(TypedArrayObject::LENGTH_SLOT, Int32Value(0));
         return;
     }
 
+    obj->setFixedSlot(TypedArrayObject::LENGTH_SLOT, Int32Value(count));
     size_t nbytes;
 
     switch (obj->type()) {
@@ -1054,28 +1063,11 @@ JS_FOR_EACH_TYPED_ARRAY(CREATE_TYPED_ARRAY)
     }
 
     nbytes = JS_ROUNDUP(nbytes, sizeof(Value));
-
-    // Elements can only be stored in the nursery since typed arrays have a
-    // finalizer that frees the memory, but the finalizer is only called for
-    // tenured objects. Allocating the memory in the nursery is done to avoid
-    // memory leaks.
-    if (nbytes > Nursery::MaxNurseryBufferSize)
-        return;
-
     Nursery& nursery = cx->runtime()->gc.nursery;
-    void* buf = nursery.allocateBuffer(obj->zone(), nbytes);
+    void* buf = nursery.allocateBuffer(obj, nbytes);
     if (buf) {
-        if (nursery.isInside(buf) || obj->isTenured()) {
-            obj->initPrivate(buf);
-            memset(buf, 0, nbytes);
-        } else {
-            // If the nursery is full, |allocateBuffer| will try to allocate
-            // the memory in the tenured heap. This will leak memory when the
-            // object is not tenured since the finalizer will not be called for
-            // non-tenured objects.
-            nursery.removeMallocedBuffer(buf);
-            js_free(buf);
-        }
+        obj->initPrivate(buf);
+        memset(buf, 0, nbytes);
     }
 }
 
@@ -1160,25 +1152,29 @@ MacroAssembler::initGCSlots(Register obj, Register temp, NativeObject* templateO
     //
     // The template object may be a CallObject, in which case we need to
     // account for uninitialized lexical slots as well as undefined
-    // slots. Unitialized lexical slots always appear at the very end of
-    // slots, after undefined.
-    uint32_t startOfUndefined = nslots;
+    // slots. Unitialized lexical slots appears in CallObjects if the function
+    // has parameter expressions, in which case closed over parameters have
+    // TDZ. Uninitialized slots come before undefined slots in CallObjects.
     uint32_t startOfUninitialized = nslots;
-    FindStartOfUndefinedAndUninitializedSlots(templateObj, nslots,
-                                              &startOfUndefined, &startOfUninitialized);
-    MOZ_ASSERT(startOfUndefined <= nfixed); // Reserved slots must be fixed.
-    MOZ_ASSERT_IF(startOfUndefined != nfixed, startOfUndefined <= startOfUninitialized);
-    MOZ_ASSERT_IF(!templateObj->is<CallObject>(), startOfUninitialized == nslots);
+    uint32_t startOfUndefined = nslots;
+    FindStartOfUninitializedAndUndefinedSlots(templateObj, nslots,
+                                              &startOfUninitialized, &startOfUndefined);
+    MOZ_ASSERT(startOfUninitialized <= nfixed); // Reserved slots must be fixed.
+    MOZ_ASSERT(startOfUndefined >= startOfUninitialized);
+    MOZ_ASSERT_IF(!templateObj->is<CallObject>(), startOfUninitialized == startOfUndefined);
 
     // Copy over any preserved reserved slots.
-    copySlotsFromTemplate(obj, templateObj, 0, startOfUndefined);
+    copySlotsFromTemplate(obj, templateObj, 0, startOfUninitialized);
 
     // Fill the rest of the fixed slots with undefined and uninitialized.
     if (initContents) {
-        fillSlotsWithUndefined(Address(obj, NativeObject::getFixedSlotOffset(startOfUndefined)), temp,
-                               startOfUndefined, Min(startOfUninitialized, nfixed));
         size_t offset = NativeObject::getFixedSlotOffset(startOfUninitialized);
-        fillSlotsWithUninitialized(Address(obj, offset), temp, startOfUninitialized, nfixed);
+        fillSlotsWithUninitialized(Address(obj, offset), temp,
+                                   startOfUninitialized, Min(startOfUndefined, nfixed));
+
+        offset = NativeObject::getFixedSlotOffset(startOfUndefined);
+        fillSlotsWithUndefined(Address(obj, offset), temp,
+                               startOfUndefined, nfixed);
     }
 
     if (ndynamic) {
@@ -1187,12 +1183,15 @@ MacroAssembler::initGCSlots(Register obj, Register temp, NativeObject* templateO
         push(obj);
         loadPtr(Address(obj, NativeObject::offsetOfSlots()), obj);
 
-        // Initially fill all dynamic slots with undefined.
-        fillSlotsWithUndefined(Address(obj, 0), temp, 0, ndynamic);
-
-        // Fill uninitialized slots if necessary.
-        fillSlotsWithUninitialized(Address(obj, 0), temp, startOfUninitialized - nfixed,
-                                   nslots - startOfUninitialized);
+        // Fill uninitialized slots if necessary. Otherwise initialize all
+        // slots to undefined.
+        if (startOfUndefined > nfixed) {
+            MOZ_ASSERT(startOfUninitialized != startOfUndefined);
+            fillSlotsWithUninitialized(Address(obj, 0), temp, 0, startOfUndefined - nfixed);
+            fillSlotsWithUndefined(Address(obj, 0), temp, startOfUndefined - nfixed, ndynamic);
+        } else {
+            fillSlotsWithUndefined(Address(obj, 0), temp, 0, ndynamic);
+        }
 
         pop(obj);
     }
@@ -2750,6 +2749,26 @@ MacroAssembler::wasmCallImport(const wasm::CallSiteDesc& desc, const wasm::Calle
 }
 
 void
+MacroAssembler::wasmCallBuiltinInstanceMethod(const ABIArg& instanceArg,
+                                              wasm::SymbolicAddress builtin)
+{
+    MOZ_ASSERT(instanceArg != ABIArg());
+
+    if (instanceArg.kind() == ABIArg::GPR) {
+        loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, instance)), instanceArg.gpr());
+    } else if (instanceArg.kind() == ABIArg::Stack) {
+        // Safe to use ABINonArgReg0 since its the last thing before the call
+        Register scratch = ABINonArgReg0;
+        loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, instance)), scratch);
+        storePtr(scratch, Address(getStackPointer(), instanceArg.offsetFromArgBase()));
+    } else {
+        MOZ_CRASH("Unknown abi passing style for pointer");
+    }
+
+    call(builtin);
+}
+
+void
 MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc, const wasm::CalleeDesc& callee)
 {
     Register scratch = WasmTableCallScratchReg;
@@ -2758,7 +2777,7 @@ MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc, const wasm::Cal
     if (callee.which() == wasm::CalleeDesc::AsmJSTable) {
         // asm.js tables require no signature check, have had their index masked
         // into range and thus need no bounds check and cannot be external.
-        loadWasmGlobalPtr(callee.tableGlobalDataOffset(), scratch);
+        loadWasmGlobalPtr(callee.tableBaseGlobalDataOffset(), scratch);
         loadPtr(BaseIndex(scratch, index, ScalePointer), scratch);
         call(desc, scratch);
         return;
@@ -2780,12 +2799,11 @@ MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc, const wasm::Cal
     }
 
     // WebAssembly throws if the index is out-of-bounds.
-    branch32(Assembler::Condition::AboveOrEqual,
-             index, Imm32(callee.wasmTableLength()),
-             wasm::JumpTarget::OutOfBounds);
+    loadWasmGlobalPtr(callee.tableLengthGlobalDataOffset(), scratch);
+    branch32(Assembler::Condition::AboveOrEqual, index, scratch, wasm::JumpTarget::OutOfBounds);
 
     // Load the base pointer of the table.
-    loadWasmGlobalPtr(callee.tableGlobalDataOffset(), scratch);
+    loadWasmGlobalPtr(callee.tableBaseGlobalDataOffset(), scratch);
 
     // Load the callee from the table.
     if (callee.wasmTableIsExternal()) {
@@ -2799,11 +2817,14 @@ MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc, const wasm::Cal
         }
 
         loadPtr(Address(scratch, offsetof(wasm::ExternalTableElem, tls)), WasmTlsReg);
+        branchTest32(Assembler::Zero, WasmTlsReg, WasmTlsReg, wasm::JumpTarget::IndirectCallToNull);
+
         loadWasmPinnedRegsFromTls();
 
         loadPtr(Address(scratch, offsetof(wasm::ExternalTableElem, code)), scratch);
     } else {
         loadPtr(BaseIndex(scratch, index, ScalePointer), scratch);
+        branchTest32(Assembler::Zero, scratch, scratch, wasm::JumpTarget::IndirectCallToNull);
     }
 
     call(desc, scratch);

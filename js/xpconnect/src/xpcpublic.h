@@ -341,7 +341,7 @@ StringToJsval(JSContext* cx, const nsAString& str, JS::MutableHandleValue rval)
 /**
  * As above, but for mozilla::dom::DOMString.
  */
-MOZ_ALWAYS_INLINE
+inline
 bool NonVoidStringToJsval(JSContext* cx, mozilla::dom::DOMString& str,
                           JS::MutableHandleValue rval)
 {
@@ -417,11 +417,11 @@ private:
 // (which isn't all of them).
 // @see ZoneStatsExtras
 // @see CompartmentStatsExtras
-nsresult
+void
 ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats& rtStats,
                                  const nsACString& rtPath,
-                                 nsIMemoryReporterCallback* cb,
-                                 nsISupports* closure,
+                                 nsIMemoryReporterCallback* handleReport,
+                                 nsISupports* data,
                                  bool anonymize,
                                  size_t* rtTotal = nullptr);
 
@@ -561,8 +561,8 @@ class ErrorReport {
 };
 
 void
-DispatchScriptErrorEvent(nsPIDOMWindowInner* win, JSRuntime* rt, xpc::ErrorReport* xpcReport,
-                         JS::Handle<JS::Value> exception);
+DispatchScriptErrorEvent(nsPIDOMWindowInner* win, JS::RootingContext* rootingCx,
+                         xpc::ErrorReport* xpcReport, JS::Handle<JS::Value> exception);
 
 // Get a stack of the sort that can be passed to
 // xpc::ErrorReport::LogToConsoleWithStack from the given exception value.  Can
@@ -584,9 +584,6 @@ FindExceptionStackForConsoleReport(nsPIDOMWindowInner* win,
 // and unique. However, there are no guarantees of either property.
 extern void
 GetCurrentCompartmentName(JSContext*, nsCString& name);
-
-JSRuntime*
-GetJSRuntime();
 
 void AddGCCallback(xpcGCCallback cb);
 void RemoveGCCallback(xpcGCCallback cb);

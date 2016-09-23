@@ -34,11 +34,9 @@ AppleVTDecoder::AppleVTDecoder(const VideoInfo& aConfig,
   , mPictureHeight(aConfig.mImage.height)
   , mDisplayWidth(aConfig.mDisplay.width)
   , mDisplayHeight(aConfig.mDisplay.height)
-  , mQueuedSamples(0)
   , mTaskQueue(aTaskQueue)
   , mMaxRefFrames(mp4_demuxer::H264::ComputeMaxRefFrames(aConfig.mExtraData))
   , mImageContainer(aImageContainer)
-  , mInputIncoming(0)
   , mIsShutDown(false)
 #ifdef MOZ_WIDGET_UIKIT
   , mUseSoftwareImages(true)
@@ -73,10 +71,10 @@ AppleVTDecoder::Init()
     return InitPromise::CreateAndResolve(TrackType::kVideoTrack, __func__);
   }
 
-  return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+  return InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
 }
 
-nsresult
+void
 AppleVTDecoder::Input(MediaRawData* aSample)
 {
   MOZ_ASSERT(mCallback->OnReaderTaskQueue());
@@ -88,14 +86,11 @@ AppleVTDecoder::Input(MediaRawData* aSample)
       aSample->mKeyframe ? " keyframe" : "",
       aSample->Size());
 
-  mInputIncoming++;
-
   mTaskQueue->Dispatch(NewRunnableMethod<RefPtr<MediaRawData>>(
     this, &AppleVTDecoder::ProcessDecode, aSample));
-  return NS_OK;
 }
 
-nsresult
+void
 AppleVTDecoder::Flush()
 {
   MOZ_ASSERT(mCallback->OnReaderTaskQueue());
@@ -104,25 +99,20 @@ AppleVTDecoder::Flush()
     NewRunnableMethod(this, &AppleVTDecoder::ProcessFlush);
   SyncRunnable::DispatchToThread(mTaskQueue, runnable);
   mIsFlushing = false;
-  // All ProcessDecode() tasks should be done.
-  MOZ_ASSERT(mInputIncoming == 0);
 
   mSeekTargetThreshold.reset();
-
-  return NS_OK;
 }
 
-nsresult
+void
 AppleVTDecoder::Drain()
 {
   MOZ_ASSERT(mCallback->OnReaderTaskQueue());
   nsCOMPtr<nsIRunnable> runnable =
     NewRunnableMethod(this, &AppleVTDecoder::ProcessDrain);
   mTaskQueue->Dispatch(runnable.forget());
-  return NS_OK;
 }
 
-nsresult
+void
 AppleVTDecoder::Shutdown()
 {
   MOZ_DIAGNOSTIC_ASSERT(!mIsShutDown);
@@ -134,7 +124,6 @@ AppleVTDecoder::Shutdown()
   } else {
     ProcessShutdown();
   }
-  return NS_OK;
 }
 
 nsresult
@@ -142,18 +131,11 @@ AppleVTDecoder::ProcessDecode(MediaRawData* aSample)
 {
   AssertOnTaskQueueThread();
 
-  mInputIncoming--;
-
   if (mIsFlushing) {
     return NS_OK;
   }
 
   auto rv = DoDecode(aSample);
-  // Ask for more data.
-  if (NS_SUCCEEDED(rv) && !mInputIncoming && mQueuedSamples <= mMaxRefFrames) {
-    LOG("%s task queue empty; requesting more data", GetDescriptionName());
-    mCallback->InputExhausted();
-  }
 
   return rv;
 }
@@ -213,7 +195,6 @@ AppleVTDecoder::DrainReorderedFrames()
   while (!mReorderQueue.IsEmpty()) {
     mCallback->Output(mReorderQueue.Pop().get());
   }
-  mQueuedSamples = 0;
 }
 
 void
@@ -223,7 +204,6 @@ AppleVTDecoder::ClearReorderedFrames()
   while (!mReorderQueue.IsEmpty()) {
     mReorderQueue.Pop();
   }
-  mQueuedSamples = 0;
 }
 
 void
@@ -288,16 +268,10 @@ AppleVTDecoder::OutputFrame(CVPixelBufferRef aImage,
       aFrameRef.is_sync_point ? " keyframe" : ""
   );
 
-  if (mQueuedSamples > mMaxRefFrames) {
-    // We had stopped requesting more input because we had received too much at
-    // the time. We can ask for more once again.
-    mCallback->InputExhausted();
-  }
-  MOZ_ASSERT(mQueuedSamples);
-  mQueuedSamples--;
-
   if (!aImage) {
-    // Image was dropped by decoder.
+    // Image was dropped by decoder or none return yet.
+    // We need more input to continue.
+    mCallback->InputExhausted();
     return NS_OK;
   }
 
@@ -336,8 +310,10 @@ AppleVTDecoder::OutputFrame(CVPixelBufferRef aImage,
     CVReturn rv = CVPixelBufferLockBaseAddress(aImage, kCVPixelBufferLock_ReadOnly);
     if (rv != kCVReturnSuccess) {
       NS_ERROR("error locking pixel data");
-      mCallback->Error(MediaDataDecoderError::DECODE_ERROR);
-      return NS_ERROR_FAILURE;
+      mCallback->Error(
+        MediaResult(NS_ERROR_DOM_MEDIA_DECODE_ERR,
+                    RESULT_DETAIL("CVPixelBufferLockBaseAddress:%x", rv)));
+      return NS_ERROR_DOM_MEDIA_DECODE_ERR;
     }
     // Y plane.
     buffer.mPlanes[0].mData =
@@ -402,17 +378,18 @@ AppleVTDecoder::OutputFrame(CVPixelBufferRef aImage,
 
   if (!data) {
     NS_ERROR("Couldn't create VideoData for frame");
-    mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
-    return NS_ERROR_FAILURE;
+    mCallback->Error(MediaResult(NS_ERROR_OUT_OF_MEMORY, __func__));
+    return NS_ERROR_OUT_OF_MEMORY;
   }
 
   // Frames come out in DTS order but we need to output them
   // in composition order.
   MonitorAutoLock mon(mMonitor);
   mReorderQueue.Push(data);
-  while (mReorderQueue.Length() > mMaxRefFrames) {
+  if (mReorderQueue.Length() > mMaxRefFrames) {
     mCallback->Output(mReorderQueue.Pop().get());
   }
+  mCallback->InputExhausted();
   LOG("%llu decoded frames queued",
       static_cast<unsigned long long>(mReorderQueue.Length()));
 
@@ -445,7 +422,7 @@ TimingInfoFromSample(MediaRawData* aSample)
   return timestamp;
 }
 
-nsresult
+MediaResult
 AppleVTDecoder::DoDecode(MediaRawData* aSample)
 {
   AssertOnTaskQueueThread();
@@ -471,16 +448,19 @@ AppleVTDecoder::DoDecode(MediaRawData* aSample)
                                           block.receive());
   if (rv != noErr) {
     NS_ERROR("Couldn't create CMBlockBuffer");
-    return NS_ERROR_FAILURE;
+    mCallback->Error(
+      MediaResult(NS_ERROR_OUT_OF_MEMORY,
+                  RESULT_DETAIL("CMBlockBufferCreateWithMemoryBlock:%x", rv)));
+    return MediaResult(NS_ERROR_OUT_OF_MEMORY, __func__);
   }
   CMSampleTimingInfo timestamp = TimingInfoFromSample(aSample);
   rv = CMSampleBufferCreate(kCFAllocatorDefault, block, true, 0, 0, mFormat, 1, 1, &timestamp, 0, NULL, sample.receive());
   if (rv != noErr) {
     NS_ERROR("Couldn't create CMSampleBuffer");
-    return NS_ERROR_FAILURE;
+    mCallback->Error(MediaResult(NS_ERROR_OUT_OF_MEMORY,
+                                 RESULT_DETAIL("CMSampleBufferCreate:%x", rv)));
+    return MediaResult(NS_ERROR_OUT_OF_MEMORY, __func__);
   }
-
-  mQueuedSamples++;
 
   VTDecodeFrameFlags decodeFlags =
     kVTDecodeFrame_EnableAsynchronousDecompression;
@@ -492,8 +472,10 @@ AppleVTDecoder::DoDecode(MediaRawData* aSample)
   if (rv != noErr && !(infoFlags & kVTDecodeInfo_FrameDropped)) {
     LOG("AppleVTDecoder: Error %d VTDecompressionSessionDecodeFrame", rv);
     NS_WARNING("Couldn't pass frame to decoder");
-    mCallback->Error(MediaDataDecoderError::DECODE_ERROR);
-    return NS_ERROR_FAILURE;
+    mCallback->Error(
+      MediaResult(NS_ERROR_DOM_MEDIA_DECODE_ERR,
+                  RESULT_DETAIL("VTDecompressionSessionDecodeFrame:%x", rv)));
+    return NS_ERROR_DOM_MEDIA_DECODE_ERR;
   }
 
   return NS_OK;

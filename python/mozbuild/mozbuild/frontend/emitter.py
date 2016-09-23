@@ -408,55 +408,6 @@ class TreeMetadataEmitter(LoggingMixin):
                     '%s %s of crate %s refers to a non-existent path' % (description, dep_crate_name, crate_name),
                     context)
 
-    def _verify_local_paths(self, context, crate_dir, config):
-        """Verify that a Cargo.toml config specifies local paths for all its dependencies."""
-        crate_name = config['package']['name']
-
-        # This is not exactly how cargo works (cargo would permit
-        # identically-named packages with different versions in the same
-        # library), but we want to try and avoid using multiple
-        # different versions of a single package for code size reasons.
-        if crate_name not in self._crate_directories:
-            self._crate_directories[crate_name] = crate_dir
-        else:
-            previous_dir = self._crate_directories[crate_name]
-            if crate_dir != previous_dir:
-                raise SandboxValidationError(
-                    'Crate %s found at multiple paths: %s, %s' % (crate_name, crate_dir, previous_dir),
-                    context)
-
-        # This check should ideally be positioned when we're recursing through
-        # dependencies, but then we would never get the chance to run the
-        # duplicated names check above.
-        if crate_name in self._crate_verified_local:
-            return
-
-        crate_deps = config.get('dependencies', {})
-        if crate_deps:
-            self._verify_deps(context, crate_dir, crate_name, crate_deps)
-
-        has_custom_build = 'build' in config['package']
-        build_deps = config.get('build-dependencies', {})
-        if has_custom_build and build_deps:
-            self._verify_deps(context, crate_dir, crate_name, build_deps,
-                              description='Build dependency')
-
-        # We have now verified that all the declared dependencies of
-        # this crate have local paths.  Now verify recursively.
-        self._crate_verified_local.add(crate_name)
-
-        if crate_deps:
-            for dep_crate_name, values in crate_deps.iteritems():
-                rel_dep_dir = mozpath.normpath(mozpath.join(crate_dir, values['path']))
-                dep_toml = mozpath.join(context.config.topsrcdir, rel_dep_dir, 'Cargo.toml')
-                self._verify_local_paths(context, rel_dep_dir, self._parse_cargo_file(dep_toml))
-
-        if has_custom_build and build_deps:
-            for dep_crate_name, values in build_deps.iteritems():
-                rel_dep_dir = mozpath.normpath(mozpath.join(crate_dir, values['path']))
-                dep_toml = mozpath.join(context.config.topsrcdir, rel_dep_dir, 'Cargo.toml')
-                self._verify_local_paths(context, rel_dep_dir, self._parse_cargo_file(dep_toml))
-
     def _rust_library(self, context, libname, static_args):
         # We need to note any Rust library for linking purposes.
         cargo_file = mozpath.join(context.srcdir, 'Cargo.toml')
@@ -472,6 +423,7 @@ class TreeMetadataEmitter(LoggingMixin):
                 'library %s does not match Cargo.toml-defined package %s' % (libname, crate_name),
                 context)
 
+        # Check that the [lib.crate-type] field is correct
         lib_section = config.get('lib', None)
         if not lib_section:
             raise SandboxValidationError(
@@ -485,12 +437,31 @@ class TreeMetadataEmitter(LoggingMixin):
                 context)
 
         crate_type = crate_type[0]
-        if crate_type != 'staticlib':
+        if crate_type != 'rlib':
             raise SandboxValidationError(
                 'crate-type %s is not permitted for %s' % (crate_type, libname),
                 context)
 
-        self._verify_local_paths(context, context.relsrcdir, config)
+        # Check that the [profile.{dev,release}.panic] field is "abort"
+        profile_section = config.get('profile', None)
+        if not profile_section:
+            raise SandboxValidationError(
+                'Cargo.toml for %s has no [profile] section' % libname,
+                context)
+
+        for profile_name in ['dev', 'release']:
+            profile = profile_section.get(profile_name, None)
+            if not profile:
+                raise SandboxValidationError(
+                    'Cargo.toml for %s has no [profile.%s] section' % (libname, profile_name),
+                    context)
+
+            panic = profile.get('panic', None)
+            if panic != 'abort':
+                raise SandboxValidationError(
+                    ('Cargo.toml for %s does not specify `panic = "abort"`'
+                     ' in [profile.%s] section') % (libname, profile_name),
+                    context)
 
         return RustLibrary(context, libname, cargo_file, crate_type, **static_args)
 
@@ -708,17 +679,6 @@ class TreeMetadataEmitter(LoggingMixin):
                     lib = StaticLibrary(context, libname, **static_args)
                 self._libs[libname].append(lib)
                 self._linkage.append((context, lib, 'USE_LIBS'))
-
-                # Multiple staticlibs for a library means multiple copies
-                # of the Rust runtime, which will result in linking errors
-                # later on.
-                if is_rust_library:
-                    staticlibs = [l for l in self._libs[libname]
-                                  if isinstance(l, RustLibrary) and l.crate_type == 'staticlib']
-                    if len(staticlibs) > 1:
-                        raise SandboxValidationError(
-                            'Cannot have multiple Rust staticlibs in %s: %s' % (libname, ', '.join(l.basename for l in staticlibs)),
-                            context)
 
                 has_linkables = True
 

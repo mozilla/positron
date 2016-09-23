@@ -64,7 +64,7 @@ public:
     : mContext(aContext), mType(aType), mRootHasSecureConnection(aRootHasSecureConnection)
   {}
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     NS_ASSERTION(mContext,
                  "You can't call this runnable without a requesting context");
@@ -231,10 +231,7 @@ LogMixedContentMessage(MixedContentTypes aClassification,
     }
   }
 
-  nsAutoCString locationSpec;
-  aContentLocation->GetSpec(locationSpec);
-  NS_ConvertUTF8toUTF16 locationSpecUTF16(locationSpec);
-
+  NS_ConvertUTF8toUTF16 locationSpecUTF16(aContentLocation->GetSpecOrDefault());
   const char16_t* strings[] = { locationSpecUTF16.get() };
   nsContentUtils::ReportToConsole(severityFlag, messageCategory, aRootDoc,
                                   nsContentUtils::eSECURITY_PROPERTIES,

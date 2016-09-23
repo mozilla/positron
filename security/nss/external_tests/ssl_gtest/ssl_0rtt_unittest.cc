@@ -14,31 +14,27 @@ extern "C" {
 #include "libssl_internals.h"
 }
 
-#include "scoped_ptrs.h"
-#include "tls_parser.h"
-#include "tls_filter.h"
-#include "tls_connect.h"
 #include "gtest_utils.h"
+#include "scoped_ptrs.h"
+#include "tls_connect.h"
+#include "tls_filter.h"
+#include "tls_parser.h"
 
 namespace nss_test {
 
-TEST_F(TlsConnectTest, DamageSecretHandleZeroRttClientFinished) {
+TEST_P(TlsConnectTls13, ZeroRtt) {
   SetupForZeroRtt();
   client_->Set0RttEnabled(true);
   server_->Set0RttEnabled(true);
-  client_->SetPacketFilter(new AfterRecordN(
-      client_,
-      server_,
-      0, // ClientHello.
-      [this]() {
-        SSLInt_DamageEarlyTrafficSecret(server_->ssl_fd());
-      }));
-  ConnectExpectFail();
-  client_->CheckErrorCode(SSL_ERROR_DECRYPT_ERROR_ALERT);
-  server_->CheckErrorCode(SSL_ERROR_BAD_HANDSHAKE_HASH_VALUE);
+  ExpectResumption(RESUME_TICKET);
+  ZeroRttSendReceive(true);
+  Handshake();
+  ExpectEarlyDataAccepted(true);
+  CheckConnected();
+  SendReceive();
 }
 
-TEST_F(TlsConnectTest, ZeroRttServerRejectByOption) {
+TEST_P(TlsConnectTls13, ZeroRttServerRejectByOption) {
   SetupForZeroRtt();
   client_->Set0RttEnabled(true);
   ExpectResumption(RESUME_TICKET);
@@ -48,7 +44,7 @@ TEST_F(TlsConnectTest, ZeroRttServerRejectByOption) {
   SendReceive();
 }
 
-TEST_F(TlsConnectTest, ZeroRttServerForgetTicket) {
+TEST_P(TlsConnectTls13, ZeroRttServerForgetTicket) {
   SetupForZeroRtt();
   client_->Set0RttEnabled(true);
   server_->Set0RttEnabled(true);
@@ -61,11 +57,7 @@ TEST_F(TlsConnectTest, ZeroRttServerForgetTicket) {
   SendReceive();
 }
 
-TEST_F(TlsConnectTest, ZeroRttServerOnly) {
-  client_->SetVersionRange(SSL_LIBRARY_VERSION_TLS_1_1,
-                           SSL_LIBRARY_VERSION_TLS_1_3);
-  server_->SetVersionRange(SSL_LIBRARY_VERSION_TLS_1_1,
-                           SSL_LIBRARY_VERSION_TLS_1_3);
+TEST_P(TlsConnectTls13, ZeroRttServerOnly) {
   ExpectResumption(RESUME_NONE);
   server_->Set0RttEnabled(true);
   client_->StartConnect();
@@ -87,19 +79,7 @@ TEST_F(TlsConnectTest, ZeroRttServerOnly) {
   CheckKeys(ssl_kea_ecdh, ssl_auth_rsa_sign);
 }
 
-TEST_F(TlsConnectTest, ZeroRtt) {
-  SetupForZeroRtt();
-  client_->Set0RttEnabled(true);
-  server_->Set0RttEnabled(true);
-  ExpectResumption(RESUME_TICKET);
-  ZeroRttSendReceive(true);
-  Handshake();
-  ExpectEarlyDataAccepted(true);
-  CheckConnected();
-  SendReceive();
-}
-
-TEST_F(TlsConnectTest, TestTls13ZeroRttAlpn) {
+TEST_P(TlsConnectTls13, TestTls13ZeroRttAlpn) {
   EnableAlpn();
   SetupForZeroRtt();
   EnableAlpn();
@@ -108,50 +88,31 @@ TEST_F(TlsConnectTest, TestTls13ZeroRttAlpn) {
   ExpectResumption(RESUME_TICKET);
   ExpectEarlyDataAccepted(true);
   ZeroRttSendReceive(true, [this]() {
-      client_->CheckAlpn(SSL_NEXT_PROTO_EARLY_VALUE, "a");
-      return true;
-    });
+    client_->CheckAlpn(SSL_NEXT_PROTO_EARLY_VALUE, "a");
+    return true;
+  });
   Handshake();
   CheckConnected();
   SendReceive();
   CheckAlpn("a");
 }
 
-// Remove the old ALPN value and so the client will not offer ALPN.
-TEST_F(TlsConnectTest, TestTls13ZeroRttAlpnChangeBoth) {
-  EnableAlpn();
-  SetupForZeroRtt();
-  static const uint8_t alpn[] = { 0x01, 0x62 };  // "b"
-  EnableAlpn(alpn, sizeof(alpn));
-  client_->Set0RttEnabled(true);
-  server_->Set0RttEnabled(true);
-  ExpectResumption(RESUME_TICKET);
-  ZeroRttSendReceive(false, [this]() {
-      client_->CheckAlpn(SSL_NEXT_PROTO_NO_SUPPORT);
-      return false;
-    });
-  Handshake();
-  CheckConnected();
-  SendReceive();
-  CheckAlpn("b");
-}
-
 // Have the server negotiate a different ALPN value, and therefore
 // reject 0-RTT.
-TEST_F(TlsConnectTest, TestTls13ZeroRttAlpnChangeServer) {
+TEST_P(TlsConnectTls13, TestTls13ZeroRttAlpnChangeServer) {
   EnableAlpn();
   SetupForZeroRtt();
-  static const uint8_t client_alpn[] = { 0x01, 0x61, 0x01, 0x62 }; // "a", "b"
-  static const uint8_t server_alpn[] = { 0x01, 0x62 };  // "b"
+  static const uint8_t client_alpn[] = {0x01, 0x61, 0x01, 0x62};  // "a", "b"
+  static const uint8_t server_alpn[] = {0x01, 0x62};              // "b"
   client_->EnableAlpn(client_alpn, sizeof(client_alpn));
   server_->EnableAlpn(server_alpn, sizeof(server_alpn));
   client_->Set0RttEnabled(true);
   server_->Set0RttEnabled(true);
   ExpectResumption(RESUME_TICKET);
   ZeroRttSendReceive(false, [this]() {
-      client_->CheckAlpn(SSL_NEXT_PROTO_EARLY_VALUE, "a");
-      return true;
-    });
+    client_->CheckAlpn(SSL_NEXT_PROTO_EARLY_VALUE, "a");
+    return true;
+  });
   Handshake();
   CheckConnected();
   SendReceive();
@@ -162,7 +123,7 @@ TEST_F(TlsConnectTest, TestTls13ZeroRttAlpnChangeServer) {
 // Stomp the ALPN on the client after sending the ClientHello so
 // that the server selection appears to be incorrect. The client
 // should then fail the connection.
-TEST_F(TlsConnectTest, TestTls13ZeroRttNoAlpnServer) {
+TEST_P(TlsConnectTls13, TestTls13ZeroRttNoAlpnServer) {
   EnableAlpn();
   SetupForZeroRtt();
   client_->Set0RttEnabled(true);
@@ -170,13 +131,12 @@ TEST_F(TlsConnectTest, TestTls13ZeroRttNoAlpnServer) {
   EnableAlpn();
   ExpectResumption(RESUME_TICKET);
   ZeroRttSendReceive(true, [this]() {
-      PRUint8 b[] = {'b'};
-      client_->CheckAlpn(SSL_NEXT_PROTO_EARLY_VALUE, "a");
-      EXPECT_EQ(SECSuccess, SSLInt_Set0RttAlpn(client_->ssl_fd(), b,
-                                               sizeof(b)));
-      client_->CheckAlpn(SSL_NEXT_PROTO_EARLY_VALUE, "b");
-      return true;
-    });
+    PRUint8 b[] = {'b'};
+    client_->CheckAlpn(SSL_NEXT_PROTO_EARLY_VALUE, "a");
+    EXPECT_EQ(SECSuccess, SSLInt_Set0RttAlpn(client_->ssl_fd(), b, sizeof(b)));
+    client_->CheckAlpn(SSL_NEXT_PROTO_EARLY_VALUE, "b");
+    return true;
+  });
   Handshake();
   client_->CheckErrorCode(SSL_ERROR_NEXT_PROTOCOL_DATA_INVALID);
   server_->CheckErrorCode(SSL_ERROR_ILLEGAL_PARAMETER_ALERT);
@@ -185,20 +145,52 @@ TEST_F(TlsConnectTest, TestTls13ZeroRttNoAlpnServer) {
 // Set up with no ALPN and then set the client so it thinks it has ALPN.
 // The server responds without the extension and the client returns an
 // error.
-TEST_F(TlsConnectTest, TestTls13ZeroRttNoAlpnClient) {
+TEST_P(TlsConnectTls13, TestTls13ZeroRttNoAlpnClient) {
   SetupForZeroRtt();
   client_->Set0RttEnabled(true);
   server_->Set0RttEnabled(true);
   ExpectResumption(RESUME_TICKET);
   ZeroRttSendReceive(true, [this]() {
-      PRUint8 b[] = {'b'};
-      EXPECT_EQ(SECSuccess, SSLInt_Set0RttAlpn(client_->ssl_fd(), b, 1));
-      client_->CheckAlpn(SSL_NEXT_PROTO_EARLY_VALUE, "b");
-      return true;
-    });
+    PRUint8 b[] = {'b'};
+    EXPECT_EQ(SECSuccess, SSLInt_Set0RttAlpn(client_->ssl_fd(), b, 1));
+    client_->CheckAlpn(SSL_NEXT_PROTO_EARLY_VALUE, "b");
+    return true;
+  });
   Handshake();
   client_->CheckErrorCode(SSL_ERROR_NEXT_PROTOCOL_DATA_INVALID);
   server_->CheckErrorCode(SSL_ERROR_ILLEGAL_PARAMETER_ALERT);
 }
 
-} // namespace nss_test
+// Remove the old ALPN value and so the client will not offer early data.
+TEST_P(TlsConnectTls13, TestTls13ZeroRttAlpnChangeBoth) {
+  EnableAlpn();
+  SetupForZeroRtt();
+  static const uint8_t alpn[] = {0x01, 0x62};  // "b"
+  EnableAlpn(alpn, sizeof(alpn));
+  client_->Set0RttEnabled(true);
+  server_->Set0RttEnabled(true);
+  ExpectResumption(RESUME_TICKET);
+  ZeroRttSendReceive(false, [this]() {
+    client_->CheckAlpn(SSL_NEXT_PROTO_NO_SUPPORT);
+    return false;
+  });
+  Handshake();
+  CheckConnected();
+  SendReceive();
+  CheckAlpn("b");
+}
+
+TEST_F(TlsConnectTest, DamageSecretHandleZeroRttClientFinished) {
+  SetupForZeroRtt();
+  client_->Set0RttEnabled(true);
+  server_->Set0RttEnabled(true);
+  client_->SetPacketFilter(new AfterRecordN(
+      client_, server_,
+      0,  // ClientHello.
+      [this]() { SSLInt_DamageEarlyTrafficSecret(server_->ssl_fd()); }));
+  ConnectExpectFail();
+  client_->CheckErrorCode(SSL_ERROR_DECRYPT_ERROR_ALERT);
+  server_->CheckErrorCode(SSL_ERROR_BAD_HANDSHAKE_HASH_VALUE);
+}
+
+}  // namespace nss_test

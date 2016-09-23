@@ -6,7 +6,7 @@
 
 #include "mozilla/dom/cache/TypeUtils.h"
 
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/CacheBinding.h"
 #include "mozilla/dom/InternalRequest.h"
 #include "mozilla/dom/Request.h"
@@ -158,6 +158,8 @@ TypeUtils::ToCacheRequest(CacheRequest& aOut, InternalRequest* aIn,
   aOut.contentPolicyType() = aIn->ContentPolicyType();
   aOut.requestCache() = aIn->GetCacheMode();
   aOut.requestRedirect() = aIn->GetRedirectMode();
+
+  aOut.integrity() = aIn->GetIntegrity();
 
   if (aBodyAction == IgnoreBody) {
     aOut.body() = void_t();
@@ -325,6 +327,7 @@ TypeUtils::ToInternalRequest(const CacheRequest& aIn)
   internalRequest->SetContentPolicyType(aIn.contentPolicyType());
   internalRequest->SetCacheMode(aIn.requestCache());
   internalRequest->SetRedirectMode(aIn.requestRedirect());
+  internalRequest->SetIntegrity(aIn.integrity());
 
   RefPtr<InternalHeaders> internalHeaders =
     ToInternalHeaders(aIn.headers(), aIn.headersGuard());

@@ -24,6 +24,14 @@
 namespace js {
 namespace wasm {
 
+// Telemetry sample values for the JS_AOT_USAGE key, indicating whether asm.js
+// or WebAssembly is used.
+
+enum class Telemetry {
+    ASMJS = 0,
+    WASM = 1
+};
+
 static const uint32_t MagicNumber        = 0x6d736100; // "\0asm"
 static const uint32_t EncodingVersion    = 0x0b;
 
@@ -891,7 +899,7 @@ class Decoder
         return uncheckedReadVarU<uint32_t>();
     }
     int32_t uncheckedReadVarS32() {
-        int32_t i32;
+        int32_t i32 = 0;
         MOZ_ALWAYS_TRUE(readVarS32(&i32));
         return i32;
     }
@@ -899,7 +907,7 @@ class Decoder
         return uncheckedReadVarU<uint64_t>();
     }
     int64_t uncheckedReadVarS64() {
-        int64_t i64;
+        int64_t i64 = 0;
         MOZ_ALWAYS_TRUE(readVarS64(&i64));
         return i64;
     }

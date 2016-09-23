@@ -7,34 +7,18 @@
 #include "secerr.h"
 #include "ssl.h"
 
-#include "scoped_ptrs.h"
-#include "tls_parser.h"
-#include "tls_filter.h"
-#include "tls_connect.h"
+extern "C" {
+// This is not something that should make you happy.
+#include "libssl_internals.h"
+}
+
 #include "gtest_utils.h"
+#include "scoped_ptrs.h"
+#include "tls_connect.h"
+#include "tls_filter.h"
+#include "tls_parser.h"
 
 namespace nss_test {
-
-// This class selectively drops complete writes.  This relies on the fact that
-// writes in libssl are on record boundaries.
-class SelectiveDropFilter : public PacketFilter, public PollTarget {
- public:
-  SelectiveDropFilter(uint32_t pattern)
-      : pattern_(pattern),
-        counter_(0) {}
-
- protected:
-  virtual Action Filter(const DataBuffer& input, DataBuffer* output) override {
-    if (counter_ >= 32) {
-      return KEEP;
-    }
-    return ((1 << counter_++) & pattern_) ? DROP : KEEP;
-  }
-
- private:
-  const uint32_t pattern_;
-  uint8_t counter_;
-};
 
 TEST_P(TlsConnectDatagram, DropClientFirstFlightOnce) {
   client_->SetPacketFilter(new SelectiveDropFilter(0x1));
@@ -81,4 +65,49 @@ TEST_P(TlsConnectDatagram, DropServerSecondFlightThrice) {
   Connect();
 }
 
-} // namespace nss_test
+// This simulates a huge number of drops on one side.
+TEST_P(TlsConnectDatagram, MissLotsOfPackets) {
+  uint16_t cipher = TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256;
+  uint64_t limit = (1ULL << 48) - 1;
+  if (version_ < SSL_LIBRARY_VERSION_TLS_1_2) {
+    cipher = TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA;
+    limit = 0x5aULL << 28;
+  }
+  EnsureTlsSetup();
+  server_->EnableSingleCipher(cipher);
+  Connect();
+
+  // Note that the limit for ChaCha is 2^48-1.
+  EXPECT_EQ(SECSuccess,
+            SSLInt_AdvanceWriteSeqNum(client_->ssl_fd(), limit - 10));
+  SendReceive();
+}
+
+class TlsConnectDatagram12Plus : public TlsConnectDatagram {
+ public:
+  TlsConnectDatagram12Plus() : TlsConnectDatagram() {}
+};
+
+// This simulates missing a window's worth of packets.
+TEST_P(TlsConnectDatagram12Plus, MissAWindow) {
+  EnsureTlsSetup();
+  server_->EnableSingleCipher(TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256);
+  Connect();
+
+  EXPECT_EQ(SECSuccess, SSLInt_AdvanceWriteSeqByAWindow(client_->ssl_fd(), 0));
+  SendReceive();
+}
+
+TEST_P(TlsConnectDatagram12Plus, MissAWindowAndOne) {
+  EnsureTlsSetup();
+  server_->EnableSingleCipher(TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256);
+  Connect();
+
+  EXPECT_EQ(SECSuccess, SSLInt_AdvanceWriteSeqByAWindow(client_->ssl_fd(), 1));
+  SendReceive();
+}
+
+INSTANTIATE_TEST_CASE_P(Datagram12Plus, TlsConnectDatagram12Plus,
+                        TlsConnectTestBase::kTlsV12Plus);
+
+}  // namespace nss_test

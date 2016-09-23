@@ -34,6 +34,8 @@ namespace layers {
 
 using mozilla::dom::TabChild;
 
+class IAPZCTreeManager;
+class APZCTreeManagerChild;
 class ClientLayerManager;
 class CompositorBridgeParent;
 class TextureClient;
@@ -62,6 +64,7 @@ public:
    * Initialize the singleton compositor bridge for a content process.
    */
   static bool InitForContent(Endpoint<PCompositorBridgeChild>&& aEndpoint);
+  static bool ReinitForContent(Endpoint<PCompositorBridgeChild>&& aEndpoint);
 
   static RefPtr<CompositorBridgeChild> CreateRemote(
     const uint64_t& aProcessToken,
@@ -158,10 +161,9 @@ public:
   bool SendStopFrameTimeRecording(const uint32_t& startIndex, nsTArray<float>* intervals);
   bool SendNotifyRegionInvalidated(const nsIntRegion& region);
   bool SendRequestNotifyAfterRemotePaint();
-  bool SendClearVisibleRegions(uint64_t aLayersId, uint32_t aPresShellId);
-  bool SendUpdateVisibleRegion(VisibilityCounter aCounter,
-                               const ScrollableLayerGuid& aGuid,
-                               const mozilla::CSSIntRegion& aRegion);
+  bool SendClearApproximatelyVisibleRegions(uint64_t aLayersId, uint32_t aPresShellId);
+  bool SendNotifyApproximatelyVisibleRegion(const ScrollableLayerGuid& aGuid,
+                                            const mozilla::CSSIntRegion& aRegion);
   bool IsSameProcess() const override;
 
   virtual bool IPCOpen() const override { return mCanSend; }
@@ -192,6 +194,8 @@ public:
                                     TextureFlags aFlags);
   void ClearTexturePool();
 
+  virtual FixedSizeSmallShmemSectionAllocator* GetTileLockAllocator() override;
+
   void HandleMemoryPressure();
 
   virtual MessageLoop* GetMessageLoop() const override { return mMessageLoop; }
@@ -208,6 +212,14 @@ public:
 
   PCompositorWidgetChild* AllocPCompositorWidgetChild(const CompositorWidgetInitData& aInitData) override;
   bool DeallocPCompositorWidgetChild(PCompositorWidgetChild* aActor) override;
+
+  RefPtr<IAPZCTreeManager> GetAPZCTreeManager(uint64_t aLayerTreeId);
+
+  PAPZCTreeManagerChild* AllocPAPZCTreeManagerChild(const uint64_t& aLayersId) override;
+  bool DeallocPAPZCTreeManagerChild(PAPZCTreeManagerChild* aActor) override;
+
+  PAPZChild* AllocPAPZChild(const uint64_t& aLayersId) override;
+  bool DeallocPAPZChild(PAPZChild* aActor) override;
 
   virtual ShmemAllocator* AsShmemAllocator() override { return this; }
 
@@ -302,6 +314,8 @@ private:
   AutoTArray<RefPtr<TextureClientPool>,2> mTexturePools;
 
   uint64_t mProcessToken;
+
+  FixedSizeSmallShmemSectionAllocator* mSectionAllocator;
 };
 
 } // namespace layers

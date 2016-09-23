@@ -96,7 +96,7 @@ static const unsigned FramePushedForEntrySP = FramePushedAfterSave + sizeof(void
 // function has an ABI derived from its specific signature, so this function
 // must map from the ABI of ExportFuncPtr to the export's signature's ABI.
 Offsets
-wasm::GenerateEntry(MacroAssembler& masm, const FuncExport& fe)
+wasm::GenerateEntry(MacroAssembler& masm, const FuncDefExport& func)
 {
     masm.haltingAlign(CodeAlignment);
 
@@ -160,15 +160,14 @@ wasm::GenerateEntry(MacroAssembler& masm, const FuncExport& fe)
     masm.andToStackPtr(Imm32(~(AsmJSStackAlignment - 1)));
 
     // Bump the stack for the call.
-    masm.reserveStack(AlignBytes(StackArgBytes(fe.sig().args()), AsmJSStackAlignment));
+    masm.reserveStack(AlignBytes(StackArgBytes(func.sig().args()), AsmJSStackAlignment));
 
     // Copy parameters out of argv and into the registers/stack-slots specified by
     // the system ABI.
-    for (ABIArgValTypeIter iter(fe.sig().args()); !iter.done(); iter++) {
+    for (ABIArgValTypeIter iter(func.sig().args()); !iter.done(); iter++) {
         unsigned argOffset = iter.index() * sizeof(ExportArg);
         Address src(argv, argOffset);
         MIRType type = iter.mirType();
-        MOZ_ASSERT_IF(type == MIRType::Int64, JitOptions.wasmTestMode);
         switch (iter->kind()) {
           case ABIArg::GPR:
             if (type == MIRType::Int32)
@@ -265,7 +264,7 @@ wasm::GenerateEntry(MacroAssembler& masm, const FuncExport& fe)
 
     // Call into the real function.
     masm.assertStackAlignment(AsmJSStackAlignment);
-    masm.call(CallSiteDesc(CallSiteDesc::Relative), fe.funcIndex());
+    masm.call(CallSiteDesc(CallSiteDesc::Relative), func.funcDefIndex());
 
     // Recover the stack pointer value before dynamic alignment.
     masm.loadWasmActivationFromTls(scratch);
@@ -276,14 +275,13 @@ wasm::GenerateEntry(MacroAssembler& masm, const FuncExport& fe)
     masm.Pop(argv);
 
     // Store the return value in argv[0]
-    switch (fe.sig().ret()) {
+    switch (func.sig().ret()) {
       case ExprType::Void:
         break;
       case ExprType::I32:
         masm.store32(ReturnReg, Address(argv, 0));
         break;
       case ExprType::I64:
-        MOZ_ASSERT(JitOptions.wasmTestMode, "no int64 in asm.js/wasm");
         masm.store64(ReturnReg64, Address(argv, 0));
         break;
       case ExprType::F32:
@@ -334,8 +332,6 @@ FillArgumentArray(MacroAssembler& masm, const ValTypeVector& args, unsigned argO
         Address dstAddr(masm.getStackPointer(), argOffset + i.index() * sizeof(Value));
 
         MIRType type = i.mirType();
-        MOZ_ASSERT_IF(type == MIRType::Int64, JitOptions.wasmTestMode);
-
         switch (i->kind()) {
           case ABIArg::GPR:
             if (type == MIRType::Int32) {
@@ -520,7 +516,6 @@ wasm::GenerateInterpExit(MacroAssembler& masm, const FuncImport& fi, uint32_t fu
         masm.load32(argv, ReturnReg);
         break;
       case ExprType::I64:
-        MOZ_ASSERT(JitOptions.wasmTestMode);
         masm.call(SymbolicAddress::CallImport_I64);
         masm.branchTest32(Assembler::Zero, ReturnReg, ReturnReg, JumpTarget::Throw);
         masm.load64(argv, ReturnReg64);
@@ -716,7 +711,6 @@ wasm::GenerateJitExit(MacroAssembler& masm, const FuncImport& fi)
                                  /* -0 check */ false);
         break;
       case ExprType::I64:
-        MOZ_ASSERT(JitOptions.wasmTestMode, "no int64 in asm.js/wasm");
         // We don't expect int64 to be returned from Ion yet, because of a
         // guard in callImport.
         masm.breakpoint();
@@ -922,7 +916,8 @@ wasm::GenerateJumpTarget(MacroAssembler& masm, JumpTarget target)
         return GenerateStackOverflow(masm);
       case JumpTarget::Throw:
         return GenerateThrow(masm);
-      case JumpTarget::BadIndirectCall:
+      case JumpTarget::IndirectCallToNull:
+      case JumpTarget::IndirectCallBadSig:
       case JumpTarget::OutOfBounds:
       case JumpTarget::UnalignedAccess:
       case JumpTarget::Unreachable:

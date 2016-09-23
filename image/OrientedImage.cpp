@@ -89,7 +89,7 @@ OrientedImage::GetFrame(uint32_t aWhichFrame,
 
   // Determine an appropriate format for the surface.
   gfx::SurfaceFormat surfaceFormat;
-  if (InnerImage()->IsOpaque()) {
+  if (InnerImage()->WillDrawOpaqueNow()) {
     surfaceFormat = gfx::SurfaceFormat::B8G8R8X8;
   } else {
     surfaceFormat = gfx::SurfaceFormat::B8G8R8A8;
@@ -345,10 +345,9 @@ OrientedImage::GetImageSpaceInvalidationRect(const nsIntRect& aRect)
   gfxMatrix matrix(OrientationMatrix(innerSize));
   gfxRect invalidRect(matrix.TransformBounds(gfxRect(rect.x, rect.y,
                                                      rect.width, rect.height)));
-  invalidRect.RoundOut();
 
-  return nsIntRect(invalidRect.x, invalidRect.y,
-                   invalidRect.width, invalidRect.height);
+  return IntRect::RoundOut(invalidRect.x, invalidRect.y,
+                           invalidRect.width, invalidRect.height);
 }
 
 } // namespace image

@@ -14,6 +14,7 @@
 
 #include <map>
 #include <set>
+#include <vector>
 
 namespace mozilla {
 
@@ -310,7 +311,7 @@ protected:
 
     MOZ_ASSERT(aDevices.Length());
     for (auto& device : aDevices) {
-      if (device->GetBestFitnessDistance(sets) != UINT32_MAX) {
+      if (device->GetBestFitnessDistance(sets, false) != UINT32_MAX) {
         return true;
       }
     }
@@ -323,7 +324,8 @@ public:
   template<class DeviceType>
   static const char*
   SelectSettings(const NormalizedConstraints &aConstraints,
-                 nsTArray<RefPtr<DeviceType>>& aDevices)
+                 nsTArray<RefPtr<DeviceType>>& aDevices,
+                 bool aIsChrome)
   {
     auto& c = aConstraints;
 
@@ -339,7 +341,8 @@ public:
     std::multimap<uint32_t, RefPtr<DeviceType>> ordered;
 
     for (uint32_t i = 0; i < aDevices.Length();) {
-      uint32_t distance = aDevices[i]->GetBestFitnessDistance(aggregateConstraints);
+      uint32_t distance = aDevices[i]->GetBestFitnessDistance(aggregateConstraints,
+                                                              aIsChrome);
       if (distance == UINT32_MAX) {
         unsatisfactory.AppendElement(aDevices[i]);
         aDevices.RemoveElementAt(i);
@@ -365,7 +368,8 @@ public:
       aggregateConstraints.AppendElement(&c.mAdvanced[i]);
       nsTArray<RefPtr<DeviceType>> rejects;
       for (uint32_t j = 0; j < aDevices.Length();) {
-        if (aDevices[j]->GetBestFitnessDistance(aggregateConstraints) == UINT32_MAX) {
+        if (aDevices[j]->GetBestFitnessDistance(aggregateConstraints,
+                                                aIsChrome) == UINT32_MAX) {
           rejects.AppendElement(aDevices[j]);
           aDevices.RemoveElementAt(j);
         } else {

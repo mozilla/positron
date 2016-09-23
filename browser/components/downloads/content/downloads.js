@@ -226,6 +226,14 @@ const DownloadsPanel = {
     }
 
     this.initialize(() => {
+      let downloadsFooterButtons =
+        document.getElementById("downloadsFooterButtons");
+      if (DownloadsCommon.showPanelDropmarker) {
+        downloadsFooterButtons.classList.remove("downloadsHideDropmarker");
+      } else {
+        downloadsFooterButtons.classList.add("downloadsHideDropmarker");
+      }
+
       // Delay displaying the panel because this function will sometimes be
       // called while another window is closing (like the window for selecting
       // whether to save or open the file), and that would cause the panel to
@@ -303,6 +311,20 @@ const DownloadsPanel = {
         return this._onKeyDown(aEvent);
       case "keypress":
         return this._onKeyPress(aEvent);
+      case "popupshown":
+        if (this.setHeightToFitOnShow) {
+          this.setHeightToFitOnShow = false;
+          this.setHeightToFit();
+        }
+        break;
+    }
+  },
+
+  setHeightToFit() {
+    if (this._state == this.kStateShown) {
+      DownloadsBlockedSubview.view.setHeightToFit();
+    } else {
+      this.setHeightToFitOnShow = true;
     }
   },
 
@@ -367,6 +389,24 @@ const DownloadsPanel = {
     this._state = this.kStateHidden;
   },
 
+  onFooterPopupShowing(aEvent) {
+    let itemClearList = document.getElementById("downloadsDropdownItemClearList");
+    if (DownloadsCommon.getData(window).canRemoveFinished) {
+      itemClearList.removeAttribute("hidden");
+    } else {
+      itemClearList.setAttribute("hidden", "true");
+    }
+    DownloadsViewController.updateCommands();
+
+    document.getElementById("downloadsFooter")
+      .setAttribute("showingdropdown", true);
+  },
+
+  onFooterPopupHidden(aEvent) {
+    document.getElementById("downloadsFooter")
+      .removeAttribute("showingdropdown");
+  },
+
   //////////////////////////////////////////////////////////////////////////////
   //// Related operations
 
@@ -380,6 +420,13 @@ const DownloadsPanel = {
     this.hidePanel();
 
     BrowserDownloadsUI();
+  },
+
+  openDownloadsFolder() {
+    Downloads.getPreferredDownloadsDirectory().then(downloadsPath => {
+      DownloadsCommon.showDirectory(new FileUtils.File(downloadsPath));
+    }).catch(Cu.reportError);
+    this.hidePanel();
   },
 
   //////////////////////////////////////////////////////////////////////////////
@@ -396,6 +443,8 @@ const DownloadsPanel = {
     // Handle keypress to be able to preventDefault() events before they reach
     // the richlistbox, for keyboard navigation.
     this.panel.addEventListener("keypress", this, false);
+    // Handle height adjustment on show.
+    this.panel.addEventListener("popupshown", this, false);
   },
 
   /**
@@ -405,6 +454,7 @@ const DownloadsPanel = {
   _unattachEventListeners() {
     this.panel.removeEventListener("keydown", this, false);
     this.panel.removeEventListener("keypress", this, false);
+    this.panel.removeEventListener("popupshown", this, false);
   },
 
   _onKeyPress(aEvent) {
@@ -709,8 +759,6 @@ const DownloadsView = {
       DownloadsPanel.panel.removeAttribute("hasdownloads");
     }
 
-    DownloadsBlockedSubview.view.setHeightToFit();
-
     // If we've got some hidden downloads, we should activate the
     // DownloadsSummary. The DownloadsSummary will determine whether or not
     // it's appropriate to actually display the summary.
@@ -841,6 +889,9 @@ const DownloadsView = {
     }
 
     this._itemCountChanged();
+
+    // Adjust the panel height if we removed items.
+    DownloadsPanel.setHeightToFit();
   },
 
   /**
@@ -1113,9 +1164,9 @@ DownloadsViewItem.prototype = {
     this.confirmUnblock(window, "chooseUnblock");
   },
 
-  downloadsCmd_chooseOpen() {
+  downloadsCmd_unblockAndOpen() {
     DownloadsPanel.hidePanel();
-    this.confirmUnblock(window, "chooseOpen");
+    this.unblockAndOpenDownload().catch(Cu.reportError);
   },
 
   downloadsCmd_open() {
@@ -1142,8 +1193,8 @@ DownloadsViewItem.prototype = {
   },
 
   downloadsCmd_showBlockedInfo() {
-    DownloadsBlockedSubview.show(this.element,
-                                 ...this.rawBlockedTitleAndDetails);
+    DownloadsBlockedSubview.toggle(this.element,
+                                   ...this.rawBlockedTitleAndDetails);
   },
 
   downloadsCmd_openReferrer() {
@@ -1188,6 +1239,9 @@ const DownloadsViewController = {
   //// nsIController
 
   supportsCommand(aCommand) {
+    if (aCommand === "downloadsCmd_clearList") {
+      return true;
+    }
     // Firstly, determine if this is a command that we can handle.
     if (!DownloadsViewUI.isCommandName(aCommand)) {
       return false;
@@ -1200,7 +1254,7 @@ const DownloadsViewController = {
     // showing.  If it is, then take the following path.
     if (DownloadsBlockedSubview.view.showingSubView) {
       let blockedSubviewCmds = [
-        "downloadsCmd_chooseOpen",
+        "downloadsCmd_unblockAndOpen",
         "cmd_delete",
       ];
       return blockedSubviewCmds.indexOf(aCommand) >= 0;
@@ -1490,6 +1544,10 @@ const DownloadsFooter = {
       } else {
         this._footerNode.removeAttribute("showingsummary");
       }
+      if (!aValue && this._showingSummary) {
+        // Make sure the panel's height shrinks when the summary is hidden.
+        DownloadsPanel.setHeightToFit();
+      }
       this._showingSummary = aValue;
     }
     return aValue;
@@ -1569,8 +1627,9 @@ const DownloadsBlockedSubview = {
    * @param details
    *        An array of strings with information about the block.
    */
-  show(element, title, details) {
+  toggle(element, title, details) {
     if (this.view.showingSubView) {
+      this.hide();
       return;
     }
 

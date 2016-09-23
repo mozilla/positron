@@ -16,7 +16,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Likely.h"
 #include "mozilla/MathAlgorithms.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 #include "base/pickle.h"
 #include "nsIComponentManager.h"
@@ -756,10 +756,12 @@ NS_IMETHODIMP
 TelemetryImpl::CollectReports(nsIHandleReportCallback* aHandleReport,
                               nsISupports* aData, bool aAnonymize)
 {
-  return MOZ_COLLECT_REPORT(
+  MOZ_COLLECT_REPORT(
     "explicit/telemetry", KIND_HEAP, UNITS_BYTES,
     SizeOfIncludingThis(TelemetryMallocSizeOf),
     "Memory used by the telemetry system.");
+
+  return NS_OK;
 }
 
 void
@@ -839,7 +841,7 @@ public:
     mTelemetry->mCallbacks.Clear();
   }
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     LoadFailedLockCount(mTelemetry->mFailedLockCount);
     mTelemetry->mLastShutdownTime = 
       ReadLastShutdownDuration(mShutdownTimeFilename);
@@ -1028,27 +1030,6 @@ TelemetryImpl::InitMemoryReporter() {
   RegisterWeakMemoryReporter(this);
 }
 
-NS_IMETHODIMP
-TelemetryImpl::NewHistogram(const nsACString &name, const nsACString &expiration, uint32_t histogramType,
-                            uint32_t min, uint32_t max, uint32_t bucketCount, JSContext *cx,
-                            uint8_t optArgCount, JS::MutableHandle<JS::Value> ret)
-{
-  return TelemetryHistogram::NewHistogram(name, expiration, histogramType,
-                                          min, max, bucketCount,
-                                          cx, optArgCount, ret);
-}
-
-NS_IMETHODIMP
-TelemetryImpl::NewKeyedHistogram(const nsACString &name, const nsACString &expiration, uint32_t histogramType,
-                            uint32_t min, uint32_t max, uint32_t bucketCount, JSContext *cx,
-                            uint8_t optArgCount, JS::MutableHandle<JS::Value> ret)
-{
-  return TelemetryHistogram::NewKeyedHistogram(name, expiration, histogramType,
-                                               min, max, bucketCount,
-                                               cx, optArgCount, ret);
-}
-
-
 bool
 TelemetryImpl::ReflectSQL(const SlowSQLEntryType *entry,
                           const Stat *stat,
@@ -1221,7 +1202,7 @@ TelemetryImpl::GetWebrtcStats(JSContext *cx, JS::MutableHandle<JS::Value> ret)
 NS_IMETHODIMP
 TelemetryImpl::GetMaximalNumberOfConcurrentThreads(uint32_t *ret)
 {
-  *ret = nsThreadManager::get()->GetHighestNumberOfThreads();
+  *ret = nsThreadManager::get().GetHighestNumberOfThreads();
   return NS_OK;
 }
 
@@ -2367,6 +2348,13 @@ TelemetryImpl::ClearScalars()
   return NS_OK;
 }
 
+NS_IMETHODIMP
+TelemetryImpl::FlushBatchedChildTelemetry()
+{
+  TelemetryHistogram::IPCTimerFired(nullptr, nullptr);
+  return NS_OK;
+}
+
 size_t
 TelemetryImpl::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
 {
@@ -2810,6 +2798,18 @@ AccumulateTimeDelta(ID aHistogram, TimeStamp start, TimeStamp end)
 {
   Accumulate(aHistogram,
              static_cast<uint32_t>((end - start).ToMilliseconds()));
+}
+
+void
+AccumulateChild(const nsTArray<Accumulation>& aAccumulations)
+{
+  TelemetryHistogram::AccumulateChild(aAccumulations);
+}
+
+void
+AccumulateChildKeyed(const nsTArray<KeyedAccumulation>& aAccumulations)
+{
+  TelemetryHistogram::AccumulateChildKeyed(aAccumulations);
 }
 
 void

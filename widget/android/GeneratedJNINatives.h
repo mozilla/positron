@@ -14,29 +14,6 @@ namespace mozilla {
 namespace java {
 
 template<class Impl>
-class ANRReporter::Natives : public mozilla::jni::NativeImpl<ANRReporter, Impl>
-{
-public:
-    static const JNINativeMethod methods[3];
-};
-
-template<class Impl>
-const JNINativeMethod ANRReporter::Natives<Impl>::methods[] = {
-
-    mozilla::jni::MakeNativeMethod<ANRReporter::GetNativeStack_t>(
-            mozilla::jni::NativeStub<ANRReporter::GetNativeStack_t, Impl>
-            ::template Wrap<&Impl::GetNativeStack>),
-
-    mozilla::jni::MakeNativeMethod<ANRReporter::ReleaseNativeStack_t>(
-            mozilla::jni::NativeStub<ANRReporter::ReleaseNativeStack_t, Impl>
-            ::template Wrap<&Impl::ReleaseNativeStack>),
-
-    mozilla::jni::MakeNativeMethod<ANRReporter::RequestNativeStack_t>(
-            mozilla::jni::NativeStub<ANRReporter::RequestNativeStack_t, Impl>
-            ::template Wrap<&Impl::RequestNativeStack>)
-};
-
-template<class Impl>
 class AlarmReceiver::Natives : public mozilla::jni::NativeImpl<AlarmReceiver, Impl>
 {
 public:
@@ -78,7 +55,7 @@ template<class Impl>
 class GeckoAppShell::Natives : public mozilla::jni::NativeImpl<GeckoAppShell, Impl>
 {
 public:
-    static const JNINativeMethod methods[6];
+    static const JNINativeMethod methods[8];
 };
 
 template<class Impl>
@@ -96,6 +73,10 @@ const JNINativeMethod GeckoAppShell::Natives<Impl>::methods[] = {
             mozilla::jni::NativeStub<GeckoAppShell::NotifyUriVisited_t, Impl>
             ::template Wrap<&Impl::NotifyUriVisited>),
 
+    mozilla::jni::MakeNativeMethod<GeckoAppShell::OnFullScreenPluginHidden_t>(
+            mozilla::jni::NativeStub<GeckoAppShell::OnFullScreenPluginHidden_t, Impl>
+            ::template Wrap<&Impl::OnFullScreenPluginHidden>),
+
     mozilla::jni::MakeNativeMethod<GeckoAppShell::OnLocationChanged_t>(
             mozilla::jni::NativeStub<GeckoAppShell::OnLocationChanged_t, Impl>
             ::template Wrap<&Impl::OnLocationChanged>),
@@ -104,9 +85,43 @@ const JNINativeMethod GeckoAppShell::Natives<Impl>::methods[] = {
             mozilla::jni::NativeStub<GeckoAppShell::OnSensorChanged_t, Impl>
             ::template Wrap<&Impl::OnSensorChanged>),
 
+    mozilla::jni::MakeNativeMethod<GeckoAppShell::ReportJavaCrash_t>(
+            mozilla::jni::NativeStub<GeckoAppShell::ReportJavaCrash_t, Impl>
+            ::template Wrap<&Impl::ReportJavaCrash>),
+
     mozilla::jni::MakeNativeMethod<GeckoAppShell::SyncNotifyObservers_t>(
             mozilla::jni::NativeStub<GeckoAppShell::SyncNotifyObservers_t, Impl>
             ::template Wrap<&Impl::SyncNotifyObservers>)
+};
+
+template<class Impl>
+class GeckoAppShell::CameraCallback::Natives : public mozilla::jni::NativeImpl<CameraCallback, Impl>
+{
+public:
+    static const JNINativeMethod methods[1];
+};
+
+template<class Impl>
+const JNINativeMethod GeckoAppShell::CameraCallback::Natives<Impl>::methods[] = {
+
+    mozilla::jni::MakeNativeMethod<GeckoAppShell::CameraCallback::OnFrameData_t>(
+            mozilla::jni::NativeStub<GeckoAppShell::CameraCallback::OnFrameData_t, Impl>
+            ::template Wrap<&Impl::OnFrameData>)
+};
+
+template<class Impl>
+class GeckoBatteryManager::Natives : public mozilla::jni::NativeImpl<GeckoBatteryManager, Impl>
+{
+public:
+    static const JNINativeMethod methods[1];
+};
+
+template<class Impl>
+const JNINativeMethod GeckoBatteryManager::Natives<Impl>::methods[] = {
+
+    mozilla::jni::MakeNativeMethod<GeckoBatteryManager::OnBatteryChange_t>(
+            mozilla::jni::NativeStub<GeckoBatteryManager::OnBatteryChange_t, Impl>
+            ::template Wrap<&Impl::OnBatteryChange>)
 };
 
 template<class Impl>
@@ -150,21 +165,6 @@ const JNINativeMethod GeckoEditable::Natives<Impl>::methods[] = {
     mozilla::jni::MakeNativeMethod<GeckoEditable::OnKeyEvent_t>(
             mozilla::jni::NativeStub<GeckoEditable::OnKeyEvent_t, Impl>
             ::template Wrap<&Impl::OnKeyEvent>)
-};
-
-template<class Impl>
-class GeckoJavaSampler::Natives : public mozilla::jni::NativeImpl<GeckoJavaSampler, Impl>
-{
-public:
-    static const JNINativeMethod methods[1];
-};
-
-template<class Impl>
-const JNINativeMethod GeckoJavaSampler::Natives<Impl>::methods[] = {
-
-    mozilla::jni::MakeNativeMethod<GeckoJavaSampler::GetProfilerTime_t>(
-            mozilla::jni::NativeStub<GeckoJavaSampler::GetProfilerTime_t, Impl>
-            ::template Wrap<&Impl::GetProfilerTime>)
 };
 
 template<class Impl>
@@ -272,7 +272,7 @@ template<class Impl>
 class GeckoThread::Natives : public mozilla::jni::NativeImpl<GeckoThread, Impl>
 {
 public:
-    static const JNINativeMethod methods[5];
+    static const JNINativeMethod methods[6];
 };
 
 template<class Impl>
@@ -289,6 +289,10 @@ const JNINativeMethod GeckoThread::Natives<Impl>::methods[] = {
     mozilla::jni::MakeNativeMethod<GeckoThread::OnResume_t>(
             mozilla::jni::NativeStub<GeckoThread::OnResume_t, Impl>
             ::template Wrap<&Impl::OnResume>),
+
+    mozilla::jni::MakeNativeMethod<GeckoThread::RunUiThreadCallback_t>(
+            mozilla::jni::NativeStub<GeckoThread::RunUiThreadCallback_t, Impl>
+            ::template Wrap<&Impl::RunUiThreadCallback>),
 
     mozilla::jni::MakeNativeMethod<GeckoThread::SpeculativeConnect_t>(
             mozilla::jni::NativeStub<GeckoThread::SpeculativeConnect_t, Impl>
@@ -358,64 +362,18 @@ const JNINativeMethod PrefsHelper::Natives<Impl>::methods[] = {
 };
 
 template<class Impl>
-class Telemetry::Natives : public mozilla::jni::NativeImpl<Telemetry, Impl>
-{
-public:
-    static const JNINativeMethod methods[5];
-};
-
-template<class Impl>
-const JNINativeMethod Telemetry::Natives<Impl>::methods[] = {
-
-    mozilla::jni::MakeNativeMethod<Telemetry::AddHistogram_t>(
-            mozilla::jni::NativeStub<Telemetry::AddHistogram_t, Impl>
-            ::template Wrap<&Impl::AddHistogram>),
-
-    mozilla::jni::MakeNativeMethod<Telemetry::AddKeyedHistogram_t>(
-            mozilla::jni::NativeStub<Telemetry::AddKeyedHistogram_t, Impl>
-            ::template Wrap<&Impl::AddKeyedHistogram>),
-
-    mozilla::jni::MakeNativeMethod<Telemetry::AddUIEvent_t>(
-            mozilla::jni::NativeStub<Telemetry::AddUIEvent_t, Impl>
-            ::template Wrap<&Impl::AddUIEvent>),
-
-    mozilla::jni::MakeNativeMethod<Telemetry::StartUISession_t>(
-            mozilla::jni::NativeStub<Telemetry::StartUISession_t, Impl>
-            ::template Wrap<&Impl::StartUISession>),
-
-    mozilla::jni::MakeNativeMethod<Telemetry::StopUISession_t>(
-            mozilla::jni::NativeStub<Telemetry::StopUISession_t, Impl>
-            ::template Wrap<&Impl::StopUISession>)
-};
-
-template<class Impl>
-class ThumbnailHelper::Natives : public mozilla::jni::NativeImpl<ThumbnailHelper, Impl>
+class SurfaceTextureListener::Natives : public mozilla::jni::NativeImpl<SurfaceTextureListener, Impl>
 {
 public:
     static const JNINativeMethod methods[1];
 };
 
 template<class Impl>
-const JNINativeMethod ThumbnailHelper::Natives<Impl>::methods[] = {
+const JNINativeMethod SurfaceTextureListener::Natives<Impl>::methods[] = {
 
-    mozilla::jni::MakeNativeMethod<ThumbnailHelper::RequestThumbnail_t>(
-            mozilla::jni::NativeStub<ThumbnailHelper::RequestThumbnail_t, Impl>
-            ::template Wrap<&Impl::RequestThumbnail>)
-};
-
-template<class Impl>
-class ZoomedView::Natives : public mozilla::jni::NativeImpl<ZoomedView, Impl>
-{
-public:
-    static const JNINativeMethod methods[1];
-};
-
-template<class Impl>
-const JNINativeMethod ZoomedView::Natives<Impl>::methods[] = {
-
-    mozilla::jni::MakeNativeMethod<ZoomedView::RequestZoomedViewData_t>(
-            mozilla::jni::NativeStub<ZoomedView::RequestZoomedViewData_t, Impl>
-            ::template Wrap<&Impl::RequestZoomedViewData>)
+    mozilla::jni::MakeNativeMethod<SurfaceTextureListener::OnFrameAvailable_t>(
+            mozilla::jni::NativeStub<SurfaceTextureListener::OnFrameAvailable_t, Impl>
+            ::template Wrap<&Impl::OnFrameAvailable>)
 };
 
 template<class Impl>
@@ -461,7 +419,7 @@ template<class Impl>
 class NativePanZoomController::Natives : public mozilla::jni::NativeImpl<NativePanZoomController, Impl>
 {
 public:
-    static const JNINativeMethod methods[8];
+    static const JNINativeMethod methods[7];
 };
 
 template<class Impl>
@@ -490,10 +448,6 @@ const JNINativeMethod NativePanZoomController::Natives<Impl>::methods[] = {
     mozilla::jni::MakeNativeMethod<NativePanZoomController::HandleScrollEvent_t>(
             mozilla::jni::NativeStub<NativePanZoomController::HandleScrollEvent_t, Impl>
             ::template Wrap<&Impl::HandleScrollEvent>),
-
-    mozilla::jni::MakeNativeMethod<NativePanZoomController::AbortAnimation_t>(
-            mozilla::jni::NativeStub<NativePanZoomController::AbortAnimation_t, Impl>
-            ::template Wrap<&Impl::AbortAnimation>),
 
     mozilla::jni::MakeNativeMethod<NativePanZoomController::SetIsLongpressEnabled_t>(
             mozilla::jni::NativeStub<NativePanZoomController::SetIsLongpressEnabled_t, Impl>

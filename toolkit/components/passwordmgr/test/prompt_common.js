@@ -1,3 +1,10 @@
+/**
+ * NOTE:
+ * This file is currently only being used for tests which haven't been
+ * fixed to work with e10s. Favor using the `prompt_common.js` file that
+ * is in `toolkit/components/prompts/test/` instead.
+ */
+
 var Ci = SpecialPowers.Ci;
 ok(Ci != null, "Access Ci");
 var Cc = SpecialPowers.Cc;
@@ -23,7 +30,7 @@ var observer = SpecialPowers.wrapCallbackObject({
         const interfaces = [Ci.nsIObserver,
                             Ci.nsISupports, Ci.nsISupportsWeakReference];
 
-        if (!interfaces.some( function(v) { return iid.equals(v) } ))
+        if (!interfaces.some( function(v) { return iid.equals(v); } ))
             throw SpecialPowers.Components.results.NS_ERROR_NO_INTERFACE;
         return this;
     },

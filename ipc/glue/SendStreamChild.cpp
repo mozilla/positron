@@ -6,7 +6,7 @@
 
 #include "mozilla/ipc/SendStream.h"
 
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/PContentChild.h"
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/workers/bindings/WorkerHolder.h"
@@ -21,6 +21,7 @@ namespace mozilla {
 namespace ipc {
 
 using mozilla::dom::PContentChild;
+using mozilla::dom::workers::Canceling;
 using mozilla::dom::workers::GetCurrentThreadWorkerPrivate;
 using mozilla::dom::workers::Status;
 using mozilla::dom::workers::WorkerHolder;
@@ -184,7 +185,7 @@ SendStreamChildImpl::AddAsWorkerHolder(WorkerPrivate* aWorkerPrivate)
 {
   NS_ASSERT_OWNINGTHREAD(SendStreamChild);
   MOZ_ASSERT(aWorkerPrivate);
-  bool result = HoldWorker(aWorkerPrivate);
+  bool result = HoldWorker(aWorkerPrivate, Canceling);
   if (result) {
     mWorkerPrivate = aWorkerPrivate;
   }

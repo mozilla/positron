@@ -241,14 +241,16 @@ public:
     void UpdateAltServiceMapping(AltSvcMapping *map,
                                  nsProxyInfo *proxyInfo,
                                  nsIInterfaceRequestor *callbacks,
-                                 uint32_t caps)
+                                 uint32_t caps,
+                                 const NeckoOriginAttributes &originAttributes)
     {
-        mConnMgr->UpdateAltServiceMapping(map, proxyInfo, callbacks, caps);
+        mConnMgr->UpdateAltServiceMapping(map, proxyInfo, callbacks, caps,
+                                          originAttributes);
     }
 
-    AltSvcMapping *GetAltServiceMapping(const nsACString &scheme,
-                                        const nsACString &host,
-                                        int32_t port, bool pb)
+    already_AddRefed<AltSvcMapping> GetAltServiceMapping(const nsACString &scheme,
+                                                         const nsACString &host,
+                                                         int32_t port, bool pb)
     {
         return mConnMgr->GetAltServiceMapping(scheme, host, port, pb);
     }
@@ -631,6 +633,7 @@ private:
     // UUID generator for channelIds
     nsCOMPtr<nsIUUIDGenerator> mUUIDGen;
 
+public:
     nsresult NewChannelId(nsID *channelId);
 };
 
