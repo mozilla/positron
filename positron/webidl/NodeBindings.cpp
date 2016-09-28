@@ -19,8 +19,18 @@
 #include "nsAppRunner.h"
 #include "nsContentUtils.h"
 #include "nsJSPrincipals.h"
+#include "xpcprivate.h"
 
 namespace mozilla {
+
+void* CreatePrivateCompartmentDataCallback(JSObject* aGlobal) {
+  JSCompartment* chromeCompartment = js::GetObjectCompartment(aGlobal);
+  xpc::CompartmentPrivate* origCompartmentPrivate = (xpc::CompartmentPrivate*)JS_GetCompartmentPrivate(chromeCompartment);
+  xpc::CompartmentPrivate* priv = new xpc::CompartmentPrivate(chromeCompartment);
+  priv->scope = origCompartmentPrivate->scope;
+  priv->SetLocation(NS_LITERAL_CSTRING("chrome://NodeBindings"));
+  return priv;
+}
 
 NodeBindings::NodeBindings(bool is_browser)
     : is_browser_(is_browser),
@@ -58,7 +68,7 @@ void NodeBindings::Initialize(JSContext* aContext, JSObject* aGlobal) {
   v8::V8::Initialize();
   uv_async_init(uv_default_loop(), &call_next_tick_async_, OnCallNextTick);
   call_next_tick_async_.data = this;
-  isolate = v8::Isolate::New(aContext, aGlobal, nsJSPrincipals::get(principal), components);
+  isolate = v8::Isolate::New(aContext, aGlobal, nsJSPrincipals::get(principal), components, &CreatePrivateCompartmentDataCallback);
   // TODO: FIX THIS LEAK
   isolate_scope = new v8::Isolate::Scope(isolate);
 

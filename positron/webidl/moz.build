@@ -46,6 +46,7 @@ LOCAL_INCLUDES += [
   '../spidernode/deps/spidershim/include',
   '../spidernode/deps/uv/include',
   '../spidernode/src',
+  '/js/xpconnect/src',
 ]
 
 EXPORTS += [
