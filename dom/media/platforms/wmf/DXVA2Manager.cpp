@@ -13,6 +13,7 @@
 #include "mozilla/gfx/DeviceManagerDx.h"
 #include "mozilla/layers/D3D11ShareHandleImage.h"
 #include "mozilla/layers/ImageBridgeChild.h"
+#include "mozilla/layers/VideoBridgeChild.h"
 #include "mozilla/Telemetry.h"
 #include "MediaTelemetryConstants.h"
 #include "mfapi.h"
@@ -428,8 +429,13 @@ D3D9DXVA2Manager::Init(nsACString& aFailureReason)
   mDeviceManager = deviceManager;
   mSyncSurface = syncSurf;
 
-  mTextureClientAllocator = new D3D9RecycleAllocator(layers::ImageBridgeChild::GetSingleton().get(),
-                                                     mDevice);
+  if (layers::ImageBridgeChild::GetSingleton()) {
+    mTextureClientAllocator = new D3D9RecycleAllocator(layers::ImageBridgeChild::GetSingleton().get(),
+                                                       mDevice);
+  } else {
+    mTextureClientAllocator = new D3D9RecycleAllocator(layers::VideoBridgeChild::GetSingleton(),
+                                                       mDevice);
+  }
   mTextureClientAllocator->SetMaxPoolSize(5);
 
   Telemetry::Accumulate(Telemetry::MEDIA_DECODER_BACKEND_USED,
@@ -492,7 +498,12 @@ DXVA2Manager::CreateD3D9DXVA(nsACString& aFailureReason)
 
   // DXVA processing takes up a lot of GPU resources, so limit the number of
   // videos we use DXVA with at any one time.
-  const uint32_t dxvaLimit = MediaPrefs::PDMWMFMaxDXVAVideos();
+  uint32_t dxvaLimit = 4;
+  // TODO: Sync this value across to the GPU process.
+  if (XRE_GetProcessType() != GeckoProcessType_GPU) {
+    dxvaLimit = MediaPrefs::PDMWMFMaxDXVAVideos();
+  }
+
   if (sDXVAVideosCount == dxvaLimit) {
     aFailureReason.AssignLiteral("Too many DXVA videos playing");
     return nullptr;
@@ -752,8 +763,13 @@ D3D11DXVA2Manager::Init(nsACString& aFailureReason)
   hr = mDevice->CreateTexture2D(&desc, NULL, getter_AddRefs(mSyncSurface));
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
-  mTextureClientAllocator = new D3D11RecycleAllocator(layers::ImageBridgeChild::GetSingleton().get(),
-                                                      mDevice);
+  if (layers::ImageBridgeChild::GetSingleton()) {
+    mTextureClientAllocator = new D3D11RecycleAllocator(layers::ImageBridgeChild::GetSingleton().get(),
+                                                        mDevice);
+  } else {
+    mTextureClientAllocator = new D3D11RecycleAllocator(layers::VideoBridgeChild::GetSingleton(),
+                                                        mDevice);
+  }
   mTextureClientAllocator->SetMaxPoolSize(5);
 
   Telemetry::Accumulate(Telemetry::MEDIA_DECODER_BACKEND_USED,
@@ -795,7 +811,7 @@ D3D11DXVA2Manager::CopyToImage(IMFSample* aVideoSample,
 
   RefPtr<D3D11ShareHandleImage> image =
     new D3D11ShareHandleImage(gfx::IntSize(mWidth, mHeight), aRegion);
-  bool ok = image->AllocateTexture(mTextureClientAllocator);
+  bool ok = image->AllocateTexture(mTextureClientAllocator, mDevice);
   NS_ENSURE_TRUE(ok, E_FAIL);
 
   HRESULT hr = mTransform->Input(aVideoSample);
@@ -898,7 +914,12 @@ DXVA2Manager::CreateD3D11DXVA(nsACString& aFailureReason)
 {
   // DXVA processing takes up a lot of GPU resources, so limit the number of
   // videos we use DXVA with at any one time.
-  const uint32_t dxvaLimit = MediaPrefs::PDMWMFMaxDXVAVideos();
+  uint32_t dxvaLimit = 4;
+  // TODO: Sync this value across to the GPU process.
+  if (XRE_GetProcessType() != GeckoProcessType_GPU) {
+    dxvaLimit = MediaPrefs::PDMWMFMaxDXVAVideos();
+  }
+
   if (sDXVAVideosCount == dxvaLimit) {
     aFailureReason.AssignLiteral("Too many DXVA videos playing");
     return nullptr;

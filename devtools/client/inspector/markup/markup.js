@@ -226,11 +226,7 @@ MarkupView.prototype = {
 
     let container = target.container;
     if (this._hoveredNode !== container.node) {
-      if (container.node.nodeType !== nodeConstants.TEXT_NODE) {
-        this._showBoxModel(container.node);
-      } else {
-        this._hideBoxModel();
-      }
+      this._showBoxModel(container.node);
     }
     this._showContainerAsHovered(container.node);
 
@@ -434,8 +430,6 @@ MarkupView.prototype = {
   /**
    * Hide the box model highlighter on a given node front
    *
-   * @param  {NodeFront} nodeFront
-   *         The node to hide the highlighter for
    * @param  {Boolean} forceHide
    *         See toolbox-highlighter-utils/unhighlight
    * @return {Promise} Resolves when the highlighter for this nodeFront is

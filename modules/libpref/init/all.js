@@ -391,7 +391,7 @@ pref("media.gmp.storage.version.expected", 1);
 
 // Filter what triggers user notifications.
 // See DecoderDoctorDocumentWatcher::ReportAnalysis for details.
-pref("media.decoder-doctor.notifications-allowed", "MediaWMFNeeded,MediaWidevineNoWMFNoSilverlight");
+pref("media.decoder-doctor.notifications-allowed", "MediaWMFNeeded,MediaWidevineNoWMFNoSilverlight,MediaCannotInitializePulseAudio");
 // Whether we report partial failures.
 pref("media.decoder-doctor.verbose", false);
 // Whether DD should consider WMF-disabled a WMF failure, useful for testing.
@@ -767,7 +767,13 @@ pref("gfx.font_rendering.opentype_svg.enabled", true);
 // comma separated list of backends to use in order of preference
 // e.g., pref("gfx.canvas.azure.backends", "direct2d,skia,cairo");
 pref("gfx.canvas.azure.backends", "direct2d1.1,skia,cairo");
+
+#ifdef NIGHTLY_BUILD
+pref("gfx.content.azure.backends", "direct2d1.1,skia,cairo");
+#else
 pref("gfx.content.azure.backends", "direct2d1.1,cairo");
+#endif
+
 #else
 #ifdef XP_MACOSX
 pref("gfx.content.azure.backends", "skia");
@@ -779,6 +785,8 @@ pref("gfx.canvas.azure.backends", "skia");
 pref("gfx.content.azure.backends", "skia");
 #endif
 #endif
+
+pref("gfx.canvas.skiagl.dynamic-cache", true);
 
 pref("gfx.text.disable-aa", false);
 
@@ -1550,6 +1558,7 @@ pref("network.http.spdy.allow-push", true);
 pref("network.http.spdy.push-allowance", 131072);   // 128KB
 pref("network.http.spdy.pull-allowance", 12582912); // 12MB
 pref("network.http.spdy.default-concurrent", 100);
+pref("network.http.spdy.default-hpack-buffer", 65536); // 64k
 
 // alt-svc allows separation of transport routing from
 // the origin host without using a proxy.
@@ -1863,11 +1872,7 @@ pref("network.prefetch-next", true);
 // enables the predictive service
 pref("network.predictor.enabled", true);
 pref("network.predictor.enable-hover-on-ssl", false);
-#ifdef NIGHTLY_BUILD
 pref("network.predictor.enable-prefetch", true);
-#else
-pref("network.predictor.enable-prefetch", false);
-#endif
 pref("network.predictor.page-degradation.day", 0);
 pref("network.predictor.page-degradation.week", 5);
 pref("network.predictor.page-degradation.month", 10);
@@ -2819,13 +2824,8 @@ pref("dom.ipc.plugins.unloadTimeoutSecs", 30);
 // Asynchronous plugin initialization is on hold.
 pref("dom.ipc.plugins.asyncInit.enabled", false);
 
-#ifdef RELEASE_BUILD
-// Allow the AsyncDrawing mode to be used for plugins.
-pref("dom.ipc.plugins.asyncdrawing.enabled", false);
-#else
 // Allow the AsyncDrawing mode to be used for plugins.
 pref("dom.ipc.plugins.asyncdrawing.enabled", true);
-#endif
 
 pref("dom.ipc.processCount", 1);
 
@@ -5088,10 +5088,6 @@ pref("dom.voicemail.defaultServiceId", 0);
 // Enable mapped array buffer by default.
 pref("dom.mapped_arraybuffer.enabled", true);
 
-// Whether to send more than one "loading" readystatechange during XHRs to
-// simulate progress events for sites still not using modern progress events.
-pref("dom.fire_extra_xhr_loading_readystatechanges", false);
-
 // The tables used for Safebrowsing phishing and malware checks.
 pref("urlclassifier.malwareTable", "goog-malware-shavar,goog-unwanted-shavar,test-malware-simple,test-unwanted-simple");
 
@@ -5356,9 +5352,7 @@ pref("browser.search.reset.enabled", false);
 pref("browser.search.reset.whitelist", "");
 pref("browser.search.geoSpecificDefaults", false);
 pref("browser.search.geoip.url", "https://location.services.mozilla.com/v1/country?key=%MOZILLA_API_KEY%");
-// NOTE: this timeout figure is also the "high" value for the telemetry probe
-// SEARCH_SERVICE_COUNTRY_FETCH_MS - if you change this also change that probe.
-pref("browser.search.geoip.timeout", 2000);
+pref("browser.search.geoip.timeout", 3000);
 
 #ifdef MOZ_OFFICIAL_BRANDING
 // {moz:official} expands to "official"
@@ -5559,8 +5553,16 @@ pref("media.block-autoplay-until-in-foreground", true);
 pref("layout.css.servo.enabled", true);
 #endif
 
-#ifdef NIGHTLY_BUILD
-pref("dom.html_fragment_serialisation.appendLF", true);
+// HSTS Priming
+// If a request is mixed-content, send an HSTS priming request to attempt to
+// see if it is available over HTTPS.
+pref("security.mixed_content.send_hsts_priming", true);
+#ifdef RELEASE_BUILD
+// Don't change the order of evaluation of mixed-content and HSTS upgrades in
+// order to be most compatible with current standards
+pref("security.mixed_content.use_hsts", false);
 #else
-pref("dom.html_fragment_serialisation.appendLF", false);
+// Change the order of evaluation so HSTS upgrades happen before
+// mixed-content blocking
+pref("security.mixed_content.use_hsts", true);
 #endif

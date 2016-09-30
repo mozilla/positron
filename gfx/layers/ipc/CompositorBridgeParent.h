@@ -239,6 +239,9 @@ public:
                                 mozilla::ipc::SharedMemory::SharedMemoryType aType,
                                 mozilla::ipc::Shmem* aShmem) override;
   virtual void DeallocShmem(mozilla::ipc::Shmem& aShmem) override;
+
+  virtual bool RecvSyncWithCompositor() override { return true; }
+
 };
 
 class CompositorBridgeParent final : public CompositorBridgeParentBase
@@ -468,6 +471,24 @@ public:
    * the compositor thread.
    */
   static LayerTreeState* GetIndirectShadowTree(uint64_t aId);
+
+  /**
+   * Given the layers id for a content process, get the APZCTreeManagerParent
+   * for the corresponding *root* layers id. That is, the APZCTreeManagerParent,
+   * if one is found, will always be connected to the parent process rather
+   * than a content process. Note that unless the compositor process is
+   * separated this is expected to return null, because if the compositor is
+   * living in the gecko parent process then there is no APZCTreeManagerParent
+   * for the parent process.
+   */
+  static APZCTreeManagerParent* GetApzcTreeManagerParentForRoot(
+        uint64_t aContentLayersId);
+  /**
+   * Same as the GetApzcTreeManagerParentForRoot function, but returns
+   * the GeckoContentController for the parent process.
+   */
+  static GeckoContentController* GetGeckoContentControllerForRoot(
+        uint64_t aContentLayersId);
 
 #if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
   /**

@@ -1160,6 +1160,8 @@ class RecursiveMakeBackend(CommonBackend):
             backend_file.write('SDK_LIBRARY := %s\n' % libdef.import_name)
         if libdef.symbols_file:
             backend_file.write('SYMBOLS_FILE := %s\n' % libdef.symbols_file)
+        if not libdef.cxx_link:
+            backend_file.write('LIB_IS_C_ONLY := 1\n')
 
     def _process_static_library(self, libdef, backend_file):
         backend_file.write_once('LIBRARY_NAME := %s\n' % libdef.basename)
@@ -1274,7 +1276,7 @@ class RecursiveMakeBackend(CommonBackend):
             for rlib in rlibs:
                 rlib_relpath = pretty_relpath(rlib)
                 backend_file.write('RUST_PRELINK_FLAGS += --extern %s=%s/%s\n'
-                                   % (rlib.basename, rlib_relpath, rlib.import_name))
+                                   % (rlib.basename.replace('-', '_'), rlib_relpath, rlib.import_name))
                 backend_file.write('RUST_PRELINK_FLAGS += -L %s/%s\n'
                                    % (rlib_relpath, rlib.deps_path))
                 backend_file.write('RUST_PRELINK_DEPS += %s/%s\n'

@@ -115,6 +115,8 @@ child:
 
   async ParentAsyncMessages(AsyncParentMessageData[] aMessages);
 
+  async ObserveLayerUpdate(uint64_t aLayersId, uint64_t aEpoch, bool aActive);
+
 parent:
   // Must be called before Initialize().
   async PCompositorWidget(CompositorWidgetInitData aInitData);
@@ -217,6 +219,8 @@ parent:
   async AllPluginsCaptured();
 
   async PTexture(SurfaceDescriptor aSharedData, LayersBackend aBackend, TextureFlags aTextureFlags, uint64_t id, uint64_t aSerial);
+
+  sync SyncWithCompositor();
 
 child:
   // Send back Compositor Frame Metrics from APZCs so tiled layers can

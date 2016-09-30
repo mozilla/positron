@@ -33,7 +33,7 @@ EXTRA_JS_MODULES += [
     'LaterRun.jsm',
     'NetworkPrioritizer.jsm',
     'offlineAppCache.jsm',
-    'PanelFrame.jsm',
+    'PermissionUI.jsm',
     'PluginContent.jsm',
     'ProcessHangMonitor.jsm',
     'ReaderParent.jsm',

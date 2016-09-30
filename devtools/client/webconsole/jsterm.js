@@ -377,7 +377,7 @@ JSTerm.prototype = {
 
     if (this.hud.NEW_CONSOLE_OUTPUT_ENABLED) {
       this.hud.newConsoleOutput.dispatchMessageAdd(response);
-      // @TODO figure out what to do about the callback.
+      callback && callback(this.hud.newConsoleOutput.getLastMessage());
       return;
     }
     let msg = new Messages.JavaScriptEvalOutput(response,
@@ -423,12 +423,17 @@ JSTerm.prototype = {
    */
   execute: function (executeString, callback) {
     let deferred = promise.defer();
-    let resultCallback = function (msg) {
-      deferred.resolve(msg);
-      if (callback) {
-        callback(msg);
-      }
-    };
+    let resultCallback;
+    if (this.hud.NEW_CONSOLE_OUTPUT_ENABLED) {
+      resultCallback = (msg) => deferred.resolve(msg);
+    } else {
+      resultCallback = (msg) => {
+        deferred.resolve(msg);
+        if (callback) {
+          callback(msg);
+        }
+      };
+    }
 
     // attempt to execute the content of the inputNode
     executeString = executeString || this.getInputValue();
@@ -447,7 +452,7 @@ JSTerm.prototype = {
       let message = new ConsoleCommand({
         messageText: executeString,
       });
-      this.hud.newConsoleOutput.dispatchMessageAdd(message);
+      this.hud.proxy.dispatchMessageAdd(message);
     } else {
       let message = new Messages.Simple(executeString, {
         category: "input",

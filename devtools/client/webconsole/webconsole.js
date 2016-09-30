@@ -494,6 +494,10 @@ WebConsoleFrame.prototype = {
     };
     allReady.then(notifyObservers, notifyObservers);
 
+    if (this.NEW_CONSOLE_OUTPUT_ENABLED) {
+      allReady.then(this.newConsoleOutput.init);
+    }
+
     return allReady;
   },
 
@@ -582,6 +586,7 @@ WebConsoleFrame.prototype = {
       // XXX: We should actually stop output from happening on old output
       // panel, but for now let's just hide it.
       this.experimentalOutputNode = this.outputNode.cloneNode();
+      this.experimentalOutputNode.removeAttribute("tabindex");
       this.outputNode.hidden = true;
       this.outputNode.parentNode.appendChild(this.experimentalOutputNode);
       // @TODO Once the toolbox has been converted to React, see if passing
@@ -3261,14 +3266,17 @@ WebConsoleConnectionProxy.prototype = {
    */
   dispatchMessageAdd: function(packet) {
     this.webConsoleFrame.newConsoleOutput.dispatchMessageAdd(packet);
-
-    // Return the last message in the DOM as the message that was just dispatched. This may not
-    // always be true in the case of filtered messages, but it's close enough for our tests.
-    let messageNodes = this.webConsoleFrame.experimentalOutputNode.querySelectorAll(".message");
-    this.webConsoleFrame.emit("new-messages", {
+    this.webConsoleFrame.emit("new-messages", new Set([{
       response: packet,
-      node: messageNodes[messageNodes.length - 1],
-    });
+      node: this.webConsoleFrame.newConsoleOutput.getLastMessage(),
+    }]));
+  },
+
+  /**
+   * Batched dispatch of messages.
+   */
+  dispatchMessagesAdd: function(packets) {
+    this.webConsoleFrame.newConsoleOutput.dispatchMessagesAdd(packets);
   },
 
   /**
@@ -3297,9 +3305,10 @@ WebConsoleConnectionProxy.prototype = {
     messages.sort((a, b) => a.timeStamp - b.timeStamp);
 
     if (this.webConsoleFrame.NEW_CONSOLE_OUTPUT_ENABLED) {
-      for (let packet of messages) {
-        this.dispatchMessageAdd(packet);
-      }
+      // Filter out CSS page errors.
+      messages = messages.filter(message => !(message._type == "PageError"
+          && Utils.categoryForScriptError(message) === CATEGORY_CSS));
+      this.dispatchMessagesAdd(messages);
     } else {
       this.webConsoleFrame.displayCachedMessages(messages);
       if (!this._hasNativeConsoleAPI) {

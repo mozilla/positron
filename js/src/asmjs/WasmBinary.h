@@ -24,6 +24,41 @@
 namespace js {
 namespace wasm {
 
+// Because WebAssembly allows one to define the payload of a NaN value,
+// including the signal/quiet bit (highest order bit of payload), another
+// represenation of floating-point values is required: on some platforms (x86
+// without SSE2), passing a floating-point argument to a function call may use
+// the x87 stack, which has the side-effect of clearing the signal/quiet bit.
+// Because the signal/quiet bit must be preserved (by spec), we use the raw
+// punned integer representation of floating points instead, in function calls.
+//
+// When we leave the WebAssembly sandbox back to JS, NaNs are canonicalized, so
+// this isn't observable from JS.
+
+template<class T>
+class Raw
+{
+    typedef typename mozilla::FloatingPoint<T>::Bits Bits;
+    Bits value_;
+
+  public:
+    Raw() : value_(0) {}
+
+    explicit Raw(T value)
+      : value_(mozilla::BitwiseCast<Bits>(value))
+    {}
+
+    template<class U> MOZ_IMPLICIT Raw(U) = delete;
+
+    static Raw fromBits(Bits bits) { Raw r; r.value_ = bits; return r; }
+
+    Bits bits() const { return value_; }
+    T fp() const { return mozilla::BitwiseCast<T>(value_); }
+};
+
+using RawF64 = Raw<double>;
+using RawF32 = Raw<float>;
+
 // Telemetry sample values for the JS_AOT_USAGE key, indicating whether asm.js
 // or WebAssembly is used.
 
@@ -33,20 +68,24 @@ enum class Telemetry {
 };
 
 static const uint32_t MagicNumber        = 0x6d736100; // "\0asm"
-static const uint32_t EncodingVersion    = 0x0b;
+static const uint32_t EncodingVersion    = 0x0c;
 
-static const char TypeSectionId[]        = "type";
-static const char GlobalSectionId[]      = "global";
-static const char ImportSectionId[]      = "import";
-static const char FunctionSectionId[]    = "function";
-static const char TableSectionId[]       = "table";
-static const char MemorySectionId[]      = "memory";
-static const char ExportSectionId[]      = "export";
-static const char StartSectionId[]       = "start";
-static const char CodeSectionId[]        = "code";
-static const char ElemSectionId[]        = "elem";
-static const char DataSectionId[]        = "data";
-static const char NameSectionId[]        = "name";
+enum class SectionId {
+    UserDefined = 0,
+    Type        = 1,
+    Import      = 2,
+    Function    = 3,
+    Table       = 4,
+    Memory      = 5,
+    Global      = 6,
+    Export      = 7,
+    Start       = 8,
+    Elem        = 9,
+    Code        = 10,
+    Data        = 11
+};
+
+static const char NameSectionName[] = "name";
 
 enum class ValType
 {
@@ -100,7 +139,7 @@ enum class GlobalFlags
 enum class Expr
 {
     // Control flow operators
-    Nop                                  = 0x00,
+    Unreachable                          = 0x00,
     Block                                = 0x01,
     Loop                                 = 0x02,
     If                                   = 0x03,
@@ -110,7 +149,8 @@ enum class Expr
     BrIf                                 = 0x07,
     BrTable                              = 0x08,
     Return                               = 0x09,
-    Unreachable                          = 0x0a,
+    Nop                                  = 0x0a,
+    Drop                                 = 0x0b,
     End                                  = 0x0f,
 
     // Basic operators
@@ -123,6 +163,7 @@ enum class Expr
     Call                                 = 0x16,
     CallIndirect                         = 0x17,
     CallImport                           = 0x18,
+    TeeLocal                             = 0x19,
 
     // Memory-related operators
     I32Load8S                            = 0x20,
@@ -297,13 +338,23 @@ enum class Expr
     // compiling asm.js and are rejected by wasm validation.
 
     // asm.js-specific operators
+    TeeGlobal                            = 0xc8,
     I32Min,
     I32Max,
     I32Neg,
     I32BitNot,
     I32Abs,
-    F32StoreF64,
-    F64StoreF32,
+    F32TeeStoreF64,
+    F64TeeStoreF32,
+    I32TeeStore8,
+    I32TeeStore16,
+    I64TeeStore8,
+    I64TeeStore16,
+    I64TeeStore32,
+    I32TeeStore,
+    I64TeeStore,
+    F32TeeStore,
+    F64TeeStore,
     F64Mod,
     F64Sin,
     F64Cos,
@@ -315,6 +366,9 @@ enum class Expr
     F64Log,
     F64Pow,
     F64Atan2,
+
+    // asm.js-style call_indirect with the callee evaluated first.
+    OldCallIndirect,
 
     // Atomics
     I32AtomicsCompareExchange,
@@ -488,6 +542,16 @@ class Encoder
         } while(assertBits != 0);
     }
 
+    void patchFixedU7(size_t offset, uint8_t patchBits, uint8_t assertBits) {
+        MOZ_ASSERT(patchBits <= uint8_t(INT8_MAX));
+        patchFixedU8(offset, patchBits, assertBits);
+    }
+
+    void patchFixedU8(size_t offset, uint8_t patchBits, uint8_t assertBits) {
+        MOZ_ASSERT(bytes_[offset] == assertBits);
+        bytes_[offset] = patchBits;
+    }
+
     uint32_t varU32ByteLength(size_t offset) const {
         size_t start = offset;
         while (bytes_[offset] & 0x80)
@@ -510,17 +574,21 @@ class Encoder
     // Fixed-size encoding operations simply copy the literal bytes (without
     // attempting to align).
 
+    MOZ_MUST_USE bool writeFixedU7(uint8_t i) {
+        MOZ_ASSERT(i <= uint8_t(INT8_MAX));
+        return writeFixedU8(i);
+    }
     MOZ_MUST_USE bool writeFixedU8(uint8_t i) {
         return write<uint8_t>(i);
     }
     MOZ_MUST_USE bool writeFixedU32(uint32_t i) {
         return write<uint32_t>(i);
     }
-    MOZ_MUST_USE bool writeFixedF32(float f) {
-        return write<float>(f);
+    MOZ_MUST_USE bool writeFixedF32(RawF32 f) {
+        return write<uint32_t>(f.bits());
     }
-    MOZ_MUST_USE bool writeFixedF64(double d) {
-        return write<double>(d);
+    MOZ_MUST_USE bool writeFixedF64(RawF64 d) {
+        return write<uint64_t>(d.bits());
     }
     MOZ_MUST_USE bool writeFixedI8x16(const I8x16& i8x16) {
         return write<I8x16>(i8x16);
@@ -553,12 +621,26 @@ class Encoder
         static_assert(size_t(ValType::Limit) <= INT8_MAX, "fits");
         return writeFixedU8(size_t(type));
     }
+    MOZ_MUST_USE bool writeExprType(ExprType type) {
+        static_assert(size_t(ExprType::Limit) <= INT8_MAX, "fits");
+        return writeFixedU8(size_t(type));
+    }
     MOZ_MUST_USE bool writeExpr(Expr expr) {
         static_assert(size_t(Expr::Limit) <= ExprLimit, "fits");
         if (size_t(expr) < UINT8_MAX)
             return writeFixedU8(uint8_t(expr));
         return writeFixedU8(UINT8_MAX) &&
                writeFixedU8(size_t(expr) - UINT8_MAX);
+    }
+
+    // Fixed-length encodings that allow back-patching.
+
+    MOZ_MUST_USE bool writePatchableFixedU7(size_t* offset) {
+        *offset = bytes_.length();
+        return writeFixedU8(UINT8_MAX);
+    }
+    void patchFixedU7(size_t offset, uint8_t patchBits) {
+        return patchFixedU7(offset, patchBits, UINT8_MAX);
     }
 
     // Variable-length encodings that allow back-patching.
@@ -585,12 +667,10 @@ class Encoder
     // end while the size's varU32 must be stored at the beginning. Immediately
     // after the section length is the string id of the section.
 
-    template <size_t IdSizeWith0>
-    MOZ_MUST_USE bool startSection(const char (&id)[IdSizeWith0], size_t* offset) {
-        static const size_t IdSize = IdSizeWith0 - 1;
-        MOZ_ASSERT(id[IdSize] == '\0');
-        return writeVarU32(IdSize) &&
-               bytes_.append(reinterpret_cast<const uint8_t*>(id), IdSize) &&
+    MOZ_MUST_USE bool startSection(SectionId id, size_t* offset) {
+        MOZ_ASSERT(id != SectionId::UserDefined); // not supported yet
+
+        return writeVarU32(uint32_t(id)) &&
                writePatchableVarU32(offset);
     }
     void finishSection(size_t offset) {
@@ -690,7 +770,7 @@ class Decoder
     static const size_t ExprLimit = 2 * UINT8_MAX - 1;
 
   public:
-    Decoder(const uint8_t* begin, const uint8_t* end, UniqueChars* error = nullptr)
+    Decoder(const uint8_t* begin, const uint8_t* end, UniqueChars* error)
       : beg_(begin),
         end_(end),
         cur_(begin),
@@ -705,14 +785,8 @@ class Decoder
         error_(error)
     {}
 
-    bool fail(const char* msg) {
-        error_->reset(strdup(msg));
-        return false;
-    }
-    bool fail(UniqueChars msg) {
-        *error_ = Move(msg);
-        return false;
-    }
+    bool fail(const char* msg, ...);
+    bool fail(UniqueChars msg);
     void clearError() {
         if (error_)
             error_->reset();
@@ -743,11 +817,19 @@ class Decoder
     MOZ_MUST_USE bool readFixedU32(uint32_t* u) {
         return read<uint32_t>(u);
     }
-    MOZ_MUST_USE bool readFixedF32(float* f) {
-        return read<float>(f);
+    MOZ_MUST_USE bool readFixedF32(RawF32* f) {
+        uint32_t u;
+        if (!read<uint32_t>(&u))
+            return false;
+        *f = RawF32::fromBits(u);
+        return true;
     }
-    MOZ_MUST_USE bool readFixedF64(double* d) {
-        return read<double>(d);
+    MOZ_MUST_USE bool readFixedF64(RawF64* d) {
+        uint64_t u;
+        if (!read<uint64_t>(&u))
+            return false;
+        *d = RawF64::fromBits(u);
+        return true;
     }
     MOZ_MUST_USE bool readFixedI8x16(I8x16* i8x16) {
         return read<I8x16>(i8x16);
@@ -816,48 +898,102 @@ class Decoder
 
     static const uint32_t NotStarted = UINT32_MAX;
 
-    template <size_t IdSizeWith0>
-    MOZ_MUST_USE bool startSection(const char (&id)[IdSizeWith0],
+    MOZ_MUST_USE bool startSection(SectionId id,
                                    uint32_t* startOffset,
-                                   uint32_t* size) {
-        static const size_t IdSize = IdSizeWith0 - 1;
-        MOZ_ASSERT(id[IdSize] == '\0');
-        const uint8_t* before = cur_;
-        uint32_t idSize;
-        if (!readVarU32(&idSize))
+                                   uint32_t* size,
+                                   const char* sectionName)
+    {
+        const uint8_t* const before = cur_;
+        const uint8_t* beforeId = before;
+        uint32_t idValue;
+        if (!readVarU32(&idValue))
             goto backup;
-        if (bytesRemain() < idSize)
-            return false;
-        if (idSize != IdSize || !!memcmp(cur_, id, IdSize))
-            goto backup;
-        cur_ += IdSize;
+        while (idValue != uint32_t(id)) {
+            if (idValue != uint32_t(SectionId::UserDefined))
+                goto backup;
+            // Rewind to the section id since skipUserDefinedSection expects it.
+            cur_ = beforeId;
+            if (!skipUserDefinedSection())
+                return false;
+            beforeId = cur_;
+            if (!readVarU32(&idValue))
+                goto backup;
+        }
         if (!readVarU32(size))
-            goto backup;
+            goto fail;
         if (bytesRemain() < *size)
-            return false;
+            goto fail;
         *startOffset = cur_ - beg_;
         return true;
       backup:
         cur_ = before;
         *startOffset = NotStarted;
         return true;
+      fail:
+        return fail("failed to start %s section", sectionName);
     }
-    MOZ_MUST_USE bool finishSection(uint32_t startOffset, uint32_t size) {
-        return size == (cur_ - beg_) - startOffset;
+    MOZ_MUST_USE bool finishSection(uint32_t startOffset, uint32_t size,
+                                    const char* sectionName)
+    {
+        if (size != (cur_ - beg_) - startOffset)
+            return fail("byte size mismatch in %s section", sectionName);
+        return true;
     }
-    void ignoreSection(uint32_t startOffset, uint32_t size) {
-        cur_ = (beg_ + startOffset) + size;
+
+    // "User sections" do not cause validation errors unless the error is in
+    // the user-defined section header itself.
+
+    MOZ_MUST_USE bool startUserDefinedSection(const char* expectedId,
+                                              size_t expectedIdSize,
+                                              uint32_t* sectionStart,
+                                              uint32_t* sectionSize)
+    {
+        const uint8_t* const before = cur_;
+        while (true) {
+            if (!startSection(SectionId::UserDefined, sectionStart, sectionSize, "user-defined"))
+                return false;
+            if (*sectionStart == NotStarted) {
+                cur_ = before;
+                return true;
+            }
+            uint32_t idSize;
+            if (!readVarU32(&idSize))
+                goto fail;
+            if (idSize > bytesRemain() || currentOffset() + idSize > *sectionStart + *sectionSize)
+                goto fail;
+            if (expectedId && (expectedIdSize != idSize || !!memcmp(cur_, expectedId, idSize))) {
+                finishUserDefinedSection(*sectionStart, *sectionSize);
+                continue;
+            }
+            cur_ += idSize;
+            return true;
+        }
+        MOZ_CRASH("unreachable");
+      fail:
+        return fail("failed to start user-defined section");
+    }
+    template <size_t IdSizeWith0>
+    MOZ_MUST_USE bool startUserDefinedSection(const char (&id)[IdSizeWith0],
+                                              uint32_t* sectionStart,
+                                              uint32_t* sectionSize)
+    {
+        MOZ_ASSERT(id[IdSizeWith0 - 1] == '\0');
+        return startUserDefinedSection(id, IdSizeWith0 - 1, sectionStart, sectionSize);
+    }
+    void finishUserDefinedSection(uint32_t sectionStart, uint32_t sectionSize) {
+        MOZ_ASSERT(cur_ >= beg_);
         MOZ_ASSERT(cur_ <= end_);
+        cur_ = (beg_ + sectionStart) + sectionSize;
+        MOZ_ASSERT(cur_ <= end_);
+        clearError();
     }
-    MOZ_MUST_USE bool skipSection() {
-        uint32_t idSize;
-        if (!readVarU32(&idSize) || bytesRemain() < idSize)
+    MOZ_MUST_USE bool skipUserDefinedSection() {
+        uint32_t sectionStart, sectionSize;
+        if (!startUserDefinedSection(nullptr, 0, &sectionStart, &sectionSize))
             return false;
-        cur_ += idSize;
-        uint32_t size;
-        if (!readVarU32(&size) || bytesRemain() < size)
-            return false;
-        cur_ += size;
+        if (sectionStart == NotStarted)
+            return fail("expected user-defined section");
+        finishUserDefinedSection(sectionStart, sectionSize);
         return true;
     }
 
@@ -871,11 +1007,11 @@ class Decoder
     uint32_t uncheckedReadFixedU32() {
         return uncheckedRead<uint32_t>();
     }
-    void uncheckedReadFixedF32(float* ret) {
-        return uncheckedRead<float>(ret);
+    RawF32 uncheckedReadFixedF32() {
+        return RawF32::fromBits(uncheckedRead<uint32_t>());
     }
-    void uncheckedReadFixedF64(double* ret) {
-        return uncheckedRead<double>(ret);
+    RawF64 uncheckedReadFixedF64() {
+        return RawF64::fromBits(uncheckedRead<uint64_t>());
     }
     template <typename UInt>
     UInt uncheckedReadVarU() {
@@ -949,10 +1085,24 @@ class Decoder
 typedef Vector<ValType, 8, SystemAllocPolicy> ValTypeVector;
 
 MOZ_MUST_USE bool
+DecodePreamble(Decoder& d);
+
+MOZ_MUST_USE bool
 EncodeLocalEntries(Encoder& d, const ValTypeVector& locals);
 
 MOZ_MUST_USE bool
 DecodeLocalEntries(Decoder& d, ValTypeVector* locals);
+
+MOZ_MUST_USE bool
+DecodeGlobalType(Decoder& d, ValType* type, uint32_t* flags);
+
+struct ResizableLimits;
+
+MOZ_MUST_USE bool
+DecodeResizable(Decoder& d, ResizableLimits* resizable);
+
+MOZ_MUST_USE bool
+DecodeUnknownSections(Decoder& d);
 
 } // namespace wasm
 } // namespace js

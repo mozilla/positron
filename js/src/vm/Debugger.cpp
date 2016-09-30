@@ -1212,7 +1212,7 @@ ToNativeDebuggerObject(JSContext* cx, MutableHandleObject obj)
     Value owner = ndobj->getReservedSlot(JSSLOT_DEBUGOBJECT_OWNER);
     if (owner.isUndefined()) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                             JSMSG_DEBUG_OBJECT_PROTO);
+                             JSMSG_DEBUG_PROTO, "Debugger.Object", "Debugger.Object");
         return nullptr;
     }
 
@@ -1229,7 +1229,7 @@ Debugger::unwrapDebuggeeObject(JSContext* cx, MutableHandleObject obj)
     Value owner = ndobj->getReservedSlot(JSSLOT_DEBUGOBJECT_OWNER);
     if (&owner.toObject() != object) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                             JSMSG_DEBUG_OBJECT_WRONG_OWNER);
+                             JSMSG_DEBUG_WRONG_OWNER, "Debugger.Object");
         return false;
     }
 
@@ -3557,7 +3557,7 @@ Debugger::unwrapDebuggeeArgument(JSContext* cx, const Value& v)
     /* If we have a cross-compartment wrapper, dereference as far as is secure. */
     obj = CheckedUnwrap(obj);
     if (!obj) {
-        JS_ReportError(cx, "Permission denied to access object");
+        JS_ReportErrorASCII(cx, "Permission denied to access object");
         return nullptr;
     }
 
@@ -4142,6 +4142,32 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
                 JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_UNEXPECTED_TYPE,
                                      "query object's 'source' property",
                                      "not undefined nor a Debugger.Source object");
+                return false;
+            }
+
+            Value owner = debuggerSource.toObject()
+                          .as<NativeObject>()
+                          .getReservedSlot(JSSLOT_DEBUGSOURCE_OWNER);
+
+            /*
+             * The given source must have an owner. Otherwise, it's a
+             * Debugger.Source.prototype, which would match no scripts, and is
+             * probably a mistake.
+             */
+            if (!owner.isObject()) {
+                JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
+                                     JSMSG_DEBUG_PROTO, "Debugger.Source", "Debugger.Source");
+                return false;
+            }
+
+            /*
+             * If it does have an owner, it should match the Debugger we're
+             * calling findScripts on. It would work fine even if it didn't,
+             * but mixing Debugger.Sources is probably a sign of confusion.
+             */
+            if (&owner.toObject() != debugger->object) {
+                JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
+                                     JSMSG_DEBUG_WRONG_OWNER, "Debugger.Source");
                 return false;
             }
 
@@ -6784,7 +6810,7 @@ DebuggerSource_check(JSContext* cx, HandleValue thisv, const char* fnname)
 
     if (!GetSourceReferentRawObject(thisobj)) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
-                             "Debugger.Frame", fnname, "prototype object");
+                             "Debugger.Source", fnname, "prototype object");
         return nullptr;
     }
 
@@ -8284,7 +8310,7 @@ DebuggerObject::checkThis(JSContext* cx, const CallArgs& args, const char* fnnam
    THIS_DEBUGOBJECT_REFERENT(cx, argc, vp, fnname, args, obj);                      \
    obj = CheckedUnwrap(obj);                                                        \
    if (!obj) {                                                                      \
-       JS_ReportError(cx, "Permission denied to access object");                    \
+       JS_ReportErrorASCII(cx, "Permission denied to access object");               \
        return false;                                                                \
    }                                                                                \
    if (!obj->is<PromiseObject>()) {                                                 \
@@ -8298,7 +8324,7 @@ DebuggerObject::checkThis(JSContext* cx, const CallArgs& args, const char* fnnam
    THIS_DEBUGOBJECT_OWNER_REFERENT(cx, argc, vp, fnname, args, dbg, obj);           \
    obj = CheckedUnwrap(obj);                                                        \
    if (!obj) {                                                                      \
-       JS_ReportError(cx, "Permission denied to access object");                    \
+       JS_ReportErrorASCII(cx, "Permission denied to access object");               \
        return false;                                                                \
    }                                                                                \
    if (!obj->is<PromiseObject>()) {                                                 \
@@ -9581,7 +9607,7 @@ DebuggerObject::getErrorMessageName(JSContext* cx, HandleDebuggerObject object,
         obj = CheckedUnwrap(obj);
 
     if (!obj) {
-        JS_ReportError(cx, "Permission denied to access object");
+        JS_ReportErrorASCII(cx, "Permission denied to access object");
         return false;
     }
 
@@ -10104,7 +10130,7 @@ DebuggerObject::requirePromise(JSContext* cx, HandleDebuggerObject object)
    if (IsCrossCompartmentWrapper(referent)) {
        referent = CheckedUnwrap(referent);
        if (!referent) {
-           JS_ReportError(cx, "Permission denied to access object");
+           JS_ReportErrorASCII(cx, "Permission denied to access object");
            return false;
        }
    }

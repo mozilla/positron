@@ -152,6 +152,9 @@ nsINode::~nsINode()
 {
   MOZ_ASSERT(!HasSlots(), "nsNodeUtils::LastRelease was not called?");
   MOZ_ASSERT(mSubtreeRoot == this, "Didn't restore state properly?");
+#ifdef MOZ_STYLO
+  ClearServoData();
+#endif
 }
 
 void*
@@ -1762,7 +1765,8 @@ nsINode::Before(const Sequence<OwningNodeOrString>& aNodes,
     return;
   }
 
-  nsINode* viablePreviousSibling = FindViablePreviousSibling(*this, aNodes);
+  nsCOMPtr<nsINode> viablePreviousSibling =
+    FindViablePreviousSibling(*this, aNodes);
 
   nsCOMPtr<nsINode> node =
     ConvertNodesOrStringsIntoNode(aNodes, OwnerDoc(), aRv);
@@ -1785,7 +1789,7 @@ nsINode::After(const Sequence<OwningNodeOrString>& aNodes,
     return;
   }
 
-  nsINode* viableNextSibling = FindViableNextSibling(*this, aNodes);
+  nsCOMPtr<nsINode> viableNextSibling = FindViableNextSibling(*this, aNodes);
 
   nsCOMPtr<nsINode> node =
     ConvertNodesOrStringsIntoNode(aNodes, OwnerDoc(), aRv);
@@ -1805,7 +1809,7 @@ nsINode::ReplaceWith(const Sequence<OwningNodeOrString>& aNodes,
     return;
   }
 
-  nsINode* viableNextSibling = FindViableNextSibling(*this, aNodes);
+  nsCOMPtr<nsINode> viableNextSibling = FindViableNextSibling(*this, aNodes);
 
   nsCOMPtr<nsINode> node =
     ConvertNodesOrStringsIntoNode(aNodes, OwnerDoc(), aRv);

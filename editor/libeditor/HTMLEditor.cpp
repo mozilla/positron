@@ -42,7 +42,6 @@
 
 #include "nsIContent.h"
 #include "nsIContentIterator.h"
-#include "nsISupportsArray.h"
 #include "nsIMutableArray.h"
 #include "nsContentUtils.h"
 #include "nsIDocumentEncoder.h"
@@ -73,8 +72,8 @@
 #include "mozilla/dom/HTMLBodyElement.h"
 #include "nsTextFragment.h"
 #include "nsContentList.h"
-#include "mozilla/StyleSheetHandle.h"
-#include "mozilla/StyleSheetHandleInlines.h"
+#include "mozilla/StyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 
 namespace mozilla {
 
@@ -2770,21 +2769,20 @@ HTMLEditor::SetBodyAttribute(const nsAString& aAttribute,
 }
 
 NS_IMETHODIMP
-HTMLEditor::GetLinkedObjects(nsISupportsArray** aNodeList)
+HTMLEditor::GetLinkedObjects(nsIArray** aNodeList)
 {
   NS_ENSURE_TRUE(aNodeList, NS_ERROR_NULL_POINTER);
 
-  nsresult res;
-
-  res = NS_NewISupportsArray(aNodeList);
-  NS_ENSURE_SUCCESS(res, res);
-  NS_ENSURE_TRUE(*aNodeList, NS_ERROR_NULL_POINTER);
+  nsresult rv;
+  nsCOMPtr<nsIMutableArray> nodes = do_CreateInstance(NS_ARRAY_CONTRACTID, &rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   nsCOMPtr<nsIContentIterator> iter =
-       do_CreateInstance("@mozilla.org/content/post-content-iterator;1", &res);
+    do_CreateInstance("@mozilla.org/content/post-content-iterator;1", &rv);
   NS_ENSURE_TRUE(iter, NS_ERROR_NULL_POINTER);
-  if ((NS_SUCCEEDED(res)))
-  {
+  if (NS_SUCCEEDED(rv)) {
     nsCOMPtr<nsIDocument> doc = GetDocument();
     NS_ENSURE_TRUE(doc, NS_ERROR_UNEXPECTED);
 
@@ -2798,18 +2796,16 @@ HTMLEditor::GetLinkedObjects(nsISupportsArray** aNodeList)
       {
         // Let nsURIRefObject make the hard decisions:
         nsCOMPtr<nsIURIRefObject> refObject;
-        res = NS_NewHTMLURIRefObject(getter_AddRefs(refObject), node);
-        if (NS_SUCCEEDED(res))
-        {
-          nsCOMPtr<nsISupports> isupp (do_QueryInterface(refObject));
-
-          (*aNodeList)->AppendElement(isupp);
+        rv = NS_NewHTMLURIRefObject(getter_AddRefs(refObject), node);
+        if (NS_SUCCEEDED(rv)) {
+          nodes->AppendElement(refObject, false);
         }
       }
       iter->Next();
     }
   }
 
+  nodes.forget(aNodeList);
   return NS_OK;
 }
 
@@ -2858,7 +2854,7 @@ HTMLEditor::ReplaceStyleSheet(const nsAString& aURL)
 NS_IMETHODIMP
 HTMLEditor::RemoveStyleSheet(const nsAString& aURL)
 {
-  StyleSheetHandle::RefPtr sheet = GetStyleSheetForURL(aURL);
+  RefPtr<StyleSheet> sheet = GetStyleSheetForURL(aURL);
   NS_ENSURE_TRUE(sheet, NS_ERROR_UNEXPECTED);
 
   RefPtr<RemoveStyleSheetTransaction> transaction;
@@ -2898,7 +2894,7 @@ HTMLEditor::AddOverrideStyleSheet(const nsAString& aURL)
   // We MUST ONLY load synchronous local files (no @import)
   // XXXbz Except this will actually try to load remote files
   // synchronously, of course..
-  StyleSheetHandle::RefPtr sheet;
+  RefPtr<StyleSheet> sheet;
   // Editor override style sheets may want to style Gecko anonymous boxes
   rv = ps->GetDocument()->CSSLoader()->
     LoadSheetSync(uaURI, mozilla::css::eAgentSheetFeatures, true,
@@ -2943,7 +2939,7 @@ HTMLEditor::ReplaceOverrideStyleSheet(const nsAString& aURL)
 NS_IMETHODIMP
 HTMLEditor::RemoveOverrideStyleSheet(const nsAString& aURL)
 {
-  StyleSheetHandle::RefPtr sheet = GetStyleSheetForURL(aURL);
+  RefPtr<StyleSheet> sheet = GetStyleSheetForURL(aURL);
 
   // Make sure we remove the stylesheet from our internal list in all
   // cases.
@@ -2966,7 +2962,7 @@ NS_IMETHODIMP
 HTMLEditor::EnableStyleSheet(const nsAString& aURL,
                              bool aEnable)
 {
-  StyleSheetHandle::RefPtr sheet = GetStyleSheetForURL(aURL);
+  RefPtr<StyleSheet> sheet = GetStyleSheetForURL(aURL);
   NS_ENSURE_TRUE(sheet, NS_OK); // Don't fail if sheet not found
 
   // Ensure the style sheet is owned by our document.
@@ -2984,7 +2980,7 @@ HTMLEditor::EnableStyleSheet(const nsAString& aURL,
 bool
 HTMLEditor::EnableExistingStyleSheet(const nsAString& aURL)
 {
-  StyleSheetHandle::RefPtr sheet = GetStyleSheetForURL(aURL);
+  RefPtr<StyleSheet> sheet = GetStyleSheetForURL(aURL);
 
   // Enable sheet if already loaded.
   if (sheet)
@@ -3006,7 +3002,7 @@ HTMLEditor::EnableExistingStyleSheet(const nsAString& aURL)
 
 nsresult
 HTMLEditor::AddNewStyleSheetToList(const nsAString& aURL,
-                                   StyleSheetHandle aStyleSheet)
+                                   StyleSheet* aStyleSheet)
 {
   uint32_t countSS = mStyleSheets.Length();
   uint32_t countU = mStyleSheetURLs.Length();
@@ -3036,7 +3032,7 @@ HTMLEditor::RemoveStyleSheetFromList(const nsAString& aURL)
   return NS_OK;
 }
 
-StyleSheetHandle
+StyleSheet*
 HTMLEditor::GetStyleSheetForURL(const nsAString& aURL)
 {
   // is it already in the list?
@@ -3051,7 +3047,7 @@ HTMLEditor::GetStyleSheetForURL(const nsAString& aURL)
 }
 
 void
-HTMLEditor::GetURLForStyleSheet(StyleSheetHandle aStyleSheet,
+HTMLEditor::GetURLForStyleSheet(StyleSheet* aStyleSheet,
                                 nsAString& aURL)
 {
   // is it already in the list?
@@ -3430,7 +3426,7 @@ HTMLEditor::DebugUnitTests(int32_t* outNumTests,
 }
 
 NS_IMETHODIMP
-HTMLEditor::StyleSheetLoaded(StyleSheetHandle aSheet,
+HTMLEditor::StyleSheetLoaded(StyleSheet* aSheet,
                              bool aWasAlternate,
                              nsresult aStatus)
 {

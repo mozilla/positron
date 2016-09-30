@@ -78,7 +78,7 @@ ImageClient::RemoveTextureWithWaiter(TextureClient* aTexture,
                                      AsyncTransactionWaiter* aAsyncTransactionWaiter)
 {
   if (aAsyncTransactionWaiter &&
-      GetForwarder()->UsesImageBridge()) {
+      GetForwarder()->GetTextureForwarder()->UsesImageBridge()) {
     RefPtr<AsyncTransactionTracker> request =
       new RemoveTextureFromCompositableTracker(aAsyncTransactionWaiter);
     GetForwarder()->RemoveTextureFromCompositableAsync(request, this, aTexture);
@@ -103,7 +103,7 @@ TextureInfo ImageClientSingle::GetTextureInfo() const
 void
 ImageClientSingle::FlushAllImages(AsyncTransactionWaiter* aAsyncTransactionWaiter)
 {
-  MOZ_ASSERT(GetForwarder()->UsesImageBridge());
+  MOZ_ASSERT(GetForwarder()->GetTextureForwarder()->UsesImageBridge());
 
   for (auto& b : mBuffers) {
     RemoveTextureWithWaiter(b.mTextureClient, aAsyncTransactionWaiter);
@@ -168,13 +168,13 @@ ImageClientSingle::UpdateImage(ImageContainer* aContainer, uint32_t aContentFlag
     }
 #endif
 
-    RefPtr<TextureClient> texture = image->GetTextureClient(this);
+    RefPtr<TextureClient> texture = image->GetTextureClient(GetForwarder());
     const bool hasTextureClient = !!texture;
 
     for (int32_t i = mBuffers.Length() - 1; i >= 0; --i) {
       if (mBuffers[i].mImageSerial == image->GetSerial()) {
         if (hasTextureClient) {
-          MOZ_ASSERT(image->GetTextureClient(this) == mBuffers[i].mTextureClient);
+          MOZ_ASSERT(image->GetTextureClient(GetForwarder()) == mBuffers[i].mTextureClient);
         } else {
           texture = mBuffers[i].mTextureClient;
         }
@@ -219,13 +219,13 @@ ImageClientSingle::UpdateImage(ImageContainer* aContainer, uint32_t aContentFlag
         if (image->GetFormat() == ImageFormat::EGLIMAGE) {
           EGLImageImage* typedImage = image->AsEGLImageImage();
           texture = EGLImageTextureData::CreateTextureClient(
-            typedImage, size, GetForwarder(), mTextureFlags);
+            typedImage, size, GetForwarder()->GetTextureForwarder(), mTextureFlags);
 #ifdef MOZ_WIDGET_ANDROID
         } else if (image->GetFormat() == ImageFormat::SURFACE_TEXTURE) {
           SurfaceTextureImage* typedImage = image->AsSurfaceTextureImage();
           texture = AndroidSurfaceTextureData::CreateTextureClient(
             typedImage->GetSurfaceTexture(), size, typedImage->GetOriginPos(),
-            GetForwarder(), mTextureFlags
+            GetForwarder()->GetTextureForwarder(), mTextureFlags
           );
 #endif
         } else {

@@ -355,11 +355,7 @@ TraversalTracer::onChild(const JS::GCCellPtr& aThing)
       getTracingEdgeName(buffer, sizeof(buffer));
       mCb.NoteNextEdgeName(buffer);
     }
-    if (aThing.is<JSObject>()) {
-      mCb.NoteJSObject(&aThing.as<JSObject>());
-    } else {
-      mCb.NoteJSScript(&aThing.as<JSScript>());
-    }
+    mCb.NoteJSChild(aThing);
   } else if (aThing.is<js::Shape>()) {
     // The maximum depth of traversal when tracing a Shape is unbounded, due to
     // the parent pointers on the shape.
@@ -511,6 +507,8 @@ CycleCollectedJSContext::Initialize(JSContext* aParentContext,
   if (!mJSContext) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
+
+  NS_GetCurrentThread()->SetCanInvokeJS(true);
 
   if (!JS_AddExtraGCRootsTracer(mJSContext, TraceBlackJS, this)) {
     MOZ_CRASH("JS_AddExtraGCRootsTracer failed");

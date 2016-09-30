@@ -81,13 +81,26 @@ function transformPacket(packet) {
             type = MESSAGE_TYPE.NULL_MESSAGE;
           }
           break;
+        case "table":
+          const supportedClasses = [
+            "Array", "Object", "Map", "Set", "WeakMap", "WeakSet"];
+          if (
+            !Array.isArray(parameters) ||
+            parameters.length === 0 ||
+            !supportedClasses.includes(parameters[0].class)
+          ) {
+            // If the class of the first parameter is not supported,
+            // we handle the call as a simple console.log
+            type = "log";
+          }
+          break;
       }
 
-      const frame = {
-        source: message.filename || null,
-        line: message.lineNumber || null,
-        column: message.columnNumber || null
-      };
+      const frame = message.filename ? {
+        source: message.filename,
+        line: message.lineNumber,
+        column: message.columnNumber,
+      } : null;
 
       return new ConsoleMessage({
         source: MESSAGE_SOURCE.CONSOLE_API,
@@ -119,11 +132,11 @@ function transformPacket(packet) {
         level = MESSAGE_LEVEL.INFO;
       }
 
-      const frame = {
+      const frame = pageError.sourceName ? {
         source: pageError.sourceName,
         line: pageError.lineNumber,
         column: pageError.columnNumber
-      };
+      } : null;
 
       return new ConsoleMessage({
         source: MESSAGE_SOURCE.JAVASCRIPT,
@@ -148,13 +161,18 @@ function transformPacket(packet) {
 
     case "evaluationResult":
     default: {
-      let { result } = packet;
+      let {
+        exceptionMessage: messageText,
+        result: parameters
+      } = packet;
 
+      const level = messageText ? MESSAGE_LEVEL.ERROR : MESSAGE_LEVEL.LOG;
       return new ConsoleMessage({
         source: MESSAGE_SOURCE.JAVASCRIPT,
         type: MESSAGE_TYPE.RESULT,
-        level: MESSAGE_LEVEL.LOG,
-        parameters: result,
+        level,
+        messageText,
+        parameters,
       });
     }
   }

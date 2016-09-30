@@ -12,9 +12,9 @@ const {
 const { connect } = require("devtools/client/shared/vendor/react-redux");
 const { getAllFilters } = require("devtools/client/webconsole/new-console-output/selectors/filters");
 const { getAllUi } = require("devtools/client/webconsole/new-console-output/selectors/ui");
-const { filterTextSet, filtersClear } = require("devtools/client/webconsole/new-console-output/actions/filters");
-const { messagesClear } = require("devtools/client/webconsole/new-console-output/actions/messages");
-const uiActions = require("devtools/client/webconsole/new-console-output/actions/ui");
+const { filterTextSet, filtersClear } = require("devtools/client/webconsole/new-console-output/actions/index");
+const { messagesClear } = require("devtools/client/webconsole/new-console-output/actions/index");
+const uiActions = require("devtools/client/webconsole/new-console-output/actions/index");
 const {
   MESSAGE_LEVEL
 } = require("../constants");
@@ -102,6 +102,21 @@ const FilterBar = createClass({
             active: filter.debug,
             label: "Debug",
             filterKey: MESSAGE_LEVEL.DEBUG,
+            dispatch
+          }),
+          dom.span({
+            className: "devtools-separator",
+          }),
+          FilterButton({
+            active: filter.netxhr,
+            label: "XHR",
+            filterKey: "netxhr",
+            dispatch
+          }),
+          FilterButton({
+            active: filter.network,
+            label: "Requests",
+            filterKey: "network",
             dispatch
           })
         )

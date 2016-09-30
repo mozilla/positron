@@ -54,6 +54,7 @@
 #include "mozilla/BinarySearch.h"
 #include "nsIHttpHeaderVisitor.h"
 #include "nsIXULRuntime.h"
+#include "nsICacheInfoChannel.h"
 
 #include <algorithm>
 
@@ -107,6 +108,7 @@ HttpBaseChannel::HttpBaseChannel()
   , mFetchCacheMode(nsIHttpChannelInternal::FETCH_CACHE_MODE_DEFAULT)
   , mOnStartRequestCalled(false)
   , mOnStopRequestCalled(false)
+  , mAfterOnStartRequestBegun(false)
   , mTransferSize(0)
   , mDecodedBodySize(0)
   , mEncodedBodySize(0)
@@ -924,6 +926,11 @@ HttpBaseChannel::DoApplyContentConversions(nsIStreamListener* aNextListener,
     return NS_OK;
   }
 
+  if (!mAvailableCachedAltDataType.IsEmpty()) {
+    LOG(("not applying conversion because delivering alt-data\n"));
+    return NS_OK;
+  }
+
   nsAutoCString contentEncoding;
   nsresult rv = mResponseHead->GetHeader(nsHttp::Content_Encoding, contentEncoding);
   if (NS_FAILED(rv) || contentEncoding.IsEmpty())
@@ -1445,6 +1452,12 @@ HttpBaseChannel::SetReferrerWithPolicy(nsIURI *referrer,
     LOG(("no triggering principal available via loadInfo, assuming load is cross-origin"));
   }
 
+  // Don't send referrer when the request is cross-origin and policy is "same-origin".
+  if (isCrossOrigin && referrerPolicy == REFERRER_POLICY_SAME_ORIGIN) {
+    mReferrerPolicy = REFERRER_POLICY_SAME_ORIGIN;
+    return NS_OK;
+  }
+
   nsCOMPtr<nsIURI> clone;
   //
   // we need to clone the referrer, so we can:
@@ -1509,8 +1522,16 @@ HttpBaseChannel::SetReferrerWithPolicy(nsIURI *referrer,
   // "unsafe-url" sends the whole referrer and origin removes the path.
   // "origin-when-cross-origin" trims the referrer only when the request is
   // cross-origin.
+  // "Strict" request from https->http case was bailed out, so here:
+  // "strict-origin" behaves the same as "origin".
+  // "strict-origin-when-cross-origin" behaves the same as "origin-when-cross-origin"
   if (referrerPolicy == REFERRER_POLICY_ORIGIN ||
-      (isCrossOrigin && referrerPolicy == REFERRER_POLICY_ORIGIN_WHEN_XORIGIN)) {
+      referrerPolicy == REFERRER_POLICY_STRICT_ORIGIN ||
+      (isCrossOrigin && (referrerPolicy == REFERRER_POLICY_ORIGIN_WHEN_XORIGIN ||
+                         referrerPolicy == REFERRER_POLICY_STRICT_ORIGIN_WHEN_XORIGIN))) {
+    // We can override the user trimming preference because "origin"
+    // (network.http.referer.trimmingPolicy = 2) is the strictest
+    // trimming policy that users can specify.
     userReferrerTrimmingPolicy = 2;
   }
 
@@ -3148,6 +3169,12 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
         mAllRedirectsPassTimingAllowCheck &&
         oldTimedChannel->TimingAllowCheck(principal));
     }
+  }
+
+  // Pass the preferred alt-data type on to the new channel.
+  nsCOMPtr<nsICacheInfoChannel> cacheInfoChan(do_QueryInterface(newChannel));
+  if (cacheInfoChan) {
+    cacheInfoChan->PreferAlternativeDataType(mPreferredCachedAltDataType);
   }
 
   if (redirectFlags & (nsIChannelEventSink::REDIRECT_INTERNAL |

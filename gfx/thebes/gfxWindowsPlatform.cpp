@@ -374,12 +374,19 @@ gfxWindowsPlatform::InitAcceleration()
   if (!mDWriteFactory && GetDefaultContentBackend() == BackendType::SKIA) {
     InitDWriteSupport();
   }
+
+  // CanUseHardwareVideoDecoding depends on DeviceManagerDx state,
+  // so update the cached value now.
+  UpdateCanUseHardwareVideoDecoding();
 }
 
 bool
 gfxWindowsPlatform::CanUseHardwareVideoDecoding()
 {
   DeviceManagerDx* dm = DeviceManagerDx::Get();
+  if (!dm) {
+    return false;
+  }
   if (!gfxPrefs::LayersPreferD3D9() && !dm->TextureSharingWorks()) {
     return false;
   }
@@ -2024,6 +2031,10 @@ gfxWindowsPlatform::ImportGPUDeviceData(const mozilla::gfx::GPUDeviceData& aData
         NS_LITERAL_CSTRING("FEATURE_FAILURE_D2D_D3D11_COMP"));
     }
   }
+
+  // CanUseHardwareVideoDecoding depends on d3d11 state, so update
+  // the cached value now.
+  UpdateCanUseHardwareVideoDecoding();
 
   // For completeness (and messaging in about:support). Content recomputes this
   // on its own, and we won't use ANGLE in the UI process if we're using a GPU

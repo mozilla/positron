@@ -662,11 +662,11 @@ js::Nursery::doCollection(JSRuntime* rt, JS::gcreason::Reason reason,
     // Mark the store buffer. This must happen first.
     StoreBuffer& sb = rt->gc.storeBuffer;
 
+    // The MIR graph only contains nursery pointers if cancelIonCompilations()
+    // is set on the store buffer, in which case we cancel all compilations.
     maybeStartProfile(ProfileKey::CancelIonCompilations);
-    if (sb.cancelIonCompilations()) {
-        for (CompartmentsIter c(rt, SkipAtoms); !c.done(); c.next())
-            jit::StopAllOffThreadCompilations(c);
-    }
+    if (sb.cancelIonCompilations())
+        js::CancelOffThreadIonCompile(rt);
     maybeEndProfile(ProfileKey::CancelIonCompilations);
 
     maybeStartProfile(ProfileKey::TraceValues);
@@ -891,7 +891,7 @@ js::Nursery::maybeResizeNursery(JS::gcreason::Reason reason, double promotionRat
     // Shrink the nursery to its minimum size of we ran out of memory or
     // received a memory pressure event.
     if (gc::IsOOMReason(reason)) {
-        updateNumChunks(1);
+        minimizeAllocableSpace();
         return;
     }
 
@@ -917,6 +917,16 @@ js::Nursery::shrinkAllocableSpace()
         return;
 #endif
     updateNumChunks(Max(numChunks() - 1, 1u));
+}
+
+void
+js::Nursery::minimizeAllocableSpace()
+{
+#ifdef JS_GC_ZEAL
+    if (runtime()->hasZealMode(ZealMode::GenerationalGC))
+        return;
+#endif
+    updateNumChunks(1);
 }
 
 void

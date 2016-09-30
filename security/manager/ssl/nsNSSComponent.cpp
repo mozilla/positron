@@ -1288,12 +1288,12 @@ static const CipherPref sCipherPrefs[] = {
  { "security.ssl3.dhe_rsa_aes_256_sha",
    TLS_DHE_RSA_WITH_AES_256_CBC_SHA, true },
 
- { "security.ssl3.ecdhe_psk_aes_128_gcm_sha256",
-   TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256, true },
- { "security.ssl3.ecdhe_psk_chacha20_poly1305_sha256",
-   TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256, true },
- { "security.ssl3.ecdhe_psk_aes_256_gcm_sha384",
-   TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384, true },
+ { "security.tls13.aes_128_gcm_sha256",
+   TLS_AES_128_GCM_SHA256, true },
+ { "security.tls13.chacha20_poly1305_sha256",
+   TLS_CHACHA20_POLY1305_SHA256, true },
+ { "security.tls13.aes_256_gcm_sha384",
+   TLS_AES_256_GCM_SHA384, true },
 
  { "security.ssl3.rsa_aes_128_sha",
    TLS_RSA_WITH_AES_128_CBC_SHA, true }, // deprecated (RSA key exchange)
@@ -1502,6 +1502,25 @@ void nsNSSComponent::setValidationOptions(bool isInitialSetting,
   PublicSSLState()->SetOCSPMustStapleEnabled(ocspMustStapleEnabled);
   PrivateSSLState()->SetOCSPMustStapleEnabled(ocspMustStapleEnabled);
 
+  const CertVerifier::CertificateTransparencyMode defaultCTMode =
+    CertVerifier::CertificateTransparencyMode::TelemetryOnly;
+  CertVerifier::CertificateTransparencyMode ctMode =
+    static_cast<CertVerifier::CertificateTransparencyMode>
+      (Preferences::GetInt("security.pki.certificate_transparency.mode",
+                           static_cast<int32_t>(defaultCTMode)));
+  switch (ctMode) {
+    case CertVerifier::CertificateTransparencyMode::Disabled:
+    case CertVerifier::CertificateTransparencyMode::TelemetryOnly:
+      break;
+    default:
+      ctMode = defaultCTMode;
+      break;
+  }
+  bool sctsEnabled =
+    ctMode != CertVerifier::CertificateTransparencyMode::Disabled;
+  PublicSSLState()->SetSignedCertTimestampsEnabled(sctsEnabled);
+  PrivateSSLState()->SetSignedCertTimestampsEnabled(sctsEnabled);
+
   CertVerifier::PinningMode pinningMode =
     static_cast<CertVerifier::PinningMode>
       (Preferences::GetInt("security.cert_pinning.enforcement_level",
@@ -1516,12 +1535,18 @@ void nsNSSComponent::setValidationOptions(bool isInitialSetting,
   switch (sha1Mode) {
     case CertVerifier::SHA1Mode::Allowed:
     case CertVerifier::SHA1Mode::Forbidden:
-    case CertVerifier::SHA1Mode::Before2016:
+    case CertVerifier::SHA1Mode::UsedToBeBefore2016ButNowIsForbidden:
     case CertVerifier::SHA1Mode::ImportedRoot:
+    case CertVerifier::SHA1Mode::ImportedRootOrBefore2016:
       break;
     default:
       sha1Mode = CertVerifier::SHA1Mode::Allowed;
       break;
+  }
+
+  // Convert a previously-available setting to a safe one.
+  if (sha1Mode == CertVerifier::SHA1Mode::UsedToBeBefore2016ButNowIsForbidden) {
+    sha1Mode = CertVerifier::SHA1Mode::Forbidden;
   }
 
   BRNameMatchingPolicy::Mode nameMatchingMode =
@@ -1565,7 +1590,8 @@ void nsNSSComponent::setValidationOptions(bool isInitialSetting,
                                                 certShortLifetimeInDays,
                                                 pinningMode, sha1Mode,
                                                 nameMatchingMode,
-                                                netscapeStepUpPolicy);
+                                                netscapeStepUpPolicy,
+                                                ctMode);
 }
 
 // Enable the TLS versions given in the prefs, defaulting to TLS 1.0 (min) and
@@ -1976,6 +2002,7 @@ nsNSSComponent::Observe(nsISupports* aSubject, const char* aTopic,
                prefName.EqualsLiteral("security.pki.cert_short_lifetime_in_days") ||
                prefName.EqualsLiteral("security.ssl.enable_ocsp_stapling") ||
                prefName.EqualsLiteral("security.ssl.enable_ocsp_must_staple") ||
+               prefName.EqualsLiteral("security.pki.certificate_transparency.mode") ||
                prefName.EqualsLiteral("security.cert_pinning.enforcement_level") ||
                prefName.EqualsLiteral("security.pki.sha1_enforcement_level") ||
                prefName.EqualsLiteral("security.pki.name_matching_mode") ||

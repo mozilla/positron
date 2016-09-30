@@ -8,7 +8,6 @@
 "use strict";
 
 const promise = require("promise");
-const defer = require("devtools/shared/defer");
 const Services = require("Services");
 const {Task} = require("devtools/shared/task");
 const {Tools} = require("devtools/client/definitions");
@@ -79,47 +78,6 @@ const FILTER_STRICT_RE = /\s*`(.*?)`\s*$/;
  */
 
 /**
- * To figure out how shorthand properties are interpreted by the
- * engine, we will set properties on a dummy element and observe
- * how their .style attribute reflects them as computed values.
- * This function creates the document in which those dummy elements
- * will be created.
- */
-var gDummyPromise;
-function createDummyDocument() {
-  if (gDummyPromise) {
-    return gDummyPromise;
-  }
-  const { getDocShell, create: makeFrame } = require("sdk/frame/utils");
-
-  let frame = makeFrame(Services.appShell.hiddenDOMWindow.document, {
-    nodeName: "iframe",
-    namespaceURI: "http://www.w3.org/1999/xhtml",
-    allowJavascript: false,
-    allowPlugins: false,
-    allowAuth: false
-  });
-  let docShell = getDocShell(frame);
-  let eventTarget = docShell.chromeEventHandler;
-  let ssm = Services.scriptSecurityManager;
-
-  // We probably need to call InheritFromDocShellToDoc to get the correct origin
-  // attributes, but right now we can't call it from JS.
-  let nullPrincipal = ssm.createNullPrincipal(docShell.getOriginAttributes());
-  docShell.createAboutBlankContentViewer(nullPrincipal);
-  let window = docShell.contentViewer.DOMDocument.defaultView;
-  window.location = "data:text/html,<html></html>";
-  let deferred = defer();
-  eventTarget.addEventListener("DOMContentLoaded", function handler() {
-    eventTarget.removeEventListener("DOMContentLoaded", handler, false);
-    deferred.resolve(window.document);
-    frame.remove();
-  }, false);
-  gDummyPromise = deferred.promise;
-  return gDummyPromise;
-}
-
-/**
  * CssRuleView is a view of the style rules and declarations that
  * apply to a given element.  After construction, the 'element'
  * property will be available with the user interface.
@@ -147,7 +105,7 @@ function CssRuleView(inspector, document, store, pageStyle) {
 
   this.cssProperties = getCssProperties(inspector.toolbox);
 
-  this._outputParser = new OutputParser(document, this.cssProperties.supportsType);
+  this._outputParser = new OutputParser(document, this.cssProperties);
 
   this._onAddRule = this._onAddRule.bind(this);
   this._onContextMenu = this._onContextMenu.bind(this);
@@ -717,8 +675,6 @@ CssRuleView.prototype = {
     this.clear();
 
     this._dummyElement = null;
-    this.dummyElementPromise = null;
-    gDummyPromise = null;
 
     this._prefObserver.off(PREF_ORIG_SOURCES, this._onSourcePrefChanged);
     this._prefObserver.off(PREF_UA_STYLES, this._handlePrefChange);
@@ -825,14 +781,12 @@ CssRuleView.prototype = {
     // To figure out how shorthand properties are interpreted by the
     // engine, we will set properties on a dummy element and observe
     // how their .style attribute reflects them as computed values.
-    this.dummyElementPromise = createDummyDocument().then(document => {
+    let dummyElementPromise = promise.resolve(this.styleDocument).then(document => {
       // ::before and ::after do not have a namespaceURI
       let namespaceURI = this.element.namespaceURI ||
           document.documentElement.namespaceURI;
       this._dummyElement = document.createElementNS(namespaceURI,
                                                    this.element.tagName);
-      document.documentElement.appendChild(this._dummyElement);
-      return this._dummyElement;
     }).then(null, promiseWarn);
 
     let elementStyle = new ElementStyle(element, this, this.store,
@@ -841,7 +795,7 @@ CssRuleView.prototype = {
 
     this._startSelectingElement();
 
-    return this.dummyElementPromise.then(() => {
+    return dummyElementPromise.then(() => {
       if (this._elementStyle === elementStyle) {
         return this._populate();
       }

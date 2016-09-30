@@ -830,7 +830,6 @@ GCRuntime::GCRuntime(JSRuntime* rt) :
     incrementalState(gc::State::NotActive),
     lastMarkSlice(false),
     sweepOnBackgroundThread(false),
-    foundBlackGrayEdges(false),
     blocksToFreeAfterSweeping(JSRuntime::TEMP_LIFO_ALLOC_PRIMARY_CHUNK_SIZE),
     blocksToFreeAfterMinorGC(JSRuntime::TEMP_LIFO_ALLOC_PRIMARY_CHUNK_SIZE),
     zoneGroupIndex(0),
@@ -909,7 +908,7 @@ const char* gc::ZealModeHelpText =
     "   12: (ElementsBarrier) Always use the individual element post-write barrier, regardless of elements size\n"
     "   13: (CheckHashTablesOnMinorGC) Check internal hashtables on minor GC\n"
     "   14: (Compact) Perform a shrinking collection every N allocations\n"
-    "   15: (CheckHeapOnMovingGC) Walk the heap to check all pointers have been updated\n"
+    "   15: (CheckHeapAfterGC) Walk the heap to check its integrity after every GC\n"
     "   16: (CheckNursery) Check nursery integrity on minor GC\n";
 
 void
@@ -2079,7 +2078,7 @@ GCRuntime::relocateArenas(Zone* zone, JS::gcreason::Reason reason, Arena*& reloc
     MOZ_ASSERT(!zone->isPreservingCode());
     MOZ_ASSERT(CanRelocateZone(zone));
 
-    jit::StopAllOffThreadCompilations(zone);
+    js::CancelOffThreadIonCompile(rt, JS::Zone::Compact);
 
     if (!zone->arenas.relocateArenas(zone, relocatedListOut, reason, sliceBudget, stats))
         return false;
@@ -3837,6 +3836,7 @@ GCRuntime::beginMarkPhase(JS::gcreason::Reason reason, AutoLockForExclusiveAcces
 
     /* For non-incremental GC the following sweep discards the jit code. */
     if (isIncremental) {
+        js::CancelOffThreadIonCompile(rt, JS::Zone::Mark);
         for (GCZonesIter zone(rt); !zone.done(); zone.next()) {
             gcstats::AutoPhase ap(stats, gcstats::PHASE_MARK_DISCARD_CODE);
             zone->discardJitCode(rt->defaultFreeOp());
@@ -3904,8 +3904,6 @@ GCRuntime::beginMarkPhase(JS::gcreason::Reason reason, AutoLockForExclusiveAcces
     }
 
     markCompartments();
-
-    foundBlackGrayEdges = false;
 
     return true;
 }
@@ -4804,7 +4802,7 @@ class GCSweepTask : public GCParallelTask
   public:
     explicit GCSweepTask(JSRuntime* rt) : runtime(rt) {}
     GCSweepTask(GCSweepTask&& other)
-      : GCParallelTask(mozilla::Forward<GCParallelTask>(other)),
+      : GCParallelTask(mozilla::Move(other)),
         runtime(other.runtime)
     {}
 };
@@ -4819,7 +4817,7 @@ class SweepWeakCacheTask : public GCSweepTask
   public:
     SweepWeakCacheTask(JSRuntime* rt, JS::WeakCache<void*>& wc) : GCSweepTask(rt), cache(wc) {}
     SweepWeakCacheTask(SweepWeakCacheTask&& other)
-      : GCSweepTask(mozilla::Forward<GCSweepTask>(other)), cache(other.cache)
+      : GCSweepTask(mozilla::Move(other)), cache(other.cache)
     {}
 
     void run() override {
@@ -5016,6 +5014,9 @@ GCRuntime::beginSweepingZoneGroup(AutoLockForExclusiveAccess& lock)
         // thread until we join, below.
         {
             gcstats::AutoPhase ap(stats, gcstats::PHASE_SWEEP_MISC);
+
+            // Cancel any active or pending off thread compilations.
+            js::CancelOffThreadIonCompile(rt, JS::Zone::Sweep);
 
             for (GCCompartmentGroupIter c(rt); !c.done(); c.next()) {
                 c->sweepGlobalObject(&fop);
@@ -5396,19 +5397,6 @@ GCRuntime::endSweepPhase(bool destroyingRuntime, AutoLockForExclusiveAccess& loc
         }
     }
 
-    /*
-     * If we found any black->gray edges during marking, we completely clear the
-     * mark bits of all uncollected zones, or if a reset has occured, zones that
-     * will no longer be collected. This is safe, although it may
-     * prevent the cycle collector from collecting some dead objects.
-     */
-    if (foundBlackGrayEdges) {
-        for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
-            if (!zone->isCollecting())
-                zone->arenas.unmarkAll();
-        }
-    }
-
     {
         gcstats::AutoPhase ap(stats, gcstats::PHASE_DESTROY);
 
@@ -5488,11 +5476,10 @@ GCRuntime::compactPhase(JS::gcreason::Reason reason, SliceBudget& sliceBudget,
 
         Zone* zone = zonesToMaybeCompact.front();
         MOZ_ASSERT(zone->isGCFinished());
-        if (relocateArenas(zone, reason, relocatedArenas, sliceBudget)) {
-            zone->setGCState(Zone::Compact);
+        zone->setGCState(Zone::Compact);
+        if (relocateArenas(zone, reason, relocatedArenas, sliceBudget))
             updatePointersToRelocatedCells(zone, lock);
-            zone->setGCState(Zone::Finished);
-        }
+        zone->setGCState(Zone::Finished);
         zonesToMaybeCompact.removeFront();
         if (sliceBudget.isOverBudget())
             break;
@@ -5919,10 +5906,6 @@ GCRuntime::incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason rea
 
         incrementalState = State::Finalize;
 
-        /* Yield before compacting since it is not incremental. */
-        if (isCompacting && isIncremental)
-            break;
-
         MOZ_FALLTHROUGH;
 
       case State::Finalize:
@@ -5952,6 +5935,10 @@ GCRuntime::incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason rea
 
         MOZ_ASSERT(!startedCompacting);
         incrementalState = State::Compact;
+
+        // Always yield before compacting since it is not incremental.
+        if (isCompacting && isIncremental)
+            break;
 
         MOZ_FALLTHROUGH;
 
@@ -6076,6 +6063,38 @@ class AutoScheduleZonesForGC
     }
 };
 
+/*
+ * An invariant of our GC/CC interaction is that there must not ever be any
+ * black to gray edges in the system. It is possible to violate this with
+ * simple compartmental GC. For example, in GC[n], we collect in both
+ * compartmentA and compartmentB, and mark both sides of the cross-compartment
+ * edge gray. Later in GC[n+1], we only collect compartmentA, but this time
+ * mark it black. Now we are violating the invariants and must fix it somehow.
+ *
+ * To prevent this situation, we explicitly detect the black->gray state when
+ * marking cross-compartment edges -- see ShouldMarkCrossCompartment -- adding
+ * each violating edges to foundBlackGrayEdges. After we leave the trace
+ * session for each GC slice, we "ExposeToActiveJS" on each of these edges
+ * (which we cannot do safely from the guts of the GC).
+ */
+class AutoExposeLiveCrossZoneEdges
+{
+    BlackGrayEdgeVector* edges;
+
+  public:
+    explicit AutoExposeLiveCrossZoneEdges(BlackGrayEdgeVector* edgesPtr) : edges(edgesPtr) {
+        MOZ_ASSERT(edges->empty());
+    }
+    ~AutoExposeLiveCrossZoneEdges() {
+        for (auto& target : *edges) {
+            MOZ_ASSERT(target);
+            MOZ_ASSERT(!target->zone()->isCollecting());
+            UnmarkGrayCellRecursively(target, target->getTraceKind());
+        }
+        edges->clear();
+    }
+};
+
 } /* anonymous namespace */
 
 /*
@@ -6094,6 +6113,8 @@ GCRuntime::gcCycle(bool nonincrementalByAPI, SliceBudget& budget, JS::gcreason::
     AutoNotifyGCActivity notify(*this);
 
     gcstats::AutoGCSlice agc(stats, scanZonesBeforeGC(), invocationKind, budget, reason);
+
+    AutoExposeLiveCrossZoneEdges aelcze(&foundBlackGrayEdges);
 
     evictNursery(reason);
 
@@ -6316,9 +6337,9 @@ GCRuntime::collect(bool nonincrementalByAPI, SliceBudget budget, JS::gcreason::R
         maybeDoCycleCollection();
 
 #ifdef JS_GC_ZEAL
-    if (shouldCompact() && rt->hasZealMode(ZealMode::CheckHeapOnMovingGC)) {
+    if (rt->hasZealMode(ZealMode::CheckHeapAfterGC)) {
         gcstats::AutoPhase ap(rt->gc.stats, gcstats::PHASE_TRACE_HEAP);
-        CheckHeapAfterMovingGC(rt);
+        CheckHeapAfterGC(rt);
     }
 #endif
 }
@@ -6521,8 +6542,8 @@ GCRuntime::minorGC(JS::gcreason::Reason reason, gcstats::Phase phase)
     blocksToFreeAfterMinorGC.freeAll();
 
 #ifdef JS_GC_ZEAL
-    if (rt->hasZealMode(ZealMode::CheckHeapOnMovingGC))
-        CheckHeapAfterMovingGC(rt);
+    if (rt->hasZealMode(ZealMode::CheckHeapAfterGC))
+        CheckHeapAfterGC(rt);
 #endif
 
     {
@@ -6807,6 +6828,7 @@ void PreventGCDuringInteractiveDebug()
 void
 js::ReleaseAllJITCode(FreeOp* fop)
 {
+    js::CancelOffThreadIonCompile(fop->runtime());
     for (ZonesIter zone(fop->runtime(), SkipAtoms); !zone.done(); zone.next()) {
         zone->setPreservingCode(false);
         zone->discardJitCode(fop);

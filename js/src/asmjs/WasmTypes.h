@@ -146,24 +146,6 @@ struct ShareableBase : RefCounted<T>
 
 // ValType/ExprType utilities
 
-// ExprType::Limit is an out-of-band value and has no wasm-semantic meaning. For
-// the purpose of recursive validation, we use this value to represent the type
-// of branch/return instructions that don't actually return to the parent
-// expression and can thus be used in any context.
-const ExprType AnyType = ExprType::Limit;
-
-inline ExprType
-Unify(ExprType a, ExprType b)
-{
-    if (a == AnyType)
-        return b;
-    if (b == AnyType)
-        return a;
-    if (a == b)
-        return a;
-    return ExprType::Void;
-}
-
 static inline bool
 IsVoid(ExprType et)
 {
@@ -335,15 +317,16 @@ ToCString(ValType type)
 class Val
 {
     ValType type_;
-    union {
+    union U {
         uint32_t i32_;
         uint64_t i64_;
-        float f32_;
-        double f64_;
+        RawF32 f32_;
+        RawF64 f64_;
         I8x16 i8x16_;
         I16x8 i16x8_;
         I32x4 i32x4_;
         F32x4 f32x4_;
+        U() {}
     } u;
 
   public:
@@ -351,8 +334,11 @@ class Val
 
     explicit Val(uint32_t i32) : type_(ValType::I32) { u.i32_ = i32; }
     explicit Val(uint64_t i64) : type_(ValType::I64) { u.i64_ = i64; }
-    explicit Val(float f32) : type_(ValType::F32) { u.f32_ = f32; }
-    explicit Val(double f64) : type_(ValType::F64) { u.f64_ = f64; }
+
+    explicit Val(RawF32 f32) : type_(ValType::F32) { u.f32_ = f32; }
+    explicit Val(RawF64 f64) : type_(ValType::F64) { u.f64_ = f64; }
+    MOZ_IMPLICIT Val(float) = delete;
+    MOZ_IMPLICIT Val(double) = delete;
 
     explicit Val(const I8x16& i8x16, ValType type = ValType::I8x16) : type_(type) {
         MOZ_ASSERT(type_ == ValType::I8x16 || type_ == ValType::B8x16);
@@ -375,8 +361,8 @@ class Val
 
     uint32_t i32() const { MOZ_ASSERT(type_ == ValType::I32); return u.i32_; }
     uint64_t i64() const { MOZ_ASSERT(type_ == ValType::I64); return u.i64_; }
-    const float& f32() const { MOZ_ASSERT(type_ == ValType::F32); return u.f32_; }
-    const double& f64() const { MOZ_ASSERT(type_ == ValType::F64); return u.f64_; }
+    RawF32 f32() const { MOZ_ASSERT(type_ == ValType::F32); return u.f32_; }
+    RawF64 f64() const { MOZ_ASSERT(type_ == ValType::F64); return u.f64_; }
 
     const I8x16& i8x16() const {
         MOZ_ASSERT(type_ == ValType::I8x16 || type_ == ValType::B8x16);
@@ -463,12 +449,13 @@ class InitExpr
 
   private:
     Kind kind_;
-    union {
+    union U {
         Val val_;
         struct {
             uint32_t index_;
             ValType type_;
         } global;
+        U() {}
     } u;
 
   public:
@@ -512,19 +499,21 @@ enum class GlobalKind
 
 class GlobalDesc
 {
-    union {
+    union V {
         struct {
-            union {
+            union U {
                 InitExpr initial_;
                 struct {
                     ValType type_;
                     uint32_t index_;
                 } import;
+                U() {}
             } val;
             unsigned offset_;
             bool isMutable_;
         } var;
         Val cst_;
+        V() {}
     } u;
     GlobalKind kind_;
 
@@ -920,7 +909,6 @@ struct Assumptions
 {
     uint32_t              cpuId;
     JS::BuildIdCharVector buildId;
-    bool                  newFormat;
 
     explicit Assumptions(JS::BuildIdCharVector&& buildId);
 

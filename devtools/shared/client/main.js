@@ -2914,7 +2914,7 @@ SourceClient.prototype = {
    * @param function aOnResponse
    *        Called with the thread's response.
    */
-  setBreakpoint: function ({ line, column, condition }, aOnResponse = noop) {
+  setBreakpoint: function ({ line, column, condition, noSliding }, aOnResponse = noop) {
     // A helper function that sets the breakpoint.
     let doSetBreakpoint = aCallback => {
       let root = this._client.mainRoot;
@@ -2927,7 +2927,8 @@ SourceClient.prototype = {
         to: this.actor,
         type: "setBreakpoint",
         location: location,
-        condition: condition
+        condition: condition,
+        noSliding: noSliding
       };
 
       // Backwards compatibility: send the breakpoint request to the

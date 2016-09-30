@@ -47,6 +47,11 @@ class nsTextFrame;
 class imgIContainer;
 struct nsStyleVisibility;
 
+typedef nsINode RawGeckoNode;
+typedef mozilla::dom::Element RawGeckoElement;
+typedef nsIDocument RawGeckoDocument;
+struct ServoNodeData;
+
 // Includes nsStyleStructID.
 #include "nsStyleStructFwd.h"
 
@@ -365,6 +370,7 @@ struct nsStyleImage
   }
   imgRequestProxy* GetImageData() const {
     MOZ_ASSERT(mType == eStyleImageType_Image, "Data is not an image!");
+    MOZ_ASSERT(mImage);
     MOZ_ASSERT(mImageTracked,
                "Should be tracking any image we're going to use!");
     return mImage;
@@ -817,7 +823,7 @@ struct nsStyleImageLayers {
   }
 
   nsChangeHint CalcDifference(const nsStyleImageLayers& aNewLayers,
-                              nsChangeHint aPositionChangeHint) const;
+                              nsStyleImageLayers::LayerType aType) const;
 
   bool HasLayerWithImage() const;
 

@@ -484,6 +484,8 @@ public:
 
   void GetDefaultScale(double *aScale);
 
+  void GetWidgetRounding(int32_t* aRounding);
+
   bool IsTransparent() const { return mIsTransparent; }
 
   void GetMaxTouchPoints(uint32_t* aTouchPoints);
@@ -572,6 +574,7 @@ public:
   }
 
   virtual bool RecvUIResolutionChanged(const float& aDpi,
+                                       const int32_t& aRounding,
                                        const double& aScale) override;
 
   virtual bool
@@ -630,12 +633,11 @@ public:
                                  bool aPreventDefault) const;
   void SetTargetAPZC(uint64_t aInputBlockId,
                     const nsTArray<ScrollableLayerGuid>& aTargets) const;
-  void HandleTap(layers::GeckoContentController::TapType aType,
-                 const LayoutDevicePoint& aPoint,
-                 const Modifiers& aModifiers,
-                 const mozilla::layers::ScrollableLayerGuid& aGuid,
-                 const uint64_t& aInputBlockId,
-                 bool aCallTakeFocusForClickFromTap);
+  bool RecvHandleTap(const layers::GeckoContentController::TapType& aType,
+                     const LayoutDevicePoint& aPoint,
+                     const Modifiers& aModifiers,
+                     const ScrollableLayerGuid& aGuid,
+                     const uint64_t& aInputBlockId) override;
   void SetAllowedTouchBehavior(uint64_t aInputBlockId,
                                const nsTArray<TouchBehaviorFlags>& aFlags) const;
 
@@ -778,6 +780,7 @@ private:
 
   friend class ContentChild;
   float mDPI;
+  int32_t mRounding;
   double mDefaultScale;
 
   bool mIsTransparent;

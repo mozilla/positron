@@ -25,6 +25,9 @@ RemoteCompositorSession::RemoteCompositorSession(nsBaseWidget* aWidget,
    mAPZ(aAPZ)
 {
   GPUProcessManager::Get()->RegisterSession(this);
+  if (mAPZ) {
+    mAPZ->SetCompositorSession(this);
+  }
 }
 
 RemoteCompositorSession::~RemoteCompositorSession()
@@ -52,7 +55,20 @@ RemoteCompositorSession::GetInProcessBridge() const
 void
 RemoteCompositorSession::SetContentController(GeckoContentController* aController)
 {
+  mContentController = aController;
   mCompositorBridgeChild->SendPAPZConstructor(new APZChild(aController), 0);
+}
+
+GeckoContentController*
+RemoteCompositorSession::GetContentController()
+{
+  return mContentController.get();
+}
+
+nsIWidget*
+RemoteCompositorSession::GetWidget()
+{
+  return mWidget;
 }
 
 RefPtr<IAPZCTreeManager>
@@ -64,6 +80,10 @@ RemoteCompositorSession::GetAPZCTreeManager() const
 void
 RemoteCompositorSession::Shutdown()
 {
+  mContentController = nullptr;
+  if (mAPZ) {
+    mAPZ->SetCompositorSession(nullptr);
+  }
   mCompositorBridgeChild->Destroy();
   mCompositorBridgeChild = nullptr;
   mCompositorWidgetDelegate = nullptr;

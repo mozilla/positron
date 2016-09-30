@@ -277,6 +277,7 @@ TabParent::TabParent(nsIContentParent* aManager,
   , mDimensions(0, 0)
   , mOrientation(0)
   , mDPI(0)
+  , mRounding(0)
   , mDefaultScale(0)
   , mUpdatedDimensions(false)
   , mSizeMode(nsSizeMode_Normal)
@@ -1030,7 +1031,8 @@ TabParent::UIResolutionChanged()
     // fails to cache the values, then mDefaultScale.scale might be invalid.
     // We don't want to send that value to content. Just send -1 for it too in
     // that case.
-    Unused << SendUIResolutionChanged(mDPI, mDPI < 0 ? -1.0 : mDefaultScale.scale);
+    Unused << SendUIResolutionChanged(mDPI, mRounding,
+                                      mDPI < 0 ? -1.0 : mDefaultScale.scale);
   }
 }
 
@@ -1682,6 +1684,21 @@ bool TabParent::SendRealTouchEvent(WidgetTouchEvent& event)
   return (event.mMessage == eTouchMove) ?
     PBrowserParent::SendRealTouchMoveEvent(event, guid, blockId, apzResponse) :
     PBrowserParent::SendRealTouchEvent(event, guid, blockId, apzResponse);
+}
+
+bool
+TabParent::SendHandleTap(TapType aType,
+                         const LayoutDevicePoint& aPoint,
+                         Modifiers aModifiers,
+                         const ScrollableLayerGuid& aGuid,
+                         uint64_t aInputBlockId)
+{
+  if (mIsDestroyed) {
+    return false;
+  }
+  LayoutDeviceIntPoint offset = GetChildProcessOffset();
+  return PBrowserParent::SendHandleTap(aType, aPoint + offset, aModifiers, aGuid,
+      aInputBlockId);
 }
 
 bool
@@ -2485,6 +2502,17 @@ TabParent::RecvGetDefaultScale(double* aValue)
 }
 
 bool
+TabParent::RecvGetWidgetRounding(int32_t* aValue)
+{
+  TryCacheDPIAndScale();
+
+  MOZ_ASSERT(mRounding > 0,
+             "Must not ask for rounding before OwnerElement is received!");
+  *aValue = mRounding;
+  return true;
+}
+
+bool
 TabParent::RecvGetMaxTouchPoints(uint32_t* aTouchPoints)
 {
   nsCOMPtr<nsIWidget> widget = GetWidget();
@@ -2751,6 +2779,7 @@ TabParent::TryCacheDPIAndScale()
 
   if (widget) {
     mDPI = widget->GetDPI();
+    mRounding = widget->RoundsWidgetCoordinatesTo();
     mDefaultScale = widget->GetDefaultScale();
   }
 }
@@ -2989,16 +3018,6 @@ private:
     return NS_OK;
   }
 };
-
-/* static */ void
-TabParent::ObserveLayerUpdate(uint64_t aLayersId, uint64_t aEpoch, bool aActive)
-{
-  MOZ_ASSERT(!NS_IsMainThread());
-
-  RefPtr<LayerTreeUpdateRunnable> runnable =
-    new LayerTreeUpdateRunnable(aLayersId, aEpoch, aActive);
-  NS_DispatchToMainThread(runnable);
-}
 
 void
 TabParent::LayerTreeUpdate(uint64_t aEpoch, bool aActive)
@@ -3369,11 +3388,11 @@ TabParent::GetShowInfo()
       nsContentUtils::IsChromeDoc(mFrameElement->OwnerDoc()) &&
       mFrameElement->HasAttr(kNameSpaceID_None, nsGkAtoms::transparent);
     return ShowInfo(name, allowFullscreen, isPrivate, false,
-                    isTransparent, mDPI, mDefaultScale.scale);
+                    isTransparent, mDPI, mRounding, mDefaultScale.scale);
   }
 
   return ShowInfo(EmptyString(), false, false, false,
-                  false, mDPI, mDefaultScale.scale);
+                  false, mDPI, mRounding, mDefaultScale.scale);
 }
 
 void

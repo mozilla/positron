@@ -321,6 +321,8 @@ public:
 
   virtual bool RecvGetDefaultScale(double* aValue) override;
 
+  virtual bool RecvGetWidgetRounding(int32_t* aValue) override;
+
   virtual bool RecvGetMaxTouchPoints(uint32_t* aTouchPoints) override;
 
   virtual bool RecvGetWidgetNativeData(WindowsHandle* aValue) override;
@@ -465,6 +467,12 @@ public:
 
   bool SendRealTouchEvent(WidgetTouchEvent& event);
 
+  bool SendHandleTap(TapType aType,
+                     const LayoutDevicePoint& aPoint,
+                     Modifiers aModifiers,
+                     const ScrollableLayerGuid& aGuid,
+                     uint64_t aInputBlockId);
+
   virtual PDocumentRendererParent*
   AllocPDocumentRendererParent(const nsRect& documentRect,
                                const gfx::Matrix& transform,
@@ -560,7 +568,6 @@ public:
   bool SendLoadRemoteScript(const nsString& aURL,
                             const bool& aRunInGlobalScope);
 
-  static void ObserveLayerUpdate(uint64_t aLayersId, uint64_t aEpoch, bool aActive);
   void LayerTreeUpdate(uint64_t aEpoch, bool aActive);
 
   virtual bool
@@ -630,6 +637,7 @@ protected:
   ScreenIntSize mDimensions;
   ScreenOrientationInternal mOrientation;
   float mDPI;
+  int32_t mRounding;
   CSSToLayoutDeviceScale mDefaultScale;
   bool mUpdatedDimensions;
   nsSizeMode mSizeMode;

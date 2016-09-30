@@ -3083,17 +3083,17 @@ this.XPIProvider = {
     url = UpdateUtils.formatUpdateURL(url);
 
     logger.info(`Starting system add-on update check from ${url}.`);
-    let addonList = yield ProductAddonChecker.getProductAddonList(url);
+    let res = yield ProductAddonChecker.getProductAddonList(url);
 
     // If there was no list then do nothing.
-    if (!addonList) {
+    if (!res || !res.gmpAddons) {
       logger.info("No system add-ons list was returned.");
       yield systemAddonLocation.cleanDirectories();
       return;
     }
 
-    addonList = new Map(
-      addonList.map(spec => [spec.id, { spec, path: null, addon: null }]));
+    let addonList = new Map(
+      res.gmpAddons.map(spec => [spec.id, { spec, path: null, addon: null }]));
 
     let getAddonsInLocation = (location) => {
       return new Promise(resolve => {
@@ -5818,6 +5818,27 @@ AddonInstall.prototype = {
       return Promise.reject([AddonManager.ERROR_CORRUPT_FILE, err]);
     }
 
+    if (this.existingAddon) {
+      // Check various conditions related to upgrades
+      if (this.addon.id != this.existingAddon.id) {
+        zipreader.close();
+        return Promise.reject([AddonManager.ERROR_INCORRECT_ID,
+                               `Refusing to upgrade addon ${this.existingAddon.id} to different ID {this.addon.id}`]);
+      }
+
+      if (this.addon.type == "multipackage") {
+        zipreader.close();
+        return Promise.reject([AddonManager.ERROR_UNEXPECTED_ADDON_TYPE,
+                               `Refusing to upgrade addon ${this.existingAddon.id} to a multi-package xpi`]);
+      }
+
+      if (this.existingAddon.type == "webextension" && this.addon.type != "webextension") {
+        zipreader.close();
+        return Promise.reject([AddonManager.ERROR_UNEXPECTED_ADDON_TYPE,
+                               "WebExtensions may not be upated to other extension types"]);
+      }
+    }
+
     if (mustSign(this.addon.type)) {
       if (this.addon.signedState <= AddonManager.SIGNEDSTATE_MISSING) {
         // This add-on isn't properly signed by a signature that chains to the
@@ -5853,13 +5874,6 @@ AddonInstall.prototype = {
                                  "XPI is incorrectly signed"]);
         }
       }
-    }
-
-    if (this.existingAddon && this.existingAddon.type == "webextension" &&
-        this.addon.type != "webextension") {
-      zipreader.close();
-      return Promise.reject([AddonManager.ERROR_UNEXPECTED_ADDON_TYPE,
-                             "WebExtensions may not be upated to other extension types"]);
     }
 
     if (this.addon.type == "multipackage")
@@ -6137,6 +6151,7 @@ AddonInstall.prototype = {
             }, AddonManager.UPDATE_WHEN_ADDON_INSTALLED);
           }
         }, ([error, message]) => {
+          this.removeTemporaryFile();
           this.downloadFailed(error, message);
         });
       }

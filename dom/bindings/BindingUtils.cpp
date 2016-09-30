@@ -1117,7 +1117,7 @@ QueryInterface(JSContext* cx, unsigned argc, JS::Value* vp)
   JS::Rooted<JSObject*> obj(cx, js::CheckedUnwrap(origObj,
                                                   /* stopAtWindowProxy = */ false));
   if (!obj) {
-      JS_ReportError(cx, "Permission denied to access object");
+      JS_ReportErrorASCII(cx, "Permission denied to access object");
       return false;
   }
 
@@ -3059,6 +3059,13 @@ UnwrapArgImpl(JS::Handle<JSObject*> src,
     }
 
     return NS_OK;
+  }
+
+  // Only allow XPCWrappedJS stuff in system code.  Ideally we would remove this
+  // even there, but that involves converting some things to WebIDL callback
+  // interfaces and making some other things builtinclass...
+  if (!nsContentUtils::IsCallerChrome()) {
+    return NS_ERROR_XPC_BAD_CONVERT_JS;
   }
 
   RefPtr<nsXPCWrappedJS> wrappedJS;

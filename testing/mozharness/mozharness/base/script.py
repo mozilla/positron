@@ -392,12 +392,15 @@ class ScriptMixin(PlatformMixin):
         if parsed_url.scheme in ('http', 'https'):
             expected_file_size = int(response.headers.get('Content-Length'))
 
-        self.info('Expected file size: {}'.format(expected_file_size))
-        self.debug('Url: {}'.format(url))
-        self.debug('Content-Encoding {}'.format(response.headers.get('Content-Encoding')))
+        self.info('Http code: {}'.format(response.getcode()))
+        for k in ('Content-Encoding', 'Content-Type', 'via', 'x-amz-cf-id',
+                  'x-amz-version-id', 'x-cache'):
+            self.info('{}: {}'.format(k, response.headers.get(k)))
 
         file_contents = response.read()
         obtained_file_size = len(file_contents)
+        self.info('Expected file size: {}'.format(expected_file_size))
+        self.info('Obtained file size: {}'.format(obtained_file_size))
 
         if obtained_file_size != expected_file_size:
             raise FetchedIncorrectFilesize(
@@ -551,7 +554,7 @@ class ScriptMixin(PlatformMixin):
                                       Defaults to False.
 
         Raises:
-            zipfile.BadZipFile: on contents of zipfile being invalid
+            zipfile.BadZipfile: on contents of zipfile being invalid
         """
         with zipfile.ZipFile(compressed_file) as bundle:
             entries = self._filter_entries(bundle.namelist(), extract_dirs)
@@ -629,6 +632,9 @@ class ScriptMixin(PlatformMixin):
                 'application/zip': {
                     'function': self.unzip,
                 },
+                'application/x-zip-compressed': {
+                    'function': self.unzip,
+                },
             }
 
             filename = url.split('/')[-1]
@@ -678,7 +684,18 @@ class ScriptMixin(PlatformMixin):
         # 2) We're guaranteed to have download the file with error_level=FATAL
         #    Let's unpack the file
         function, kwargs = _determine_extraction_method_and_kwargs(url)
-        function(**kwargs)
+        try:
+            function(**kwargs)
+        except zipfile.BadZipfile:
+            # Bug 1305752 - Sometimes a good download turns out to be a
+            # corrupted zipfile. Let's upload the file for inspection
+            filepath = os.path.join(self.query_abs_dirs()['abs_upload_dir'], url.split('/')[-1])
+            self.info('Storing corrupted file to {}'.format(filepath))
+            with open(filepath, 'w') as f:
+                f.write(compressed_file.read())
+
+            # Dump the exception and exit
+            self.exception(level=FATAL)
 
 
     def load_json_url(self, url, error_level=None, *args, **kwargs):
@@ -1365,7 +1382,8 @@ class ScriptMixin(PlatformMixin):
                 returncode = int(p.proc.returncode)
             else:
                 p = subprocess.Popen(command, shell=shell, stdout=subprocess.PIPE,
-                                     cwd=cwd, stderr=subprocess.STDOUT, env=env)
+                                     cwd=cwd, stderr=subprocess.STDOUT, env=env,
+                                     bufsize=0)
                 loop = True
                 while loop:
                     if p.poll() is not None:
@@ -1781,6 +1799,21 @@ class BaseScript(ScriptMixin, LogMixin, object):
         self.env = None
         self.new_log_obj(default_log_level=default_log_level)
         self.script_obj = self
+
+        # Indicate we're a source checkout if VCS directory is present at the
+        # appropriate place. This code will break if this file is ever moved
+        # to another directory.
+        self.topsrcdir = None
+
+        srcreldir = 'testing/mozharness/mozharness/base'
+        here = os.path.normpath(os.path.dirname(__file__))
+        if here.replace('\\', '/').endswith(srcreldir):
+            topsrcdir = os.path.normpath(os.path.join(here, '..', '..',
+                                                      '..', '..'))
+            hg_dir = os.path.join(topsrcdir, '.hg')
+            git_dir = os.path.join(topsrcdir, '.git')
+            if os.path.isdir(hg_dir) or os.path.isdir(git_dir):
+                self.topsrcdir = topsrcdir
 
         # Set self.config to read-only.
         #

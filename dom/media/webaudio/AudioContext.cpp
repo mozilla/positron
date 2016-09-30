@@ -354,12 +354,11 @@ AudioContext::CreateMediaElementSource(HTMLMediaElement& aMediaElement,
     aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
     return nullptr;
   }
-#ifdef MOZ_EME
+
   if (aMediaElement.ContainsRestrictedContent()) {
     aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
     return nullptr;
   }
-#endif
 
   if (CheckClosed(aRv)) {
     return nullptr;
@@ -837,6 +836,15 @@ AudioContext::OnStateChanged(void* aPromise, AudioContextState aNewState)
   if (mAudioContextState == AudioContextState::Closed &&
       aNewState == AudioContextState::Running &&
       !aPromise) {
+    return;
+  }
+
+  // This can happen if this is called in reaction to a
+  // MediaStreamGraph shutdown, and a AudioContext was being
+  // suspended at the same time, for example if a page was being
+  // closed.
+  if (mAudioContextState == AudioContextState::Closed &&
+      aNewState == AudioContextState::Suspended) {
     return;
   }
 

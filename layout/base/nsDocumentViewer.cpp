@@ -42,8 +42,8 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/EncodingUtils.h"
 #include "mozilla/WeakPtr.h"
-#include "mozilla/StyleSheetHandle.h"
-#include "mozilla/StyleSheetHandleInlines.h"
+#include "mozilla/StyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 
 #include "nsViewManager.h"
 #include "nsView.h"
@@ -52,7 +52,7 @@
 #include "nsNetUtil.h"
 #include "nsIContentViewerEdit.h"
 #include "nsIContentViewerFile.h"
-#include "mozilla/CSSStyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 #include "mozilla/css/Loader.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
@@ -2205,7 +2205,7 @@ nsDocumentViewer::CreateStyleSet(nsIDocument* aDocument)
   auto cache = nsLayoutStylesheetCache::For(backendType);
 
   // Handle the user sheets.
-  StyleSheetHandle sheet = nullptr;
+  StyleSheet* sheet = nullptr;
   if (nsContentUtils::IsInChromeDocshell(aDocument)) {
     sheet = cache->UserChromeSheet();
   } else {
@@ -2222,7 +2222,7 @@ nsDocumentViewer::CreateStyleSet(nsIDocument* aDocument)
   nsCOMPtr<nsIDocShell> ds(mContainer);
   nsCOMPtr<nsIDOMEventTarget> chromeHandler;
   nsCOMPtr<nsIURI> uri;
-  StyleSheetHandle::RefPtr chromeSheet;
+  RefPtr<StyleSheet> chromeSheet;
 
   if (ds) {
     ds->GetChromeEventHandler(getter_AddRefs(chromeHandler));
@@ -2341,10 +2341,10 @@ nsDocumentViewer::CreateStyleSet(nsIDocument* aDocument)
   if (styleSet->IsGecko()) {
     nsStyleSheetService* sheetService = nsStyleSheetService::GetInstance();
     if (sheetService) {
-      for (StyleSheetHandle sheet : *sheetService->AgentStyleSheets()) {
+      for (StyleSheet* sheet : *sheetService->AgentStyleSheets()) {
         styleSet->AppendStyleSheet(SheetType::Agent, sheet);
       }
-      for (StyleSheetHandle sheet : Reversed(*sheetService->UserStyleSheets())) {
+      for (StyleSheet* sheet : Reversed(*sheetService->UserStyleSheets())) {
         styleSet->PrependStyleSheet(SheetType::User, sheet);
       }
     }
@@ -3762,7 +3762,9 @@ nsDocumentViewer::Print(nsIPrintSettings*       aPrintSettings,
       return rv;
     }
   }
-
+  if (mPrintEngine->HasPrintCallbackCanvas()) {
+    mBeforeAndAfterPrint = beforeAndAfterPrint;
+  }
   dom::Element* root = mDocument->GetRootElement();
   if (root && root->HasAttr(kNameSpaceID_None, nsGkAtoms::mozdisallowselectionprint)) {
     mPrintEngine->SetDisallowSelectionPrint(true);
@@ -3770,18 +3772,7 @@ nsDocumentViewer::Print(nsIPrintSettings*       aPrintSettings,
   rv = mPrintEngine->Print(aPrintSettings, aWebProgressListener);
   if (NS_FAILED(rv)) {
     OnDonePrinting();
-  } else if (GetIsPrinting()) {
-    if (mPrintEngine->HasPrintCallbackCanvas() ||
-        mPrintEngine->MayHavePluginFrames()) {
-      mBeforeAndAfterPrint = beforeAndAfterPrint;
-    } else {
-      // Since printing cloned the document and doesn't need plugin or canvas data
-      // from the original document, we can clear the print flag in the docshell
-      // tree early, before afterprint is dispatched.
-      SetIsPrinting(false);
-    }
   }
-
   return rv;
 }
 
@@ -3846,7 +3837,9 @@ nsDocumentViewer::PrintPreview(nsIPrintSettings* aPrintSettings,
       return rv;
     }
   }
-
+  if (mPrintEngine->HasPrintCallbackCanvas()) {
+    mBeforeAndAfterPrint = beforeAndAfterPrint;
+  }
   dom::Element* root = doc->GetRootElement();
   if (root && root->HasAttr(kNameSpaceID_None, nsGkAtoms::mozdisallowselectionprint)) {
     PR_PL(("PrintPreview: found mozdisallowselectionprint"));
@@ -3856,16 +3849,7 @@ nsDocumentViewer::PrintPreview(nsIPrintSettings* aPrintSettings,
   mPrintPreviewZoomed = false;
   if (NS_FAILED(rv)) {
     OnDonePrinting();
-  } else if (GetIsPrintPreview() &&
-             (mPrintEngine->HasPrintCallbackCanvas() ||
-              mPrintEngine->MayHavePluginFrames())) {
-    mBeforeAndAfterPrint = beforeAndAfterPrint;
   }
-
-  // Unlike in printing case we don't explicitly call SetIsPrintPreview(false);
-  // here, since this ContentViewer is for the cloned document, not for the
-  // original document.
-
   return rv;
 #else
   return NS_ERROR_FAILURE;

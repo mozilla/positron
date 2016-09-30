@@ -856,7 +856,6 @@ case "$target" in
         RCFLAGS="-nologo"
     fi
     AC_DEFINE(HAVE__MSIZE)
-    AC_DEFINE(STDC_HEADERS)
     AC_DEFINE(WIN32_LEAN_AND_MEAN)
     BIN_SUFFIX='.exe'
     MOZ_USER_DIR="Mozilla"
@@ -979,7 +978,6 @@ fi
 if test -z "$SKIP_COMPILER_CHECKS"; then
 dnl Checks for typedefs, structures, and compiler characteristics.
 dnl ========================================================
-AC_HEADER_STDC
 AC_C_CONST
 AC_TYPE_MODE_T
 AC_TYPE_OFF_T
@@ -1218,27 +1216,35 @@ AC_FUNC_MEMCMP
 AC_CHECK_FUNCS([getc_unlocked _getc_nolock gmtime_r localtime_r pthread_getname_np])
 
 dnl check for clock_gettime(), the CLOCK_MONOTONIC clock
-AC_CACHE_CHECK(for clock_gettime(CLOCK_MONOTONIC),
-               ac_cv_clock_monotonic,
-               [for libs in "" -lrt; do
-                    _SAVE_LIBS="$LIBS"
-                    LIBS="$LIBS $libs"
-                    AC_TRY_LINK([#include <time.h>],
-                                 [ struct timespec ts;
-                                   clock_gettime(CLOCK_MONOTONIC, &ts); ],
-                                 ac_cv_clock_monotonic=$libs
-                                 LIBS="$_SAVE_LIBS"
-                                 break,
-                                 ac_cv_clock_monotonic=no)
-                    LIBS="$_SAVE_LIBS"
-                done])
-if test "$ac_cv_clock_monotonic" != "no"; then
-    HAVE_CLOCK_MONOTONIC=1
-    REALTIME_LIBS=$ac_cv_clock_monotonic
-    AC_DEFINE(HAVE_CLOCK_MONOTONIC)
-    AC_SUBST(HAVE_CLOCK_MONOTONIC)
-    AC_SUBST_LIST(REALTIME_LIBS)
-fi
+dnl avoid this on Darwin, since depending on your system config, we may think
+dnl it exists but it really doesn't
+case "$OS_TARGET" in
+Darwin)
+  ;;
+*)
+  AC_CACHE_CHECK(for clock_gettime(CLOCK_MONOTONIC),
+                 ac_cv_clock_monotonic,
+                 [for libs in "" -lrt; do
+                      _SAVE_LIBS="$LIBS"
+                      LIBS="$LIBS $libs"
+                      AC_TRY_LINK([#include <time.h>],
+                                   [ struct timespec ts;
+                                     clock_gettime(CLOCK_MONOTONIC, &ts); ],
+                                   ac_cv_clock_monotonic=$libs
+                                   LIBS="$_SAVE_LIBS"
+                                   break,
+                                   ac_cv_clock_monotonic=no)
+                      LIBS="$_SAVE_LIBS"
+                  done])
+  if test "$ac_cv_clock_monotonic" != "no"; then
+      HAVE_CLOCK_MONOTONIC=1
+      REALTIME_LIBS=$ac_cv_clock_monotonic
+      AC_DEFINE(HAVE_CLOCK_MONOTONIC)
+      AC_SUBST(HAVE_CLOCK_MONOTONIC)
+      AC_SUBST_LIST(REALTIME_LIBS)
+  fi
+  ;;
+esac
 
 dnl Checks for math functions.
 dnl ========================================================
@@ -2280,7 +2286,6 @@ AC_SUBST(JS_LIBRARY_NAME)
 AC_SUBST(JS_CONFIG_MOZ_JS_LIBS)
 AC_SUBST(JS_CONFIG_LIBS)
 
-MOZ_SUBCONFIGURE_FFI()
 MOZ_SUBCONFIGURE_JEMALLOC()
 
 # Avoid using obsolete NSPR features

@@ -95,6 +95,8 @@ var {
   flushJarCache,
 } = ExtensionUtils;
 
+XPCOMUtils.defineLazyGetter(this, "console", ExtensionUtils.getConsole);
+
 const LOGGER_ID_BASE = "addons.webextension.";
 const UUID_MAP_PREF = "extensions.webextensions.uuids";
 const LEAVE_STORAGE_PREF = "extensions.webextensions.keepStorageOnUninstall";
@@ -199,14 +201,13 @@ ExtensionContext = class extends BaseContext {
     }
     Management.emit("page-load", this, params, sender);
 
-    // Properties in |filter| must match those in the |recipient|
-    // parameter of sendMessage.
     let filter = {extensionId: extension.id};
+    let optionalFilter = {};
     // Addon-generated messages (not necessarily from the same process as the
     // addon itself) are sent to the main process, which forwards them via the
     // parent process message manager. Specific replies can be sent to the frame
     // message manager.
-    this.messenger = new Messenger(this, [Services.cpmm, this.messageManager], sender, filter);
+    this.messenger = new Messenger(this, [Services.cpmm, this.messageManager], sender, filter, optionalFilter);
 
     if (this.externallyVisible) {
       this.extension.views.add(this);
@@ -698,10 +699,9 @@ GlobalManager = {
         return context.extension.hasPermission(permission);
       },
 
-      shouldInject(namespace, name, restrictions) {
+      shouldInject(namespace, name, allowedContexts) {
         // Do not generate content script APIs, unless explicitly allowed.
-        if (context.envType === "content_parent" &&
-            (!restrictions || !restrictions.includes("content"))) {
+        if (context.envType === "content_parent" && !allowedContexts.includes("content")) {
           return false;
         }
         return findPathInObject(apis, namespace) !== null;

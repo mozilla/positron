@@ -19,7 +19,7 @@
 #include "nsWeakReference.h"
 #include "nsWeakPtr.h"
 #include "nsTArray.h"
-#include "nsIDOMXMLDocument.h"
+#include "nsIDOMDocument.h"
 #include "nsIDOMDocumentXBL.h"
 #include "nsStubDocumentObserver.h"
 #include "nsIScriptGlobalObject.h"
@@ -485,16 +485,8 @@ protected:
 };
 
 // Base class for our document implementations.
-//
-// Note that this class *implements* nsIDOMXMLDocument, but it's not
-// really an nsIDOMXMLDocument. The reason for implementing
-// nsIDOMXMLDocument on this class is to avoid having to duplicate all
-// its inherited methods on document classes that *are*
-// nsIDOMXMLDocument's. nsDocument's QI should *not* claim to support
-// nsIDOMXMLDocument unless someone writes a real implementation of
-// the interface.
 class nsDocument : public nsIDocument,
-                   public nsIDOMXMLDocument, // inherits nsIDOMDocument
+                   public nsIDOMDocument,
                    public nsIDOMDocumentXBL,
                    public nsSupportsWeakReference,
                    public nsIScriptObjectPrincipal,
@@ -621,37 +613,37 @@ public:
   virtual Element* FindContentForSubDocument(nsIDocument *aDocument) const override;
   virtual Element* GetRootElementInternal() const override;
 
-  virtual void EnsureOnDemandBuiltInUASheet(mozilla::StyleSheetHandle aSheet) override;
+  virtual void EnsureOnDemandBuiltInUASheet(mozilla::StyleSheet* aSheet) override;
 
   /**
    * Get the (document) style sheets owned by this document.
    * These are ordered, highest priority last
    */
   virtual int32_t GetNumberOfStyleSheets() const override;
-  virtual mozilla::StyleSheetHandle GetStyleSheetAt(int32_t aIndex) const override;
+  virtual mozilla::StyleSheet* GetStyleSheetAt(int32_t aIndex) const override;
   virtual int32_t GetIndexOfStyleSheet(
-      const mozilla::StyleSheetHandle aSheet) const override;
-  virtual void AddStyleSheet(mozilla::StyleSheetHandle aSheet) override;
-  virtual void RemoveStyleSheet(mozilla::StyleSheetHandle aSheet) override;
+      const mozilla::StyleSheet* aSheet) const override;
+  virtual void AddStyleSheet(mozilla::StyleSheet* aSheet) override;
+  virtual void RemoveStyleSheet(mozilla::StyleSheet* aSheet) override;
 
   virtual void UpdateStyleSheets(
-      nsTArray<mozilla::StyleSheetHandle::RefPtr>& aOldSheets,
-      nsTArray<mozilla::StyleSheetHandle::RefPtr>& aNewSheets) override;
-  virtual void AddStyleSheetToStyleSets(mozilla::StyleSheetHandle aSheet);
-  virtual void RemoveStyleSheetFromStyleSets(mozilla::StyleSheetHandle aSheet);
+      nsTArray<RefPtr<mozilla::StyleSheet>>& aOldSheets,
+      nsTArray<RefPtr<mozilla::StyleSheet>>& aNewSheets) override;
+  virtual void AddStyleSheetToStyleSets(mozilla::StyleSheet* aSheet);
+  virtual void RemoveStyleSheetFromStyleSets(mozilla::StyleSheet* aSheet);
 
-  virtual void InsertStyleSheetAt(mozilla::StyleSheetHandle aSheet,
+  virtual void InsertStyleSheetAt(mozilla::StyleSheet* aSheet,
                                   int32_t aIndex) override;
-  virtual void SetStyleSheetApplicableState(mozilla::StyleSheetHandle aSheet,
+  virtual void SetStyleSheetApplicableState(mozilla::StyleSheet* aSheet,
                                             bool aApplicable) override;
 
   virtual nsresult LoadAdditionalStyleSheet(additionalSheetType aType,
                                             nsIURI* aSheetURI) override;
   virtual nsresult AddAdditionalStyleSheet(additionalSheetType aType,
-                                           mozilla::StyleSheetHandle aSheet) override;
+                                           mozilla::StyleSheet* aSheet) override;
   virtual void RemoveAdditionalStyleSheet(additionalSheetType aType,
                                           nsIURI* sheetURI) override;
-  virtual mozilla::StyleSheetHandle GetFirstAdditionalAuthorSheet() override;
+  virtual mozilla::StyleSheet* GetFirstAdditionalAuthorSheet() override;
 
   virtual nsIChannel* GetChannel() const override {
     return mChannel;
@@ -711,11 +703,11 @@ public:
   virtual void DocumentStatesChanged(
                  mozilla::EventStates aStateMask) override;
 
-  virtual void StyleRuleChanged(mozilla::StyleSheetHandle aStyleSheet,
+  virtual void StyleRuleChanged(mozilla::StyleSheet* aStyleSheet,
                                 mozilla::css::Rule* aStyleRule) override;
-  virtual void StyleRuleAdded(mozilla::StyleSheetHandle aStyleSheet,
+  virtual void StyleRuleAdded(mozilla::StyleSheet* aStyleSheet,
                               mozilla::css::Rule* aStyleRule) override;
-  virtual void StyleRuleRemoved(mozilla::StyleSheetHandle aStyleSheet,
+  virtual void StyleRuleRemoved(mozilla::StyleSheet* aStyleSheet,
                                 mozilla::css::Rule* aStyleRule) override;
 
   virtual void FlushPendingNotifications(mozFlushType aType) override;
@@ -787,7 +779,7 @@ public:
   void ReportUseCounters();
 
 private:
-  void AddOnDemandBuiltInUASheet(mozilla::StyleSheetHandle aSheet);
+  void AddOnDemandBuiltInUASheet(mozilla::StyleSheet* aSheet);
   nsRadioGroupStruct* GetRadioGroupInternal(const nsAString& aName) const;
   void SendToConsole(nsCOMArray<nsISecurityConsoleMessage>& aMessages);
 
@@ -797,9 +789,6 @@ public:
 
   // nsIDOMDocument
   NS_DECL_NSIDOMDOCUMENT
-
-  // nsIDOMXMLDocument
-  NS_DECL_NSIDOMXMLDOCUMENT
 
   // nsIDOMDocumentXBL
   NS_DECL_NSIDOMDOCUMENTXBL
@@ -970,7 +959,7 @@ public:
                             const nsAString& aIntegrity) override;
 
   virtual nsresult LoadChromeSheetSync(nsIURI* uri, bool isAgentSheet,
-                                       mozilla::StyleSheetHandle::RefPtr* aSheet) override;
+                                       RefPtr<mozilla::StyleSheet>* aSheet) override;
 
   virtual nsISupports* GetCurrentContentSink() override;
 
@@ -1275,9 +1264,7 @@ public:
 
   js::ExpandoAndGeneration mExpandoAndGeneration;
 
-#ifdef MOZ_EME
   bool ContainsEMEContent();
-#endif
 
   bool ContainsMSEContent();
 
@@ -1288,7 +1275,7 @@ protected:
 
   void RemoveDocStyleSheetsFromStyleSets();
   void RemoveStyleSheetsFromStyleSets(
-      const nsTArray<mozilla::StyleSheetHandle::RefPtr>& aSheets,
+      const nsTArray<RefPtr<mozilla::StyleSheet>>& aSheets,
       mozilla::SheetType aType);
   void ResetStylesheetsToURI(nsIURI* aURI);
   void FillStyleSet(mozilla::StyleSetHandle aStyleSet);
@@ -1342,9 +1329,9 @@ protected:
   // EndLoad() has already happened.
   nsWeakPtr mWeakSink;
 
-  nsTArray<mozilla::StyleSheetHandle::RefPtr> mStyleSheets;
-  nsTArray<mozilla::StyleSheetHandle::RefPtr> mOnDemandBuiltInUASheets;
-  nsTArray<mozilla::StyleSheetHandle::RefPtr> mAdditionalSheets[AdditionalSheetTypeCount];
+  nsTArray<RefPtr<mozilla::StyleSheet>> mStyleSheets;
+  nsTArray<RefPtr<mozilla::StyleSheet>> mOnDemandBuiltInUASheets;
+  nsTArray<RefPtr<mozilla::StyleSheet>> mAdditionalSheets[AdditionalSheetTypeCount];
 
   // Array of observers
   nsTObserverArray<nsIDocumentObserver*> mObservers;
@@ -1498,8 +1485,8 @@ private:
   friend class nsUnblockOnloadEvent;
   // Recomputes the visibility state but doesn't set the new value.
   mozilla::dom::VisibilityState GetVisibilityState() const;
-  void NotifyStyleSheetAdded(mozilla::StyleSheetHandle aSheet, bool aDocumentSheet);
-  void NotifyStyleSheetRemoved(mozilla::StyleSheetHandle aSheet, bool aDocumentSheet);
+  void NotifyStyleSheetAdded(mozilla::StyleSheet* aSheet, bool aDocumentSheet);
+  void NotifyStyleSheetRemoved(mozilla::StyleSheet* aSheet, bool aDocumentSheet);
 
   void PostUnblockOnloadEvent();
   void DoUnblockOnload();

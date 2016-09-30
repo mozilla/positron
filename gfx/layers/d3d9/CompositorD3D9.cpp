@@ -18,6 +18,7 @@
 #include "gfxCrashReporterUtils.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/widget/WinCompositorWidget.h"
+#include "D3D9SurfaceImage.h"
 
 namespace mozilla {
 namespace layers {

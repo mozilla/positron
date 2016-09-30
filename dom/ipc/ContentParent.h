@@ -271,6 +271,8 @@ public:
                                nsTArray<PluginTag>* aPlugins,
                                uint32_t* aNewPluginEpoch) override;
 
+  virtual bool RecvInitVideoDecoderManager(Endpoint<PVideoDecoderManagerChild>* endpoint) override;
+
   virtual bool RecvUngrabPointer(const uint32_t& aTime) override;
 
   virtual bool RecvRemovePermission(const IPC::Principal& aPrincipal,
@@ -787,7 +789,8 @@ private:
                                const uint32_t& aFlags, bool* aIsSecureURI) override;
 
   virtual bool RecvAccumulateMixedContentHSTS(const URIParams& aURI,
-                                              const bool& aActive) override;
+                                              const bool& aActive,
+                                              const bool& aHSTSPriming) override;
 
   virtual bool DeallocPHalParent(PHalParent*) override;
 

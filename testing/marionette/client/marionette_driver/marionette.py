@@ -999,36 +999,40 @@ class Marionette(object):
             raise errors.MarionetteException("enforce_gecko_prefs() can only be called "
                                              "on Gecko instances launched by Marionette")
         pref_exists = True
-        self.set_context(self.CONTEXT_CHROME)
-        for pref, value in prefs.iteritems():
-            if type(value) is not str:
-                value = json.dumps(value)
-            pref_exists = self.execute_script("""
-            let prefInterface = Components.classes["@mozilla.org/preferences-service;1"]
-                                          .getService(Components.interfaces.nsIPrefBranch);
-            let pref = '%s';
-            let value = '%s';
-            let type = prefInterface.getPrefType(pref);
-            switch(type) {
-                case prefInterface.PREF_STRING:
-                    return value == prefInterface.getCharPref(pref).toString();
-                case prefInterface.PREF_BOOL:
-                    return value == prefInterface.getBoolPref(pref).toString();
-                case prefInterface.PREF_INT:
-                    return value == prefInterface.getIntPref(pref).toString();
-                case prefInterface.PREF_INVALID:
-                    return false;
-            }
-            """ % (pref, value))
-            if not pref_exists:
-                break
-        self.set_context(self.CONTEXT_CONTENT)
+        with self.using_context(self.CONTEXT_CHROME):
+            for pref, value in prefs.iteritems():
+                if type(value) is not str:
+                    value = json.dumps(value)
+                pref_exists = self.execute_script("""
+                let prefInterface = Components.classes["@mozilla.org/preferences-service;1"]
+                                              .getService(Components.interfaces.nsIPrefBranch);
+                let pref = '%s';
+                let value = '%s';
+                let type = prefInterface.getPrefType(pref);
+                switch(type) {
+                    case prefInterface.PREF_STRING:
+                        return value == prefInterface.getCharPref(pref).toString();
+                    case prefInterface.PREF_BOOL:
+                        return value == prefInterface.getBoolPref(pref).toString();
+                    case prefInterface.PREF_INT:
+                        return value == prefInterface.getIntPref(pref).toString();
+                    case prefInterface.PREF_INVALID:
+                        return false;
+                }
+                """ % (pref, value))
+                if not pref_exists:
+                    break
+
         if not pref_exists:
+            context = self._send_message("getContext", key="value")
             self.delete_session()
             self.instance.restart(prefs)
             self.raise_for_port(self.wait_for_port())
             self.start_session()
             self.reset_timeouts()
+
+            # Restore the context as used before the restart
+            self.set_context(context)
 
     def _request_in_app_shutdown(self, shutdown_flags=None):
         """Terminate the currently running instance from inside the application.
@@ -1037,15 +1041,28 @@ class Marionette(object):
                                of the application. Possible values here correspond
                                to constants in nsIAppStartup: http://mzl.la/1X0JZsC.
         """
-        flags = set(["eForceQuit"])
+        flags = set([])
         if shutdown_flags:
             flags.add(shutdown_flags)
-        self._send_message("quitApplication", {"flags": list(flags)})
 
+        # Trigger a 'quit-application-requested' observer notification so that
+        # components can safely shutdown before quitting the application.
+        with self.using_context("chrome"):
+            canceled = self.execute_script("""
+                Components.utils.import("resource://gre/modules/Services.jsm");
+                let cancelQuit = Components.classes["@mozilla.org/supports-PRBool;1"].
+                                 createInstance(Components.interfaces.nsISupportsPRBool);
+                Services.obs.notifyObservers(cancelQuit, "quit-application-requested", null);
+                return cancelQuit.data;
+                """)
+            if canceled:
+                raise errors.MarionetteException("Something canceled the quit application request")
+
+        self._send_message("quitApplication", {"flags": list(flags)})
         self.delete_session(in_app=True)
 
     @do_process_check
-    def quit(self, in_app=False):
+    def quit(self, in_app=False, callback=None):
         """Terminate the currently running instance.
 
         This command will delete the active marionette session. It also allows
@@ -1055,6 +1072,8 @@ class Marionette(object):
         :param in_app: If True, marionette will cause a quit from within the
                        browser. Otherwise the browser will be quit immediately
                        by killing the process.
+        :param callback: If provided and `in_app` is True, the callback will
+                         be used to trigger the shutdown.
         """
         if not self.instance:
             raise errors.MarionetteException("quit() can only be called "
@@ -1063,7 +1082,10 @@ class Marionette(object):
         self.reset_timeouts()
 
         if in_app:
-            self._request_in_app_shutdown()
+            if callable(callback):
+                callback()
+            else:
+                self._request_in_app_shutdown()
 
             # Give the application some time to shutdown
             self.instance.runner.wait(timeout=self.DEFAULT_SHUTDOWN_TIMEOUT)
@@ -1072,7 +1094,7 @@ class Marionette(object):
             self.instance.close()
 
     @do_process_check
-    def restart(self, clean=False, in_app=False):
+    def restart(self, clean=False, in_app=False, callback=None):
         """
         This will terminate the currently running instance, and spawn a new instance
         with the same profile and then reuse the session id when creating a session again.
@@ -1083,17 +1105,24 @@ class Marionette(object):
         :param in_app: If True, marionette will cause a restart from within the
                        browser. Otherwise the browser will be restarted immediately
                        by killing the process.
+        :param callback: If provided and `in_app` is True, the callback will be
+                         used to trigger the restart.
         """
         if not self.instance:
             raise errors.MarionetteException("restart() can only be called "
                                              "on Gecko instances launched by Marionette")
+
+        context = self._send_message("getContext", key="value")
         session_id = self.session_id
 
         if in_app:
             if clean:
                 raise ValueError("An in_app restart cannot be triggered with the clean flag set")
 
-            self._request_in_app_shutdown("eRestart")
+            if callable(callback):
+                callback()
+            else:
+                self._request_in_app_shutdown("eRestart")
 
             try:
                 self.raise_for_port(self.wait_for_port())
@@ -1110,6 +1139,9 @@ class Marionette(object):
 
         self.start_session(session_id=session_id)
         self.reset_timeouts()
+
+        # Restore the context as used before the restart
+        self.set_context(context)
 
         if in_app and self.session.get("processId"):
             # In some cases Firefox restarts itself by spawning into a new process group.

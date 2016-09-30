@@ -349,21 +349,10 @@ public:
     nsIntRegion fillPaintNeededRegion;
     nsIntRegion strokePaintNeededRegion;
 
-    if (aCtx->CurrentState().updateFilterOnWriteOnly) {
-      aCtx->UpdateFilter();
-      aCtx->CurrentState().updateFilterOnWriteOnly = false;
-    }
-
-    // This should not be empty, but if it is, we want to handle it
-    // rather than crash, as UpdateFilter() call above could have changed
-    // the number of filter primitives.
-    MOZ_ASSERT(!aCtx->CurrentState().filter.mPrimitives.IsEmpty());
-    if (!aCtx->CurrentState().filter.mPrimitives.IsEmpty()) {
-      FilterSupport::ComputeSourceNeededRegions(
-        aCtx->CurrentState().filter, mPostFilterBounds,
-        sourceGraphicNeededRegion, fillPaintNeededRegion,
-        strokePaintNeededRegion);
-    }
+    FilterSupport::ComputeSourceNeededRegions(
+      aCtx->CurrentState().filter, mPostFilterBounds,
+      sourceGraphicNeededRegion, fillPaintNeededRegion,
+      strokePaintNeededRegion);
 
     mSourceGraphicRect = sourceGraphicNeededRegion.GetBounds();
     mFillPaintRect = fillPaintNeededRegion.GetBounds();
@@ -2796,9 +2785,6 @@ CanvasRenderingContext2D::SetFilter(const nsAString& aFilter, ErrorResult& aErro
       UpdateFilter();
     }
   }
-  if (mCanvasElement && !mCanvasElement->IsWriteOnly()) {
-    CurrentState().updateFilterOnWriteOnly = true;
-  }
 }
 
 class CanvasUserSpaceMetrics : public UserSpaceMetricsWithSize
@@ -2867,6 +2853,8 @@ CanvasRenderingContext2D::UpdateFilter()
                              presShell->GetPresContext()),
       gfxRect(0, 0, mWidth, mHeight),
       CurrentState().filterAdditionalImages);
+  CurrentState().filterSourceGraphicTainted =
+    (mCanvasElement && mCanvasElement->IsWriteOnly());
 }
 
 //
@@ -4021,11 +4009,12 @@ struct MOZ_STACK_CLASS CanvasBidiProcessor : public nsBidiPresUtils::BidiProcess
       }
     }
 
-    if (style == Style::STROKE) {
-      const ContextState& state = *mState;
-      drawOpts.mAlpha = state.globalAlpha;
-      drawOpts.mCompositionOp = mCtx->UsedOperation();
+    const ContextState& state = *mState;
+    drawOpts.mAlpha = state.globalAlpha;
+    drawOpts.mCompositionOp = mCtx->UsedOperation();
+    params.drawOpts = &drawOpts;
 
+    if (style == Style::STROKE) {
       strokeOpts.mLineWidth = state.lineWidth;
       strokeOpts.mLineJoin = state.lineJoin;
       strokeOpts.mLineCap = state.lineCap;
@@ -4037,7 +4026,6 @@ struct MOZ_STACK_CLASS CanvasBidiProcessor : public nsBidiPresUtils::BidiProcess
 
       params.drawMode = DrawMode::GLYPH_STROKE;
       params.strokeOpts = &strokeOpts;
-      params.drawOpts = &drawOpts;
     }
 
     mTextRun->Draw(gfxTextRun::Range(mTextRun.get()), point, params);
@@ -4797,12 +4785,10 @@ CanvasRenderingContext2D::DrawImage(const CanvasImageSource& aImage,
       return;
     }
 
-#ifdef MOZ_EME
     if (video->ContainsRestrictedContent()) {
       aError.Throw(NS_ERROR_NOT_AVAILABLE);
       return;
     }
-#endif
 
     uint16_t readyState;
     if (NS_SUCCEEDED(video->GetReadyState(&readyState)) &&
@@ -5780,6 +5766,8 @@ CanvasRenderingContext2D::PutImageData_explicit(int32_t aX, int32_t aY, uint32_t
   //uint8_t *src = aArray->Data();
   uint8_t *dst = imgsurf->Data();
   uint8_t* srcLine = aArray->Data() + copyY * (aW * 4) + copyX * 4;
+  // For opaque canvases, we must still premultiply the RGB components, but write the alpha as opaque.
+  uint8_t alphaMask = mOpaque ? 255 : 0;
 #if 0
   printf("PutImageData_explicit: dirty x=%d y=%d w=%d h=%d copy x=%d y=%d w=%d h=%d ext x=%d y=%d w=%d h=%d\n",
        dirtyRect.x, dirtyRect.y, copyWidth, copyHeight,
@@ -5799,9 +5787,9 @@ CanvasRenderingContext2D::PutImageData_explicit(int32_t aX, int32_t aY, uint32_t
       *dst++ = gfxUtils::sPremultiplyTable[a * 256 + b];
       *dst++ = gfxUtils::sPremultiplyTable[a * 256 + g];
       *dst++ = gfxUtils::sPremultiplyTable[a * 256 + r];
-      *dst++ = a;
+      *dst++ = a | alphaMask;
 #else
-      *dst++ = a;
+      *dst++ = a | alphaMask;
       *dst++ = gfxUtils::sPremultiplyTable[a * 256 + r];
       *dst++ = gfxUtils::sPremultiplyTable[a * 256 + g];
       *dst++ = gfxUtils::sPremultiplyTable[a * 256 + b];

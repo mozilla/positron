@@ -93,9 +93,7 @@ public:
     return mTrackDemuxersMayBlock;
   }
 
-#ifdef MOZ_EME
   void SetCDMProxy(CDMProxy* aProxy) override;
-#endif
 
   // Returns a string describing the state of the decoder data.
   // Used for debugging purposes.
@@ -105,8 +103,8 @@ public:
 
 private:
 
-  bool HasVideo() { return mVideo.mTrackDemuxer; }
-  bool HasAudio() { return mAudio.mTrackDemuxer; }
+  bool HasVideo() const { return mVideo.mTrackDemuxer; }
+  bool HasAudio() const { return mAudio.mTrackDemuxer; }
 
   bool IsWaitingOnCDMResource();
 
@@ -528,11 +526,7 @@ private:
   // True if we've read the streams' metadata.
   bool mInitDone;
   MozPromiseHolder<MetadataPromise> mMetadataPromise;
-  bool IsEncrypted()
-  {
-    return mIsEncrypted;
-  }
-  bool mIsEncrypted;
+  bool IsEncrypted() const;
 
   // Set to true if any of our track buffers may be blocking.
   bool mTrackDemuxersMayBlock;
@@ -569,9 +563,8 @@ private:
   RefPtr<VideoFrameContainer> mVideoFrameContainer;
   layers::ImageContainer* GetImageContainer();
 
-#ifdef MOZ_EME
   RefPtr<CDMProxy> mCDMProxy;
-#endif
+
   RefPtr<GMPCrashHelper> mCrashHelper;
 
   void SetBlankDecode(TrackType aTrack, bool aIsBlankDecode);

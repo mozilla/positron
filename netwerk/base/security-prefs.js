@@ -55,8 +55,8 @@ pref("security.OCSP.GET.enabled", false);
 pref("security.pki.cert_short_lifetime_in_days", 10);
 // NB: Changes to this pref affect CERT_CHAIN_SHA1_POLICY_STATUS telemetry.
 // See the comment in CertVerifier.cpp.
-// 3 = allow SHA-1 for certificates issued before 2016 or by an imported root.
-pref("security.pki.sha1_enforcement_level", 3);
+// 4 = allow SHA-1 for certificates issued before 2016 or by an imported root.
+pref("security.pki.sha1_enforcement_level", 4);
 
 // security.pki.name_matching_mode controls how the platform matches hostnames
 // to name information in TLS certificates. The possible values are:
@@ -86,6 +86,11 @@ pref("security.pki.netscape_step_up_policy", 1);
 pref("security.pki.netscape_step_up_policy", 2);
 #endif
 
+// Configures Certificate Transparency support mode:
+// 0: Fully disabled.
+// 1: Only collect telemetry. CT qualification checks are not performed.
+pref("security.pki.certificate_transparency.mode", 1);
+
 pref("security.webauth.u2f", false);
 pref("security.webauth.u2f_enable_softtoken", false);
 pref("security.webauth.u2f_enable_usbtoken", false);
@@ -98,3 +103,15 @@ pref("security.ssl.errorReporting.automatic", false);
 // blacking themselves out by setting a bad pin.  (60 days by default)
 // https://tools.ietf.org/html/rfc7469#section-4.1
 pref("security.cert_pinning.max_max_age_seconds", 5184000);
+
+// If a request is mixed-content, send an HSTS priming request to attempt to
+// see if it is available over HTTPS.
+pref("security.mixed_content.send_hsts_priming", true);
+#ifdef RELEASE_BUILD
+// Don't change the order of evaluation of mixed-content and HSTS upgrades
+pref("security.mixed_content.use_hsts", false);
+#else
+// Change the order of evaluation so HSTS upgrades happen before
+// mixed-content blocking
+pref("security.mixed_content.use_hsts", true);
+#endif

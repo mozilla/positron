@@ -182,12 +182,12 @@ public:
   virtual void UnsuppressPainting() override;
 
   virtual nsresult GetAgentStyleSheets(
-      nsTArray<mozilla::StyleSheetHandle::RefPtr>& aSheets) override;
+      nsTArray<RefPtr<mozilla::StyleSheet>>& aSheets) override;
   virtual nsresult SetAgentStyleSheets(
-      const nsTArray<mozilla::StyleSheetHandle::RefPtr>& aSheets) override;
+      const nsTArray<RefPtr<mozilla::StyleSheet>>& aSheets) override;
 
-  virtual nsresult AddOverrideStyleSheet(mozilla::StyleSheetHandle aSheet) override;
-  virtual nsresult RemoveOverrideStyleSheet(mozilla::StyleSheetHandle aSheet) override;
+  virtual nsresult AddOverrideStyleSheet(mozilla::StyleSheet* aSheet) override;
+  virtual nsresult RemoveOverrideStyleSheet(mozilla::StyleSheet* aSheet) override;
 
   virtual nsresult HandleEventWithTarget(
                                  mozilla::WidgetEvent* aEvent,
@@ -391,6 +391,8 @@ public:
                               size_t *aPresContextSize) override;
   size_t SizeOfTextRuns(mozilla::MallocSizeOf aMallocSizeOf) const;
 
+  virtual void AddInvalidateHiddenPresShellObserver(nsRefreshDriver *aDriver) override;
+
   // This data is stored as a content property (nsGkAtoms::scrolling) on
   // mContentToScrollTo when we have a pending ScrollIntoView.
   struct ScrollIntoViewData {
@@ -539,7 +541,7 @@ protected:
   void ShowEventTargetDebug();
 #endif
 
-  void RecordStyleSheetChange(mozilla::StyleSheetHandle aStyleSheet);
+  void RecordStyleSheetChange(mozilla::StyleSheet* aStyleSheet);
 
   void RemovePreferenceStyles();
 
@@ -860,7 +862,7 @@ protected:
   mozilla::layers::ScrollableLayerGuid mMouseEventTargetGuid;
 
   // mStyleSet owns it but we maintain a ref, may be null
-  mozilla::StyleSheetHandle::RefPtr mPrefStyleSheet;
+  RefPtr<mozilla::StyleSheet> mPrefStyleSheet;
 
   // Set of frames that we should mark with NS_FRAME_HAS_DIRTY_CHILDREN after
   // we finish reflowing mCurrentReflowRoot.
