@@ -2,14 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-'use strict';
+"use strict";
 
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
 const positronUtil = process.positronBinding('positron_util');
 
-exports.setupBufferJS = positronUtil.makeStub('buffer.setupBufferJS', { 
-  returnValue: function(bufferPrototype, bindingObj) {
-    bindingObj.flags = [];
+module.exports = {
+  protocol: {
+    registerStandardSchemes: positronUtil.makeStub('atom_common_protocol.registerStandardSchemes'),
+    registerHttpProtocol: positronUtil.makeStub('atom_common_protocol.registerHttpProtocol'),
   },
-});
+};
+positronUtil.makeStub('atom_common_protocol')();

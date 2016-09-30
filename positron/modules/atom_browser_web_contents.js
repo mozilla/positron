@@ -5,8 +5,12 @@
 "use strict";
 
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
-const { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
-const positronUtil = process.binding('positron_util');
+// TODO: remove workaround for broken Cu.import.
+let scope = {};
+Cu.import('resource://gre/modules/Services.jsm', scope);
+const Services = scope.Services;
+
+const positronUtil = process.positronBinding('positron_util');
 
 let wrapWebContents = null;
 

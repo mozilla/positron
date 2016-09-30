@@ -4,6 +4,72 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-WEBIDL_FILES += [
-    'Process.webidl',
+DEFINES['NODE_WANT_INTERNALS'] = 1
+
+# Positron needs -mmacosx-version-min=10.9 in order to build SpiderNode per
+# https://github.com/mozilla/spidernode/issues/166.
+if CONFIG['OS_ARCH'] == 'Darwin':
+    CXXFLAGS += ['-mmacosx-version-min=10.9']
+    LDFLAGS += ['-mmacosx-version-min=10.9']
+
+# Declare a dependency on static libjs in an attempt to force it to get built
+# before compiling and linking SpiderNode.
+# TODO: figure out a better way to express this dependency (and SpiderNode's
+# dependency on icudata.o, for that matter).
+USE_LIBS += ['static:js']
+
+# Depend on mozglue.  This isn't needed on Mac, but it does seem to be needed
+# on Linux.  browser/app/moz.build does this unconditionally.  I wonder if we
+# should move it to positron/app/moz.build.
+USE_LIBS += [
+    'mozglue',
 ]
+
+# The SpiderNode libraries that Positron uses.  This needs to be kept in sync
+# with the SPIDERNODE_LIBS list in positron/webidl/Makefile.in.
+USE_LIBS += [
+    'static:/positron/app/spidernode/.libs/cares',
+    'static:/positron/app/spidernode/.libs/http_parser',
+    'static:/positron/app/spidernode/.libs/node',
+    'static:/positron/app/spidernode/.libs/openssl',
+    'static:/positron/app/spidernode/.libs/spidershim',
+    'static:/positron/app/spidernode/.libs/uv',
+    'static:/positron/app/spidernode/.libs/zlib',
+]
+
+XPIDL_SOURCES += [
+  'nsINodeLoader.idl',
+]
+
+LOCAL_INCLUDES += [
+  '../spidernode/deps/cares/include',
+  '../spidernode/deps/spidershim/include',
+  '../spidernode/deps/uv/include',
+  '../spidernode/src',
+  '/js/xpconnect/src',
+]
+
+EXPORTS += [
+    'NodeLoader.h',
+]
+
+SOURCES += [
+    'NodeBindings.cpp',
+    'NodeLoader.cpp',
+]
+
+if CONFIG['OS_ARCH'] == 'Darwin':
+    SOURCES += [
+        'NodeBindingsMac.cpp',
+    ]
+
+if CONFIG['OS_ARCH'] == 'Linux':
+    SOURCES += [
+        'NodeBindingsLinux.cpp',
+    ]
+
+XPIDL_MODULE = 'positron'
+
+FINAL_LIBRARY = 'xul'
+
+include('/ipc/chromium/chromium-config.mozbuild')

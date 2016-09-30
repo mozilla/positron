@@ -4,6 +4,6 @@
 
 "use strict";
 
-const positronUtil = process.binding('positron_util');
+const positronUtil = process.positronBinding('positron_util');
 
 exports._setWrapDebugger = positronUtil.makeStub('atom_browser_debugger._setWrapDebugger');

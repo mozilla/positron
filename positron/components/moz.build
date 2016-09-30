@@ -5,8 +5,6 @@
 EXTRA_COMPONENTS += [
     'PositronCLH.js',
     'PositronCLH.manifest',
-    'Process.js',
-    'Process.manifest',
 ]
 
 EXTRA_JS_MODULES += [
