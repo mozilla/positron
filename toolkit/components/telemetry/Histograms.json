@@ -2014,6 +2014,96 @@
     "n_values": 32,
     "description": "H2: goaway reason from peer from rfc 7540. 31 is none received."
   },
+  "HPACK_ELEMENTS_EVICTED_DECOMPRESSOR": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 256,
+    "n_buckets": 50,
+    "description": "HPACK: Number of items removed from dynamic table to make room for 1 new item",
+    "alert_emails": ["necko@mozilla.com", "hurley@mozilla.com"],
+    "bug_numbers": [1296280]
+  },
+  "HPACK_BYTES_EVICTED_DECOMPRESSOR": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 8192,
+    "n_buckets": 50,
+    "description": "HPACK: Number of bytes removed from dynamic table to make room for 1 new item",
+    "alert_emails": ["necko@mozilla.com", "hurley@mozilla.com"],
+    "bug_numbers": [1296280]
+  },
+  "HPACK_BYTES_EVICTED_RATIO_DECOMPRESSOR": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 256,
+    "n_buckets": 50,
+    "description": "HPACK: Ratio of bytes evicted to bytes added (* 100)",
+    "alert_emails": ["necko@mozilla.com", "hurley@mozilla.com"],
+    "bug_numbers": [1296280]
+  },
+  "HPACK_PEAK_COUNT_DECOMPRESSOR": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 1024,
+    "n_buckets": 50,
+    "description": "HPACK: peak number of items in the dynamic table",
+    "alert_emails": ["necko@mozilla.com", "hurley@mozilla.com"],
+    "bug_numbers": [1296280]
+  },
+  "HPACK_PEAK_SIZE_DECOMPRESSOR": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 16384,
+    "n_buckets": 100,
+    "description": "HPACK: peak size in bytes of the table",
+    "alert_emails": ["necko@mozilla.com", "hurley@mozilla.com"],
+    "bug_numbers": [1296280]
+  },
+  "HPACK_ELEMENTS_EVICTED_COMPRESSOR": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 256,
+    "n_buckets": 50,
+    "description": "HPACK: Number of items removed from dynamic table to make room for 1 new item",
+    "alert_emails": ["necko@mozilla.com", "hurley@mozilla.com"],
+    "bug_numbers": [1296280]
+  },
+  "HPACK_BYTES_EVICTED_COMPRESSOR": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 8192,
+    "n_buckets": 50,
+    "description": "HPACK: Number of bytes removed from dynamic table to make room for 1 new item",
+    "alert_emails": ["necko@mozilla.com", "hurley@mozilla.com"],
+    "bug_numbers": [1296280]
+  },
+  "HPACK_BYTES_EVICTED_RATIO_COMPRESSOR": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 256,
+    "n_buckets": 50,
+    "description": "HPACK: Ratio of bytes evicted to bytes added (* 100)",
+    "alert_emails": ["necko@mozilla.com", "hurley@mozilla.com"],
+    "bug_numbers": [1296280]
+  },
+  "HPACK_PEAK_COUNT_COMPRESSOR": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 1024,
+    "n_buckets": 50,
+    "description": "HPACK: peak number of items in the dynamic table",
+    "alert_emails": ["necko@mozilla.com", "hurley@mozilla.com"],
+    "bug_numbers": [1296280]
+  },
+  "HPACK_PEAK_SIZE_COMPRESSOR": {
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 16384,
+    "n_buckets": 100,
+    "description": "HPACK: peak size in bytes of the table",
+    "alert_emails": ["necko@mozilla.com", "hurley@mozilla.com"],
+    "bug_numbers": [1296280]
+  },
   "HTTP_CONNECTION_ENTRY_CACHE_HIT_1" : {
     "expires_in_version": "never",
     "kind": "boolean",
@@ -5423,6 +5513,13 @@
     "keyed": true,
     "description": "Count of individual invalid ping types that were submitted to Telemetry."
   },
+  "TELEMETRY_INVALID_PAYLOAD_SUBMITTED": {
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "never",
+    "bug_numbers": [1292226],
+    "kind": "count",
+    "description": "Count of individual invalid payloads that were submitted to Telemetry."
+  },
   "TELEMETRY_PING_EVICTED_FOR_SERVER_ERRORS": {
     "alert_emails": ["telemetry-client-dev@mozilla.com"],
     "expires_in_version": "never",
@@ -6240,7 +6337,14 @@
     "kind": "boolean",
     "description": "Reports whether a decoder for an HTTP Live Streaming media type was created when requested.",
     "bug_numbers": [1262659]
-
+  },
+  "MEDIA_DECODING_PROCESS_CRASH": {
+    "alert_emails": ["bwu@mozilla.com", "jolin@mozilla.com", "jacheng@mozilla.com"],
+    "expires_in_version": "57",
+    "kind": "count",
+    "bug_numbers": [1297556, 1257777],
+    "description": "Records a value each time Fennec remote decoding process crashes unexpected while decoding media content.",
+    "releaseChannelCollection": "opt-out"
   },
   "VIDEO_MFT_OUTPUT_NULL_SAMPLES": {
     "alert_emails": ["cpearce@mozilla.com"],
@@ -7593,6 +7697,22 @@
     "n_values": 10,
     "description": "How often would blocked mixed content be allowed if HSTS upgrades were allowed? 0=display/no-HSTS, 1=display/HSTS, 2=active/no-HSTS, 3=active/HSTS"
   },
+  "MIXED_CONTENT_HSTS_PRIMING": {
+    "alert_emails": ["seceng@mozilla.org"],
+    "bug_numbers": [1246540],
+    "expires_in_version": "60",
+    "kind": "enumerated",
+    "n_values": 16,
+    "description": "How often would blocked mixed content be allowed if HSTS upgrades were allowed, including how often would we send an HSTS priming request? 0=display/no-HSTS, 1=display/HSTS, 2=active/no-HSTS, 3=active/HSTS, 4=display/no-HSTS-priming, 5=display/do-HSTS-priming, 6=active/no-HSTS-priming, 7=active/do-HSTS-priming"
+  },
+  "MIXED_CONTENT_HSTS_PRIMING_RESULT": {
+    "alert_emails": ["seceng@mozilla.org"],
+    "bug_numbers": [1246540],
+    "expires_in_version": "60",
+    "kind": "enumerated",
+    "n_values": 16,
+    "description": "How often do we get back an HSTS priming result which upgrades the connection to HTTPS? 0=cached (no upgrade), 1=cached (do upgrade), 2=cached (blocked), 3=already upgraded, 4=priming succeeded, 5=priming succeeded (block due to pref), 6=priming succeeded (no upgrade due to pref), 7=priming failed (block), 8=priming failed (accept)"
+  },
   "MIXED_CONTENT_OBJECT_SUBREQUEST": {
     "alert_emails": ["seceng@mozilla.org"],
     "bug_numbers": [1244116],
@@ -7966,6 +8086,33 @@
     "n_buckets": 10,
     "description": "How many permanent certificate overrides a user has stored."
   },
+  "SSL_SCTS_ORIGIN": {
+    "alert_emails": ["seceng-telemetry@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 10,
+    "bug_numbers": [1293231],
+    "releaseChannelCollection": "opt-out",
+    "description": "Origin of Signed Certificate Timestamps received (1=Embedded, 2=TLS handshake extension, 3=Stapled OCSP response)"
+  },
+  "SSL_SCTS_PER_CONNECTION": {
+    "alert_emails": ["seceng-telemetry@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 10,
+    "bug_numbers": [1293231],
+    "releaseChannelCollection": "opt-out",
+    "description": "Histogram of Signed Certificate Timestamps per SSL connection, from all sources (embedded / OCSP Stapling / TLS handshake). Bucket 0 counts the cases when no SCTs were received, or none were extracted due to parsing errors."
+  },
+  "SSL_SCTS_VERIFICATION_STATUS": {
+    "alert_emails": ["seceng-telemetry@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 10,
+    "bug_numbers": [1293231],
+    "releaseChannelCollection": "opt-out",
+    "description": "Verification status of Signed Certificate Timestamps received (0=Decoding error, 1=SCT verified, 2=SCT from unknown log, 3=Invalid SCT signature, 4=SCT timestamp is in the future)"
+  },
   "SSL_SERVER_AUTH_EKU": {
     "alert_emails": ["seceng-telemetry@mozilla.com"],
     "expires_in_version": "never",
@@ -8086,7 +8233,7 @@
     "expires_in_version": "default",
     "kind": "enumerated",
     "n_values": 6,
-    "description": "1 = No SHA1 signatures, 2 = SHA1 certificates issued before 2016, 3 = SHA1 certificates issued by an imported root, 4 = SHA1 certificates issued after 2015, 5 = another error prevented successful verification"
+    "description": "1 = No SHA1 signatures, 2 = SHA1 certificates issued by an imported root, 3 = SHA1 certificates issued before 2016, 4 = SHA1 certificates issued after 2015, 5 = another error prevented successful verification"
   },
   "WEAVE_CONFIGURED": {
     "expires_in_version": "default",
@@ -8585,6 +8732,24 @@
     "high": 1000,
     "n_buckets": 100,
     "description": "720p VP9 decode benchmark measurement in frames per second",
+    "releaseChannelCollection": "opt-out"
+  },
+  "VIDEO_CDM_CREATED": {
+    "alert_emails": ["cpearce@mozilla.com"],
+    "expires_in_version": "58",
+    "bug_numbers": [1304207],
+    "kind": "enumerated",
+    "n_values": 6,
+    "description": "Note the type of CDM (0=ClearKey, 1=Primetime, 2=Widevine, 3=unknown) every time we successfully instantiate an EME MediaKeys object.",
+    "releaseChannelCollection": "opt-out"
+  },
+  "VIDEO_CDM_GENERATE_REQUEST_CALLED": {
+    "alert_emails": ["cpearce@mozilla.com"],
+    "expires_in_version": "58",
+    "bug_numbers": [1305552],
+    "kind": "enumerated",
+    "n_values": 6,
+    "description": "Note the type of CDM (0=ClearKey, 1=Primetime, 2=Widevine, 3=unknown) every time we call MediaKeySession.generateRequest().",
     "releaseChannelCollection": "opt-out"
   },
   "MEDIA_CODEC_USED": {

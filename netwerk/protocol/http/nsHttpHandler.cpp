@@ -239,6 +239,7 @@ nsHttpHandler::nsHttpHandler()
     , mTCPKeepaliveLongLivedIdleTimeS(600)
     , mEnforceH1Framing(FRAMECHECK_BARELY)
     , mKeepEmptyResponseHeadersAsEmtpyString(false)
+    , mDefaultHpackBuffer(4096)
 {
     LOG(("Creating nsHttpHandler [this=%p].\n", this));
 
@@ -1693,6 +1694,13 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         }
     }
 
+    if (PREF_CHANGED(HTTP_PREF("spdy.hpack-default-buffer"))) {
+        rv = prefs->GetIntPref(HTTP_PREF("spdy.default-hpack-buffer"), &val);
+        if (NS_SUCCEEDED(rv)) {
+            mDefaultHpackBuffer = val;
+        }
+    }
+
     // Enable HTTP response timeout if TCP Keepalives are disabled.
     mResponseTimeoutEnabled = !mTCPKeepaliveShortLivedEnabled &&
                               !mTCPKeepaliveLongLivedEnabled;
@@ -2232,7 +2240,8 @@ nsHttpHandler::SpeculativeConnectInternal(nsIURI *aURI,
         flags |= nsISocketProvider::NO_PERMANENT_STORAGE;
     nsCOMPtr<nsIURI> clone;
     if (NS_SUCCEEDED(sss->IsSecureURI(nsISiteSecurityService::HEADER_HSTS,
-                                      aURI, flags, &isStsHost)) && isStsHost) {
+                                      aURI, flags, nullptr, &isStsHost)) &&
+                                      isStsHost) {
         if (NS_SUCCEEDED(NS_GetSecureUpgradedURI(aURI,
                                                  getter_AddRefs(clone)))) {
             aURI = clone.get();

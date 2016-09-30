@@ -110,6 +110,7 @@ pref("network.http.max-persistent-connections-per-proxy", 20);
 
 // spdy
 pref("network.http.spdy.push-allowance", 32768);
+pref("network.http.spdy.default-hpack-buffer", 4096); // 4k
 
 // See bug 545869 for details on why these are set the way they are
 pref("network.buffer.cache.count", 24);
@@ -194,8 +195,7 @@ pref("dom.forms.number", true);
 /* extension manager and xpinstall */
 pref("xpinstall.whitelist.directRequest", false);
 pref("xpinstall.whitelist.fileRequest", false);
-pref("xpinstall.whitelist.add", "https://addons.mozilla.org");
-pref("xpinstall.whitelist.add", "https://testpilot.firefox.com");
+pref("xpinstall.whitelist.add", "https://addons.mozilla.org,https://testpilot.firefox.com");
 
 pref("xpinstall.signatures.required", true);
 

@@ -335,9 +335,9 @@ ImageBridgeChild::NotifyNotUsedToNonRecycle(uint64_t aTextureId, uint64_t aTrans
   // Release TextureClient on allocator's message loop.
   RefPtr<TextureClientReleaseTask> task =
     MakeAndAddRef<TextureClientReleaseTask>(client);
-  RefPtr<ClientIPCAllocator> allocator = client->GetAllocator();
+  RefPtr<LayersIPCChannel> allocator = client->GetAllocator();
   client = nullptr;
-  allocator->AsClientAllocator()->GetMessageLoop()->PostTask(task.forget());
+  allocator->GetMessageLoop()->PostTask(task.forget());
 #else
   NS_RUNTIMEABORT("not reached");
 #endif
@@ -1152,7 +1152,9 @@ ImageBridgeChild::AllocUnsafeShmem(size_t aSize,
     return DispatchAllocShmemInternal(aSize, aType, aShmem, true); // true: unsafe
   }
 
-  MOZ_ASSERT(CanSend());
+  if (!CanSend()) {
+    return false;
+  }
   return PImageBridgeChild::AllocUnsafeShmem(aSize, aType, aShmem);
 }
 
@@ -1165,14 +1167,15 @@ ImageBridgeChild::AllocShmem(size_t aSize,
     return DispatchAllocShmemInternal(aSize, aType, aShmem, false); // false: unsafe
   }
 
-  MOZ_ASSERT(CanSend());
+  if (!CanSend()) {
+    return false;
+  }
   return PImageBridgeChild::AllocShmem(aSize, aType, aShmem);
 }
 
 // NewRunnableFunction accepts a limited number of parameters so we need a
 // struct here
 struct AllocShmemParams {
-  RefPtr<ISurfaceAllocator> mAllocator;
   size_t mSize;
   ipc::SharedMemory::SharedMemoryType mType;
   ipc::Shmem* mShmem;
@@ -1185,18 +1188,17 @@ ImageBridgeChild::ProxyAllocShmemNow(SynchronousTask* aTask, AllocShmemParams* a
 {
   AutoCompleteTask complete(aTask);
 
-  MOZ_ASSERT(aParams);
-
-  auto shmAllocator = aParams->mAllocator->AsShmemAllocator();
-  if (aParams->mUnsafe) {
-    aParams->mSuccess = shmAllocator->AllocUnsafeShmem(aParams->mSize,
-                                                       aParams->mType,
-                                                       aParams->mShmem);
-  } else {
-    aParams->mSuccess = shmAllocator->AllocShmem(aParams->mSize,
-                                                 aParams->mType,
-                                                 aParams->mShmem);
+  if (!CanSend()) {
+    return;
   }
+
+  bool ok = false;
+  if (aParams->mUnsafe) {
+    ok = AllocUnsafeShmem(aParams->mSize, aParams->mType, aParams->mShmem);
+  } else {
+    ok = AllocShmem(aParams->mSize, aParams->mType, aParams->mShmem);
+  }
+  aParams->mSuccess = ok;
 }
 
 bool
@@ -1208,7 +1210,7 @@ ImageBridgeChild::DispatchAllocShmemInternal(size_t aSize,
   SynchronousTask task("AllocatorProxy alloc");
 
   AllocShmemParams params = {
-    this, aSize, aType, aShmem, aUnsafe, true
+    aSize, aType, aShmem, aUnsafe, false
   };
 
   RefPtr<Runnable> runnable = WrapRunnable(
@@ -1225,20 +1227,23 @@ ImageBridgeChild::DispatchAllocShmemInternal(size_t aSize,
 
 void
 ImageBridgeChild::ProxyDeallocShmemNow(SynchronousTask* aTask,
-                                       ISurfaceAllocator* aAllocator,
                                        ipc::Shmem* aShmem)
 {
   AutoCompleteTask complete(aTask);
 
-  MOZ_ASSERT(aShmem);
-
-  aAllocator->AsShmemAllocator()->DeallocShmem(*aShmem);
+  if (!CanSend()) {
+    return;
+  }
+  DeallocShmem(*aShmem);
 }
 
 void
 ImageBridgeChild::DeallocShmem(ipc::Shmem& aShmem)
 {
   if (InImageBridgeChildThread()) {
+    if (!CanSend()) {
+      return;
+    }
     PImageBridgeChild::DeallocShmem(aShmem);
     return;
   }
@@ -1249,7 +1254,6 @@ ImageBridgeChild::DeallocShmem(ipc::Shmem& aShmem)
     RefPtr<ImageBridgeChild>(this),
     &ImageBridgeChild::ProxyDeallocShmemNow,
     &task,
-    this,
     &aShmem);
   GetMessageLoop()->PostTask(runnable.forget());
 

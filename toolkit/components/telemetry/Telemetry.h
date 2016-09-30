@@ -143,13 +143,6 @@ void AccumulateChild(const nsTArray<Accumulation>& aAccumulations);
 void AccumulateChildKeyed(const nsTArray<KeyedAccumulation>& aAccumulations);
 
 /**
- * This clears the data for a histogram in TelemetryHistogramEnums.h.
- *
- * @param id - histogram id
- */
-void ClearHistogram(ID id);
-
-/**
  * Enable/disable recording for this histogram at runtime.
  * Recording is enabled by default, unless listed at kRecordingInitiallyDisabledIDs[].
  * id must be a valid telemetry enum, otherwise an assertion is triggered.
@@ -363,7 +356,7 @@ void WriteFailedProfileLock(nsIFile* aProfileDir);
  * Adds the value to the given scalar.
  *
  * @param aId The scalar enum id.
- * @param aValue The unsigned value to add to the scalar.
+ * @param aValue The value to add to the scalar.
  */
 void ScalarAdd(mozilla::Telemetry::ScalarID aId, uint32_t aValue);
 
@@ -371,7 +364,7 @@ void ScalarAdd(mozilla::Telemetry::ScalarID aId, uint32_t aValue);
  * Sets the scalar to the given value.
  *
  * @param aId The scalar enum id.
- * @param aValue The numeric, unsigned value to set the scalar to.
+ * @param aValue The value to set the scalar to.
  */
 void ScalarSet(mozilla::Telemetry::ScalarID aId, uint32_t aValue);
 
@@ -379,7 +372,15 @@ void ScalarSet(mozilla::Telemetry::ScalarID aId, uint32_t aValue);
  * Sets the scalar to the given value.
  *
  * @param aId The scalar enum id.
- * @param aValue The string value to set the scalar to, truncated to
+ * @param aValue The value to set the scalar to.
+ */
+void ScalarSet(mozilla::Telemetry::ScalarID aId, bool aValue);
+
+/**
+ * Sets the scalar to the given value.
+ *
+ * @param aId The scalar enum id.
+ * @param aValue The value to set the scalar to, truncated to
  *        50 characters if exceeding that length.
  */
 void ScalarSet(mozilla::Telemetry::ScalarID aId, const nsAString& aValue);
@@ -388,10 +389,47 @@ void ScalarSet(mozilla::Telemetry::ScalarID aId, const nsAString& aValue);
  * Sets the scalar to the maximum of the current and the passed value.
  *
  * @param aId The scalar enum id.
- * @param aValue The unsigned value the scalar is set to if its greater
+ * @param aValue The value the scalar is set to if its greater
  *        than the current value.
  */
 void ScalarSetMaximum(mozilla::Telemetry::ScalarID aId, uint32_t aValue);
+
+/**
+ * Adds the value to the given scalar.
+ *
+ * @param aId The scalar enum id.
+ * @param aKey The scalar key.
+ * @param aValue The value to add to the scalar.
+ */
+void ScalarAdd(mozilla::Telemetry::ScalarID aId, const nsAString& aKey, uint32_t aValue);
+
+/**
+ * Sets the scalar to the given value.
+ *
+ * @param aId The scalar enum id.
+ * @param aKey The scalar key.
+ * @param aValue The value to set the scalar to.
+ */
+void ScalarSet(mozilla::Telemetry::ScalarID aId, const nsAString& aKey, uint32_t aValue);
+
+/**
+ * Sets the scalar to the given value.
+ *
+ * @param aId The scalar enum id.
+ * @param aKey The scalar key.
+ * @param aValue The value to set the scalar to.
+ */
+void ScalarSet(mozilla::Telemetry::ScalarID aId, const nsAString& aKey, bool aValue);
+
+/**
+ * Sets the scalar to the maximum of the current and the passed value.
+ *
+ * @param aId The scalar enum id.
+ * @param aKey The scalar key.
+ * @param aValue The value the scalar is set to if its greater
+ *        than the current value.
+ */
+void ScalarSetMaximum(mozilla::Telemetry::ScalarID aId, const nsAString& aKey, uint32_t aValue);
 
 } // namespace Telemetry
 } // namespace mozilla

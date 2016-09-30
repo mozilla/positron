@@ -155,13 +155,13 @@ EvaluateConstantOperands(TempAllocator& alloc, MBinaryInstruction* ins, bool* pt
         MOZ_CRASH("NYI");
     }
 
-    // For a float32 or double value, use NewRawDouble so that we preserve NaN
+    // For a float32 or double value, use the Raw* New so that we preserve NaN
     // bits. This isn't strictly required for either ES or wasm, but it does
     // avoid making constant-folding observable.
     if (ins->type() == MIRType::Double)
-        return MConstant::NewRawDouble(alloc, ret);
+        return MConstant::New(alloc, wasm::RawF64(ret));
     if (ins->type() == MIRType::Float32)
-        return MConstant::NewRawFloat32(alloc, float(ret));
+        return MConstant::New(alloc, wasm::RawF32(float(ret)));
 
     Value retVal;
     retVal.setNumber(JS::CanonicalizeNaN(ret));
@@ -760,15 +760,19 @@ MConstant::NewFloat32(TempAllocator& alloc, double d)
 }
 
 MConstant*
-MConstant::NewRawFloat32(TempAllocator& alloc, float f)
+MConstant::New(TempAllocator& alloc, wasm::RawF32 f)
 {
-    return new(alloc) MConstant(f);
+    auto* c = new(alloc) MConstant(Int32Value(f.bits()), nullptr);
+    c->setResultType(MIRType::Float32);
+    return c;
 }
 
 MConstant*
-MConstant::NewRawDouble(TempAllocator& alloc, double d)
+MConstant::New(TempAllocator& alloc, wasm::RawF64 d)
 {
-    return new(alloc) MConstant(d);
+    auto* c = new(alloc) MConstant(int64_t(d.bits()));
+    c->setResultType(MIRType::Double);
+    return c;
 }
 
 MConstant*
@@ -1863,11 +1867,10 @@ MAtomicIsLockFree::foldsTo(TempAllocator& alloc)
     return MConstant::New(alloc, BooleanValue(AtomicOperations::isLockfree(i)));
 }
 
-MParameter*
-MParameter::New(TempAllocator& alloc, int32_t index, TemporaryTypeSet* types)
-{
-    return new(alloc) MParameter(index, types);
-}
+// Define |THIS_SLOT| as part of this translation unit, as it is used to
+// specialized the parameterized |New| function calls introduced by
+// TRIVIAL_NEW_WRAPPERS.
+const int32_t MParameter::THIS_SLOT;
 
 void
 MParameter::printOpcode(GenericPrinter& out) const
@@ -3187,10 +3190,10 @@ MMinMax::foldsTo(TempAllocator& alloc)
             if (mozilla::NumberEqualsInt32(result, &cast))
                 return MConstant::New(alloc, Int32Value(cast));
         } else if (type() == MIRType::Float32) {
-            return MConstant::NewFloat32(alloc, result);
+            return MConstant::New(alloc, wasm::RawF32(float(result)));
         } else {
             MOZ_ASSERT(type() == MIRType::Double);
-            return MConstant::NewRawDouble(alloc, result);
+            return MConstant::New(alloc, wasm::RawF64(result));
         }
     }
 
@@ -4174,7 +4177,7 @@ MToDouble::foldsTo(TempAllocator& alloc)
 
     if (input->isConstant() && input->toConstant()->isTypeRepresentableAsDouble()) {
         double out = input->toConstant()->numberToDouble();
-        return MConstant::NewRawDouble(alloc, out);
+        return MConstant::New(alloc, wasm::RawF64(out));
     }
 
     return this;
@@ -4198,8 +4201,10 @@ MToFloat32::foldsTo(TempAllocator& alloc)
         return input->toToDouble()->input();
     }
 
-    if (input->isConstant() && input->toConstant()->isTypeRepresentableAsDouble())
-        return MConstant::NewRawFloat32(alloc, float(input->toConstant()->numberToDouble()));
+    if (input->isConstant() && input->toConstant()->isTypeRepresentableAsDouble()) {
+        float out = float(input->toConstant()->numberToDouble());
+        return MConstant::New(alloc, wasm::RawF32(out));
+    }
 
     return this;
 }

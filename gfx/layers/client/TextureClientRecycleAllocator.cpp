@@ -7,7 +7,7 @@
 #include "ImageContainer.h"
 #include "mozilla/layers/BufferTexture.h"
 #include "mozilla/layers/ISurfaceAllocator.h"
-#include "mozilla/layers/CompositableForwarder.h"
+#include "mozilla/layers/TextureForwarder.h"
 #include "TextureClientRecycleAllocator.h"
 
 namespace mozilla {
@@ -72,7 +72,7 @@ public:
     return true;
   }
 
-  already_AddRefed<TextureClient> Allocate(CompositableForwarder* aAllocator) override
+  already_AddRefed<TextureClient> Allocate(KnowsCompositor* aAllocator) override
   {
     return mAllocator->Allocate(mFormat,
                                 mSize,
@@ -114,7 +114,7 @@ YCbCrTextureClientAllocationHelper::IsCompatible(TextureClient* aTextureClient)
 }
 
 already_AddRefed<TextureClient>
-YCbCrTextureClientAllocationHelper::Allocate(CompositableForwarder* aAllocator)
+YCbCrTextureClientAllocationHelper::Allocate(KnowsCompositor* aAllocator)
 {
   return TextureClient::CreateForYCbCr(aAllocator,
                                        mData.mYSize, mData.mCbCrSize,
@@ -122,7 +122,7 @@ YCbCrTextureClientAllocationHelper::Allocate(CompositableForwarder* aAllocator)
                                        mTextureFlags);
 }
 
-TextureClientRecycleAllocator::TextureClientRecycleAllocator(CompositableForwarder* aAllocator)
+TextureClientRecycleAllocator::TextureClientRecycleAllocator(KnowsCompositor* aAllocator)
   : mSurfaceAllocator(aAllocator)
   , mMaxPooledSize(kMaxPooledSized)
   , mLock("TextureClientRecycleAllocatorImp.mLock")
@@ -189,7 +189,7 @@ TextureClientRecycleAllocator::CreateOrRecycle(ITextureClientAllocationHelper& a
         RefPtr<Runnable> task = new TextureClientReleaseTask(textureHolder->GetTextureClient());
         textureHolder->ClearTextureClient();
         textureHolder = nullptr;
-        mSurfaceAllocator->GetMessageLoop()->PostTask(task.forget());
+        mSurfaceAllocator->GetTextureForwarder()->GetMessageLoop()->PostTask(task.forget());
       } else {
         textureHolder->GetTextureClient()->RecycleTexture(aHelper.mTextureFlags);
       }
@@ -226,8 +226,8 @@ TextureClientRecycleAllocator::Allocate(gfx::SurfaceFormat aFormat,
                                         TextureFlags aTextureFlags,
                                         TextureAllocationFlags aAllocFlags)
 {
-  return TextureClient::CreateForDrawing(mSurfaceAllocator, aFormat, aSize, aSelector,
-                                         aTextureFlags, aAllocFlags);
+  return TextureClient::CreateForDrawing(mSurfaceAllocator, aFormat, aSize,
+                                         aSelector, aTextureFlags, aAllocFlags);
 }
 
 void

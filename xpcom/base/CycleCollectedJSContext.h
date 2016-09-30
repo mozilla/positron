@@ -143,6 +143,7 @@ protected:
   CycleCollectedJSContext();
   virtual ~CycleCollectedJSContext();
 
+  MOZ_IS_CLASS_INIT
   nsresult Initialize(JSContext* aParentContext,
                       uint32_t aMaxBytes,
                       uint32_t aMaxNurseryBytes);
@@ -482,7 +483,7 @@ void TraceScriptHolder(nsISupports* aHolder, JSTracer* aTracer);
 // Returns true if the JS::TraceKind is one the cycle collector cares about.
 inline bool AddToCCKind(JS::TraceKind aKind)
 {
-  return aKind == JS::TraceKind::Object || aKind == JS::TraceKind::Script;
+  return aKind == JS::TraceKind::Object || aKind == JS::TraceKind::Script || aKind == JS::TraceKind::Scope;
 }
 
 bool

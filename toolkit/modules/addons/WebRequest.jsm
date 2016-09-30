@@ -371,6 +371,11 @@ HttpObserverManager = {
     let headers = [];
     let visitor = {
       visitHeader(name, value) {
+        try {
+          value = channel.getProperty(`webrequest-header-${name.toLowerCase()}`);
+        } catch (e) {
+          // This will throw if the property does not exist.
+        }
         headers.push({name, value});
       },
 
@@ -379,6 +384,7 @@ HttpObserverManager = {
     };
 
     try {
+      channel.QueryInterface(Ci.nsIPropertyBag);
       channel[method](visitor);
     } catch (e) {
       Cu.reportError(`webRequest Error: ${e} trying to perform ${method} in ${event}@${channel.name}`);
@@ -422,9 +428,11 @@ HttpObserverManager = {
       case "http-on-modify-request":
         this.modify(channel, topic, data);
         break;
-      case "http-on-examine-response":
       case "http-on-examine-cached-response":
       case "http-on-examine-merged-response":
+        getData(channel).fromCache = true;
+        // falls through
+      case "http-on-examine-response":
         this.examine(channel, topic, data);
         break;
     }
@@ -532,6 +540,7 @@ HttpObserverManager = {
           method: channel.requestMethod,
           browser: browser,
           type: WebRequestCommon.typeForPolicyType(policyType),
+          fromCache: getData(channel).fromCache,
         };
 
         if (loadInfo) {
@@ -613,7 +622,20 @@ HttpObserverManager = {
       if (opts.responseHeaders && result.responseHeaders) {
         this.replaceHeaders(
           result.responseHeaders, responseHeaderNames,
-          (name, value) => channel.setResponseHeader(name, value, false)
+          (name, value) => {
+            if (name.toLowerCase() === "content-type" && value) {
+              // The Content-Type header value can't be modified, so we
+              // set the channel's content type directly, instead, and
+              // record that we made the change for the sake of
+              // subsequent observers.
+              channel.contentType = value;
+
+              channel.QueryInterface(Ci.nsIWritablePropertyBag);
+              channel.setProperty("webrequest-header-content-type", value);
+            } else {
+              channel.setResponseHeader(name, value, false);
+            }
+          }
         );
       }
     }

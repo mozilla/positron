@@ -456,7 +456,7 @@ public:
 
     static bool OffMainThreadCompositingEnabled();
 
-    virtual bool CanUseHardwareVideoDecoding();
+    void UpdateCanUseHardwareVideoDecoding();
 
     // Returns a prioritized list of all available compositor backends.
     void GetCompositorBackends(bool useAcceleration, nsTArray<mozilla::layers::LayersBackend>& aBackends);
@@ -752,6 +752,8 @@ protected:
     static already_AddRefed<mozilla::gfx::ScaledFont>
       GetScaledFontForFontWithCairoSkia(mozilla::gfx::DrawTarget* aTarget, gfxFont* aFont);
 
+    virtual bool CanUseHardwareVideoDecoding();
+
     int8_t  mAllowDownloadableFonts;
     int8_t  mGraphiteShapingEnabled;
     int8_t  mOpenTypeSVGEnabled;
@@ -768,7 +770,7 @@ protected:
     // max number of entries in word cache
     int32_t mWordCacheMaxEntries;
 
-    uint32_t mTotalSystemMemory;
+    uint64_t mTotalSystemMemory;
 
     // Hardware vsync source. Only valid on parent process
     RefPtr<mozilla::gfx::VsyncSource> mVsyncSource;

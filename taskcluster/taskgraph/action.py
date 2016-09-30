@@ -35,7 +35,7 @@ def taskgraph_action(options):
     # read in the full graph for reference
     full_task_json = get_artifact(decision_task_id, "public/full-task-graph.json")
     decision_params = get_artifact(decision_task_id, "public/parameters.yml")
-    all_tasks, full_task_graph = TaskGraph.from_json(full_task_json, options['root'])
+    all_tasks, full_task_graph = TaskGraph.from_json(full_task_json)
 
     target_tasks = set(parameters['task_labels'].split(','))
     target_graph = full_task_graph.graph.transitive_closure(target_tasks)
@@ -57,7 +57,7 @@ def taskgraph_action(options):
     write_artifact('task-graph.json', optimized_graph.to_json())
     write_artifact('label-to-taskid.json', label_to_taskid)
     # actually create the graph
-    create_tasks(optimized_graph, label_to_taskid)
+    create_tasks(optimized_graph, label_to_taskid, decision_params)
 
 
 def get_action_parameters(options):

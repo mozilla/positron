@@ -180,28 +180,28 @@ VerifyRGBXCorners(uint8_t* aData, const IntSize &aSize, const int32_t aStride, S
   const int strideDiff = aStride - (width * pixelSize);
   MOZ_ASSERT(width * pixelSize <= aStride);
 
-  const int topLeft = kARGBAlphaOffset;
-  const int topRight = width * pixelSize + kARGBAlphaOffset - pixelSize;
-  const int bottomRight = aStride * height - strideDiff + kARGBAlphaOffset - pixelSize;
-  const int bottomLeft = aStride * height - aStride + kARGBAlphaOffset;
+  const int topLeft = 0;
+  const int topRight = width * pixelSize - pixelSize;
+  const int bottomRight = aStride * height - strideDiff - pixelSize;
+  const int bottomLeft = aStride * height - aStride;
 
   // Lastly the center pixel
   int middleRowHeight = height / 2;
   int middleRowWidth = (width / 2) * pixelSize;
-  const int middle = aStride * middleRowHeight + middleRowWidth + kARGBAlphaOffset;
+  const int middle = aStride * middleRowHeight + middleRowWidth;
 
   const int offsets[] = { topLeft, topRight, bottomRight, bottomLeft, middle };
   for (size_t i = 0; i < MOZ_ARRAY_LENGTH(offsets); i++) {
     int offset = offsets[i];
-    if (aData[offset] != 0xFF) {
+    if (aData[offset + kARGBAlphaOffset] != 0xFF) {
         int row = offset / aStride;
         int column = (offset % aStride) / pixelSize;
         gfxCriticalError() << "RGBX corner pixel at (" << column << "," << row << ") in "
                            << width << "x" << height << " surface is not opaque: "
-                           << int(aData[column]) << ","
-                           << int(aData[column+1]) << ","
-                           << int(aData[column+2]) << ","
-                           << int(aData[column+3]);
+                           << int(aData[offset]) << ","
+                           << int(aData[offset+1]) << ","
+                           << int(aData[offset+2]) << ","
+                           << int(aData[offset+3]);
     }
   }
 
@@ -1814,6 +1814,22 @@ DrawTargetSkia::PushClip(const Path *aPath)
   const PathSkia *skiaPath = static_cast<const PathSkia*>(aPath);
   mCanvas->save();
   mCanvas->clipPath(skiaPath->GetPath(), SkRegion::kIntersect_Op, true);
+}
+
+void
+DrawTargetSkia::PushDeviceSpaceClipRects(const IntRect* aRects, uint32_t aCount)
+{
+  // Build a region by unioning all the rects together.
+  SkRegion region;
+  for (uint32_t i = 0; i < aCount; i++) {
+    region.op(IntRectToSkIRect(aRects[i]), SkRegion::kUnion_Op);
+  }
+
+  // Clip with the resulting region. clipRegion does not transform
+  // this region by the current transform, unlike the other SkCanvas
+  // clip methods, so it is just passed through in device-space.
+  mCanvas->save();
+  mCanvas->clipRegion(region, SkRegion::kIntersect_Op);
 }
 
 void

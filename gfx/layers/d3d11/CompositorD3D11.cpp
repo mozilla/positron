@@ -27,6 +27,9 @@
 #include "mozilla/Telemetry.h"
 #include "BlendShaderConstants.h"
 
+#include "D3D11ShareHandleImage.h"
+#include "D3D9SurfaceImage.h"
+
 #include <dxgi1_2.h>
 
 namespace mozilla {

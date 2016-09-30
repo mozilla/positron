@@ -25,6 +25,7 @@
 
 #include "asmjs/WasmAST.h"
 #include "asmjs/WasmBinaryToAST.h"
+#include "asmjs/WasmTextUtils.h"
 #include "asmjs/WasmTypes.h"
 #include "vm/ArrayBufferObject.h"
 #include "vm/StringBuffer.h"
@@ -128,7 +129,8 @@ struct WasmPrintContext
     uint32_t currentFuncIndex;
     PrintOperatorPrecedence currentPrecedence;
 
-    WasmPrintContext(JSContext* cx, AstModule* module, WasmPrintBuffer& buffer, const ExperimentalTextFormatting& f, GeneratedSourceMap* wasmSourceMap_)
+    WasmPrintContext(JSContext* cx, AstModule* module, WasmPrintBuffer& buffer,
+                     const ExperimentalTextFormatting& f, GeneratedSourceMap* wasmSourceMap_)
       : cx(cx),
         module(module),
         buffer(buffer),
@@ -138,6 +140,8 @@ struct WasmPrintContext
         currentFuncIndex(0),
         currentPrecedence(PrintOperatorPrecedence::ExpressionPrecedence)
     {}
+
+    StringBuffer& sb() { return buffer.stringBuffer(); }
 };
 
 /*****************************************************************************/
@@ -156,10 +160,12 @@ IsDropValueExpr(AstExpr& expr)
         return !expr.as<AstBranchTable>().maybeValue();
       case AstExprKind::If:
         return !expr.as<AstIf>().hasElse();
-      case AstExprKind::NullaryOperator:
-        return expr.as<AstNullaryOperator>().expr() == Expr::Nop;
+      case AstExprKind::Nop:
+      case AstExprKind::Drop:
       case AstExprKind::Unreachable:
       case AstExprKind::Return:
+      case AstExprKind::SetLocal:
+      case AstExprKind::Store:
         return true;
       default:
         return false;
@@ -216,20 +222,21 @@ PrintInt64(WasmPrintContext& c, int64_t num)
 }
 
 static bool
-PrintDouble(WasmPrintContext& c, double num)
+PrintDouble(WasmPrintContext& c, RawF64 num)
 {
-    if (IsNegativeZero(num))
+    double d = num.fp();
+    if (IsNegativeZero(d))
         return c.buffer.append("-0.0");
-    if (IsNaN(num))
-        return c.buffer.append("nan");
-    if (IsInfinite(num)) {
-        if (num > 0)
+    if (IsNaN(d))
+        return RenderNaN(c.sb(), num);
+    if (IsInfinite(d)) {
+        if (d > 0)
             return c.buffer.append("infinity");
         return c.buffer.append("-infinity");
     }
 
     uint32_t startLength = c.buffer.length();
-    if (!NumberValueToStringBuffer(c.cx, DoubleValue(num), c.buffer.stringBuffer()))
+    if (!NumberValueToStringBuffer(c.cx, DoubleValue(d), c.buffer.stringBuffer()))
         return false;
     MOZ_ASSERT(startLength < c.buffer.length());
 
@@ -240,6 +247,16 @@ PrintDouble(WasmPrintContext& c, double num)
             return true;
     }
     return c.buffer.append(".0");
+}
+
+static bool
+PrintFloat32(WasmPrintContext& c, RawF32 num)
+{
+    float f = num.fp();
+    if (IsNaN(f))
+        return RenderNaN(c.sb(), num) && c.buffer.append(".f");
+    return PrintDouble(c, RawF64(double(f))) &&
+           c.buffer.append("f");
 }
 
 static bool
@@ -363,12 +380,26 @@ PrintNullaryOperator(WasmPrintContext& c, AstNullaryOperator& op)
     const char* opStr;
 
     switch (op.expr()) {
-        case Expr::Nop:             opStr = "nop"; break;
         case Expr::CurrentMemory:   opStr = "curent_memory"; break;
         default:  return false;
     }
 
     return c.buffer.append(opStr, strlen(opStr));
+}
+
+static bool
+PrintNop(WasmPrintContext& c)
+{
+    return c.buffer.append("nop");
+}
+
+static bool
+PrintDrop(WasmPrintContext& c, AstDrop& drop)
+{
+    if (!PrintExpr(c, drop.value()))
+        return false;
+
+    return true;
 }
 
 static bool
@@ -433,6 +464,12 @@ PrintCallIndirect(WasmPrintContext& c, AstCallIndirect& call)
     if (!PrintRef(c, call.sig()))
         return false;
 
+    if (!c.buffer.append(' '))
+        return false;
+
+    if (!PrintCallArgs(c, call.args()))
+        return false;
+
     if (!c.buffer.append(" ["))
         return false;
 
@@ -444,9 +481,7 @@ PrintCallIndirect(WasmPrintContext& c, AstCallIndirect& call)
 
     c.currentPrecedence = lastPrecedence;
 
-    if (!c.buffer.append("] "))
-        return false;
-    if (!PrintCallArgs(c, call.args()))
+    if (!c.buffer.append(']'))
         return false;
     return true;
 }
@@ -466,9 +501,7 @@ PrintConst(WasmPrintContext& c, AstConst& cst)
             return false;
         break;
       case ExprType::F32:
-        if (!PrintDouble(c, (double)cst.val().f32()))
-            return false;
-        if (!c.buffer.append("f"))
+        if (!PrintFloat32(c, cst.val().f32()))
             return false;
         break;
       case ExprType::F64:
@@ -476,10 +509,8 @@ PrintConst(WasmPrintContext& c, AstConst& cst)
             return false;
         break;
       default:
-        MOZ_CRASH("bad const type");
-        break;
+        return false;
     }
-
     return true;
 }
 
@@ -493,6 +524,35 @@ PrintGetLocal(WasmPrintContext& c, AstGetLocal& gl)
 
 static bool
 PrintSetLocal(WasmPrintContext& c, AstSetLocal& sl)
+{
+    PrintOperatorPrecedence lastPrecedence = c.currentPrecedence;
+
+    if (!c.f.reduceParens || lastPrecedence > AssignmentPrecedence) {
+        if (!c.buffer.append("("))
+            return false;
+    }
+
+    if (!PrintRef(c, sl.local()))
+        return false;
+    if (!c.buffer.append(" = "))
+        return false;
+
+    c.currentPrecedence = AssignmentPrecedence;
+
+    if (!PrintExpr(c, sl.value()))
+        return false;
+
+    if (!c.f.reduceParens || lastPrecedence > AssignmentPrecedence) {
+        if (!c.buffer.append(")"))
+            return false;
+    }
+
+    c.currentPrecedence = lastPrecedence;
+    return true;
+}
+
+static bool
+PrintTeeLocal(WasmPrintContext& c, AstTeeLocal& sl)
 {
     PrintOperatorPrecedence lastPrecedence = c.currentPrecedence;
 
@@ -548,10 +608,10 @@ PrintGroupedBlock(WasmPrintContext& c, AstBlock& block)
         return false;
 
     // If no br/br_if/br_table refer this block, use some non-existent label.
-    if (block.breakName().empty())
+    if (block.name().empty())
         return c.buffer.append("$label:\n");
 
-    if (!PrintName(c, block.breakName()))
+    if (!PrintName(c, block.name()))
         return false;
     if (!c.buffer.append(":\n"))
         return false;
@@ -580,10 +640,10 @@ PrintBlock(WasmPrintContext& c, AstBlock& block)
     } else if (block.expr() == Expr::Loop) {
         if (!c.buffer.append("loop"))
             return false;
-        if (!block.continueName().empty()) {
+        if (!block.name().empty()) {
             if (!c.buffer.append(" "))
                 return false;
-            if (!PrintName(c, block.continueName()))
+            if (!PrintName(c, block.name()))
                 return false;
         }
         if (!c.buffer.append(" {\n"))
@@ -596,15 +656,18 @@ PrintBlock(WasmPrintContext& c, AstBlock& block)
     bool skip = 0;
     if (c.f.groupBlocks && block.expr() == Expr::Block &&
         block.exprs().length() > 0 && block.exprs()[0]->kind() == AstExprKind::Block) {
-        if (!PrintGroupedBlock(c, *static_cast<AstBlock*>(block.exprs()[0])))
-            return false;
-        skip = 1;
-        if (block.exprs().length() == 1 && block.breakName().empty()) {
-          // Special case to resolve ambiguity in parsing of optional end block label.
-          if (!PrintIndent(c))
-              return false;
-          if (!c.buffer.append("$exit$:\n"))
-              return false;
+        AstBlock* innerBlock = static_cast<AstBlock*>(block.exprs()[0]);
+        if (innerBlock->expr() == Expr::Block) {
+            if (!PrintGroupedBlock(c, *innerBlock))
+                return false;
+            skip = 1;
+            if (block.exprs().length() == 1 && block.name().empty()) {
+              // Special case to resolve ambiguity in parsing of optional end block label.
+              if (!PrintIndent(c))
+                  return false;
+              if (!c.buffer.append("$exit$:\n"))
+                  return false;
+            }
         }
     }
 
@@ -614,8 +677,10 @@ PrintBlock(WasmPrintContext& c, AstBlock& block)
     c.indent--;
     c.currentPrecedence = lastPrecedence;
 
-    if (!PrintBlockName(c, block.breakName()))
-      return false;
+    if (block.expr() != Expr::Loop) {
+        if (!PrintBlockName(c, block.name()))
+          return false;
+    }
 
     if (!PrintIndent(c))
         return false;
@@ -999,7 +1064,7 @@ PrintIf(WasmPrintContext& c, AstIf& if_)
         return false;
     c.indent--;
 
-    if (!PrintBlockName(c, if_.thenName()))
+    if (!PrintBlockName(c, if_.name()))
         return false;
 
     if (if_.hasElse()) {
@@ -1012,7 +1077,7 @@ PrintIf(WasmPrintContext& c, AstIf& if_)
         if (!PrintExprList(c, if_.elseExprs()))
             return false;
         c.indent--;
-        if (!PrintBlockName(c, if_.elseName()))
+        if (!PrintBlockName(c, if_.name()))
             return false;
     }
 
@@ -1337,6 +1402,27 @@ PrintReturn(WasmPrintContext& c, AstReturn& ret)
 }
 
 static bool
+PrintFirst(WasmPrintContext& c, AstFirst& first)
+{
+    if (!c.buffer.append("first("))
+        return false;
+
+    for (uint32_t i = 0; i < first.exprs().length(); i++) {
+        if (!PrintExpr(c, *first.exprs()[i]))
+            return false;
+        if (i + 1 == first.exprs().length())
+            break;
+        if (!c.buffer.append(", "))
+            return false;
+    }
+
+    if (!c.buffer.append(")"))
+        return false;
+
+    return true;
+}
+
+static bool
 PrintExpr(WasmPrintContext& c, AstExpr& expr)
 {
     if (c.maybeSourceMap) {
@@ -1347,6 +1433,10 @@ PrintExpr(WasmPrintContext& c, AstExpr& expr)
     }
 
     switch (expr.kind()) {
+      case AstExprKind::Nop:
+        return PrintNop(c);
+      case AstExprKind::Drop:
+        return PrintDrop(c, expr.as<AstDrop>());
       case AstExprKind::NullaryOperator:
         return PrintNullaryOperator(c, expr.as<AstNullaryOperator>());
       case AstExprKind::Unreachable:
@@ -1361,6 +1451,8 @@ PrintExpr(WasmPrintContext& c, AstExpr& expr)
         return PrintGetLocal(c, expr.as<AstGetLocal>());
       case AstExprKind::SetLocal:
         return PrintSetLocal(c, expr.as<AstSetLocal>());
+      case AstExprKind::TeeLocal:
+        return PrintTeeLocal(c, expr.as<AstTeeLocal>());
       case AstExprKind::Block:
         return PrintBlock(c, expr.as<AstBlock>());
       case AstExprKind::If:
@@ -1385,6 +1477,8 @@ PrintExpr(WasmPrintContext& c, AstExpr& expr)
         return PrintBrTable(c, expr.as<AstBranchTable>());
       case AstExprKind::Return:
         return PrintReturn(c, expr.as<AstReturn>());
+      case AstExprKind::First:
+        return PrintFirst(c, expr.as<AstFirst>());
       default:
         // Note: it's important not to remove this default since readExpr()
         // can return Expr values for which there is no enumerator.
@@ -1486,12 +1580,15 @@ PrintTableSection(WasmPrintContext& c, const AstModule& module)
 
     for (uint32_t i = 0; i < segment.elems().length(); i++) {
         const AstRef& elem = segment.elems()[i];
-        AstFunc* func = module.funcs()[elem.index()];
-        if (func->name().empty()) {
-            if (!PrintInt32(c, elem.index()))
+        uint32_t index = elem.index();
+        AstName name = index < module.funcImportNames().length()
+                           ? module.funcImportNames()[index]
+                           : module.funcs()[index - module.funcImportNames().length()]->name();
+        if (name.empty()) {
+            if (!PrintInt32(c, index))
                 return false;
         } else {
-          if (!PrintName(c, func->name()))
+          if (!PrintName(c, name))
               return false;
         }
         if (i + 1 == segment.elems().length())
@@ -1565,7 +1662,9 @@ PrintImportSection(WasmPrintContext& c, const AstModule::ImportVector& imports, 
 }
 
 static bool
-PrintExport(WasmPrintContext& c, AstExport& export_, const AstModule::FuncVector& funcs)
+PrintExport(WasmPrintContext& c, AstExport& export_,
+            const AstModule::NameVector& funcImportNames,
+            const AstModule::FuncVector& funcs)
 {
     if (!PrintIndent(c))
         return false;
@@ -1575,12 +1674,15 @@ PrintExport(WasmPrintContext& c, AstExport& export_, const AstModule::FuncVector
         if (!c.buffer.append("memory"))
           return false;
     } else {
-        const AstFunc* func = funcs[export_.ref().index()];
-        if (func->name().empty()) {
-            if (!PrintInt32(c, export_.ref().index()))
+        uint32_t index = export_.ref().index();
+        AstName name = index < funcImportNames.length()
+                           ? funcImportNames[index]
+                           : funcs[index - funcImportNames.length()]->name();
+        if (name.empty()) {
+            if (!PrintInt32(c, index))
                 return false;
         } else {
-            if (!PrintName(c, func->name()))
+            if (!PrintName(c, name))
                 return false;
         }
     }
@@ -1595,11 +1697,13 @@ PrintExport(WasmPrintContext& c, AstExport& export_, const AstModule::FuncVector
 }
 
 static bool
-PrintExportSection(WasmPrintContext& c, const AstModule::ExportVector& exports, const AstModule::FuncVector& funcs)
+PrintExportSection(WasmPrintContext& c, const AstModule::ExportVector& exports,
+                   const AstModule::NameVector& funcImportNames,
+                   const AstModule::FuncVector& funcs)
 {
     uint32_t numExports = exports.length();
     for (uint32_t i = 0; i < numExports; i++) {
-        if (!PrintExport(c, *exports[i], funcs))
+        if (!PrintExport(c, *exports[i], funcImportNames, funcs))
             return false;
     }
     if (numExports) {
@@ -1712,12 +1816,12 @@ PrintDataSection(WasmPrintContext& c, const AstModule& module)
         return false;
     if (!c.buffer.append("memory "))
         return false;
-    if (!PrintInt32(c, module.memory().initial()))
+    if (!PrintInt32(c, module.memory().initial))
        return false;
-    if (module.memory().maximum()) {
+    if (module.memory().maximum) {
         if (!c.buffer.append(", "))
             return false;
-        if (!PrintInt32(c, *module.memory().maximum()))
+        if (!PrintInt32(c, *module.memory().maximum))
             return false;
     }
 
@@ -1769,7 +1873,7 @@ PrintModule(WasmPrintContext& c, AstModule& module)
     if (!PrintTableSection(c, module))
         return false;
 
-    if (!PrintExportSection(c, module.exports(), module.funcs()))
+    if (!PrintExportSection(c, module.exports(), module.funcImportNames(), module.funcs()))
         return false;
 
     if (!PrintCodeSection(c, module.funcs(), module.sigs()))

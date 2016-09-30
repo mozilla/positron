@@ -139,10 +139,19 @@ ContentProcessController::HandleTap(
                         const ScrollableLayerGuid& aGuid,
                         uint64_t aInputBlockId)
 {
-  if (mBrowser) {
-    mBrowser->HandleTap(aType, aPoint - mBrowser->GetChromeDisplacement(), aModifiers, aGuid,
-        aInputBlockId, (aType == TapType::eSingleTap));
-  }
+  // This should never get called
+  MOZ_ASSERT(false);
+}
+
+void
+ContentProcessController::NotifyPinchGesture(
+                        PinchGestureInput::PinchGestureType aType,
+                        const ScrollableLayerGuid& aGuid,
+                        LayoutDeviceCoord aSpanChange,
+                        Modifiers aModifiers)
+{
+  // This should never get called
+  MOZ_ASSERT_UNREACHABLE("Unexpected message to content process");
 }
 
 void

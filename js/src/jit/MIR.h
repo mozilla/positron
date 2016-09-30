@@ -1497,9 +1497,9 @@ class MConstant : public MNullaryInstruction
                           CompilerConstraintList* constraints = nullptr);
     static MConstant* New(TempAllocator::Fallible alloc, const Value& v,
                           CompilerConstraintList* constraints = nullptr);
+    static MConstant* New(TempAllocator& alloc, wasm::RawF32 bits);
+    static MConstant* New(TempAllocator& alloc, wasm::RawF64 bits);
     static MConstant* NewFloat32(TempAllocator& alloc, double d);
-    static MConstant* NewRawFloat32(TempAllocator& alloc, float d);
-    static MConstant* NewRawDouble(TempAllocator& alloc, double d);
     static MConstant* NewInt64(TempAllocator& alloc, int64_t i);
     static MConstant* NewAsmJS(TempAllocator& alloc, const Value& v, MIRType type);
     static MConstant* NewConstraintlessObject(TempAllocator& alloc, JSObject* v);
@@ -1567,13 +1567,21 @@ class MConstant : public MNullaryInstruction
     bool isInt32(int32_t i) const {
         return type() == MIRType::Int32 && payload_.i32 == i;
     }
-    const double& toDouble() const {
+    double toDouble() const {
         MOZ_ASSERT(type() == MIRType::Double);
         return payload_.d;
     }
-    const float& toFloat32() const {
+    wasm::RawF64 toRawF64() const {
+        MOZ_ASSERT(type() == MIRType::Double);
+        return wasm::RawF64::fromBits(payload_.i64);
+    }
+    float toFloat32() const {
         MOZ_ASSERT(type() == MIRType::Float32);
         return payload_.f;
+    }
+    wasm::RawF32 toRawF32() const {
+        MOZ_ASSERT(type() == MIRType::Float32);
+        return wasm::RawF32::fromBits(payload_.i32);
     }
     JSString* toString() const {
         MOZ_ASSERT(type() == MIRType::String);
@@ -2657,9 +2665,6 @@ class MParameter : public MNullaryInstruction
 {
     int32_t index_;
 
-  public:
-    static const int32_t THIS_SLOT = -1;
-
     MParameter(int32_t index, TemporaryTypeSet* types)
       : index_(index)
     {
@@ -2669,8 +2674,9 @@ class MParameter : public MNullaryInstruction
 
   public:
     INSTRUCTION_HEADER(Parameter)
-    static MParameter* New(TempAllocator& alloc, int32_t index, TemporaryTypeSet* types);
+    TRIVIAL_NEW_WRAPPERS
 
+    static const int32_t THIS_SLOT = -1;
     int32_t index() const {
         return index_;
     }

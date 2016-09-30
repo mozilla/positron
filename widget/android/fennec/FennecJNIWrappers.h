@@ -604,37 +604,6 @@ public:
     template<class Impl> class Natives;
 };
 
-class Distribution : public mozilla::jni::ObjectBase<Distribution>
-{
-public:
-    static const char name[];
-
-    explicit Distribution(const Context& ctx) : ObjectBase<Distribution>(ctx) {}
-
-    struct GetDistributionDirectories_t {
-        typedef Distribution Owner;
-        typedef mozilla::jni::ObjectArray::LocalRef ReturnType;
-        typedef mozilla::jni::ObjectArray::Param SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "getDistributionDirectories";
-        static constexpr char signature[] =
-                "()[Ljava/lang/String;";
-        static const bool isStatic = true;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-        static const mozilla::jni::CallingThread callingThread =
-                mozilla::jni::CallingThread::GECKO;
-        static const mozilla::jni::DispatchTarget dispatchTarget =
-                mozilla::jni::DispatchTarget::CURRENT;
-    };
-
-    static auto GetDistributionDirectories() -> mozilla::jni::ObjectArray::LocalRef;
-
-    static const mozilla::jni::CallingThread callingThread =
-            mozilla::jni::CallingThread::GECKO;
-
-};
-
 class AudioFocusAgent : public mozilla::jni::ObjectBase<AudioFocusAgent>
 {
 public:
@@ -741,10 +710,11 @@ public:
         typedef bool SetterType;
         typedef mozilla::jni::Args<
                 mozilla::jni::ByteArray::Param,
+                mozilla::jni::Object::Param,
                 mozilla::jni::Object::Param> Args;
         static constexpr char name[] = "input";
         static constexpr char signature[] =
-                "([BLandroid/media/MediaCodec$BufferInfo;)Z";
+                "([BLandroid/media/MediaCodec$BufferInfo;Landroid/media/MediaCodec$CryptoInfo;)Z";
         static const bool isStatic = false;
         static const mozilla::jni::ExceptionMode exceptionMode =
                 mozilla::jni::ExceptionMode::ABORT;
@@ -754,7 +724,7 @@ public:
                 mozilla::jni::DispatchTarget::CURRENT;
     };
 
-    auto Input(mozilla::jni::ByteArray::Param, mozilla::jni::Object::Param) const -> bool;
+    auto Input(mozilla::jni::ByteArray::Param, mozilla::jni::Object::Param, mozilla::jni::Object::Param) const -> bool;
 
     struct Release_t {
         typedef CodecProxy Owner;

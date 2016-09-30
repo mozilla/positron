@@ -61,6 +61,10 @@ import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.hardware.Sensor;
 import android.net.Uri;
@@ -137,6 +141,7 @@ public abstract class GeckoApp
     private static final String LOGTAG = "GeckoApp";
     private static final long ONE_DAY_MS = TimeUnit.MILLISECONDS.convert(1, TimeUnit.DAYS);
 
+    public static final String ACTION_ALERT_CALLBACK       = "org.mozilla.gecko.ALERT_CALLBACK";
     public static final String ACTION_HOMESCREEN_SHORTCUT  = "org.mozilla.gecko.BOOKMARK";
     public static final String ACTION_DEBUG                = "org.mozilla.gecko.DEBUG";
     public static final String ACTION_LAUNCH_SETTINGS      = "org.mozilla.gecko.SETTINGS";
@@ -195,6 +200,8 @@ public abstract class GeckoApp
     protected boolean mLastSessionCrashed;
     protected boolean mShouldRestore;
     private boolean mSessionRestoreParsingFinished = false;
+
+    private EventDispatcher eventDispatcher;
 
     private static final class LastSessionParser extends SessionParser {
         private JSONArray tabs;
@@ -287,7 +294,7 @@ public abstract class GeckoApp
     private volatile HealthRecorder mHealthRecorder;
     private volatile Locale mLastLocale;
 
-    private Intent mRestartIntent;
+    protected Intent mRestartIntent;
 
     private boolean mWasFirstTabShownAfterActivityUnhidden;
 
@@ -1100,6 +1107,8 @@ public abstract class GeckoApp
     public void onCreate(Bundle savedInstanceState) {
         GeckoAppShell.ensureCrashHandling();
 
+        eventDispatcher = new EventDispatcher();
+
         // Enable Android Strict Mode for developers' local builds (the "default" channel).
         if ("default".equals(AppConstants.MOZ_UPDATE_CHANNEL)) {
             enableStrictMode();
@@ -1141,11 +1150,10 @@ public abstract class GeckoApp
         // When that's fixed, `this` can change to
         // `(GeckoApplication) getApplication()` here.
         GeckoAppShell.setContextGetter(this);
-        GeckoAppShell.setApplicationContext(getApplicationContext());
         GeckoAppShell.setGeckoInterface(this);
         // We need to set the notification client before launching Gecko, since Gecko could start
         // sending notifications immediately after startup, which we don't want to lose/crash on.
-        GeckoAppShell.setNotificationClient(makeNotificationClient());
+        GeckoAppShell.setNotificationListener(makeNotificationClient());
 
         // Tell Stumbler to register a local broadcast listener to listen for preference intents.
         // We do this via intents since we can't easily access Stumbler directly,
@@ -1200,12 +1208,12 @@ public abstract class GeckoApp
         // GeckoThread has to register for "Gecko:Ready" first, so GeckoApp registers
         // for events after initializing GeckoThread but before launching it.
 
-        EventDispatcher.getInstance().registerGeckoThreadListener((GeckoEventListener)this,
+        getAppEventDispatcher().registerGeckoThreadListener((GeckoEventListener)this,
             "Gecko:Ready",
             "Gecko:Exited",
             "Accessibility:Event");
 
-        EventDispatcher.getInstance().registerGeckoThreadListener((NativeEventListener)this,
+        getAppEventDispatcher().registerGeckoThreadListener((NativeEventListener)this,
             "Accessibility:Ready",
             "Bookmark:Insert",
             "Contact:Add",
@@ -1379,7 +1387,7 @@ public abstract class GeckoApp
                 // through "onDestroy" -- essentially the same as the lifecycle
                 // of the activity itself.
                 final String profilePath = getProfile().getDir().getAbsolutePath();
-                final EventDispatcher dispatcher = EventDispatcher.getInstance();
+                final EventDispatcher dispatcher = getAppEventDispatcher();
 
                 // This is the locale prior to fixing it up.
                 final Locale osLocale = Locale.getDefault();
@@ -1660,7 +1668,7 @@ public abstract class GeckoApp
             }
         }
 
-        if (GeckoAppShell.ACTION_ALERT_CALLBACK.equals(action)) {
+        if (ACTION_ALERT_CALLBACK.equals(action)) {
             processAlertCallback(intent);
         }
     }
@@ -1688,11 +1696,11 @@ public abstract class GeckoApp
             public void run() {
                 if (TabQueueHelper.TAB_QUEUE_ENABLED && TabQueueHelper.shouldOpenTabQueueUrls(GeckoApp.this)) {
 
-                    EventDispatcher.getInstance().registerGeckoThreadListener(new NativeEventListener() {
+                    getAppEventDispatcher().registerGeckoThreadListener(new NativeEventListener() {
                         @Override
                         public void handleMessage(String event, NativeJSObject message, EventCallback callback) {
                             if ("Tabs:TabsOpened".equals(event)) {
-                                EventDispatcher.getInstance().unregisterGeckoThreadListener(this, "Tabs:TabsOpened");
+                                getAppEventDispatcher().unregisterGeckoThreadListener(this, "Tabs:TabsOpened");
                                 openTabsRunnable.run();
                             }
                         }
@@ -1749,6 +1757,16 @@ public abstract class GeckoApp
         } catch (JSONException e) {
             throw new SessionRestoreException(e);
         }
+    }
+
+    public static EventDispatcher getEventDispatcher() {
+        final GeckoApp geckoApp = (GeckoApp) GeckoAppShell.getGeckoInterface();
+        return geckoApp.getAppEventDispatcher();
+    }
+
+    @Override
+    public EventDispatcher getAppEventDispatcher() {
+        return eventDispatcher;
     }
 
     @Override
@@ -1926,7 +1944,7 @@ public abstract class GeckoApp
 
         Intent intent = new Intent();
         intent.putExtra(Intent.EXTRA_SHORTCUT_INTENT, shortcutIntent);
-        intent.putExtra(Intent.EXTRA_SHORTCUT_ICON, BitmapUtils.getLauncherIcon(getApplicationContext(), aIcon, GeckoAppShell.getPreferredIconSize()));
+        intent.putExtra(Intent.EXTRA_SHORTCUT_ICON, getLauncherIcon(aIcon, GeckoAppShell.getPreferredIconSize()));
 
         if (aTitle != null) {
             intent.putExtra(Intent.EXTRA_SHORTCUT_NAME, aTitle);
@@ -1945,6 +1963,60 @@ public abstract class GeckoApp
         urlAnnotations.insertHomeScreenShortcut(getContentResolver(), aURI, true);
     }
 
+    private Bitmap getLauncherIcon(Bitmap aSource, int size) {
+        final float[] DEFAULT_LAUNCHER_ICON_HSV = { 32.0f, 1.0f, 1.0f };
+        final int kOffset = 6;
+        final int kRadius = 5;
+
+        int insetSize = aSource != null ? size * 2 / 3 : size;
+
+        Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+
+        // draw a base color
+        Paint paint = new Paint();
+        if (aSource == null) {
+            // If we aren't drawing a favicon, just use an orange color.
+            paint.setColor(Color.HSVToColor(DEFAULT_LAUNCHER_ICON_HSV));
+            canvas.drawRoundRect(new RectF(kOffset, kOffset, size - kOffset, size - kOffset), kRadius, kRadius, paint);
+        } else if (aSource.getWidth() >= insetSize || aSource.getHeight() >= insetSize) {
+            // Otherwise, if the icon is large enough, just draw it.
+            Rect iconBounds = new Rect(0, 0, size, size);
+            canvas.drawBitmap(aSource, null, iconBounds, null);
+            return bitmap;
+        } else {
+            // otherwise use the dominant color from the icon + a layer of transparent white to lighten it somewhat
+            int color = BitmapUtils.getDominantColor(aSource);
+            paint.setColor(color);
+            canvas.drawRoundRect(new RectF(kOffset, kOffset, size - kOffset, size - kOffset), kRadius, kRadius, paint);
+            paint.setColor(Color.argb(100, 255, 255, 255));
+            canvas.drawRoundRect(new RectF(kOffset, kOffset, size - kOffset, size - kOffset), kRadius, kRadius, paint);
+        }
+
+        // draw the overlay
+        Bitmap overlay = BitmapUtils.decodeResource(this, R.drawable.home_bg);
+        canvas.drawBitmap(overlay, null, new Rect(0, 0, size, size), null);
+
+        // draw the favicon
+        if (aSource == null)
+            aSource = BitmapUtils.decodeResource(this, R.drawable.home_star);
+
+        // by default, we scale the icon to this size
+        int sWidth = insetSize / 2;
+        int sHeight = sWidth;
+
+        int halfSize = size / 2;
+        canvas.drawBitmap(aSource,
+                null,
+                new Rect(halfSize - sWidth,
+                        halfSize - sHeight,
+                        halfSize + sWidth,
+                        halfSize + sHeight),
+                null);
+
+        return bitmap;
+    }
+
     private void processAlertCallback(SafeIntent intent) {
         String alertName = "";
         String alertCookie = "";
@@ -1957,7 +2029,9 @@ public abstract class GeckoApp
             if (alertCookie == null)
                 alertCookie = "";
         }
-        handleNotification(GeckoAppShell.ACTION_ALERT_CALLBACK, alertName, alertCookie);
+
+        ((NotificationClient) GeckoAppShell.getNotificationListener()).onNotificationClick(
+                alertName);
     }
 
     @Override
@@ -2002,7 +2076,7 @@ public abstract class GeckoApp
             mLayerView.loadUri(uri, GeckoView.LOAD_SWITCH_TAB);
         } else if (Intent.ACTION_SEARCH.equals(action)) {
             mLayerView.loadUri(uri, GeckoView.LOAD_NEW_TAB);
-        } else if (GeckoAppShell.ACTION_ALERT_CALLBACK.equals(action)) {
+        } else if (ACTION_ALERT_CALLBACK.equals(action)) {
             processAlertCallback(intent);
         } else if (NotificationHelper.HELPER_BROADCAST_ACTION.equals(action)) {
             NotificationHelper.getInstance(getApplicationContext()).handleNotificationIntent(intent);
@@ -2026,7 +2100,7 @@ public abstract class GeckoApp
      */
     protected String getURIFromIntent(SafeIntent intent) {
         final String action = intent.getAction();
-        if (GeckoAppShell.ACTION_ALERT_CALLBACK.equals(action) ||
+        if (ACTION_ALERT_CALLBACK.equals(action) ||
                 NotificationHelper.HELPER_BROADCAST_ACTION.equals(action)) {
             return null;
         }
@@ -2047,6 +2121,8 @@ public abstract class GeckoApp
         if (mIsAbortingAppLaunch) {
             return;
         }
+
+        GeckoAppShell.setGeckoInterface(this);
 
         int newOrientation = getResources().getConfiguration().orientation;
         if (GeckoScreenOrientation.getInstance().update(newOrientation)) {
@@ -2199,12 +2275,12 @@ public abstract class GeckoApp
             return;
         }
 
-        EventDispatcher.getInstance().unregisterGeckoThreadListener((GeckoEventListener)this,
+        getAppEventDispatcher().unregisterGeckoThreadListener((GeckoEventListener)this,
             "Gecko:Ready",
             "Gecko:Exited",
             "Accessibility:Event");
 
-        EventDispatcher.getInstance().unregisterGeckoThreadListener((NativeEventListener)this,
+        getAppEventDispatcher().unregisterGeckoThreadListener((NativeEventListener)this,
             "Accessibility:Ready",
             "Bookmark:Insert",
             "Contact:Add",
@@ -2227,26 +2303,8 @@ public abstract class GeckoApp
             "Update:Download",
             "Update:Install");
 
-        deleteTempFiles();
-
-        if (mDoorHangerPopup != null)
-            mDoorHangerPopup.destroy();
-        if (mFormAssistPopup != null)
-            mFormAssistPopup.destroy();
         if (mPromptService != null)
             mPromptService.destroy();
-        if (mTextSelection != null)
-            mTextSelection.destroy();
-        NotificationHelper.destroy();
-        IntentHelper.destroy();
-        GeckoNetworkManager.destroy();
-
-        if (SmsManager.isEnabled()) {
-            SmsManager.getInstance().stop();
-            if (isFinishing()) {
-                SmsManager.getInstance().shutdown();
-            }
-        }
 
         final HealthRecorder rec = mHealthRecorder;
         mHealthRecorder = null;
@@ -2263,28 +2321,6 @@ public abstract class GeckoApp
         super.onDestroy();
 
         Tabs.unregisterOnTabsChangedListener(this);
-
-        if (!isFinishing()) {
-            // GeckoApp was not intentionally destroyed, so keep our process alive.
-            return;
-        }
-
-        // Wait for Gecko to handle our pause event sent in onPause.
-        if (GeckoThread.isStateAtLeast(GeckoThread.State.PROFILE_READY)) {
-            GeckoThread.waitOnGecko();
-        }
-
-        if (mRestartIntent != null) {
-            // Restarting, so let Restarter kill us.
-            final Intent intent = new Intent();
-            intent.setClass(getApplicationContext(), Restarter.class)
-                  .putExtra("pid", Process.myPid())
-                  .putExtra(Intent.EXTRA_INTENT, mRestartIntent);
-            startService(intent);
-        } else {
-            // Exiting, so kill our own process.
-            Process.killProcess(Process.myPid());
-        }
     }
 
     public void showSDKVersionError() {
@@ -2387,15 +2423,6 @@ public abstract class GeckoApp
                 }
             }
         });
-    }
-
-    public void handleNotification(String action, String alertName, String alertCookie) {
-        // If Gecko isn't running yet, we ignore the notification. Note that
-        // even if Gecko is running but it was restarted since the notification
-        // was created, the notification won't be handled (bug 849653).
-        if (GeckoThread.isRunning()) {
-            GeckoAppShell.handleNotification(action, alertName, alertCookie);
-        }
     }
 
     private void checkMigrateProfile() {

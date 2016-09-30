@@ -26,6 +26,7 @@
 #endif
 #include "GMPDecoderModule.h"
 
+#include "mozilla/CDMProxy.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/SharedThreadPool.h"
 #include "mozilla/StaticPtr.h"
@@ -38,15 +39,12 @@
 #include "H264Converter.h"
 
 #include "AgnosticDecoderModule.h"
-
-#ifdef MOZ_EME
 #include "EMEDecoderModule.h"
-#include "mozilla/CDMProxy.h"
-#endif
 
 #include "DecoderDoctorDiagnostics.h"
 
 #include "MP4Decoder.h"
+#include "mozilla/dom/RemoteVideoDecoder.h"
 
 #include "mp4_demuxer/H264.h"
 
@@ -237,9 +235,9 @@ PDMFactory::CreateDecoderWithPDM(PlatformDecoderModule* aPDM,
     DecoderDoctorDiagnostics* diagnostics = aParams.mDiagnostics;
     if (diagnostics) {
       if (reason == SupportChecker::Result::kVideoFormatNotSupported) {
-        diagnostics->SetVideoFormatNotSupport();
+        diagnostics->SetVideoNotSupported();
       } else if (reason == SupportChecker::Result::kAudioFormatNotSupported) {
-        diagnostics->SetAudioFormatNotSupport();
+        diagnostics->SetAudioNotSupported();
       }
     }
     return nullptr;
@@ -322,7 +320,11 @@ PDMFactory::CreatePDMs()
 #ifdef XP_WIN
   if (MediaPrefs::PDMWMFEnabled()) {
     m = new WMFDecoderModule();
-    mWMFFailedToLoad = !StartupPDM(m);
+    RefPtr<PlatformDecoderModule> remote = new dom::RemoteDecoderModule(m);
+    mWMFFailedToLoad = !StartupPDM(remote);
+    if (mWMFFailedToLoad) {
+      mWMFFailedToLoad = !StartupPDM(m);
+    }
   } else {
     mWMFFailedToLoad = MediaPrefs::DecoderDoctorWMFDisabledIsFailure();
   }
@@ -414,13 +416,11 @@ PDMFactory::GetDecoder(const nsACString& aMimeType,
   return pdm.forget();
 }
 
-#ifdef MOZ_EME
 void
 PDMFactory::SetCDMProxy(CDMProxy* aProxy)
 {
   RefPtr<PDMFactory> m = new PDMFactory();
   mEMEPDM = new EMEDecoderModule(aProxy, m);
 }
-#endif
 
 }  // namespace mozilla

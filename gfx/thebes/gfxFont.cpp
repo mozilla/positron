@@ -2022,6 +2022,10 @@ gfxFont::Draw(const gfxTextRun *aTextRun, uint32_t aStart, uint32_t aEnd,
 
     FontDrawParams fontParams;
 
+    if (aRunParams.drawOpts) {
+        fontParams.drawOptions = *aRunParams.drawOpts;
+    }
+
     fontParams.scaledFont = GetScaledFont(aRunParams.dt);
     if (!fontParams.scaledFont) {
         return;
@@ -3101,6 +3105,10 @@ gfxFont::InitFakeSmallCapsRun(DrawTarget     *aDrawTarget,
     bool ok = true;
 
     RefPtr<gfxFont> smallCapsFont = GetSmallCapsFont();
+    if (!smallCapsFont) {
+        NS_WARNING("failed to get reduced-size font for smallcaps!");
+        smallCapsFont = this;
+    }
 
     enum RunCaseAction {
         kNoChange,

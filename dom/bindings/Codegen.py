@@ -6836,6 +6836,9 @@ class CGCallGenerator(CGThing):
     A class to generate an actual call to a C++ object.  Assumes that the C++
     object is stored in a variable whose name is given by the |object| argument.
 
+    needsSubjectPrincipal is a boolean indicating whether the call should
+    receive the subject nsIPrincipal as argument.
+
     isFallible is a boolean indicating whether the call should be fallible.
 
     resultVar: If the returnType is not void, then the result of the call is
@@ -6843,9 +6846,10 @@ class CGCallGenerator(CGThing):
     declaring the result variable. If the caller doesn't care about the result
     value, resultVar can be omitted.
     """
-    def __init__(self, isFallible, arguments, argsPre, returnType,
-                 extendedAttributes, descriptorProvider, nativeMethodName,
-                 static, object="self", argsPost=[], resultVar=None):
+    def __init__(self, isFallible, needsSubjectPrincipal, arguments, argsPre,
+                 returnType, extendedAttributes, descriptorProvider,
+                 nativeMethodName, static, object="self", argsPost=[],
+                 resultVar=None):
         CGThing.__init__(self)
 
         result, resultOutParam, resultRooter, resultArgs, resultConversion = \
@@ -6902,6 +6906,9 @@ class CGCallGenerator(CGThing):
                 assert resultOutParam == "ptr"
                 args.append(CGGeneric("&" + resultVar))
 
+        if needsSubjectPrincipal:
+            args.append(CGGeneric("subjectPrincipal"))
+
         if isFallible:
             args.append(CGGeneric("rv"))
         args.extend(CGGeneric(arg) for arg in argsPost)
@@ -6939,6 +6946,18 @@ class CGCallGenerator(CGThing):
 
         call = CGWrapper(call, post=";\n")
         self.cgRoot.append(call)
+
+        if needsSubjectPrincipal:
+            self.cgRoot.prepend(CGGeneric(dedent(
+               """
+               Maybe<nsIPrincipal*> subjectPrincipal;
+               if (NS_IsMainThread()) {
+                 JSCompartment* compartment = js::GetContextCompartment(cx);
+                 MOZ_ASSERT(compartment);
+                 JSPrincipals* principals = JS_GetCompartmentPrincipals(compartment);
+                 subjectPrincipal.emplace(nsJSPrincipals::get(principals));
+               }
+               """)))
 
         if isFallible:
             self.cgRoot.prepend(CGGeneric("binding_detail::FastErrorResult rv;\n"))
@@ -7406,6 +7425,7 @@ class CGPerSignatureCall(CGThing):
         else:
             cgThings.append(CGCallGenerator(
                 self.isFallible(),
+                idlNode.getExtendedAttribute('NeedsSubjectPrincipal'),
                 self.getArguments(), argsPre, returnType,
                 self.extendedAttributes, descriptor,
                 nativeMethodName,
@@ -10255,15 +10275,18 @@ class ClassDestructor(ClassItem):
 
 class ClassMember(ClassItem):
     def __init__(self, name, type, visibility="private", static=False,
-                 body=None):
+                 body=None, hasIgnoreInitCheckFlag=False):
         self.type = type
         self.static = static
         self.body = body
+        self.hasIgnoreInitCheckFlag = hasIgnoreInitCheckFlag;
         ClassItem.__init__(self, name, visibility)
 
     def declare(self, cgClass):
-        return '%s%s %s;\n' % ('static ' if self.static else '', self.type,
-                               self.name)
+        return '%s%s%s %s;\n' % ('static ' if self.static else '',
+                                 'MOZ_INIT_OUTSIDE_CTOR '
+                                 if self.hasIgnoreInitCheckFlag else '',
+                                 self.type, self.name)
 
     def define(self, cgClass):
         if not self.static:
@@ -12519,7 +12542,8 @@ class CGDictionary(CGThing):
         members = [ClassMember(self.makeMemberName(m[0].identifier.name),
                                self.getMemberType(m),
                                visibility="public",
-                               body=self.getMemberInitializer(m))
+                               body=self.getMemberInitializer(m),
+                               hasIgnoreInitCheckFlag=True)
                    for m in self.memberInfo]
         if d.parent:
             # We always want to init our parent with our non-initializing
@@ -13808,6 +13832,9 @@ class CGNativeMember(ClassMethod):
         elif returnType.isObject() or returnType.isSpiderMonkeyInterface():
             args.append(Argument("JS::MutableHandle<JSObject*>", "aRetVal"))
 
+        # And the nsIPrincipal
+        if self.member.getExtendedAttribute('NeedsSubjectPrincipal'):
+            args.append(Argument("const Maybe<nsIPrincipal*>&", "aPrincipal"))
         # And the ErrorResult
         if 'infallible' not in self.extendedAttrs:
             # Use aRv so it won't conflict with local vars named "rv"
@@ -15753,7 +15780,7 @@ class CGMaplikeOrSetlikeMethodGenerator(CGThing):
             // TODO (Bug 1173651): Xrays currently cannot wrap iterators. Change
             // after bug 1023984 is fixed.
             if (xpc::WrapperFactory::IsXrayWrapper(obj)) {
-              JS_ReportError(cx, "Xray wrapping of iterators not supported.");
+              JS_ReportErrorASCII(cx, "Xray wrapping of iterators not supported.");
               return false;
             }
             JS::Rooted<JSObject*> result(cx);

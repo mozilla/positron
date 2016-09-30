@@ -147,14 +147,15 @@ GetPrincipalDomainOrigin(nsIPrincipal* aPrincipal,
   return GetOriginFromURI(uri, aOrigin);
 }
 
-inline void SetPendingException(JSContext *cx, const char *aMsg)
+inline void SetPendingExceptionASCII(JSContext *cx, const char *aMsg)
 {
-    JS_ReportError(cx, "%s", aMsg);
+    JS_ReportErrorASCII(cx, "%s", aMsg);
 }
 
 inline void SetPendingException(JSContext *cx, const char16_t *aMsg)
 {
-    JS_ReportError(cx, "%hs", aMsg);
+    // FIXME: Need to convert to UTF-8 (bug XXX).
+    JS_ReportErrorLatin1(cx, "%hs", aMsg);
 }
 
 // Helper class to get stuff from the ClassInfo and not waste extra time with
@@ -596,7 +597,7 @@ nsScriptSecurityManager::CheckLoadURIFromScript(JSContext *cx, nsIURI *aURI)
     nsAutoCString msg("Access to '");
     msg.Append(spec);
     msg.AppendLiteral("' from script denied");
-    SetPendingException(cx, msg.get());
+    SetPendingExceptionASCII(cx, msg.get());
     return NS_ERROR_DOM_BAD_URI;
 }
 
@@ -1182,21 +1183,6 @@ nsScriptSecurityManager::CreateNullPrincipal(JS::Handle<JS::Value> aOriginAttrib
 }
 
 NS_IMETHODIMP
-nsScriptSecurityManager::CreateExpandedPrincipal(nsIPrincipal** aPrincipalArray, uint32_t aLength,
-                                                 nsIPrincipal** aResult)
-{
-  nsTArray<nsCOMPtr<nsIPrincipal>> principals;
-  principals.SetCapacity(aLength);
-  for (uint32_t i = 0; i < aLength; ++i) {
-    principals.AppendElement(aPrincipalArray[i]);
-  }
-
-  nsCOMPtr<nsIPrincipal> p = new nsExpandedPrincipal(principals);
-  p.forget(aResult);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsScriptSecurityManager::GetAppCodebasePrincipal(nsIURI* aURI,
                                                  uint32_t aAppId,
                                                  bool aInIsolatedMozBrowser,
@@ -1320,7 +1306,7 @@ nsScriptSecurityManager::CanCreateInstance(JSContext *cx,
     char cidStr[NSID_LENGTH];
     aCID.ToProvidedString(cidStr);
     errorMsg.Append(cidStr);
-    SetPendingException(cx, errorMsg.get());
+    SetPendingExceptionASCII(cx, errorMsg.get());
     return NS_ERROR_DOM_XPCONNECT_ACCESS_DENIED;
 }
 
@@ -1337,7 +1323,7 @@ nsScriptSecurityManager::CanGetService(JSContext *cx,
     char cidStr[NSID_LENGTH];
     aCID.ToProvidedString(cidStr);
     errorMsg.Append(cidStr);
-    SetPendingException(cx, errorMsg.get());
+    SetPendingExceptionASCII(cx, errorMsg.get());
     return NS_ERROR_DOM_XPCONNECT_ACCESS_DENIED;
 }
 

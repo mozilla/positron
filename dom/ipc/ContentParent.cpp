@@ -35,7 +35,7 @@
 #include "imgIContainer.h"
 #include "mozIApplication.h"
 #include "mozilla/ClearOnShutdown.h"
-#include "mozilla/CSSStyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 #include "mozilla/DataStorage.h"
 #include "mozilla/devtools/HeapSnapshotTempFileHelperParent.h"
 #include "mozilla/docshell/OfflineCacheUpdateParent.h"
@@ -46,9 +46,7 @@
 #include "mozilla/dom/ExternalHelperAppParent.h"
 #include "mozilla/dom/GetFilesHelper.h"
 #include "mozilla/dom/GeolocationBinding.h"
-#ifdef MOZ_EME
 #include "mozilla/dom/MediaKeySystemAccess.h"
-#endif
 #include "mozilla/dom/Notification.h"
 #include "mozilla/dom/PContentBridgeParent.h"
 #include "mozilla/dom/PContentPermissionRequestParent.h"
@@ -78,11 +76,8 @@
 #include "mozilla/hal_sandbox/PHalParent.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/BackgroundParent.h"
-#include "mozilla/ipc/FileDescriptorSetParent.h"
 #include "mozilla/ipc/FileDescriptorUtils.h"
-#include "mozilla/ipc/PFileDescriptorSetParent.h"
 #include "mozilla/ipc/PSendStreamParent.h"
-#include "mozilla/ipc/SendStreamAlloc.h"
 #include "mozilla/ipc/TestShellParent.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
@@ -190,8 +185,8 @@
 #include "nsPluginHost.h"
 #include "nsPluginTags.h"
 #include "nsIBlocklistService.h"
-#include "mozilla/StyleSheetHandle.h"
-#include "mozilla/StyleSheetHandleInlines.h"
+#include "mozilla/StyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 #include "nsHostObjectProtocolHandler.h"
 
 #include "nsIBidiKeyboard.h"
@@ -978,14 +973,9 @@ ContentParent::RecvIsGMPPresentOnDisk(const nsString& aKeySystem,
                                       bool* aIsPresent,
                                       nsCString* aMessage)
 {
-#ifdef MOZ_EME
   *aIsPresent = MediaKeySystemAccess::IsGMPPresentOnDisk(aKeySystem,
                                                          aVersion,
                                                          *aMessage);
-#else
-  *aIsPresent = false;
-#endif
-
   return true;
 }
 
@@ -1056,6 +1046,13 @@ ContentParent::RecvFindPlugins(const uint32_t& aPluginEpoch,
                                uint32_t* aNewPluginEpoch)
 {
   *aRv = mozilla::plugins::FindPluginsForContent(aPluginEpoch, aPlugins, aNewPluginEpoch);
+  return true;
+}
+
+bool
+ContentParent::RecvInitVideoDecoderManager(Endpoint<PVideoDecoderManagerChild>* aEndpoint)
+{
+  GPUProcessManager::Get()->CreateContentVideoDecoderManager(OtherPid(), aEndpoint);
   return true;
 }
 
@@ -2263,19 +2260,19 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority,
     // This looks like a lot of work, but in a normal browser session we just
     // send two loads.
 
-    for (StyleSheetHandle sheet : *sheetService->AgentStyleSheets()) {
+    for (StyleSheet* sheet : *sheetService->AgentStyleSheets()) {
       URIParams uri;
       SerializeURI(sheet->GetSheetURI(), uri);
       Unused << SendLoadAndRegisterSheet(uri, nsIStyleSheetService::AGENT_SHEET);
     }
 
-    for (StyleSheetHandle sheet : *sheetService->UserStyleSheets()) {
+    for (StyleSheet* sheet : *sheetService->UserStyleSheets()) {
       URIParams uri;
       SerializeURI(sheet->GetSheetURI(), uri);
       Unused << SendLoadAndRegisterSheet(uri, nsIStyleSheetService::USER_SHEET);
     }
 
-    for (StyleSheetHandle sheet : *sheetService->AuthorStyleSheets()) {
+    for (StyleSheet* sheet : *sheetService->AuthorStyleSheets()) {
       URIParams uri;
       SerializeURI(sheet->GetSheetURI(), uri);
       Unused << SendLoadAndRegisterSheet(uri, nsIStyleSheetService::AUTHOR_SHEET);
@@ -3381,14 +3378,13 @@ ContentParent::GetPrintingParent()
 PSendStreamParent*
 ContentParent::AllocPSendStreamParent()
 {
-  return mozilla::ipc::AllocPSendStreamParent();
+  return nsIContentParent::AllocPSendStreamParent();
 }
 
 bool
 ContentParent::DeallocPSendStreamParent(PSendStreamParent* aActor)
 {
-  delete aActor;
-  return true;
+  return nsIContentParent::DeallocPSendStreamParent(aActor);
 }
 
 PScreenManagerParent*
@@ -3898,18 +3894,18 @@ ContentParent::RecvIsSecureURI(const uint32_t& type,
   if (!ourURI) {
     return false;
   }
-  nsresult rv = sss->IsSecureURI(type, ourURI, flags, isSecureURI);
+  nsresult rv = sss->IsSecureURI(type, ourURI, flags, nullptr, isSecureURI);
   return NS_SUCCEEDED(rv);
 }
 
 bool
-ContentParent::RecvAccumulateMixedContentHSTS(const URIParams& aURI, const bool& aActive)
+ContentParent::RecvAccumulateMixedContentHSTS(const URIParams& aURI, const bool& aActive, const bool& aHSTSPriming)
 {
   nsCOMPtr<nsIURI> ourURI = DeserializeURI(aURI);
   if (!ourURI) {
     return false;
   }
-  nsMixedContentBlocker::AccumulateMixedContentHSTS(ourURI, aActive);
+  nsMixedContentBlocker::AccumulateMixedContentHSTS(ourURI, aActive, aHSTSPriming);
   return true;
 }
 
@@ -4595,14 +4591,13 @@ ContentParent::RecvKeygenProvideContent(nsString* aAttribute,
 PFileDescriptorSetParent*
 ContentParent::AllocPFileDescriptorSetParent(const FileDescriptor& aFD)
 {
-  return new FileDescriptorSetParent(aFD);
+  return nsIContentParent::AllocPFileDescriptorSetParent(aFD);
 }
 
 bool
 ContentParent::DeallocPFileDescriptorSetParent(PFileDescriptorSetParent* aActor)
 {
-  delete static_cast<FileDescriptorSetParent*>(aActor);
-  return true;
+  return nsIContentParent::DeallocPFileDescriptorSetParent(aActor);
 }
 
 bool

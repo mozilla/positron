@@ -198,11 +198,20 @@ add_task(function* setup() {
   let oldServerURL = env.get("MOZ_CRASHREPORTER_URL");
   env.set("MOZ_CRASHREPORTER_URL", SERVER_URL);
 
+  // nsBrowserGlue starts up UnsubmittedCrashHandler automatically
+  // so at this point, it is initialized. It's possible that it
+  // was initialized, but is preffed off, so it's inert, so we
+  // shut it down, make sure it's preffed on, and then restart it.
+  // Note that making the component initialize even when it's
+  // disabled is an intentional choice, as this allows for easier
+  // simulation of startup and shutdown.
+  UnsubmittedCrashHandler.uninit();
   yield SpecialPowers.pushPrefEnv({
     set: [
       ["browser.crashReports.unsubmittedCheck.enabled", true],
     ],
   });
+  UnsubmittedCrashHandler.init();
 
   registerCleanupFunction(function() {
     gNotificationBox = null;
@@ -415,6 +424,9 @@ add_task(function* test_can_ignore() {
   let anonyNodes = document.getAnonymousNodes(notification)[0];
   let closeButton = anonyNodes.querySelector(".close-icon");
   closeButton.click();
+  // We'll not wait for the notification to finish its transition -
+  // we'll just remove it right away.
+  gNotificationBox.removeNotification(notification, true);
   yield waitForIgnoredReports(reportIDs);
 
   notification =
@@ -486,6 +498,10 @@ add_task(function* test_shutdown_while_not_showing() {
   let anonyNodes = document.getAnonymousNodes(notification)[0];
   let closeButton = anonyNodes.querySelector(".close-icon");
   closeButton.click();
+  // We'll not wait for the notification to finish its transition -
+  // we'll just remove it right away.
+  gNotificationBox.removeNotification(notification, true);
+
   yield waitForIgnoredReports(reportIDs);
 
   UnsubmittedCrashHandler.uninit();
@@ -496,7 +512,6 @@ add_task(function* test_shutdown_while_not_showing() {
      "uninitting.");
   UnsubmittedCrashHandler.init();
 
-  gNotificationBox.removeNotification(notification, true);
   clearPendingCrashReports();
 });
 

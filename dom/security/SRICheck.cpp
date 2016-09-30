@@ -11,6 +11,7 @@
 #include "mozilla/Logging.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/SRILogHelper.h"
+#include "mozilla/dom/SRIMetadata.h"
 #include "nsContentUtils.h"
 #include "nsIChannel.h"
 #include "nsIConsoleReportCollector.h"
@@ -186,7 +187,6 @@ SRICheck::VerifyIntegrity(const SRIMetadata& aMetadata,
   NS_ENSURE_ARG_POINTER(aLoader);
   NS_ENSURE_ARG_POINTER(aReporter);
 
-  NS_ConvertUTF16toUTF8 utf8Hash(aString);
   nsCOMPtr<nsIChannel> channel;
   aLoader->GetChannel(getter_AddRefs(channel));
 
@@ -203,7 +203,10 @@ SRICheck::VerifyIntegrity(const SRIMetadata& aMetadata,
 
   SRICheckDataVerifier verifier(aMetadata, aSourceFileURI, aReporter);
   nsresult rv;
-  rv = verifier.Update(utf8Hash.Length(), (uint8_t*)utf8Hash.get());
+  nsDependentCString rawBuffer;
+  rv = aLoader->GetRawBuffer(rawBuffer);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = verifier.Update(rawBuffer.Length(), (const uint8_t*)rawBuffer.get());
   NS_ENSURE_SUCCESS(rv, rv);
 
   return verifier.Verify(aMetadata, channel, aSourceFileURI, aReporter);

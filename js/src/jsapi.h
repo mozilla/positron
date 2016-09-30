@@ -218,9 +218,31 @@ class MOZ_RAII AutoVectorRooter : public AutoVectorRooterBase<T>
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
-typedef AutoVectorRooter<Value> AutoValueVector;
-typedef AutoVectorRooter<jsid> AutoIdVector;
-typedef AutoVectorRooter<JSObject*> AutoObjectVector;
+class AutoValueVector : public Rooted<GCVector<Value, 8>> {
+    using Vec = GCVector<Value, 8>;
+    using Base = Rooted<Vec>;
+  public:
+    explicit AutoValueVector(JSContext* cx) : Base(cx, Vec(cx)) {}
+    explicit AutoValueVector(js::ContextFriendFields* cx) : Base(cx, Vec(cx)) {}
+};
+
+class AutoIdVector : public Rooted<GCVector<jsid, 8>> {
+    using Vec = GCVector<jsid, 8>;
+    using Base = Rooted<Vec>;
+  public:
+    explicit AutoIdVector(JSContext* cx) : Base(cx, Vec(cx)) {}
+    explicit AutoIdVector(js::ContextFriendFields* cx) : Base(cx, Vec(cx)) {}
+
+    bool appendAll(const AutoIdVector& other) { return this->Base::appendAll(other.get()); }
+};
+
+class AutoObjectVector : public Rooted<GCVector<JSObject*, 8>> {
+    using Vec = GCVector<JSObject*, 8>;
+    using Base = Rooted<Vec>;
+  public:
+    explicit AutoObjectVector(JSContext* cx) : Base(cx, Vec(cx)) {}
+    explicit AutoObjectVector(js::ContextFriendFields* cx) : Base(cx, Vec(cx)) {}
+};
 
 using ValueVector = JS::GCVector<JS::Value>;
 using IdVector = JS::GCVector<jsid>;
@@ -626,6 +648,8 @@ typedef enum JSExnType {
         JSEXN_TYPEERR,
         JSEXN_URIERR,
         JSEXN_DEBUGGEEWOULDRUN,
+        JSEXN_WASMCOMPILEERROR,
+        JSEXN_WASMRUNTIMEERROR,
     JSEXN_WARN,
     JSEXN_LIMIT
 } JSExnType;
@@ -5163,7 +5187,13 @@ extern JS_PUBLIC_API(void)
 JS_ReportError(JSContext* cx, const char* format, ...);
 
 extern JS_PUBLIC_API(void)
+JS_ReportErrorASCII(JSContext* cx, const char* format, ...);
+
+extern JS_PUBLIC_API(void)
 JS_ReportErrorLatin1(JSContext* cx, const char* format, ...);
+
+extern JS_PUBLIC_API(void)
+JS_ReportErrorUTF8(JSContext* cx, const char* format, ...);
 
 /*
  * Use an errorNumber to retrieve the format string, args are char*
@@ -5179,6 +5209,14 @@ JS_ReportErrorNumberVA(JSContext* cx, JSErrorCallback errorCallback,
 #endif
 
 extern JS_PUBLIC_API(void)
+JS_ReportErrorNumberASCII(JSContext* cx, JSErrorCallback errorCallback,
+                          void* userRef, const unsigned errorNumber, ...);
+
+extern JS_PUBLIC_API(void)
+JS_ReportErrorNumberASCIIVA(JSContext* cx, JSErrorCallback errorCallback,
+                            void* userRef, const unsigned errorNumber, va_list ap);
+
+extern JS_PUBLIC_API(void)
 JS_ReportErrorNumberLatin1(JSContext* cx, JSErrorCallback errorCallback,
                            void* userRef, const unsigned errorNumber, ...);
 
@@ -5186,6 +5224,16 @@ JS_ReportErrorNumberLatin1(JSContext* cx, JSErrorCallback errorCallback,
 extern JS_PUBLIC_API(void)
 JS_ReportErrorNumberLatin1VA(JSContext* cx, JSErrorCallback errorCallback,
                              void* userRef, const unsigned errorNumber, va_list ap);
+#endif
+
+extern JS_PUBLIC_API(void)
+JS_ReportErrorNumberUTF8(JSContext* cx, JSErrorCallback errorCallback,
+                           void* userRef, const unsigned errorNumber, ...);
+
+#ifdef va_start
+extern JS_PUBLIC_API(void)
+JS_ReportErrorNumberUTF8VA(JSContext* cx, JSErrorCallback errorCallback,
+                           void* userRef, const unsigned errorNumber, va_list ap);
 #endif
 
 /*
@@ -5210,7 +5258,13 @@ extern JS_PUBLIC_API(bool)
 JS_ReportWarning(JSContext* cx, const char* format, ...);
 
 extern JS_PUBLIC_API(bool)
+JS_ReportWarningASCII(JSContext* cx, const char* format, ...);
+
+extern JS_PUBLIC_API(bool)
 JS_ReportWarningLatin1(JSContext* cx, const char* format, ...);
+
+extern JS_PUBLIC_API(bool)
+JS_ReportWarningUTF8(JSContext* cx, const char* format, ...);
 
 extern JS_PUBLIC_API(bool)
 JS_ReportErrorFlagsAndNumber(JSContext* cx, unsigned flags,
@@ -5218,9 +5272,19 @@ JS_ReportErrorFlagsAndNumber(JSContext* cx, unsigned flags,
                              const unsigned errorNumber, ...);
 
 extern JS_PUBLIC_API(bool)
+JS_ReportErrorFlagsAndNumberASCII(JSContext* cx, unsigned flags,
+                                  JSErrorCallback errorCallback, void* userRef,
+                                  const unsigned errorNumber, ...);
+
+extern JS_PUBLIC_API(bool)
 JS_ReportErrorFlagsAndNumberLatin1(JSContext* cx, unsigned flags,
                                    JSErrorCallback errorCallback, void* userRef,
                                    const unsigned errorNumber, ...);
+
+extern JS_PUBLIC_API(bool)
+JS_ReportErrorFlagsAndNumberUTF8(JSContext* cx, unsigned flags,
+                                 JSErrorCallback errorCallback, void* userRef,
+                                 const unsigned errorNumber, ...);
 
 extern JS_PUBLIC_API(bool)
 JS_ReportErrorFlagsAndNumberUC(JSContext* cx, unsigned flags,

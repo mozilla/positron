@@ -199,6 +199,9 @@ MediaKeySession::GenerateRequest(const nsAString& aInitDataType,
     return promise.forget();
   }
 
+  Telemetry::Accumulate(Telemetry::VIDEO_CDM_GENERATE_REQUEST_CALLED,
+                        ToCDMTypeTelemetryEnum(mKeySystem));
+
   // Convert initData to base64 for easier logging.
   // Note: CreateSession() Move()s the data out of the array, so we have
   // to copy it here.
@@ -481,6 +484,30 @@ MediaKeySession::SetExpiration(double aExpiration)
           NS_ConvertUTF16toUTF8(mSessionId).get(),
           aExpiration);
   mExpiration = aExpiration;
+}
+
+EventHandlerNonNull*
+MediaKeySession::GetOnkeystatuseschange()
+{
+  return GetEventHandler(nsGkAtoms::onkeystatuseschange, EmptyString());
+}
+
+void
+MediaKeySession::SetOnkeystatuseschange(EventHandlerNonNull* aCallback)
+{
+  SetEventHandler(nsGkAtoms::onkeystatuseschange, EmptyString(), aCallback);
+}
+
+EventHandlerNonNull*
+MediaKeySession::GetOnmessage()
+{
+  return GetEventHandler(nsGkAtoms::onmessage, EmptyString());
+}
+
+void
+MediaKeySession::SetOnmessage(EventHandlerNonNull* aCallback)
+{
+  SetEventHandler(nsGkAtoms::onmessage, EmptyString(), aCallback);
 }
 
 } // namespace dom

@@ -100,8 +100,6 @@
 #include "mozilla/layers/GrallocTextureHost.h"
 #endif
 
-#include "mozilla/Hal.h"
-
 #ifdef USE_SKIA
 # ifdef __GNUC__
 #  pragma GCC diagnostic push
@@ -144,6 +142,7 @@ class mozilla::gl::SkiaGLGlue : public GenericAtomicRefCounted {
 #include "gfxVR.h"
 #include "VRManagerChild.h"
 #include "mozilla/gfx/GPUParent.h"
+#include "prsystem.h"
 
 namespace mozilla {
 namespace layers {
@@ -506,7 +505,8 @@ gfxPlatform::gfxPlatform()
 #endif
     InitBackendPrefs(canvasMask, BackendType::CAIRO,
                      contentMask, BackendType::CAIRO);
-    mTotalSystemMemory = mozilla::hal::GetTotalSystemMemory();
+
+    mTotalSystemMemory = PR_GetPhysicalMemorySize();
 
     VRManager::ManagerInit();
 }
@@ -1274,7 +1274,7 @@ gfxPlatform::InitializeSkiaCacheLimits()
 #ifdef USE_SKIA_GPU
     bool usingDynamicCache = gfxPrefs::CanvasSkiaGLDynamicCache();
     int cacheItemLimit = gfxPrefs::CanvasSkiaGLCacheItems();
-    int cacheSizeLimit = gfxPrefs::CanvasSkiaGLCacheSize();
+    uint64_t cacheSizeLimit = std::max(gfxPrefs::CanvasSkiaGLCacheSize(), (int32_t)0);
 
     // Prefs are in megabytes, but we want the sizes in bytes
     cacheSizeLimit *= 1024*1024;
@@ -1289,11 +1289,14 @@ gfxPlatform::InitializeSkiaCacheLimits()
       }
     }
 
+    // Ensure cache size doesn't overflow on 32-bit platforms.
+    cacheSizeLimit = std::min(cacheSizeLimit, (uint64_t)SIZE_MAX);
+
   #ifdef DEBUG
-    printf_stderr("Determined SkiaGL cache limits: Size %i, Items: %i\n", cacheSizeLimit, cacheItemLimit);
+    printf_stderr("Determined SkiaGL cache limits: Size %" PRIu64 ", Items: %i\n", cacheSizeLimit, cacheItemLimit);
   #endif
 
-    mSkiaGlue->GetGrContext()->setResourceCacheLimits(cacheItemLimit, cacheSizeLimit);
+    mSkiaGlue->GetGrContext()->setResourceCacheLimits(cacheItemLimit, (size_t)cacheSizeLimit);
 #endif
   }
 }
@@ -2092,6 +2095,20 @@ static bool sBufferRotationCheckPref = true;
 
 static mozilla::Atomic<bool> sLayersAccelerationPrefsInitialized(false);
 
+void VideoDecodingFailedChangedCallback(const char* aPref, void*)
+{
+  sLayersHardwareVideoDecodingFailed = Preferences::GetBool(aPref, false);
+  gfxPlatform::GetPlatform()->UpdateCanUseHardwareVideoDecoding();
+}
+
+void
+gfxPlatform::UpdateCanUseHardwareVideoDecoding()
+{
+  if (XRE_IsParentProcess()) {
+    gfxVars::SetCanUseHardwareVideoDecoding(CanUseHardwareVideoDecoding());
+  }
+}
+
 void
 gfxPlatform::InitAcceleration()
 {
@@ -2131,11 +2148,14 @@ gfxPlatform::InitAcceleration()
     }
   }
 
-  Preferences::AddBoolVarCache(&sLayersHardwareVideoDecodingFailed,
-                               "media.hardware-video-decoding.failed",
-                               false);
+  sLayersAccelerationPrefsInitialized = true;
 
   if (XRE_IsParentProcess()) {
+    Preferences::RegisterCallbackAndCall(VideoDecodingFailedChangedCallback,
+                                         "media.hardware-video-decoding.failed",
+                                         nullptr,
+                                         Preferences::ExactMatch);
+
     FeatureState& gpuProc = gfxConfig::GetFeature(Feature::GPU_PROCESS);
     if (gfxPrefs::GPUProcessDevEnabled()) {
       // We want to hide this from about:support, so only set a default if the
@@ -2161,8 +2181,6 @@ gfxPlatform::InitAcceleration()
       gpu->EnableGPUProcess();
     }
   }
-
-  sLayersAccelerationPrefsInitialized = true;
 }
 
 void

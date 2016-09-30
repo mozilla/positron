@@ -20,8 +20,8 @@
 #include "nsIBaseWindow.h"
 #include "nsIDocument.h"
 #include "nsContentUtils.h"
-#include "mozilla/StyleSheetHandle.h"
-#include "mozilla/StyleSheetHandleInlines.h"
+#include "mozilla/StyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 
 using namespace mozilla;
 
@@ -674,22 +674,6 @@ nsMediaFeatures::features[] = {
     nsMediaFeature::eBoolInteger,
     nsMediaFeature::eNoRequirements,
     { &nsGkAtoms::scrollbar_thumb_proportional },
-    GetSystemMetric
-  },
-  {
-    &nsGkAtoms::_moz_images_in_menus,
-    nsMediaFeature::eMinMaxNotAllowed,
-    nsMediaFeature::eBoolInteger,
-    nsMediaFeature::eNoRequirements,
-    { &nsGkAtoms::images_in_menus },
-    GetSystemMetric
-  },
-  {
-    &nsGkAtoms::_moz_images_in_buttons,
-    nsMediaFeature::eMinMaxNotAllowed,
-    nsMediaFeature::eBoolInteger,
-    nsMediaFeature::eNoRequirements,
-    { &nsGkAtoms::images_in_buttons },
     GetSystemMetric
   },
   {

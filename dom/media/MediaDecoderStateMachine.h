@@ -174,6 +174,12 @@ public:
   // Seeks to the decoder to aTarget asynchronously.
   RefPtr<MediaDecoder::SeekPromise> InvokeSeek(SeekTarget aTarget);
 
+  void DispatchSetPlaybackRate(double aPlaybackRate)
+  {
+    OwnerThread()->DispatchStateChange(NewRunnableMethod<double>(
+      this, &MediaDecoderStateMachine::SetPlaybackRate, aPlaybackRate));
+  }
+
   // Set/Unset dormant state.
   void DispatchSetDormant(bool aDormant);
 
@@ -247,6 +253,9 @@ public:
   MediaEventSource<MediaResult>&
   OnPlaybackErrorEvent() { return mOnPlaybackErrorEvent; }
 
+  MediaEventSource<DecoderDoctorEvent>&
+  OnDecoderDoctorEvent() { return mOnDecoderDoctorEvent; }
+
   size_t SizeOfVideoQueue() const;
 
   size_t SizeOfAudioQueue() const;
@@ -291,11 +300,6 @@ private:
   // Only called on the decoder thread. Must be called with
   // the decode monitor held.
   void UpdatePlaybackPosition(int64_t aTime);
-
-  // Causes the state machine to switch to buffering state, and to
-  // immediately stop playback and buffer downloaded data. Called on
-  // the state machine thread.
-  void StartBuffering();
 
   bool CanPlayThrough();
 
@@ -372,7 +376,7 @@ protected:
   void AudioAudibleChanged(bool aAudible);
 
   void VolumeChanged();
-  void LogicalPlaybackRateChanged();
+  void SetPlaybackRate(double aPlaybackRate);
   void PreservesPitchChanged();
 
   MediaQueue<MediaData>& AudioQueue() { return mAudioQueue; }
@@ -386,11 +390,13 @@ protected:
   // decode more.
   bool NeedToDecodeVideo();
 
-  // Returns true if we've got less than aAudioUsecs microseconds of decoded
-  // and playable data. The decoder monitor must be held.
-  //
+  // True if we are low in decoded audio/video data.
   // May not be invoked when mReader->UseBufferingHeuristics() is false.
-  bool HasLowDecodedData(int64_t aAudioUsecs);
+  bool HasLowDecodedData();
+
+  bool HasLowDecodedAudio();
+
+  bool HasLowDecodedVideo();
 
   bool OutOfDecodedAudio();
 
@@ -543,12 +549,6 @@ protected:
 
   // Performs one "cycle" of the state machine.
   void RunStateMachine();
-  // Perform one cycle of the DECODING state.
-  void StepDecoding();
-  // Perform one cycle of the BUFFERING state.
-  void StepBuffering();
-  // Perform one cycle of the COMPLETED state.
-  void StepCompleted();
 
   bool IsStateMachineScheduled() const;
 
@@ -564,7 +564,7 @@ private:
   void OnMediaSinkVideoComplete();
 
   // Rejected by the MediaSink to signal errors for audio/video.
-  void OnMediaSinkAudioError();
+  void OnMediaSinkAudioError(nsresult aResult);
   void OnMediaSinkVideoError();
 
   // Return true if the video decoder's decode speed can not catch up the
@@ -601,11 +601,6 @@ private:
   Watchable<State> mState;
 
   UniquePtr<StateObject> mStateObj;
-
-  // Time that buffering started. Used for buffering timeout and only
-  // accessed on the state machine thread. This is null while we're not
-  // buffering.
-  TimeStamp mBufferingStart;
 
   media::TimeUnit Duration() const { MOZ_ASSERT(OnTaskQueue()); return mDuration.Ref().ref(); }
 
@@ -843,8 +838,6 @@ private:
   // are playing an MSE stream (the start time is always assumed 0).
   bool mSentFirstFrameLoadedEvent;
 
-  bool mSentPlaybackEndedEvent;
-
   // True if video decoding is suspended.
   bool mVideoDecodeSuspended;
 
@@ -874,16 +867,16 @@ private:
   MediaEventProducer<MediaEventType> mOnPlaybackEvent;
   MediaEventProducer<MediaResult> mOnPlaybackErrorEvent;
 
+  MediaEventProducer<DecoderDoctorEvent> mOnDecoderDoctorEvent;
+
   // True if audio is offloading.
   // Playback will not start when audio is offloading.
   bool mAudioOffloading;
 
-#ifdef MOZ_EME
   void OnCDMProxyReady(RefPtr<CDMProxy> aProxy);
   void OnCDMProxyNotReady();
   RefPtr<CDMProxy> mCDMProxy;
   MozPromiseRequestHolder<MediaDecoder::CDMProxyPromise> mCDMProxyPromise;
-#endif
 
 private:
   // The buffered range. Mirrored from the decoder thread.
@@ -903,11 +896,6 @@ private:
 
   // Volume of playback. 0.0 = muted. 1.0 = full volume.
   Mirror<double> mVolume;
-
-  // TODO: The separation between mPlaybackRate and mLogicalPlaybackRate is a
-  // kludge to preserve existing fragile logic while converting this setup to
-  // state-mirroring. Some hero should clean this up.
-  Mirror<double> mLogicalPlaybackRate;
 
   // Pitch preservation for the playback rate.
   Mirror<bool> mPreservesPitch;

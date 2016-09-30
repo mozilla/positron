@@ -32,6 +32,7 @@
 #include "nsXULAppAPI.h"                // for XRE_GetIOMessageLoop, etc
 #include "FrameLayerBuilder.h"
 #include "mozilla/dom/TabChild.h"
+#include "mozilla/dom/TabParent.h"
 #include "mozilla/Unused.h"
 #include "mozilla/DebugOnly.h"
 #if defined(XP_WIN)
@@ -51,9 +52,26 @@ using mozilla::gfx::GPUProcessManager;
 namespace mozilla {
 namespace layers {
 
+static int sShmemCreationCounter = 0;
+
+static void ResetShmemCounter()
+{
+  sShmemCreationCounter = 0;
+}
+
+static void ShmemAllocated(CompositorBridgeChild* aProtocol)
+{
+  sShmemCreationCounter++;
+  if (sShmemCreationCounter > 256) {
+    aProtocol->SendSyncWithCompositor();
+    ResetShmemCounter();
+    MOZ_PERFORMANCE_WARNING("gfx", "The number of shmem allocations is too damn high!");
+  }
+}
+
 static StaticRefPtr<CompositorBridgeChild> sCompositorBridge;
 
-Atomic<int32_t> CompositableForwarder::sSerialCounter(0);
+Atomic<int32_t> KnowsCompositor::sSerialCounter(0);
 
 CompositorBridgeChild::CompositorBridgeChild(ClientLayerManager *aLayerManager)
   : mLayerManager(aLayerManager)
@@ -867,6 +885,22 @@ CompositorBridgeChild::RecvParentAsyncMessages(InfallibleTArray<AsyncParentMessa
   return true;
 }
 
+bool
+CompositorBridgeChild::RecvObserveLayerUpdate(const uint64_t& aLayersId,
+                                              const uint64_t& aEpoch,
+                                              const bool& aActive)
+{
+  // This message is sent via the window compositor, not the tab compositor -
+  // however it still has a layers id.
+  MOZ_ASSERT(aLayersId);
+  MOZ_ASSERT(XRE_IsParentProcess());
+
+  if (RefPtr<dom::TabParent> tab = dom::TabParent::GetTabParentFromLayersId(aLayersId)) {
+    tab->LayerTreeUpdate(aEpoch, aActive);
+  }
+  return true;
+}
+
 void
 CompositorBridgeChild::HoldUntilCompositableRefReleasedIfNecessary(TextureClient* aClient)
 {
@@ -926,12 +960,13 @@ CompositorBridgeChild::CancelWaitForRecycle(uint64_t aTextureId)
 }
 
 TextureClientPool*
-CompositorBridgeChild::GetTexturePool(LayersBackend aBackend,
+CompositorBridgeChild::GetTexturePool(KnowsCompositor* aAllocator,
                                       SurfaceFormat aFormat,
                                       TextureFlags aFlags)
 {
   for (size_t i = 0; i < mTexturePools.Length(); i++) {
-    if (mTexturePools[i]->GetBackend() == aBackend &&
+    if (mTexturePools[i]->GetBackend() == aAllocator->GetCompositorBackendType() &&
+        mTexturePools[i]->GetMaxTextureSize() == aAllocator->GetMaxTextureSize() &&
         mTexturePools[i]->GetFormat() == aFormat &&
         mTexturePools[i]->GetFlags() == aFlags) {
       return mTexturePools[i];
@@ -939,7 +974,9 @@ CompositorBridgeChild::GetTexturePool(LayersBackend aBackend,
   }
 
   mTexturePools.AppendElement(
-      new TextureClientPool(aBackend, aFormat,
+      new TextureClientPool(aAllocator->GetCompositorBackendType(),
+                            aAllocator->GetMaxTextureSize(),
+                            aFormat,
                             gfx::gfxVars::TileSize(),
                             aFlags,
                             gfxPrefs::LayersTilePoolShrinkTimeout(),
@@ -996,6 +1033,7 @@ CompositorBridgeChild::AllocUnsafeShmem(size_t aSize,
                                    ipc::SharedMemory::SharedMemoryType aType,
                                    ipc::Shmem* aShmem)
 {
+  ShmemAllocated(this);
   return PCompositorBridgeChild::AllocUnsafeShmem(aSize, aType, aShmem);
 }
 
@@ -1004,6 +1042,7 @@ CompositorBridgeChild::AllocShmem(size_t aSize,
                              ipc::SharedMemory::SharedMemoryType aType,
                              ipc::Shmem* aShmem)
 {
+  ShmemAllocated(this);
   return PCompositorBridgeChild::AllocShmem(aSize, aType, aShmem);
 }
 
@@ -1088,6 +1127,12 @@ CompositorBridgeChild::ProcessingError(Result aCode, const char* aReason)
   if (aCode != MsgDropped) {
     gfxDevCrash(gfx::LogReason::ProcessingError) << "Processing error in CompositorBridgeChild: " << int(aCode);
   }
+}
+
+void
+CompositorBridgeChild::WillEndTransaction()
+{
+  ResetShmemCounter();
 }
 
 } // namespace layers
