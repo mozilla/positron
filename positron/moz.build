@@ -92,3 +92,17 @@ EXTRA_JS_MODULES.renderer['web-view'] += [
   'electron/lib/renderer/web-view/web-view-constants.js',
   'electron/lib/renderer/web-view/web-view.js',
 ]
+
+include('/build/gyp.mozbuild')
+GYP_DIRS += ['spidernode']
+GYP_DIRS['spidernode'].input = 'spidernode/node.gyp'
+GYP_DIRS['spidernode'].variables = gyp_vars
+
+# The current incarnation of mozbuild's GYP support resolves include paths
+# relative to $topsrcdir/media/webrtc/trunk/build, which is why we need
+# to prepend  ../../../../ to get to $topsrcdir in them.
+# TODO: make mozbuild resolve include paths relative to the moz.build file.
+GYP_DIRS['spidernode'].includes += [
+  '../../../../positron/spidernode/common.gypi',
+  '../../../../positron/spidernode/config.gypi',
+]
