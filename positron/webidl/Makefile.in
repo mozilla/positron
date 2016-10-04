@@ -14,25 +14,37 @@ else
 BUILDTYPE = Release
 endif
 
+SPIDERNODE_LIB_NAMES = \
+	cares \
+	http_parser \
+	node \
+	openssl \
+	spidershim \
+	uv \
+	zlib \
+	$(NULL)
+
 # The SpiderNode libraries that Positron uses.  This needs to be kept in sync
 # with the USE_LIBS list in positron/webidl/moz.build.
-SPIDERNODE_LIBS = \
-	libcares.a \
-	libhttp_parser.a \
-	libnode.a \
-	libopenssl.a \
-	libspidershim.a \
-	libuv.a \
-	libzlib.a \
-	$(NULL)
+SPIDERNODE_LIBS = $(foreach file,$(SPIDERNODE_LIB_NAMES),lib$(file).a)
 
 # The paths to the libraries in Positron's objdir.  These are our build targets.
 SPIDERNODE_TARGETS = $(foreach file,$(SPIDERNODE_LIBS),$(DEPTH)/positron/app/spidernode/.libs/$(file))
 
+# SpiderNode currently builds the static libraries in different places on Linux and OS X.
+# On OS X they're all in the one directory, whereas on Linux they're all
+# in different sub-directories under the library's name, except for Node which is in the
+# top obj.target folder.
+ifeq ($(OS_ARCH), Linux)
+LIB_PATH = obj.target/$(if $(filter node,$(1)),,deps/$(1)/)lib$(1).a
+else
+LIB_PATH = lib$(1).a
+endif
+
 # The paths to the libraries in SpiderNode's "out" dir.  This is where
 # the libraries are actually built, since we don't yet configure SpiderNode
 # to build directly to Positron's objdir.
-SPIDERNODE_LIB_PATHS = $(foreach file,$(SPIDERNODE_LIBS),$(topsrcdir)/positron/spidernode/out/$(BUILDTYPE)/$(file))
+SPIDERNODE_LIB_PATHS = $(foreach file,$(SPIDERNODE_LIB_NAMES),$(topsrcdir)/positron/spidernode/out/$(BUILDTYPE)/$(call LIB_PATH,$(file)))
 
 .PHONY: spidernode
 
