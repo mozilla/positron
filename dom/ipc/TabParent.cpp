@@ -40,7 +40,7 @@
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/UniquePtr.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "BlobParent.h"
 #include "nsCOMPtr.h"
 #include "nsContentAreaDragDrop.h"
@@ -49,6 +49,7 @@
 #include "nsFocusManager.h"
 #include "nsFrameLoader.h"
 #include "nsIBaseWindow.h"
+#include "nsIBrowser.h"
 #include "nsIContent.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeOwner.h"
@@ -150,7 +151,7 @@ private:
 
     // This shouldn't be called directly except by the event loop. Use Dispatch
     // to start the sequence.
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         if (NS_IsMainThread()) {
             SendResponse();
@@ -276,6 +277,7 @@ TabParent::TabParent(nsIContentParent* aManager,
   , mDimensions(0, 0)
   , mOrientation(0)
   , mDPI(0)
+  , mRounding(0)
   , mDefaultScale(0)
   , mUpdatedDimensions(false)
   , mSizeMode(nsSizeMode_Normal)
@@ -292,13 +294,15 @@ TabParent::TabParent(nsIContentParent* aManager,
   , mInitedByParent(false)
   , mTabId(aTabId)
   , mCreatingWindow(false)
-  , mNeedLayerTreeReadyNotification(false)
   , mCursor(nsCursor(-1))
   , mTabSetsCursor(false)
   , mHasContentOpener(false)
 #ifdef DEBUG
   , mActiveSupressDisplayportCount(0)
 #endif
+  , mLayerTreeEpoch(0)
+  , mPreserveLayers(false)
+  , mFirstActivate(true)
 {
   MOZ_ASSERT(aManager);
 }
@@ -398,6 +402,17 @@ TabParent::SetOwnerElement(Element* aElement)
     Unused << SendSetUseGlobalHistory(useGlobalHistory);
   }
 
+#if defined(XP_WIN) && defined(ACCESSIBILITY)
+  if (!mIsDestroyed) {
+    uintptr_t newWindowHandle = 0;
+    if (nsCOMPtr<nsIWidget> widget = GetWidget()) {
+      newWindowHandle =
+        reinterpret_cast<uintptr_t>(widget->GetNativeData(NS_NATIVE_WINDOW));
+    }
+    Unused << SendUpdateNativeWindowHandle(newWindowHandle);
+  }
+#endif
+
   AddWindowListeners();
   TryCacheDPIAndScale();
 }
@@ -475,9 +490,7 @@ TabParent::IsVisible() const
     return false;
   }
 
-  bool visible = false;
-  frameLoader->GetVisible(&visible);
-  return visible;
+  return frameLoader->GetVisible();
 }
 
 void
@@ -495,13 +508,6 @@ TabParent::DestroyInternal()
   if (RenderFrameParent* frame = GetRenderFrame()) {
     RemoveTabParentFromTable(frame->GetLayersId());
     frame->Destroy();
-
-    // Notify our layer tree update observer that we're going away. It's
-    // possible that we race with a notification and there can be an
-    // LayerTreeUpdateRunnable on the main thread's event queue with a pointer
-    // to us. However, our actual destruction won't be until yet another event
-    // *after* that one is processed, so this should be safe.
-    mLayerUpdateObserver->TabParentDestroyed();
   }
 
   // Let all PluginWidgets know we are tearing down. Prevents
@@ -569,6 +575,15 @@ TabParent::Attach(nsFrameLoader* aFrameLoader)
 }
 
 bool
+TabParent::RecvEnsureLayersConnected()
+{
+  if (RenderFrameParent* frame = GetRenderFrame()) {
+    frame->EnsureLayersConnected();
+  }
+  return true;
+}
+
+bool
 TabParent::Recv__delete__()
 {
   if (XRE_IsParentProcess()) {
@@ -620,9 +635,19 @@ TabParent::ActorDestroy(ActorDestroyReason why)
     if (why == AbnormalShutdown && os) {
       os->NotifyObservers(NS_ISUPPORTS_CAST(nsIFrameLoader*, frameLoader),
                           "oop-frameloader-crashed", nullptr);
-      nsContentUtils::DispatchTrustedEvent(frameElement->OwnerDoc(), frameElement,
-                                           NS_LITERAL_STRING("oop-browser-crashed"),
-                                           true, true);
+      nsCOMPtr<nsIFrameLoaderOwner> owner = do_QueryInterface(frameElement);
+      if (owner) {
+        RefPtr<nsFrameLoader> currentFrameLoader = owner->GetFrameLoader();
+        // It's possible that the frameloader owner has already moved on
+        // and created a new frameloader. If so, we don't fire the event,
+        // since the frameloader owner has clearly moved on.
+        if (currentFrameLoader == frameLoader) {
+          nsContentUtils::DispatchTrustedEvent(frameElement->OwnerDoc(), frameElement,
+                                               NS_LITERAL_STRING("oop-browser-crashed"),
+                                               true, true);
+
+        }
+      }
     }
 
     mFrameLoader = nullptr;
@@ -680,6 +705,21 @@ TabParent::RecvSizeShellTo(const uint32_t& aFlags, const int32_t& aWidth, const 
   NS_ENSURE_TRUE(xulWin, true);
   xulWin->SizeShellToWithLimit(width, height, aShellItemWidth, aShellItemHeight);
 
+  return true;
+}
+
+bool
+TabParent::RecvDropLinks(nsTArray<nsString>&& aLinks)
+{
+  nsCOMPtr<nsIBrowser> browser = do_QueryInterface(mFrameElement);
+  if (browser) {
+    UniquePtr<const char16_t*[]> links;
+    links = MakeUnique<const char16_t*[]>(aLinks.Length());
+    for (uint32_t i = 0; i < aLinks.Length(); i++) {
+      links[i] = aLinks[i].get();
+    }
+    browser->DropLinks(aLinks.Length(), links.get());
+  }
   return true;
 }
 
@@ -991,7 +1031,8 @@ TabParent::UIResolutionChanged()
     // fails to cache the values, then mDefaultScale.scale might be invalid.
     // We don't want to send that value to content. Just send -1 for it too in
     // that case.
-    Unused << SendUIResolutionChanged(mDPI, mDPI < 0 ? -1.0 : mDefaultScale.scale);
+    Unused << SendUIResolutionChanged(mDPI, mRounding,
+                                      mDPI < 0 ? -1.0 : mDefaultScale.scale);
   }
 }
 
@@ -1419,9 +1460,9 @@ public:
     MOZ_ASSERT(mTabParent);
   }
 
-  NS_IMETHODIMP Observe(nsISupports* aSubject,
-                        const char* aTopic,
-                        const char16_t* aData) override
+  NS_IMETHOD Observe(nsISupports* aSubject,
+                     const char* aTopic,
+                     const char16_t* aData) override
   {
     if (!mTabParent) {
       // We already sent the notification
@@ -1646,6 +1687,21 @@ bool TabParent::SendRealTouchEvent(WidgetTouchEvent& event)
 }
 
 bool
+TabParent::SendHandleTap(TapType aType,
+                         const LayoutDevicePoint& aPoint,
+                         Modifiers aModifiers,
+                         const ScrollableLayerGuid& aGuid,
+                         uint64_t aInputBlockId)
+{
+  if (mIsDestroyed) {
+    return false;
+  }
+  LayoutDeviceIntPoint offset = GetChildProcessOffset();
+  return PBrowserParent::SendHandleTap(aType, aPoint + offset, aModifiers, aGuid,
+      aInputBlockId);
+}
+
+bool
 TabParent::RecvSyncMessage(const nsString& aMessage,
                            const ClonedMessageData& aData,
                            InfallibleTArray<CpowEntry>&& aCpows,
@@ -1776,12 +1832,11 @@ TabParent::RecvSetCustomCursor(const nsCString& aCursorData,
 nsIXULBrowserWindow*
 TabParent::GetXULBrowserWindow()
 {
-  nsCOMPtr<nsIContent> frame = do_QueryInterface(mFrameElement);
-  if (!frame) {
+  if (!mFrameElement) {
     return nullptr;
   }
 
-  nsCOMPtr<nsIDocShell> docShell = frame->OwnerDoc()->GetDocShell();
+  nsCOMPtr<nsIDocShell> docShell = mFrameElement->OwnerDoc()->GetDocShell();
   if (!docShell) {
     return nullptr;
   }
@@ -1976,8 +2031,9 @@ void
 TabParent::HandledWindowedPluginKeyEvent(const NativeEventData& aKeyEventData,
                                          bool aIsConsumed)
 {
-  bool ok = SendHandledWindowedPluginKeyEvent(aKeyEventData, aIsConsumed);
-  NS_WARN_IF(!ok);
+  DebugOnly<bool> ok =
+    SendHandledWindowedPluginKeyEvent(aKeyEventData, aIsConsumed);
+  NS_WARNING_ASSERTION(ok, "SendHandledWindowedPluginKeyEvent failed");
 }
 
 bool
@@ -2229,6 +2285,16 @@ TabParent::SendSelectionEvent(WidgetSelectionEvent& event)
   return true;
 }
 
+bool
+TabParent::SendPasteTransferable(const IPCDataTransfer& aDataTransfer,
+                                 const bool& aIsPrivateData,
+                                 const IPC::Principal& aRequestingPrincipal)
+{
+  return PBrowserParent::SendPasteTransferable(aDataTransfer,
+                                               aIsPrivateData,
+                                               aRequestingPrincipal);
+}
+
 /*static*/ TabParent*
 TabParent::GetFrom(nsFrameLoader* aFrameLoader)
 {
@@ -2283,12 +2349,10 @@ TabParent::GetTabIdFrom(nsIDocShell *docShell)
 RenderFrameParent*
 TabParent::GetRenderFrame()
 {
-  if (!mLayerUpdateObserver) {
-    mLayerUpdateObserver = new LayerTreeUpdateObserver(this);
-  }
-
   PRenderFrameParent* p = LoneManagedOrNullAsserts(ManagedPRenderFrameParent());
-  return static_cast<RenderFrameParent*>(p);
+  RenderFrameParent* frame = static_cast<RenderFrameParent*>(p);
+
+  return frame;
 }
 
 bool
@@ -2438,6 +2502,17 @@ TabParent::RecvGetDefaultScale(double* aValue)
 }
 
 bool
+TabParent::RecvGetWidgetRounding(int32_t* aValue)
+{
+  TryCacheDPIAndScale();
+
+  MOZ_ASSERT(mRounding > 0,
+             "Must not ask for rounding before OwnerElement is received!");
+  *aValue = mRounding;
+  return true;
+}
+
+bool
 TabParent::RecvGetMaxTouchPoints(uint32_t* aTouchPoints)
 {
   nsCOMPtr<nsIWidget> widget = GetWidget();
@@ -2557,7 +2632,7 @@ TabParent::GetAuthPrompt(uint32_t aPromptReason, const nsIID& iid,
   nsCOMPtr<nsILoginManagerPrompter> prompter = do_QueryInterface(prompt);
   if (prompter) {
     nsCOMPtr<nsIDOMElement> browser = do_QueryInterface(mFrameElement);
-    prompter->SetE10sData(browser, nullptr);
+    prompter->SetBrowser(browser);
   }
 
   *aResult = prompt.forget().take();
@@ -2639,11 +2714,6 @@ TabParent::SetRenderFrame(PRenderFrameParent* aRFParent)
   uint64_t layersId = renderFrame->GetLayersId();
   AddTabParentToTable(layersId, this);
 
-  if (mNeedLayerTreeReadyNotification) {
-    RequestNotifyLayerTreeReady();
-    mNeedLayerTreeReadyNotification = false;
-  }
-
   return true;
 }
 
@@ -2709,6 +2779,7 @@ TabParent::TryCacheDPIAndScale()
 
   if (widget) {
     mDPI = widget->GetDPI();
+    mRounding = widget->RoundsWidgetCoordinatesTo();
     mDefaultScale = widget->GetDefaultScale();
   }
 }
@@ -2780,6 +2851,9 @@ TabParent::RecvBrowserFrameOpenWindow(PBrowserParent* aOpener,
                                         this, aRenderFrame, aURL, aName, aFeatures,
                                         aTextureFactoryIdentifier, aLayersId);
   *aOutWindowOpened = (opened == BrowserElementParent::OPEN_WINDOW_ADDED);
+  if (!*aOutWindowOpened) {
+    Destroy();
+  }
   return true;
 }
 
@@ -2813,71 +2887,6 @@ TabParent::GetLoadContext()
 }
 
 NS_IMETHODIMP
-TabParent::InjectTouchEvent(const nsAString& aType,
-                            uint32_t* aIdentifiers,
-                            int32_t* aXs,
-                            int32_t* aYs,
-                            uint32_t* aRxs,
-                            uint32_t* aRys,
-                            float* aRotationAngles,
-                            float* aForces,
-                            uint32_t aCount,
-                            int32_t aModifiers)
-{
-  EventMessage msg;
-  nsContentUtils::GetEventMessageAndAtom(aType, eTouchEventClass, &msg);
-  if (msg != eTouchStart && msg != eTouchMove &&
-      msg != eTouchEnd && msg != eTouchCancel) {
-    return NS_ERROR_FAILURE;
-  }
-
-  nsCOMPtr<nsIWidget> widget = GetWidget();
-  if (!widget) {
-    return NS_ERROR_FAILURE;
-  }
-
-  WidgetTouchEvent event(true, msg, widget);
-  event.mModifiers = aModifiers;
-  event.mTime = PR_IntervalNow();
-
-  nsCOMPtr<nsIContent> content = do_QueryInterface(mFrameElement);
-  if (!content || !content->OwnerDoc()) {
-    return NS_ERROR_FAILURE;
-  }
-
-  nsIDocument* doc = content->OwnerDoc();
-  if (!doc || !doc->GetShell()) {
-    return NS_ERROR_FAILURE;
-  }
-  nsPresContext* presContext = doc->GetShell()->GetPresContext();
-
-  event.mTouches.SetCapacity(aCount);
-  for (uint32_t i = 0; i < aCount; ++i) {
-    LayoutDeviceIntPoint pt =
-      LayoutDeviceIntPoint::FromAppUnitsRounded(
-        CSSPoint::ToAppUnits(CSSPoint(aXs[i], aYs[i])),
-        presContext->AppUnitsPerDevPixel());
-
-    LayoutDeviceIntPoint radius =
-      LayoutDeviceIntPoint::FromAppUnitsRounded(
-        CSSPoint::ToAppUnits(CSSPoint(aRxs[i], aRys[i])),
-        presContext->AppUnitsPerDevPixel());
-
-    RefPtr<Touch> t =
-      new Touch(aIdentifiers[i], pt, radius, aRotationAngles[i], aForces[i]);
-
-    // Consider all injected touch events as changedTouches. For more details
-    // about the meaning of changedTouches for each event, see
-    // https://developer.mozilla.org/docs/Web/API/TouchEvent.changedTouches
-    t->mChanged = true;
-    event.mTouches.AppendElement(t);
-  }
-
-  SendRealTouchEvent(event);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 TabParent::GetUseAsyncPanZoom(bool* useAsyncPanZoom)
 {
   *useAsyncPanZoom = AsyncPanZoomEnabled();
@@ -2888,10 +2897,26 @@ TabParent::GetUseAsyncPanZoom(bool* useAsyncPanZoom)
 NS_IMETHODIMP
 TabParent::SetDocShellIsActive(bool isActive)
 {
+  // Increment the epoch so that layer tree updates from previous
+  // SetDocShellIsActive requests are ignored.
+  mLayerTreeEpoch++;
+
   // docshell is consider prerendered only if not active yet
   mIsPrerendered &= !isActive;
   mDocShellIsActive = isActive;
-  Unused << SendSetDocShellIsActive(isActive, true);
+  Unused << SendSetDocShellIsActive(isActive, mPreserveLayers, mLayerTreeEpoch);
+
+  // Ask the child to repaint using the PHangMonitor channel/thread (which may
+  // be less congested).
+  if (isActive) {
+    if (mFirstActivate) {
+      mFirstActivate = false;
+    } else {
+      ContentParent* cp = Manager()->AsContentParent();
+      cp->ForceTabPaint(this, mLayerTreeEpoch);
+    }
+  }
+
   return NS_OK;
 }
 
@@ -2910,12 +2935,9 @@ TabParent::GetIsPrerendered(bool* aIsPrerendered)
 }
 
 NS_IMETHODIMP
-TabParent::SetDocShellIsActiveAndForeground(bool isActive)
+TabParent::PreserveLayers(bool aPreserveLayers)
 {
-  // docshell is consider prerendered only if not active yet
-  mIsPrerendered &= !isActive;
-  mDocShellIsActive = isActive;
-  Unused << SendSetDocShellIsActive(isActive, false);
+  mPreserveLayers = aPreserveLayers;
   return NS_OK;
 }
 
@@ -2976,72 +2998,41 @@ TabParent::NavigateByKey(bool aForward, bool aForDocumentNavigation)
 class LayerTreeUpdateRunnable final
   : public mozilla::Runnable
 {
-  RefPtr<LayerTreeUpdateObserver> mUpdateObserver;
+  uint64_t mLayersId;
+  uint64_t mEpoch;
   bool mActive;
 
 public:
-  explicit LayerTreeUpdateRunnable(LayerTreeUpdateObserver* aObs, bool aActive)
-    : mUpdateObserver(aObs), mActive(aActive)
+  explicit LayerTreeUpdateRunnable(uint64_t aLayersId, uint64_t aEpoch, bool aActive)
+    : mLayersId(aLayersId), mEpoch(aEpoch), mActive(aActive)
   {
     MOZ_ASSERT(!NS_IsMainThread());
   }
 
 private:
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     MOZ_ASSERT(NS_IsMainThread());
-    if (RefPtr<TabParent> tabParent = mUpdateObserver->GetTabParent()) {
-      tabParent->LayerTreeUpdate(mActive);
+    if (RefPtr<TabParent> tabParent = TabParent::GetTabParentFromLayersId(mLayersId)) {
+      tabParent->LayerTreeUpdate(mEpoch, mActive);
     }
     return NS_OK;
   }
 };
 
 void
-LayerTreeUpdateObserver::ObserveUpdate(uint64_t aLayersId, bool aActive)
+TabParent::LayerTreeUpdate(uint64_t aEpoch, bool aActive)
 {
-  MOZ_ASSERT(!NS_IsMainThread());
-
-  RefPtr<LayerTreeUpdateRunnable> runnable =
-    new LayerTreeUpdateRunnable(this, aActive);
-  NS_DispatchToMainThread(runnable);
-}
-
-
-bool
-TabParent::RequestNotifyLayerTreeReady()
-{
-  RenderFrameParent* frame = GetRenderFrame();
-  if (!frame || !frame->IsInitted()) {
-    mNeedLayerTreeReadyNotification = true;
-  } else {
-    GPUProcessManager::Get()->RequestNotifyLayerTreeReady(
-      frame->GetLayersId(),
-      mLayerUpdateObserver);
-  }
-  return true;
-}
-
-bool
-TabParent::RequestNotifyLayerTreeCleared()
-{
-  RenderFrameParent* frame = GetRenderFrame();
-  if (!frame) {
-    return false;
+  // Ignore updates from old epochs. They might tell us that layers are
+  // available when we've already sent a message to clear them. We can't trust
+  // the update in that case since layers could disappear anytime after that.
+  if (aEpoch != mLayerTreeEpoch || mIsDestroyed) {
+    return;
   }
 
-  GPUProcessManager::Get()->RequestNotifyLayerTreeCleared(
-    frame->GetLayersId(),
-    mLayerUpdateObserver);
-  return true;
-}
-
-bool
-TabParent::LayerTreeUpdate(bool aActive)
-{
   nsCOMPtr<mozilla::dom::EventTarget> target = do_QueryInterface(mFrameElement);
   if (!target) {
     NS_WARNING("Could not locate target for layer tree message.");
-    return true;
+    return;
   }
 
   RefPtr<Event> event = NS_NewDOMEvent(mFrameElement, nullptr, nullptr);
@@ -3054,33 +3045,16 @@ TabParent::LayerTreeUpdate(bool aActive)
   event->WidgetEventPtr()->mFlags.mOnlyChromeDispatch = true;
   bool dummy;
   mFrameElement->DispatchEvent(event, &dummy);
-  return true;
 }
 
-void
-TabParent::SwapLayerTreeObservers(TabParent* aOther)
+bool
+TabParent::RecvForcePaintNoOp(const uint64_t& aLayerObserverEpoch)
 {
-  if (IsDestroyed() || aOther->IsDestroyed()) {
-    return;
-  }
-
-  RenderFrameParent* rfp = GetRenderFrame();
-  RenderFrameParent* otherRfp = aOther->GetRenderFrame();
-  if (!rfp || !otherRfp) {
-    return;
-  }
-
-  // The swap that happens for the observers in GPUProcessManager has to
-  // happen in a lock so that an update being processed on the compositor thread
-  // can't grab the layer update observer for the wrong tab parent.
-  GPUProcessManager::Get()->SwapLayerTreeObservers(
-    rfp->GetLayersId(),
-    otherRfp->GetLayersId());
-
-  // No need for a lock, destruction can only happen on the main thread and we
-  // only read mLayerUpdateObserver::mTabParent on the main thread.
-  Swap(mLayerUpdateObserver, aOther->mLayerUpdateObserver);
-  mLayerUpdateObserver->SwapTabParent(aOther->mLayerUpdateObserver);
+  // We sent a ForcePaint message when layers were already visible. In this
+  // case, we should act as if an update occurred even though we already have
+  // the layers.
+  LayerTreeUpdate(aLayerObserverEpoch, true);
+  return true;
 }
 
 bool
@@ -3414,11 +3388,11 @@ TabParent::GetShowInfo()
       nsContentUtils::IsChromeDoc(mFrameElement->OwnerDoc()) &&
       mFrameElement->HasAttr(kNameSpaceID_None, nsGkAtoms::transparent);
     return ShowInfo(name, allowFullscreen, isPrivate, false,
-                    isTransparent, mDPI, mDefaultScale.scale);
+                    isTransparent, mDPI, mRounding, mDefaultScale.scale);
   }
 
   return ShowInfo(EmptyString(), false, false, false,
-                  false, mDPI, mDefaultScale.scale);
+                  false, mDPI, mRounding, mDefaultScale.scale);
 }
 
 void

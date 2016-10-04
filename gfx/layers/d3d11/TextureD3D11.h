@@ -72,7 +72,8 @@ public:
   virtual already_AddRefed<gfx::DrawTarget> BorrowDrawTarget() override;
 
   virtual TextureData*
-  CreateSimilar(ClientIPCAllocator* aAllocator,
+  CreateSimilar(LayersIPCChannel* aAllocator,
+                LayersBackend aLayersBackend,
                 TextureFlags aFlags,
                 TextureAllocationFlags aAllocFlags) const override;
 
@@ -81,7 +82,7 @@ public:
 
   ID3D11Texture2D* GetD3D11Texture() { return mTexture; }
 
-  virtual void Deallocate(ClientIPCAllocator* aAllocator) override;
+  virtual void Deallocate(LayersIPCChannel* aAllocator) override;
 
   D3D11TextureData* AsD3D11TextureData() override {
     return this;
@@ -109,14 +110,13 @@ already_AddRefed<TextureClient>
 CreateD3D11extureClientWithDevice(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
                                   TextureFlags aTextureFlags, TextureAllocationFlags aAllocFlags,
                                   ID3D11Device* aDevice,
-                                  ClientIPCAllocator* aAllocator);
+                                  LayersIPCChannel* aAllocator);
 
 class DXGIYCbCrTextureData : public TextureData
 {
 public:
   static DXGIYCbCrTextureData*
-  Create(ClientIPCAllocator* aAllocator,
-         TextureFlags aFlags,
+  Create(TextureFlags aFlags,
          IUnknown* aTextureY,
          IUnknown* aTextureCb,
          IUnknown* aTextureCr,
@@ -128,8 +128,7 @@ public:
          const gfx::IntSize& aSizeCbCr);
 
   static DXGIYCbCrTextureData*
-  Create(ClientIPCAllocator* aAllocator,
-         TextureFlags aFlags,
+  Create(TextureFlags aFlags,
          ID3D11Texture2D* aTextureCb,
          ID3D11Texture2D* aTextureY,
          ID3D11Texture2D* aTextureCr,
@@ -147,13 +146,7 @@ public:
 
   virtual already_AddRefed<gfx::DrawTarget> BorrowDrawTarget() override { return nullptr; }
 
-  // This TextureData should not be used in a context where we use CreateSimilar
-  // (ex. component alpha) because the underlying texture is always created by
-  // an external producer.
-  virtual DXGIYCbCrTextureData*
-  CreateSimilar(ClientIPCAllocator*, TextureFlags, TextureAllocationFlags) const override { return nullptr; }
-
-  virtual void Deallocate(ClientIPCAllocator* aAllocator) override;
+  virtual void Deallocate(LayersIPCChannel* aAllocator) override;
 
   virtual bool UpdateFromSurface(gfx::SourceSurface*) override { return false; }
 
@@ -273,7 +266,7 @@ already_AddRefed<TextureClient>
 CreateD3D11TextureClientWithDevice(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
                                    TextureFlags aTextureFlags, TextureAllocationFlags aAllocFlags,
                                    ID3D11Device* aDevice,
-                                   ClientIPCAllocator* aAllocator);
+                                   LayersIPCChannel* aAllocator);
 
 
 /**
@@ -296,8 +289,10 @@ public:
   virtual gfx::SurfaceFormat GetFormat() const override { return mFormat; }
 
   virtual bool Lock() override;
-
   virtual void Unlock() override;
+
+  virtual bool LockWithoutCompositor() override;
+  virtual void UnlockWithoutCompositor() override;
 
   virtual gfx::IntSize GetSize() const override { return mSize; }
 
@@ -307,6 +302,9 @@ public:
   }
 
 protected:
+  bool LockInternal();
+  void UnlockInternal();
+
   RefPtr<ID3D11Device> GetDevice();
 
   bool OpenSharedHandle();
@@ -381,7 +379,6 @@ public:
 
 private:
   friend class CompositorD3D11;
-
   RefPtr<ID3D11RenderTargetView> mRTView;
 };
 

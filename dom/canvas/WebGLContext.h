@@ -116,6 +116,7 @@ template<typename> struct Nullable;
 
 namespace gfx {
 class SourceSurface;
+class VRLayerChild;
 } // namespace gfx
 
 namespace webgl {
@@ -123,6 +124,7 @@ struct LinkedProgramInfo;
 class ShaderValidator;
 class TexUnpackBlob;
 struct UniformInfo;
+struct UniformBlockInfo;
 } // namespace webgl
 
 WebGLTexelFormat GetWebGLTexelFormat(TexInternalFormat format);
@@ -180,6 +182,19 @@ public:
     GLfloat AsFloat() const { return (mType == Float) ? mValue.f : GLfloat(mValue.i); }
 };
 
+struct IndexedBufferBinding
+{
+    WebGLRefPtr<WebGLBuffer> mBufferBinding;
+    uint64_t mRangeStart;
+    uint64_t mRangeSize;
+
+    IndexedBufferBinding();
+
+    uint64_t ByteCount() const;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
 class WebGLContext
     : public nsIDOMWebGLRenderingContext
     , public nsICanvasRenderingContextInternal
@@ -188,6 +203,9 @@ class WebGLContext
     , public WebGLRectangleObject
     , public nsWrapperCache
 {
+    friend class ScopedDrawHelper;
+    friend class ScopedDrawWithTransformFeedback;
+    friend class ScopedFBRebinder;
     friend class WebGL2Context;
     friend class WebGLContextUserData;
     friend class WebGLExtensionCompressedTextureATC;
@@ -201,6 +219,7 @@ class WebGLContext
     friend class WebGLExtensionLoseContext;
     friend class WebGLExtensionVertexArray;
     friend class WebGLMemoryTracker;
+    friend struct webgl::UniformBlockInfo;
 
     enum {
         UNPACK_FLIP_Y_WEBGL = 0x9240,
@@ -239,7 +258,8 @@ public:
     virtual int32_t GetHeight() const override;
 
     NS_IMETHOD SetDimensions(int32_t width, int32_t height) override;
-    NS_IMETHOD InitializeWithDrawTarget(nsIDocShell*, gfx::DrawTarget*) override
+    NS_IMETHOD InitializeWithDrawTarget(nsIDocShell*,
+                                        NotNull<gfx::DrawTarget*>) override
     {
         return NS_ERROR_NOT_IMPLEMENTED;
     }
@@ -353,6 +373,11 @@ public:
     bool IsPreservingDrawingBuffer() const { return mOptions.preserveDrawingBuffer; }
 
     bool PresentScreenBuffer();
+
+    // Prepare the context for capture before compositing
+    void BeginComposition();
+    // Clean up the context after captured for compositing
+    void EndComposition();
 
     // a number that increments every time we have an event that causes
     // all context resources to be lost.
@@ -539,6 +564,9 @@ public:
     void LinkProgram(WebGLProgram* prog);
     void PixelStorei(GLenum pname, GLint param);
     void PolygonOffset(GLfloat factor, GLfloat units);
+
+    already_AddRefed<layers::SharedSurfaceTextureClient> GetVRFrame();
+    bool StartVRPresentation();
 protected:
     bool ReadPixels_SharedPrecheck(ErrorResult* const out_error);
     void ReadPixelsImpl(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format,
@@ -548,10 +576,20 @@ protected:
                                 GLenum destType, void* dest, uint32_t dataLen,
                                 uint32_t rowStride);
 public:
-    void ReadPixels(GLint x, GLint y, GLsizei width, GLsizei height,
-                    GLenum format, GLenum type,
-                    const dom::Nullable<dom::ArrayBufferView>& pixels,
-                    ErrorResult& rv);
+    void ReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format,
+                    GLenum type, const dom::Nullable<dom::ArrayBufferView>& maybeView,
+                    ErrorResult& rv)
+    {
+        const char funcName[] = "readPixels";
+        if (maybeView.IsNull()) {
+            ErrorInvalidValue("%s: `pixels` must not be null.", funcName);
+            return;
+        }
+        ReadPixels(x, y, width, height, format, type, maybeView.Value(), rv);
+    }
+
+    void ReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format,
+                    GLenum type, const dom::ArrayBufferView& pixels, ErrorResult& rv);
     void RenderbufferStorage(GLenum target, GLenum internalFormat,
                              GLsizei width, GLsizei height);
 protected:
@@ -705,11 +743,6 @@ public:
 
 // -----------------------------------------------------------------------------
 // Buffer Objects (WebGLContextBuffers.cpp)
-private:
-    void UpdateBoundBuffer(GLenum target, WebGLBuffer* buffer);
-    void UpdateBoundBufferIndexed(GLenum target, GLuint index, WebGLBuffer* buffer);
-
-public:
     void BindBuffer(GLenum target, WebGLBuffer* buffer);
     void BindBufferBase(GLenum target, GLuint index, WebGLBuffer* buf);
     void BindBufferRange(GLenum target, GLuint index, WebGLBuffer* buf,
@@ -751,17 +784,13 @@ protected:
     WebGLRefPtr<WebGLBuffer> mBoundCopyWriteBuffer;
     WebGLRefPtr<WebGLBuffer> mBoundPixelPackBuffer;
     WebGLRefPtr<WebGLBuffer> mBoundPixelUnpackBuffer;
-    WebGLRefPtr<WebGLBuffer> mBoundTransformFeedbackBuffer;
     WebGLRefPtr<WebGLBuffer> mBoundUniformBuffer;
 
-    nsTArray<WebGLRefPtr<WebGLBuffer>> mBoundUniformBuffers;
-    nsTArray<WebGLRefPtr<WebGLBuffer>> mBoundTransformFeedbackBuffers;
+    std::vector<IndexedBufferBinding> mIndexedUniformBufferBindings;
 
     WebGLRefPtr<WebGLBuffer>& GetBufferSlotByTarget(GLenum target);
     WebGLRefPtr<WebGLBuffer>& GetBufferSlotByTargetIndexed(GLenum target,
                                                            GLuint index);
-
-    GLenum GetCurrentBinding(WebGLBuffer* buffer) const;
 
 // -----------------------------------------------------------------------------
 // Queries (WebGL2ContextQueries.cpp)
@@ -848,48 +877,77 @@ public:
                            GLint yOffset, GLint x, GLint y, GLsizei width,
                            GLsizei height);
 
+    ////
+
     void TexImage2D(GLenum texImageTarget, GLint level, GLenum internalFormat,
                     GLsizei width, GLsizei height, GLint border, GLenum unpackFormat,
                     GLenum unpackType,
                     const dom::Nullable<dom::ArrayBufferView>& maybeView,
                     ErrorResult&);
+protected:
     void TexImage2D(GLenum texImageTarget, GLint level, GLenum internalFormat,
-                    GLenum unpackFormat, GLenum unpackType, dom::ImageData* imageData,
-                    ErrorResult&);
+                    GLenum unpackFormat, GLenum unpackType,
+                    const dom::ImageData& imageData, ErrorResult& out_error);
+public:
     void TexImage2D(GLenum texImageTarget, GLint level, GLenum internalFormat,
-                    GLenum unpackFormat, GLenum unpackType, dom::Element* elem,
-                    ErrorResult* const out_error);
+                    GLenum unpackFormat, GLenum unpackType, const dom::Element& elem,
+                    ErrorResult& out_error);
+
+    ////
+
+protected:
+    void TexSubImage2D(GLenum texImageTarget, GLint level, GLint xOffset, GLint yOffset,
+                       GLsizei width, GLsizei height, GLenum unpackFormat,
+                       GLenum unpackType, const dom::ArrayBufferView& view);
+    void TexSubImage2D(GLenum texImageTarget, GLint level, GLint xOffset, GLint yOffset,
+                       GLenum unpackFormat, GLenum unpackType,
+                       const dom::ImageData& imageData, ErrorResult& out_error);
+public:
+    void TexSubImage2D(GLenum texImageTarget, GLint level, GLint xOffset, GLint yOffset,
+                       GLenum unpackFormat, GLenum unpackType, const dom::Element& elem,
+                       ErrorResult& out_error);
+
+    ////////////////
+    // Pseudo-nullable WebGL1 entrypoints
+
+    void TexImage2D(GLenum texImageTarget, GLint level, GLenum internalFormat,
+                    GLenum unpackFormat, GLenum unpackType,
+                    const dom::ImageData* imageData, ErrorResult& out_error)
+    {
+        const char funcName[] = "texImage2D";
+        if (!imageData) {
+            ErrorInvalidValue("%s: `data` must not be null.", funcName);
+            return;
+        }
+        TexImage2D(texImageTarget, level, internalFormat, unpackFormat, unpackType,
+                   *imageData, out_error);
+    }
 
     void TexSubImage2D(GLenum texImageTarget, GLint level, GLint xOffset, GLint yOffset,
                        GLsizei width, GLsizei height, GLenum unpackFormat,
                        GLenum unpackType,
-                       const dom::Nullable<dom::ArrayBufferView>& maybeView,
-                       ErrorResult&);
-    void TexSubImage2D(GLenum texImageTarget, GLint level, GLint xOffset, GLint yOffset,
-                       GLenum unpackFormat, GLenum unpackType, dom::ImageData* imageData,
-                       ErrorResult&);
-    void TexSubImage2D(GLenum texImageTarget, GLint level, GLint xOffset, GLint yOffset,
-                       GLenum unpackFormat, GLenum unpackType, dom::Element* elem,
-                       ErrorResult* const out_error);
-
-    // Allow whatever element unpackTypes the bindings are willing to pass
-    // us in Tex(Sub)Image2D
-    template<typename T>
-    inline void
-    TexImage2D(GLenum texImageTarget, GLint level, GLenum internalFormat,
-               GLenum unpackFormat, GLenum unpackType, T& elem, ErrorResult& out_error)
+                       const dom::Nullable<dom::ArrayBufferView>& maybeView, ErrorResult&)
     {
-        TexImage2D(texImageTarget, level, internalFormat, unpackFormat, unpackType, &elem,
-                   &out_error);
+        const char funcName[] = "texSubImage2D";
+        if (maybeView.IsNull()) {
+            ErrorInvalidValue("%s: `data` must not be null.", funcName);
+            return;
+        }
+        TexSubImage2D(texImageTarget, level, xOffset, yOffset, width, height,
+                      unpackFormat, unpackType, maybeView.Value());
     }
 
-    template<typename T>
-    inline void
-    TexSubImage2D(GLenum texImageTarget, GLint level, GLint xOffset, GLint yOffset,
-                  GLenum unpackFormat, GLenum unpackType, T& elem, ErrorResult& out_error)
+    void TexSubImage2D(GLenum texImageTarget, GLint level, GLint xOffset, GLint yOffset,
+                       GLenum unpackFormat, GLenum unpackType,
+                       const dom::ImageData* imageData, ErrorResult& out_error)
     {
+        const char funcName[] = "texSubImage2D";
+        if (!imageData) {
+            ErrorInvalidValue("%s: `data` must not be null.", funcName);
+            return;
+        }
         TexSubImage2D(texImageTarget, level, xOffset, yOffset, unpackFormat, unpackType,
-                      &elem, &out_error);
+                      *imageData, out_error);
     }
 
     //////
@@ -996,11 +1054,11 @@ private:
     uint32_t mMaxFetchedInstances;
     bool mBufferFetch_IsAttrib0Active;
 
-    bool DrawArrays_check(GLint first, GLsizei count, GLsizei primcount,
-                          const char* info);
-    bool DrawElements_check(GLsizei count, GLenum type, WebGLintptr byteOffset,
-                            GLsizei primcount, const char* info,
-                            GLuint* out_upperBound);
+    bool DrawArrays_check(const char* funcName, GLenum mode, GLint first,
+                          GLsizei vertCount, GLsizei instanceCount);
+    bool DrawElements_check(const char* funcName, GLenum mode, GLsizei vertCount,
+                            GLenum type, WebGLintptr byteOffset,
+                            GLsizei instanceCount);
     bool DrawInstanced_check(const char* info);
     void Draw_cleanup(const char* funcName);
 
@@ -1038,6 +1096,7 @@ protected:
     bool mInvalidated;
     bool mCapturedFrameInvalidated;
     bool mResetLayer;
+    bool mLayerIsMirror;
     bool mOptionsFrozen;
     bool mMinCapability;
     bool mDisableExtensions;
@@ -1087,6 +1146,8 @@ public:
     GLenum LastColorAttachmentEnum() const {
         return LOCAL_GL_COLOR_ATTACHMENT0 + mImplMaxColorAttachments - 1;
     }
+
+    const decltype(mOptions)& Options() const { return mOptions; }
 
 protected:
 
@@ -1202,7 +1263,6 @@ protected:
     bool ValidateBlendFuncSrcEnum(GLenum mode, const char* info);
     bool ValidateBlendFuncEnumsCompatibility(GLenum sfactor, GLenum dfactor,
                                              const char* info);
-    bool ValidateDataOffsetSize(WebGLintptr offset, WebGLsizeiptr size, WebGLsizeiptr bufferSize, const char* info);
     bool ValidateDataRanges(WebGLintptr readOffset, WebGLintptr writeOffset, WebGLsizeiptr size, const char* info);
     bool ValidateTextureTargetEnum(GLenum target, const char* info);
     bool ValidateComparisonEnum(GLenum target, const char* info);
@@ -1269,6 +1329,28 @@ protected:
                               const webgl::FormatUsageInfo** const out_format,
                               uint32_t* const out_width, uint32_t* const out_height);
 
+    bool HasDrawBuffers() const {
+        return IsWebGL2() ||
+               IsExtensionEnabled(WebGLExtensionID::WEBGL_draw_buffers);
+    }
+
+    WebGLRefPtr<WebGLBuffer>* ValidateBufferSlot(const char* funcName, GLenum target);
+    WebGLBuffer* ValidateBufferSelection(const char* funcName, GLenum target);
+    IndexedBufferBinding* ValidateIndexedBufferSlot(const char* funcName, GLenum target,
+                                                    GLuint index);
+
+    bool ValidateIndexedBufferBinding(const char* funcName, GLenum target, GLuint index,
+                                      WebGLRefPtr<WebGLBuffer>** const out_genericBinding,
+                                      IndexedBufferBinding** const out_indexedBinding);
+
+    bool ValidateNonNegative(const char* funcName, const char* argName, int64_t val) {
+        if (MOZ_UNLIKELY(val < 0)) {
+            ErrorInvalidValue("%s: `%s` must be non-negative.", funcName, argName);
+            return false;
+        }
+        return true;
+    }
+
     void Invalidate();
     void DestroyResourcesAndContext();
 
@@ -1314,19 +1396,8 @@ private:
     virtual WebGLVertexArray* CreateVertexArrayImpl();
 
     virtual bool ValidateAttribPointerType(bool integerMode, GLenum type, uint32_t* alignment, const char* info) = 0;
-    virtual bool ValidateBufferTarget(GLenum target, const char* info) = 0;
-    virtual bool ValidateBufferIndexedTarget(GLenum target, const char* info) = 0;
-    virtual bool ValidateBufferForTarget(GLenum target, WebGLBuffer* buffer, const char* info);
-    virtual bool ValidateBufferUsageEnum(GLenum usage, const char* info) = 0;
     virtual bool ValidateQueryTarget(GLenum usage, const char* info) = 0;
     virtual bool ValidateUniformMatrixTranspose(bool transpose, const char* info) = 0;
-
-protected:
-    /** Like glBufferData, but if the call may change the buffer size, checks
-     *  any GL error generated by this glBufferData call and returns it.
-     */
-    GLenum CheckedBufferData(GLenum target, GLsizeiptr size, const GLvoid* data,
-                             GLenum usage);
 
 public:
     void ForceLoseContext(bool simulateLoss = false);
@@ -1730,18 +1801,51 @@ public:
     void operator =(const UniqueBuffer& other) = delete; // assign using Move()!
 };
 
-class ScopedUnpackReset
+class ScopedUnpackReset final
     : public gl::ScopedGLWrapper<ScopedUnpackReset>
 {
     friend struct gl::ScopedGLWrapper<ScopedUnpackReset>;
 
-protected:
+private:
     WebGLContext* const mWebGL;
 
 public:
     explicit ScopedUnpackReset(WebGLContext* webgl);
 
-protected:
+private:
+    void UnwrapImpl();
+};
+
+class ScopedFBRebinder final
+    : public gl::ScopedGLWrapper<ScopedFBRebinder>
+{
+    friend struct gl::ScopedGLWrapper<ScopedFBRebinder>;
+
+private:
+    WebGLContext* const mWebGL;
+
+public:
+    explicit ScopedFBRebinder(WebGLContext* webgl)
+        : ScopedGLWrapper<ScopedFBRebinder>(webgl->gl)
+        , mWebGL(webgl)
+    { }
+
+private:
+    void UnwrapImpl();
+};
+
+class ScopedLazyBind final
+    : public gl::ScopedGLWrapper<ScopedLazyBind>
+{
+    friend struct gl::ScopedGLWrapper<ScopedLazyBind>;
+
+    const GLenum mTarget;
+    const WebGLBuffer* const mBuf;
+
+public:
+    ScopedLazyBind(gl::GLContext* gl, GLenum target, const WebGLBuffer* buf);
+
+private:
     void UnwrapImpl();
 };
 
@@ -1756,10 +1860,20 @@ Intersect(uint32_t srcSize, int32_t dstStartInSrc, uint32_t dstSize,
           uint32_t* const out_intSize);
 
 bool
-ZeroTextureData(WebGLContext* webgl, const char* funcName, bool respecifyTexture,
-                GLuint tex, TexImageTarget target, uint32_t level,
+ZeroTextureData(WebGLContext* webgl, const char* funcName, GLuint tex,
+                TexImageTarget target, uint32_t level,
                 const webgl::FormatUsageInfo* usage, uint32_t xOffset, uint32_t yOffset,
                 uint32_t zOffset, uint32_t width, uint32_t height, uint32_t depth);
+
+////
+
+void
+ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& callback,
+                            const std::vector<IndexedBufferBinding>& field,
+                            const char* name, uint32_t flags = 0);
+
+void
+ImplCycleCollectionUnlink(std::vector<IndexedBufferBinding>& field);
 
 } // namespace mozilla
 

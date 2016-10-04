@@ -14,6 +14,12 @@ const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
 var gWebConsole, gJSTerm, gDebuggerWin, gThread, gDebuggerController;
 var gStackframes;
 
+// Force the old debugger UI since it's directly used (see Bug 1301705)
+Services.prefs.setBoolPref("devtools.debugger.new-debugger-frontend", false);
+registerCleanupFunction(function* () {
+  Services.prefs.clearUserPref("devtools.debugger.new-debugger-frontend");
+});
+
 function test() {
   loadTab(TEST_URI).then(() => {
     openConsole().then(consoleOpened);
@@ -132,18 +138,20 @@ function onExecuteFoo23InFirstCall() {
                     onExecuteFooAndFoo3ChangesInFirstCall));
 }
 
-function onExecuteFooAndFoo3ChangesInFirstCall() {
+var onExecuteFooAndFoo3ChangesInFirstCall = Task.async(function*() {
   let expected = "abbabug783499";
   isnot(gWebConsole.outputNode.textContent.indexOf(expected), -1,
         "|foo + foo3| updated in |firstCall()|");
 
-  is(content.wrappedJSObject.foo, "globalFooBug783499",
-     "|foo| in content window");
-  is(content.wrappedJSObject.foo2, "newFoo", "|foo2| in content window");
-  ok(!content.wrappedJSObject.foo3,
-     "|foo3| was not added to the content window");
+  yield ContentTask.spawn(gBrowser.selectedBrowser, null, function*() {
+    is(content.wrappedJSObject.foo, "globalFooBug783499",
+       "|foo| in content window");
+    is(content.wrappedJSObject.foo2, "newFoo", "|foo2| in content window");
+    ok(!content.wrappedJSObject.foo3,
+       "|foo3| was not added to the content window");
+  });
 
   gWebConsole = gJSTerm = gDebuggerWin = gThread = gDebuggerController =
     gStackframes = null;
   executeSoon(finishTest);
-}
+});

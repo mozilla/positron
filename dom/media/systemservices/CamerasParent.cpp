@@ -9,7 +9,7 @@
 #include "MediaUtils.h"
 
 #include "mozilla/Assertions.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/Services.h"
 #include "mozilla/Logging.h"
 #include "mozilla/ipc/BackgroundParent.h"
@@ -39,6 +39,24 @@ namespace camera {
 //   called "VideoCapture". On Windows this is a thread with an event loop
 //   suitable for UI access.
 
+void InputObserver::DeviceChange() {
+  LOG((__PRETTY_FUNCTION__));
+  MOZ_ASSERT(mParent);
+
+  RefPtr<nsIRunnable> ipc_runnable =
+    media::NewRunnableFrom([this]() -> nsresult {
+      if (mParent->IsShuttingDown()) {
+        return NS_ERROR_FAILURE;
+      }
+      Unused << mParent->SendDeviceChange();
+      return NS_OK;
+    });
+
+  nsIThread* thread = mParent->GetBackgroundThread();
+  MOZ_ASSERT(thread != nullptr);
+  thread->Dispatch(ipc_runnable, NS_DISPATCH_NORMAL);
+};
+
 class FrameSizeChangeRunnable : public Runnable {
 public:
   FrameSizeChangeRunnable(CamerasParent *aParent, CaptureEngine capEngine,
@@ -46,7 +64,7 @@ public:
     : mParent(aParent), mCapEngine(capEngine), mCapId(cap_id),
       mWidth(aWidth), mHeight(aHeight) {}
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     if (mParent->IsShuttingDown()) {
       // Communication channel is being torn down
       LOG(("FrameSizeChangeRunnable is active without active Child"));
@@ -114,7 +132,7 @@ public:
     }
   };
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     if (mParent->IsShuttingDown()) {
       // Communication channel is being torn down
       mResult = 0;
@@ -399,6 +417,15 @@ CamerasParent::SetupEngine(CaptureEngine aCapEngine)
     return false;
   }
 
+  InputObserver** observer = mObservers.AppendElement(
+          new InputObserver(this));
+
+#ifdef DEBUG
+  MOZ_ASSERT(0 == helper->mPtrViECapture->RegisterInputObserver(*observer));
+#else
+  helper->mPtrViECapture->RegisterInputObserver(*observer);
+#endif
+
   helper->mPtrViERender = webrtc::ViERender::GetInterface(helper->mEngine);
   if (!helper->mPtrViERender) {
     LOG(("ViERender::GetInterface failed"));
@@ -435,6 +462,12 @@ CamerasParent::CloseEngines()
       mEngines[i].mPtrViERender = nullptr;
     }
     if (mEngines[i].mPtrViECapture) {
+#ifdef DEBUG
+      MOZ_ASSERT(0 == mEngines[i].mPtrViECapture->DeregisterInputObserver());
+#else
+      mEngines[i].mPtrViECapture->DeregisterInputObserver();
+#endif
+
       mEngines[i].mPtrViECapture->Release();
         mEngines[i].mPtrViECapture = nullptr;
     }
@@ -448,6 +481,11 @@ CamerasParent::CloseEngines()
       mEngines[i].mEngine = nullptr;
     }
   }
+
+  for (InputObserver* observer : mObservers) {
+    delete observer;
+  }
+  mObservers.Clear();
 
   mWebRTCAlive = false;
 }
@@ -475,7 +513,7 @@ CamerasParent::EnsureInitialized(int aEngine)
 // It would be nice to get rid of the code duplication here,
 // perhaps via Promises.
 bool
-CamerasParent::RecvNumberOfCaptureDevices(const int& aCapEngine)
+CamerasParent::RecvNumberOfCaptureDevices(const CaptureEngine& aCapEngine)
 {
   LOG((__PRETTY_FUNCTION__));
 
@@ -509,7 +547,7 @@ CamerasParent::RecvNumberOfCaptureDevices(const int& aCapEngine)
 }
 
 bool
-CamerasParent::RecvNumberOfCapabilities(const int& aCapEngine,
+CamerasParent::RecvNumberOfCapabilities(const CaptureEngine& aCapEngine,
                                         const nsCString& unique_id)
 {
   LOG((__PRETTY_FUNCTION__));
@@ -548,7 +586,7 @@ CamerasParent::RecvNumberOfCapabilities(const int& aCapEngine,
 }
 
 bool
-CamerasParent::RecvGetCaptureCapability(const int &aCapEngine,
+CamerasParent::RecvGetCaptureCapability(const CaptureEngine& aCapEngine,
                                         const nsCString& unique_id,
                                         const int& num)
 {
@@ -598,7 +636,7 @@ CamerasParent::RecvGetCaptureCapability(const int &aCapEngine,
 }
 
 bool
-CamerasParent::RecvGetCaptureDevice(const int& aCapEngine,
+CamerasParent::RecvGetCaptureDevice(const CaptureEngine& aCapEngine,
                                     const int& aListNumber)
 {
   LOG((__PRETTY_FUNCTION__));
@@ -669,9 +707,8 @@ static bool
 HasCameraPermission(const nsCString& aOrigin)
 {
   // Name used with nsIPermissionManager
-  static const char* cameraPermission = "camera";
+  static const char* cameraPermission = "MediaManagerVideo";
   bool allowed = false;
-  bool permanent = false;
   nsresult rv;
   nsCOMPtr<nsIPermissionManager> mgr =
     do_GetService(NS_PERMISSIONMANAGER_CONTRACTID, &rv);
@@ -690,19 +727,9 @@ HasCameraPermission(const nsCString& aOrigin)
                                                    &video);
         if (NS_SUCCEEDED(rv)) {
           allowed = (video == nsIPermissionManager::ALLOW_ACTION);
-          // Was allowed, now see if this is a persistent permission
-          // or a session one.
-          if (allowed) {
-            rv = mgr->TestExactPermanentPermission(principal,
-                                                   cameraPermission,
-                                                   &video);
-            if (NS_SUCCEEDED(rv)) {
-              permanent = (video == nsIPermissionManager::ALLOW_ACTION);
-            }
-          }
         }
         // Session permissions are removed after one use.
-        if (allowed && !permanent) {
+        if (allowed) {
           mgr->RemoveFromPrincipal(principal, cameraPermission);
         }
       }
@@ -712,7 +739,7 @@ HasCameraPermission(const nsCString& aOrigin)
 }
 
 bool
-CamerasParent::RecvAllocateCaptureDevice(const int& aCapEngine,
+CamerasParent::RecvAllocateCaptureDevice(const CaptureEngine& aCapEngine,
                                          const nsCString& unique_id,
                                          const nsCString& aOrigin)
 {
@@ -769,7 +796,7 @@ CamerasParent::RecvAllocateCaptureDevice(const int& aCapEngine,
 }
 
 int
-CamerasParent::ReleaseCaptureDevice(const int& aCapEngine,
+CamerasParent::ReleaseCaptureDevice(const CaptureEngine& aCapEngine,
                                     const int& capnum)
 {
   int error = -1;
@@ -780,7 +807,7 @@ CamerasParent::ReleaseCaptureDevice(const int& aCapEngine,
 }
 
 bool
-CamerasParent::RecvReleaseCaptureDevice(const int& aCapEngine,
+CamerasParent::RecvReleaseCaptureDevice(const CaptureEngine& aCapEngine,
                                         const int& numdev)
 {
   LOG((__PRETTY_FUNCTION__));
@@ -814,7 +841,7 @@ CamerasParent::RecvReleaseCaptureDevice(const int& aCapEngine,
 }
 
 bool
-CamerasParent::RecvStartCapture(const int& aCapEngine,
+CamerasParent::RecvStartCapture(const CaptureEngine& aCapEngine,
                                 const int& capnum,
                                 const CaptureCapability& ipcCaps)
 {
@@ -876,7 +903,7 @@ CamerasParent::RecvStartCapture(const int& aCapEngine,
 }
 
 void
-CamerasParent::StopCapture(const int& aCapEngine,
+CamerasParent::StopCapture(const CaptureEngine& aCapEngine,
                            const int& capnum)
 {
   if (EnsureInitialized(aCapEngine)) {
@@ -897,7 +924,7 @@ CamerasParent::StopCapture(const int& aCapEngine,
 }
 
 bool
-CamerasParent::RecvStopCapture(const int& aCapEngine,
+CamerasParent::RecvStopCapture(const CaptureEngine& aCapEngine,
                                const int& capnum)
 {
   LOG((__PRETTY_FUNCTION__));

@@ -23,18 +23,21 @@ class MemoryTextureData : public BufferTextureData
 {
 public:
   static MemoryTextureData* Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
-                                   gfx::BackendType aMoz2DBackend,TextureFlags aFlags,
+                                   gfx::BackendType aMoz2DBackend,
+                                   LayersBackend aLayersBackend,
+                                   TextureFlags aFlags,
                                    TextureAllocationFlags aAllocFlags,
-                                   ClientIPCAllocator* aAllocator);
+                                   LayersIPCChannel* aAllocator);
 
   virtual TextureData*
-  CreateSimilar(ClientIPCAllocator* aAllocator,
+  CreateSimilar(LayersIPCChannel* aAllocator,
+                LayersBackend aLayersBackend,
                 TextureFlags aFlags = TextureFlags::DEFAULT,
                 TextureAllocationFlags aAllocFlags = ALLOC_DEFAULT) const override;
 
   virtual bool Serialize(SurfaceDescriptor& aOutDescriptor) override;
 
-  virtual void Deallocate(ClientIPCAllocator*) override;
+  virtual void Deallocate(LayersIPCChannel*) override;
 
   MemoryTextureData(const BufferDescriptor& aDesc,
                     gfx::BackendType aMoz2DBackend,
@@ -60,18 +63,21 @@ class ShmemTextureData : public BufferTextureData
 {
 public:
   static ShmemTextureData* Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
-                                  gfx::BackendType aMoz2DBackend, TextureFlags aFlags,
+                                  gfx::BackendType aMoz2DBackend,
+                                  LayersBackend aLayersBackend,
+                                  TextureFlags aFlags,
                                   TextureAllocationFlags aAllocFlags,
-                                  ClientIPCAllocator* aAllocator);
+                                  LayersIPCChannel* aAllocator);
 
   virtual TextureData*
-  CreateSimilar(ClientIPCAllocator* aAllocator,
+  CreateSimilar(LayersIPCChannel* aAllocator,
+                LayersBackend aLayersBackend,
                 TextureFlags aFlags = TextureFlags::DEFAULT,
                 TextureAllocationFlags aAllocFlags = ALLOC_DEFAULT) const override;
 
   virtual bool Serialize(SurfaceDescriptor& aOutDescriptor) override;
 
-  virtual void Deallocate(ClientIPCAllocator* aAllocator) override;
+  virtual void Deallocate(LayersIPCChannel* aAllocator) override;
 
   ShmemTextureData(const BufferDescriptor& aDesc,
                    gfx::BackendType aMoz2DBackend, mozilla::ipc::Shmem aShmem)
@@ -107,22 +113,24 @@ bool ComputeHasIntermediateBuffer(gfx::SurfaceFormat aFormat,
 
 BufferTextureData*
 BufferTextureData::Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
-                          gfx::BackendType aMoz2DBackend, TextureFlags aFlags,
+                          gfx::BackendType aMoz2DBackend,
+                          LayersBackend aLayersBackend, TextureFlags aFlags,
                           TextureAllocationFlags aAllocFlags,
-                          ClientIPCAllocator* aAllocator)
+                          LayersIPCChannel* aAllocator)
 {
   if (!aAllocator || aAllocator->IsSameProcess()) {
-    return MemoryTextureData::Create(aSize, aFormat, aMoz2DBackend, aFlags,
+    return MemoryTextureData::Create(aSize, aFormat, aMoz2DBackend,
+                                     aLayersBackend, aFlags,
                                      aAllocFlags, aAllocator);
-  } else if (aAllocator->AsShmemAllocator()) {
-    return ShmemTextureData::Create(aSize, aFormat, aMoz2DBackend, aFlags,
+  } else {
+    return ShmemTextureData::Create(aSize, aFormat, aMoz2DBackend,
+                                    aLayersBackend, aFlags,
                                     aAllocFlags, aAllocator);
   }
-  return nullptr;
 }
 
 BufferTextureData*
-BufferTextureData::CreateInternal(ClientIPCAllocator* aAllocator,
+BufferTextureData::CreateInternal(LayersIPCChannel* aAllocator,
                                   const BufferDescriptor& aDesc,
                                   gfx::BackendType aMoz2DBackend,
                                   int32_t aBufferSize,
@@ -137,19 +145,18 @@ BufferTextureData::CreateInternal(ClientIPCAllocator* aAllocator,
     GfxMemoryImageReporter::DidAlloc(buffer);
 
     return new MemoryTextureData(aDesc, aMoz2DBackend, buffer, aBufferSize);
-  } else if (aAllocator->AsShmemAllocator()) {
+  } else {
     ipc::Shmem shm;
-    if (!aAllocator->AsShmemAllocator()->AllocUnsafeShmem(aBufferSize, OptimalShmemType(), &shm)) {
+    if (!aAllocator->AllocUnsafeShmem(aBufferSize, OptimalShmemType(), &shm)) {
       return nullptr;
     }
 
     return new ShmemTextureData(aDesc, aMoz2DBackend, shm);
   }
-  return nullptr;
 }
 
 BufferTextureData*
-BufferTextureData::CreateForYCbCrWithBufferSize(ClientIPCAllocator* aAllocator,
+BufferTextureData::CreateForYCbCrWithBufferSize(KnowsCompositor* aAllocator,
                                                 int32_t aBufferSize,
                                                 TextureFlags aTextureFlags)
 {
@@ -157,10 +164,8 @@ BufferTextureData::CreateForYCbCrWithBufferSize(ClientIPCAllocator* aAllocator,
     return nullptr;
   }
 
-  auto fwd = aAllocator->AsCompositableForwarder();
-  bool hasIntermediateBuffer = fwd ? ComputeHasIntermediateBuffer(gfx::SurfaceFormat::YUV,
-                                                                  fwd->GetCompositorBackendType())
-                                   : true;
+  bool hasIntermediateBuffer = ComputeHasIntermediateBuffer(gfx::SurfaceFormat::YUV,
+                                                            aAllocator->GetCompositorBackendType());
 
   // Initialize the metadata with something, even if it will have to be rewritten
   // afterwards since we don't know the dimensions of the texture at this point.
@@ -168,12 +173,12 @@ BufferTextureData::CreateForYCbCrWithBufferSize(ClientIPCAllocator* aAllocator,
                                           0, 0, 0, StereoMode::MONO,
                                           hasIntermediateBuffer);
 
-  return CreateInternal(aAllocator, desc, gfx::BackendType::NONE, aBufferSize,
+  return CreateInternal(aAllocator->GetTextureForwarder(), desc, gfx::BackendType::NONE, aBufferSize,
                         aTextureFlags);
 }
 
 BufferTextureData*
-BufferTextureData::CreateForYCbCr(ClientIPCAllocator* aAllocator,
+BufferTextureData::CreateForYCbCr(KnowsCompositor* aAllocator,
                                   gfx::IntSize aYSize,
                                   gfx::IntSize aCbCrSize,
                                   StereoMode aStereoMode,
@@ -191,17 +196,16 @@ BufferTextureData::CreateForYCbCr(ClientIPCAllocator* aAllocator,
                                           aCbCrSize.width, aCbCrSize.height,
                                           yOffset, cbOffset, crOffset);
 
-  auto fwd = aAllocator ? aAllocator->AsCompositableForwarder() : nullptr;
-  bool hasIntermediateBuffer = fwd ? ComputeHasIntermediateBuffer(gfx::SurfaceFormat::YUV,
-                                                                  fwd->GetCompositorBackendType())
-                                   : true;
+  bool hasIntermediateBuffer = aAllocator ? ComputeHasIntermediateBuffer(gfx::SurfaceFormat::YUV,
+                                                                         aAllocator->GetCompositorBackendType())
+                                          : true;
 
   YCbCrDescriptor descriptor = YCbCrDescriptor(aYSize, aCbCrSize, yOffset, cbOffset,
                                                crOffset, aStereoMode,
                                                hasIntermediateBuffer);
 
- return CreateInternal(aAllocator, descriptor, gfx::BackendType::NONE, bufSize,
-                       aTextureFlags);
+ return CreateInternal(aAllocator ? aAllocator->GetTextureForwarder() : nullptr, descriptor,
+                       gfx::BackendType::NONE, bufSize, aTextureFlags);
 }
 
 void
@@ -452,9 +456,10 @@ InitBuffer(uint8_t* buf, size_t bufSize,
 
 MemoryTextureData*
 MemoryTextureData::Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
-                          gfx::BackendType aMoz2DBackend, TextureFlags aFlags,
+                          gfx::BackendType aMoz2DBackend,
+                          LayersBackend aLayersBackend, TextureFlags aFlags,
                           TextureAllocationFlags aAllocFlags,
-                          ClientIPCAllocator* aAllocator)
+                          LayersIPCChannel* aAllocator)
 {
   // Should have used CreateForYCbCr.
   MOZ_ASSERT(aFormat != gfx::SurfaceFormat::YUV);
@@ -474,10 +479,7 @@ MemoryTextureData::Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
     return nullptr;
   }
 
-  auto fwd = aAllocator ? aAllocator->AsCompositableForwarder() : nullptr;
-  bool hasIntermediateBuffer = fwd ? ComputeHasIntermediateBuffer(aFormat,
-                                              fwd->GetCompositorBackendType())
-                                   : true;
+  bool hasIntermediateBuffer = ComputeHasIntermediateBuffer(aFormat, aLayersBackend);
 
   GfxMemoryImageReporter::DidAlloc(buf);
 
@@ -487,7 +489,7 @@ MemoryTextureData::Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
 }
 
 void
-MemoryTextureData::Deallocate(ClientIPCAllocator*)
+MemoryTextureData::Deallocate(LayersIPCChannel*)
 {
   MOZ_ASSERT(mBuffer);
   GfxMemoryImageReporter::WillFree(mBuffer);
@@ -496,12 +498,13 @@ MemoryTextureData::Deallocate(ClientIPCAllocator*)
 }
 
 TextureData*
-MemoryTextureData::CreateSimilar(ClientIPCAllocator* aAllocator,
+MemoryTextureData::CreateSimilar(LayersIPCChannel* aAllocator,
+                                 LayersBackend aLayersBackend,
                                  TextureFlags aFlags,
                                  TextureAllocationFlags aAllocFlags) const
 {
   return MemoryTextureData::Create(GetSize(), GetFormat(), mMoz2DBackend,
-                                   aFlags, aAllocFlags, aAllocator);
+                                   aLayersBackend, aFlags, aAllocFlags, aAllocator);
 }
 
 bool
@@ -519,15 +522,16 @@ ShmemTextureData::Serialize(SurfaceDescriptor& aOutDescriptor)
 
 ShmemTextureData*
 ShmemTextureData::Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
-                         gfx::BackendType aMoz2DBackend, TextureFlags aFlags,
+                         gfx::BackendType aMoz2DBackend,
+                         LayersBackend aLayersBackend, TextureFlags aFlags,
                          TextureAllocationFlags aAllocFlags,
-                         ClientIPCAllocator* aAllocator)
+                         LayersIPCChannel* aAllocator)
 {
   MOZ_ASSERT(aAllocator);
   // Should have used CreateForYCbCr.
   MOZ_ASSERT(aFormat != gfx::SurfaceFormat::YUV);
 
-  if (!aAllocator || !aAllocator->AsShmemAllocator()) {
+  if (!aAllocator) {
     return nullptr;
   }
 
@@ -542,7 +546,7 @@ ShmemTextureData::Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
   }
 
   mozilla::ipc::Shmem shm;
-  if (!aAllocator->AsShmemAllocator()->AllocUnsafeShmem(bufSize, OptimalShmemType(), &shm)) {
+  if (!aAllocator->AllocUnsafeShmem(bufSize, OptimalShmemType(), &shm)) {
     return nullptr;
   }
 
@@ -551,10 +555,7 @@ ShmemTextureData::Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
     return nullptr;
   }
 
-  auto fwd = aAllocator->AsCompositableForwarder();
-  bool hasIntermediateBuffer = fwd ? ComputeHasIntermediateBuffer(aFormat,
-                                              fwd->GetCompositorBackendType())
-                                   : true;
+  bool hasIntermediateBuffer = ComputeHasIntermediateBuffer(aFormat, aLayersBackend);
 
   BufferDescriptor descriptor = RGBDescriptor(aSize, aFormat, hasIntermediateBuffer);
 
@@ -564,18 +565,19 @@ ShmemTextureData::Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
 }
 
 TextureData*
-ShmemTextureData::CreateSimilar(ClientIPCAllocator* aAllocator,
+ShmemTextureData::CreateSimilar(LayersIPCChannel* aAllocator,
+                                LayersBackend aLayersBackend,
                                 TextureFlags aFlags,
                                 TextureAllocationFlags aAllocFlags) const
 {
   return ShmemTextureData::Create(GetSize(), GetFormat(), mMoz2DBackend,
-                                  aFlags, aAllocFlags, aAllocator);
+                                  aLayersBackend, aFlags, aAllocFlags, aAllocator);
 }
 
 void
-ShmemTextureData::Deallocate(ClientIPCAllocator* aAllocator)
+ShmemTextureData::Deallocate(LayersIPCChannel* aAllocator)
 {
-  aAllocator->AsShmemAllocator()->DeallocShmem(mShmem);
+  aAllocator->DeallocShmem(mShmem);
 }
 
 } // namespace

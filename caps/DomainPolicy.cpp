@@ -7,7 +7,7 @@
 #include "DomainPolicy.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/ipc/URIUtils.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsIMessageManager.h"
 #include "nsScriptSecurityManager.h"
 
@@ -141,8 +141,6 @@ CopyURIs(const InfallibleTArray<URIParams>& aDomains, nsIDomainSet* aSet)
 void
 DomainPolicy::ApplyClone(DomainPolicyClone* aClone)
 {
-    nsCOMPtr<nsIDomainSet> list;
-
     CopyURIs(aClone->blacklist(), mBlacklist);
     CopyURIs(aClone->whitelist(), mWhitelist);
     CopyURIs(aClone->superBlacklist(), mSuperBlacklist);

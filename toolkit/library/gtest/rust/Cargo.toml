@@ -7,10 +7,11 @@ description = "Testing code for libgkrust"
 
 [dependencies]
 mp4parse-gtest = { path = "../../../../dom/media/gtest" }
+nsstring-gtest = { path = "../../../../xpcom/rust/nsstring/gtest" }
 
 [lib]
 path = "lib.rs"
-crate-type = ["staticlib"]
+crate-type = ["rlib"]
 test = false
 doctest = false
 bench = false
@@ -21,15 +22,20 @@ harness = false
 # Explicitly specify what our profiles use.
 [profile.dev]
 opt-level = 1
-debug = true
+# XXX: We're passing `-C debuginfo=1` to rustc to work around an llvm-dsymutil
+# crash (bug 1301751), but rustc can't handle -g with that option, so
+# turn off debug for now.
+# This should be temporary until we upgrade to Rust 1.12.
+debug = false
 rpath = false
 lto = false
 debug-assertions = true
 codegen-units = 1
+panic = "abort"
 
 [profile.release]
 opt-level = 2
-debug = true
+debug = false
 rpath = false
 # This would normally be 'true' for release configurations, but using LTO on
 # rul-gtest causes link failures due to symbols also being found in libxul's
@@ -38,3 +44,4 @@ rpath = false
 lto = false
 debug-assertions = false
 codegen-units = 1
+panic = "abort"

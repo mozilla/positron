@@ -13,6 +13,7 @@
 #include "MediaPrefs.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Logging.h"
+#include "mozilla/gfx/gfxVars.h"
 
 namespace mozilla {
 
@@ -53,7 +54,7 @@ AppleDecoderModule::Init()
   sIsVTHWAvailable = AppleVTLinker::skPropEnableHWAccel != nullptr;
 
   sCanUseHardwareVideoDecoder = loaded &&
-    gfxPlatform::GetPlatform()->CanUseHardwareVideoDecoding();
+    gfx::gfxVars::CanUseHardwareVideoDecoding();
 
   sInitialized = true;
 }
@@ -103,9 +104,9 @@ PlatformDecoderModule::ConversionRequired
 AppleDecoderModule::DecoderNeedsConversion(const TrackInfo& aConfig) const
 {
   if (aConfig.IsVideo()) {
-    return kNeedAVCC;
+    return ConversionRequired::kNeedAVCC;
   } else {
-    return kNeedNone;
+    return ConversionRequired::kNeedNone;
   }
 }
 

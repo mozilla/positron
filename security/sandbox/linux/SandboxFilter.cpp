@@ -19,6 +19,7 @@
 #include <linux/net.h>
 #include <linux/prctl.h>
 #include <linux/sched.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
@@ -26,8 +27,8 @@
 #include <unistd.h>
 
 #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
-#include "sandbox/linux/seccomp-bpf/linux_seccomp.h"
-#include "sandbox/linux/services/linux_syscalls.h"
+#include "sandbox/linux/system_headers/linux_seccomp.h"
+#include "sandbox/linux/system_headers/linux_syscalls.h"
 
 using namespace sandbox::bpf_dsl;
 #define CASES SANDBOX_BPF_DSL_CASES
@@ -39,6 +40,11 @@ using namespace sandbox::bpf_dsl;
 #endif
 #ifndef MADV_DONTDUMP
 #define MADV_DONTDUMP 16
+#endif
+
+// Added in Linux 4.5; see bug 1303813.
+#ifndef MADV_FREE
+#define MADV_FREE 8
 #endif
 
 #ifndef PR_SET_PTRACER
@@ -437,8 +443,9 @@ public:
         return Some(Allow());
       }
       Arg<int> domain(0), type(1);
-      return Some(If(domain == AF_UNIX &&
-                     (type == SOCK_STREAM || type == SOCK_SEQPACKET), Allow())
+      return Some(If(AllOf(domain == AF_UNIX,
+                           AnyOf(type == SOCK_STREAM, type == SOCK_SEQPACKET)),
+                     Allow())
                   .Else(InvalidSyscall()));
     }
 
@@ -537,18 +544,23 @@ public:
     case __NR_rename:
     case __NR_symlink:
     case __NR_quotactl:
-    case __NR_utimes:
     case __NR_link:
     case __NR_unlink:
     CASES_FOR_fchown:
     case __NR_fchmod:
+    case __NR_flock:
 #endif
       return Allow();
 
     case __NR_readlink:
     case __NR_readlinkat:
+#ifdef DESKTOP
+      // Bug 1290896
+      return Allow();
+#else
       // Workaround for bug 964455:
       return Error(EINVAL);
+#endif
 
     CASES_FOR_select:
     case __NR_pselect6:
@@ -815,6 +827,7 @@ public:
     case __NR_madvise: {
       Arg<int> advice(2);
       return If(advice == MADV_DONTNEED, Allow())
+        .ElseIf(advice == MADV_FREE, Allow())
 #ifdef MOZ_ASAN
         .ElseIf(advice == MADV_NOHUGEPAGE, Allow())
         .ElseIf(advice == MADV_DONTDUMP, Allow())
@@ -833,6 +846,10 @@ public:
       return If(pid == 0, Allow())
         .Else(Trap(SchedTrap, nullptr));
     }
+
+    // For clock(3) on older glibcs; bug 1304220.
+    case __NR_times:
+      return Allow();
 
     default:
       return SandboxPolicyCommon::EvaluateSyscall(sysno);

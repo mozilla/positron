@@ -31,6 +31,7 @@ DOM4_MSG_DEF(TimeoutError, "The operation timed out.", NS_ERROR_DOM_TIMEOUT_ERR)
 DOM4_MSG_DEF(InvalidNodeTypeError, "The supplied node is incorrect or has an incorrect ancestor for this operation.", NS_ERROR_DOM_INVALID_NODE_TYPE_ERR)
 DOM4_MSG_DEF(DataCloneError, "The object could not be cloned.", NS_ERROR_DOM_DATA_CLONE_ERR)
 DOM4_MSG_DEF(InvalidPointerId, "Invalid pointer id.", NS_ERROR_DOM_INVALID_POINTER_ERR)
+DOM4_MSG_DEF(NotAllowedError, "The request is not allowed by the user agent or the platform in the current context, possibly because the user denied permission.", NS_ERROR_DOM_NOT_ALLOWED_ERR)
 
 /* XXX Should be JavaScript native TypeError */
 DOM4_MSG_DEF(TypeError, "The method parameter is missing or invalid.", NS_ERROR_TYPE_ERR)
@@ -118,7 +119,6 @@ DOM4_MSG_DEF(BtAuthRejectedError, "Authentication rejected",  NS_ERROR_DOM_BLUET
 /* Web Animations errors */
 
 DOM4_MSG_DEF(NotSupportedError, "Animation to or from an underlying value is not yet supported.", NS_ERROR_DOM_ANIM_MISSING_PROPS_ERR)
-DOM4_MSG_DEF(NotSupportedError, "Animation with no effect is not yet supported.", NS_ERROR_DOM_ANIM_NO_EFFECT_ERR)
 
 /* common global codes (from nsError.h) */
 
@@ -161,3 +161,21 @@ DOM4_MSG_DEF(InvalidStateError, "A subscription with a different application ser
 
 DOM_MSG_DEF(NS_ERROR_DOM_JS_EXCEPTION, "A callback threw an exception")
 DOM_MSG_DEF(NS_ERROR_DOM_DOMEXCEPTION, "A DOMException was thrown")
+
+/* Media errors */
+DOM4_MSG_DEF(AbortError,        "The fetching process for the media resource was aborted by the user agent at the user's request.", NS_ERROR_DOM_MEDIA_ABORT_ERR)
+DOM4_MSG_DEF(NotAllowedError,   "The play method is not allowed by the user agent or the platform in the current context, possibly because the user denied permission.", NS_ERROR_DOM_MEDIA_NOT_ALLOWED_ERR)
+DOM4_MSG_DEF(NotSupportedError, "The media resource indicated by the src attribute or assigned media provider object was not suitable.", NS_ERROR_DOM_MEDIA_NOT_SUPPORTED_ERR)
+
+DOM4_MSG_DEF(SyntaxError, "The URI is malformed.", NS_ERROR_DOM_MALFORMED_URI)
+DOM4_MSG_DEF(SyntaxError, "Invalid header name.", NS_ERROR_DOM_INVALID_HEADER_NAME)
+
+/* XMLHttpRequest errors. */
+DOM4_MSG_DEF(InvalidStateError, "XMLHttpRequest has an invalid context.", NS_ERROR_DOM_INVALID_STATE_XHR_HAS_INVALID_CONTEXT)
+DOM4_MSG_DEF(InvalidStateError, "XMLHttpRequest state must be OPENED.", NS_ERROR_DOM_INVALID_STATE_XHR_MUST_BE_OPENED)
+DOM4_MSG_DEF(InvalidStateError, "XMLHttpRequest must not be sending.", NS_ERROR_DOM_INVALID_STATE_XHR_MUST_NOT_BE_SENDING)
+DOM4_MSG_DEF(InvalidStateError, "XMLHttpRequest state must not be LOADING or DONE.", NS_ERROR_DOM_INVALID_STATE_XHR_MUST_NOT_BE_LOADING_OR_DONE)
+DOM4_MSG_DEF(InvalidStateError, "responseXML is only available if responseType is '' or 'document'.", NS_ERROR_DOM_INVALID_STATE_XHR_HAS_WRONG_RESPONSETYPE_FOR_RESPONSEXML)
+DOM4_MSG_DEF(InvalidStateError, "responseText is only available if responseType is '', 'document', or 'moz-chunked-text'.", NS_ERROR_DOM_INVALID_STATE_XHR_HAS_WRONG_RESPONSETYPE_FOR_RESPONSETEXT)
+DOM4_MSG_DEF(InvalidStateError, "synchronous XMLHttpRequests do not support 'moz-chunked-text' or 'moz-chunked-arraybuffer' responseType.", NS_ERROR_DOM_INVALID_STATE_XHR_CHUNKED_RESPONSETYPES_UNSUPPORTED_FOR_SYNC)
+DOM4_MSG_DEF(InvalidAccessError, "synchronous XMLHttpRequests do not support timeout and responseType.", NS_ERROR_DOM_INVALID_ACCESS_XHR_TIMEOUT_AND_RESPONSETYPE_UNSUPPORTED_FOR_SYNC)

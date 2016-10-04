@@ -354,8 +354,8 @@ class MacroAssemblerARM : public Assembler
     void ma_vsqrt(FloatRegister src, FloatRegister dest, Condition cc = Always);
     void ma_vsqrt_f32(FloatRegister src, FloatRegister dest, Condition cc = Always);
 
-    void ma_vimm(double value, FloatRegister dest, Condition cc = Always);
-    void ma_vimm_f32(float value, FloatRegister dest, Condition cc = Always);
+    void ma_vimm(wasm::RawF64 value, FloatRegister dest, Condition cc = Always);
+    void ma_vimm_f32(wasm::RawF32 value, FloatRegister dest, Condition cc = Always);
 
     void ma_vcmp(FloatRegister src1, FloatRegister src2, Condition cc = Always);
     void ma_vcmp_f32(FloatRegister src1, FloatRegister src2, Condition cc = Always);
@@ -757,6 +757,8 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void loadInt32OrDouble(Register base, Register index,
                            FloatRegister dest, int32_t shift = defaultShift);
     void loadConstantDouble(double dp, FloatRegister dest);
+    void loadConstantDouble(wasm::RawF64 dp, FloatRegister dest);
+
     // Treat the value as a boolean, and set condition codes accordingly.
     Condition testInt32Truthy(bool truthy, const ValueOperand& operand);
     Condition testBooleanTruthy(bool truthy, const ValueOperand& operand);
@@ -766,6 +768,7 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void boolValueToFloat32(const ValueOperand& operand, FloatRegister dest);
     void int32ValueToFloat32(const ValueOperand& operand, FloatRegister dest);
     void loadConstantFloat32(float f, FloatRegister dest);
+    void loadConstantFloat32(wasm::RawF32 f, FloatRegister dest);
 
     void moveValue(const Value& val, Register type, Register data);
 
@@ -981,11 +984,6 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void loadFloat32(const Address& addr, FloatRegister dest);
     void loadFloat32(const BaseIndex& src, FloatRegister dest);
 
-    void ma_loadHeapAsmJS(Register ptrReg, int size, bool needsBoundsCheck, bool faultOnOOB,
-                          FloatRegister output);
-    void ma_loadHeapAsmJS(Register ptrReg, int size, bool isSigned, bool needsBoundsCheck,
-                          bool faultOnOOB, Register output);
-
     void store8(Register src, const Address& address);
     void store8(Imm32 imm, const Address& address);
     void store8(Register src, const BaseIndex& address);
@@ -1021,11 +1019,6 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void moveDouble(FloatRegister src, FloatRegister dest, Condition cc = Always) {
         ma_vmov(src, dest, cc);
     }
-
-    void ma_storeHeapAsmJS(Register ptrReg, int size, bool needsBoundsCheck, bool faultOnOOB,
-                           FloatRegister value);
-    void ma_storeHeapAsmJS(Register ptrReg, int size, bool isSigned, bool needsBoundsCheck,
-                           bool faultOnOOB, Register value);
 
   private:
     template<typename T>
@@ -1314,15 +1307,6 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void atomicExchangeToTypedIntArray(Scalar::Type arrayType, const T& mem, Register value,
                                        Register temp, AnyRegister output);
 
-    void clampIntToUint8(Register reg) {
-        // Look at (reg >> 8) if it is 0, then reg shouldn't be clamped if it is
-        // <0, then we want to clamp to 0, otherwise, we wish to clamp to 255
-        ScratchRegisterScope scratch(asMasm());
-        as_mov(scratch, asr(reg, 8), SetCC);
-        ma_mov(Imm32(0xff), reg, NotEqual);
-        ma_mov(Imm32(0), reg, Signed);
-    }
-
     inline void incrementInt32Value(const Address& addr);
 
     void cmp32(Register lhs, Imm32 rhs);
@@ -1452,9 +1436,6 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void ma_storeImm(Imm32 c, const Address& dest) {
         ma_mov(c, lr);
         ma_str(lr, dest);
-    }
-    BufferOffset ma_BoundsCheck(Register bounded) {
-        return as_cmp(bounded, Imm8(0));
     }
 
     void moveFloat32(FloatRegister src, FloatRegister dest, Condition cc = Always) {

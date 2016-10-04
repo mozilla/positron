@@ -142,6 +142,15 @@ TypeSet::ObjectKey::singleton()
     return res;
 }
 
+inline JSCompartment*
+TypeSet::ObjectKey::maybeCompartment()
+{
+    if (isSingleton())
+        return singleton()->compartment();
+
+    return group()->compartment();
+}
+
 /* static */ inline TypeSet::Type
 TypeSet::ObjectType(JSObject* obj)
 {
@@ -600,6 +609,8 @@ TypeScript::MonitorAssign(JSContext* cx, HandleObject obj, jsid id)
 /* static */ inline void
 TypeScript::SetThis(JSContext* cx, JSScript* script, TypeSet::Type type)
 {
+    assertSameCompartment(cx, script, type);
+
     StackTypeSet* types = ThisTypes(script);
     if (!types)
         return;
@@ -622,6 +633,8 @@ TypeScript::SetThis(JSContext* cx, JSScript* script, const js::Value& value)
 /* static */ inline void
 TypeScript::SetArgument(JSContext* cx, JSScript* script, unsigned arg, TypeSet::Type type)
 {
+    assertSameCompartment(cx, script, type);
+
     StackTypeSet* types = ArgTypes(script, arg);
     if (!types)
         return;
@@ -845,6 +858,32 @@ inline ObjectGroup*
 TypeSet::Type::groupNoBarrier() const
 {
     return objectKey()->groupNoBarrier();
+}
+
+inline void
+TypeSet::Type::trace(JSTracer* trc)
+{
+    if (isSingletonUnchecked()) {
+        JSObject* obj = singletonNoBarrier();
+        TraceManuallyBarrieredEdge(trc, &obj, "TypeSet::Object");
+        *this = TypeSet::ObjectType(obj);
+    } else if (isGroupUnchecked()) {
+        ObjectGroup* group = groupNoBarrier();
+        TraceManuallyBarrieredEdge(trc, &group, "TypeSet::Group");
+        *this = TypeSet::ObjectType(group);
+    }
+}
+
+inline JSCompartment*
+TypeSet::Type::maybeCompartment()
+{
+    if (isSingletonUnchecked())
+        return singletonNoBarrier()->compartment();
+
+    if (isGroupUnchecked())
+        return groupNoBarrier()->compartment();
+
+    return nullptr;
 }
 
 inline bool

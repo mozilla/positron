@@ -36,7 +36,7 @@
 
     // Test another invalid title - for updating later
     {isInQuery: false, isVisit:true, isDetails: true, title: "m,oz",
-     uri: "http://foo.com/changeme2.htm", lastVisit: tomorrow}];
+     uri: "http://foo.com/changeme2.htm", lastVisit: yesterday}];
 
 /**
  * This test will test Queries that use relative search terms and URI options
@@ -74,12 +74,12 @@ add_task(function* test_searchterms_uri()
    // live update.
    do_print("change title");
    var change1 = [{isDetails: true, uri:"http://foo.com/",
-                   title: "mo"},];
+                   title: "mo"}, ];
    yield task_populateDB(change1);
 
    do_check_false(isInResult({uri: "http://foo.com/"}, root));
    var change2 = [{isDetails: true, uri:"http://foo.com/",
-                   title: "moz"},];
+                   title: "moz"}, ];
    yield task_populateDB(change2);
    do_check_true(isInResult({uri: "http://foo.com/"}, root));
 

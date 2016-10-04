@@ -25,18 +25,6 @@ template<class Cls> class GlobalRef;
 template<class Cls> class DependentRef;
 
 
-// How exception during a JNI call should be treated.
-enum class ExceptionMode
-{
-    // Abort on unhandled excepion (default).
-    ABORT,
-    // Ignore the exception and return to caller.
-    IGNORE,
-    // Catch any exception and return a nsresult.
-    NSRESULT,
-};
-
-
 // Class to hold the native types of a method's arguments.
 // For example, if a method has signature (ILjava/lang/String;)V,
 // its arguments class would be jni::Args<int32_t, jni::String::Param>
@@ -77,7 +65,8 @@ class Ref
 protected:
     static JNIEnv* FindEnv()
     {
-        return Cls::isMultithreaded ? GetEnvForThread() : GetGeckoThreadEnv();
+        return Cls::callingThread == CallingThread::GECKO ?
+                GetGeckoThreadEnv() : GetEnvForThread();
     }
 
     Type mInstance;
@@ -191,7 +180,9 @@ public:
     jclass ClassRef() const
     {
         if (!sClassRef) {
-            sClassRef = GetClassGlobalRef(mEnv, Cls::name);
+            const jclass cls = GetClassRef(mEnv, Cls::name);
+            sClassRef = jclass(mEnv->NewGlobalRef(cls));
+            mEnv->DeleteLocalRef(cls);
         }
         return sClassRef;
     }
@@ -231,7 +222,7 @@ public:
 };
 
 
-template<class Cls, typename Type>
+template<class Cls, typename Type = jobject>
 class ObjectBase
 {
 protected:
@@ -248,7 +239,7 @@ public:
     using GlobalRef = jni::GlobalRef<Cls>;
     using Param = const Ref&;
 
-    static const bool isMultithreaded = true;
+    static const CallingThread callingThread = CallingThread::ANY;
     static const char name[];
 
     explicit ObjectBase(const Context& ctx) : mCtx(ctx) {}
@@ -717,6 +708,21 @@ public:
     explicit ArrayRefBase(const Context<TypedObject<JNIType>, JNIType>& ctx)
         : Base(ctx)
     {}
+
+    static typename Base::LocalRef New(const ElementType* data, size_t length) {
+        using JNIElemType = typename detail::TypeAdapter<ElementType>::JNIType;
+        static_assert(sizeof(ElementType) == sizeof(JNIElemType),
+                      "Size of native type must match size of JNI type");
+        JNIEnv* const jenv = mozilla::jni::GetEnvForThread();
+        auto result =
+            (jenv->*detail::TypeAdapter<ElementType>::NewArray)(length);
+        MOZ_CATCH_JNI_EXCEPTION(jenv);
+        (jenv->*detail::TypeAdapter<ElementType>::SetArray)(
+                result, jsize(0), length,
+                reinterpret_cast<const JNIElemType*>(data));
+        MOZ_CATCH_JNI_EXCEPTION(jenv);
+        return Base::LocalRef::Adopt(jenv, result);
+    }
 
     size_t Length() const
     {

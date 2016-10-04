@@ -151,6 +151,7 @@ function backgroundScript() {
   }
 
   let frameIDs = new Map();
+  let skippedRequests = new Set();
 
   let recorded = {requested: [],
                   beforeSendHeaders: [],
@@ -181,6 +182,7 @@ function backgroundScript() {
       },
       modified: {
         "Server": "WebRequest",
+        "Content-Type": "text/html; charset=utf-8",
       },
       deleted: [
         "Connection",
@@ -201,6 +203,7 @@ function backgroundScript() {
     if (headers.find(h => h.name === processedMark)) {
       // This may happen because of redirections or cache
       browser.test.log(`${phase}Headers in ${details.requestId} already processed`);
+      skippedRequests.add(details.requestId);
       return null;
     }
     headers.push({name: processedMark, value: "1"});
@@ -251,8 +254,14 @@ function backgroundScript() {
     }
 
     let modifiedAny = false;
+    browser.test.log(`HEADERS ${JSON.stringify(headers)}`);
     for (let header of headers.filter(h => h.name in modified)) {
       let {name, value} = header;
+      if (name.toLowerCase() === "content-type" && skippedRequests.has(details.requestId)) {
+        // Changes to Content-Type headers are not persisted in the cache.
+        continue;
+      }
+
       browser.test.assertTrue(value === modified[name], `header "${name}: ${value}" matches modified value ("${modified[name]}")`);
       modifiedAny = true;
     }
@@ -421,6 +430,17 @@ function backgroundScript() {
     checkStatus(details);
   }
 
+  function checkFromCache(kind, details) {
+    if (checkCompleted) {
+      // If we have already completed a GET request for this url,
+      // and it was found, we expect for the response to come fromCache.
+      const completed = kind in completedUrls && completedUrls[kind].has(details.url);
+      const expected = completed && details.method === "GET" && details.statusCode != 404;
+      browser.test.assertEq(expected, details.fromCache, "fromCache is correct");
+    }
+    checkIpAndRecord(kind, details);
+  }
+
   function onHeadersReceived(details) {
     checkIpAndRecord("headersReceived", details);
     processHeaders("response", details);
@@ -434,7 +454,7 @@ function backgroundScript() {
   }
 
   function onCompleted(details) {
-    checkIpAndRecord("completed", details);
+    checkFromCache("completed", details);
     checkHeaders("response", details);
   }
 
@@ -451,8 +471,8 @@ function backgroundScript() {
   browser.webRequest.onSendHeaders.addListener(onSendHeaders, {urls: ["<all_urls>"]}, ["requestHeaders"]);
   browser.webRequest.onBeforeRedirect.addListener(onBeforeRedirect, {urls: ["<all_urls>"]});
   browser.webRequest.onHeadersReceived.addListener(onHeadersReceived, {urls: ["<all_urls>"]}, ["blocking", "responseHeaders"]);
-  browser.webRequest.onResponseStarted.addListener(checkIpAndRecord.bind(null, "responseStarted"), {urls: ["<all_urls>"]});
-  browser.webRequest.onResponseStarted.addListener(checkIpAndRecord.bind(null, "responseStarted2"), {urls: ["<all_urls>"]});
+  browser.webRequest.onResponseStarted.addListener(checkFromCache.bind(null, "responseStarted"), {urls: ["<all_urls>"]});
+  browser.webRequest.onResponseStarted.addListener(checkFromCache.bind(null, "responseStarted2"), {urls: ["<all_urls>"]});
   browser.webRequest.onErrorOccurred.addListener(onErrorOccurred, {urls: ["<all_urls>"]});
   browser.webRequest.onCompleted.addListener(onCompleted, {urls: ["<all_urls>"]}, ["responseHeaders"]);
 

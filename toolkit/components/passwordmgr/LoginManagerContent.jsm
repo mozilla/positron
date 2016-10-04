@@ -354,13 +354,15 @@ var LoginManagerContent = {
       return;
     }
 
-    this.setupProgressListener(window);
-
     let pwField = event.target;
     if (pwField.form) {
-      // Handled by onDOMFormHasPassword which is already throttled.
+      // Fill is handled by onDOMFormHasPassword which is already throttled.
       return;
     }
+
+    // Only setup the listener for formless inputs.
+    // Capture within a <form> but without a submit event is bug 1287202.
+    this.setupProgressListener(window);
 
     let formLike = FormLikeFactory.createFromField(pwField);
     log("onDOMInputPasswordAdded:", pwField, formLike);
@@ -387,17 +389,15 @@ var LoginManagerContent = {
       // We update the FormLike so it (most important .elements) is fresh when the task eventually
       // runs since changes to the elements could affect our field heuristics.
       this._formLikeByRootElement.set(formLike.rootElement, formLike);
+    } else if (window.document.readyState == "complete") {
+      log("Arming the DeferredTask we just created since document.readyState == 'complete'");
+      deferredTask.arm();
     } else {
-      if (window.document.readyState == "complete") {
-        log("Arming the DeferredTask we just created since document.readyState == 'complete'");
+      window.addEventListener("DOMContentLoaded", function armPasswordAddedTask() {
+        window.removeEventListener("DOMContentLoaded", armPasswordAddedTask);
+        log("Arming the onDOMInputPasswordAdded DeferredTask due to DOMContentLoaded");
         deferredTask.arm();
-      } else {
-        window.addEventListener("DOMContentLoaded", function armPasswordAddedTask() {
-          window.removeEventListener("DOMContentLoaded", armPasswordAddedTask);
-          log("Arming the onDOMInputPasswordAdded DeferredTask due to DOMContentLoaded");
-          deferredTask.arm();
-        });
-      }
+      });
     }
   },
 
@@ -408,7 +408,7 @@ var LoginManagerContent = {
    * @param {Window} window
    */
   _fetchLoginsFromParentAndFillForm(form, window) {
-    this._updateLoginFormPresence(window);
+    this._detectInsecureFormLikes(window);
 
     let messageManager = messageManagerFromWindow(window);
     messageManager.sendAsyncMessage("LoginStats:LoginEncountered");
@@ -423,7 +423,7 @@ var LoginManagerContent = {
   },
 
   onPageShow(event, window) {
-    this._updateLoginFormPresence(window);
+    this._detectInsecureFormLikes(window);
   },
 
   /**
@@ -448,38 +448,11 @@ var LoginManagerContent = {
   },
 
   /**
-   * Compute whether there is a login form on any frame of the current page, and
-   * notify the parent process. This is one of the factors used to control the
-   * visibility of the password fill doorhanger anchor.
+   * Compute whether there is an insecure login form on any frame of the current page, and
+   * notify the parent process. This is used to control whether insecure password UI appears.
    */
-  _updateLoginFormPresence(topWindow) {
-    log("_updateLoginFormPresence", topWindow.location.href);
-    // For the login form presence notification, we currently support only one
-    // origin for each browser, so the form origin will always match the origin
-    // of the top level document.
-    let loginFormOrigin =
-        LoginUtils._getPasswordOrigin(topWindow.document.documentURI);
-
-    // Returns the first known loginForm present in this window or in any
-    // same-origin subframes. Returns null if no loginForm is currently present.
-    let getFirstLoginForm = thisWindow => {
-      let loginForms = this.stateForDocument(thisWindow.document).loginFormRootElements;
-      if (loginForms.size) {
-        return [...loginForms][0];
-      }
-      for (let i = 0; i < thisWindow.frames.length; i++) {
-        let frame = thisWindow.frames[i];
-        if (LoginUtils._getPasswordOrigin(frame.document.documentURI) !=
-            loginFormOrigin) {
-          continue;
-        }
-        let loginForm = getFirstLoginForm(frame);
-        if (loginForm) {
-          return loginForm;
-        }
-      }
-      return null;
-    };
+  _detectInsecureFormLikes(topWindow) {
+    log("_detectInsecureFormLikes", topWindow.location.href);
 
     // Returns true if this window or any subframes have insecure login forms.
     let hasInsecureLoginForms = (thisWindow, parentIsInsecure) => {
@@ -491,16 +464,8 @@ var LoginManagerContent = {
                         frame => hasInsecureLoginForms(frame, isInsecure));
     };
 
-    // Store the actual form to use on the state for the top-level document.
-    let topState = this.stateForDocument(topWindow.document);
-    topState.loginFormForFill = getFirstLoginForm(topWindow);
-    log("_updateLoginFormPresence: topState.loginFormForFill", topState.loginFormForFill);
-
-    // Determine whether to show the anchor icon for the current tab.
     let messageManager = messageManagerFromWindow(topWindow);
-    messageManager.sendAsyncMessage("RemoteLogins:updateLoginFormPresence", {
-      loginFormOrigin,
-      loginFormPresent: !!topState.loginFormForFill,
+    messageManager.sendAsyncMessage("RemoteLogins:insecureLoginFormPresent", {
       hasInsecureLoginForms: hasInsecureLoginForms(topWindow, false),
     });
   },
@@ -526,14 +491,12 @@ var LoginManagerContent = {
    *          recipes:
    *            Fill recipes transmitted together with the original message.
    *          inputElement:
-   *            Optional input password element from the form we want to fill.
+   *            Username or password input element from the form we want to fill.
    *        }
    */
   fillForm({ topDocument, loginFormOrigin, loginsFound, recipes, inputElement }) {
-    let topState = this.stateForDocument(topDocument);
-    if (!inputElement && !topState.loginFormForFill) {
-      log("fillForm: There is no login form anymore. The form may have been",
-          "removed or the document may have changed.");
+    if (!inputElement) {
+      log("fillForm: No input element specified");
       return;
     }
     if (LoginUtils._getPasswordOrigin(topDocument.documentURI) != loginFormOrigin) {
@@ -546,18 +509,15 @@ var LoginManagerContent = {
         return;
       }
     }
-    let form = topState.loginFormForFill;
+
     let clobberUsername = true;
     let options = {
       inputElement,
     };
 
-    // If we have a target input, fills it's form.
-    if (inputElement) {
-      form = FormLikeFactory.createFromField(inputElement);
-      if (inputElement.type == "password") {
-        clobberUsername = false;
-      }
+    let form = FormLikeFactory.createFromField(inputElement);
+    if (inputElement.type == "password") {
+      clobberUsername = false;
     }
     this._fillForm(form, true, clobberUsername, true, true, loginsFound, recipes, options);
   },
@@ -787,16 +747,15 @@ var LoginManagerContent = {
         log("(form ignored -- all 3 pw fields differ)");
         return [null, null, null];
       }
-    } else { // pwFields.length == 2
-      if (pw1 == pw2) {
-        // Treat as if 1 pw field
-        newPasswordField = pwFields[0].element;
-        oldPasswordField = null;
-      } else {
-        // Just assume that the 2nd password is the new password
-        oldPasswordField = pwFields[0].element;
-        newPasswordField = pwFields[1].element;
-      }
+    } else if (pw1 == pw2) {
+      // pwFields.length == 2
+      // Treat as if 1 pw field
+      newPasswordField = pwFields[0].element;
+      oldPasswordField = null;
+    } else {
+      // Just assume that the 2nd password is the new password
+      oldPasswordField = pwFields[0].element;
+      newPasswordField = pwFields[1].element;
     }
 
     log("Password field (new) id/name is: ", newPasswordField.id, " / ", newPasswordField.name);
@@ -919,7 +878,7 @@ var LoginManagerContent = {
                             null;
 
     // Make sure to pass the opener's top in case it was in a frame.
-    let opener = win.opener ? win.opener.top : null;
+    let openerTopWindow = win.opener ? win.opener.top : null;
 
     messageManager.sendAsyncMessage("RemoteLogins:onFormSubmit",
                                     { hostname: hostname,
@@ -927,7 +886,7 @@ var LoginManagerContent = {
                                       usernameField: mockUsername,
                                       newPasswordField: mockPassword,
                                       oldPasswordField: mockOldPassword },
-                                    { openerWin: opener });
+                                    { openerTopWindow });
   },
 
   /**
@@ -1190,7 +1149,7 @@ var LoginManagerContent = {
       formOrigin: LoginUtils._getPasswordOrigin(doc.documentURI),
     })[0];
 
-    let [usernameField, newPasswordField, oldPasswordField] =
+    let [usernameField, newPasswordField] =
           this._getFormFields(form, false, recipes);
 
     // If we are not verifying a password field, we want

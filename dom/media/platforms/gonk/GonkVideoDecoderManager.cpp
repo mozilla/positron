@@ -52,7 +52,7 @@ public:
     , mGrallocFormat(aGrallocFormat)
   {}
 
-  already_AddRefed<TextureClient> Allocate(CompositableForwarder* aAllocator) override
+  already_AddRefed<TextureClient> Allocate(KnowsCompositor* aAllocator) override
   {
     uint32_t usage = android::GraphicBuffer::USAGE_SW_READ_OFTEN |
                      android::GraphicBuffer::USAGE_SW_WRITE_OFTEN |
@@ -60,7 +60,7 @@ public:
 
     GrallocTextureData* texData = GrallocTextureData::Create(mSize, mGrallocFormat,
                                                              gfx::BackendType::NONE,
-                                                             usage, aAllocator);
+                                                             usage, aAllocator->GetTextureForwarder());
     if (!texData) {
       return nullptr;
     }
@@ -69,7 +69,7 @@ public:
       return nullptr;
     }
     RefPtr<TextureClient> textureClient =
-      TextureClient::CreateWithData(texData, TextureFlags::DEALLOCATE_CLIENT, aAllocator);
+      TextureClient::CreateWithData(texData, TextureFlags::DEALLOCATE_CLIENT, aAllocator->GetTextureForwarder());
     return textureClient.forget();
   }
 
@@ -130,25 +130,25 @@ GonkVideoDecoderManager::Init()
 
   if (uint32_t(mConfig.mImage.width * mConfig.mImage.height) > maxWidth * maxHeight) {
     GVDM_LOG("Video resolution exceeds hw codec capability");
-    return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+    return InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
   }
 
   // Validate the container-reported frame and pictureRect sizes. This ensures
   // that our video frame creation code doesn't overflow.
   if (!IsValidVideoRegion(mConfig.mImage, mConfig.ImageRect(), mConfig.mDisplay)) {
     GVDM_LOG("It is not a valid region");
-    return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+    return InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
   }
 
   mReaderTaskQueue = AbstractThread::GetCurrent()->AsTaskQueue();
   MOZ_ASSERT(mReaderTaskQueue);
 
   if (mDecodeLooper.get() != nullptr) {
-    return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+    return InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
   }
 
   if (!InitLoopers(MediaData::VIDEO_DATA)) {
-    return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+    return InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
   }
 
   RefPtr<InitPromise> p = mInitPromise.Ensure(__func__);
@@ -400,7 +400,8 @@ GonkVideoDecoderManager::CreateVideoDataFromGraphicBuffer(MediaBuffer* aSource,
   if (mNeedsCopyBuffer) {
     // Copy buffer contents for bug 1199809.
     if (!mCopyAllocator) {
-      mCopyAllocator = new TextureClientRecycleAllocator(ImageBridgeChild::GetSingleton());
+      RefPtr<layers::ImageBridgeChild> bridge = layers::ImageBridgeChild::GetSingleton();
+      mCopyAllocator = new TextureClientRecycleAllocator(bridge);
     }
     if (!mCopyAllocator) {
       GVDM_LOG("Create buffer allocator failed!");
@@ -672,7 +673,7 @@ GonkVideoDecoderManager::codecReserved()
 
   if (rv != OK) {
     GVDM_LOG("Failed to configure codec!!!!");
-    mInitPromise.Reject(DecoderFailureReason::INIT_ERROR, __func__);
+    mInitPromise.Reject(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
     return;
   }
 
@@ -683,7 +684,7 @@ void
 GonkVideoDecoderManager::codecCanceled()
 {
   GVDM_LOG("codecCanceled");
-  mInitPromise.RejectIfExists(DecoderFailureReason::CANCELED, __func__);
+  mInitPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_CANCELED, __func__);
 }
 
 // Called on GonkDecoderManager::mTaskLooper thread.

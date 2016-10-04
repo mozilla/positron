@@ -243,10 +243,6 @@
         ]]></getter>
       </property>
 
-      <property name="autoCompletePopup"
-                onget="return document.getElementById(this.getAttribute('autocompletepopup'))"
-                readonly="true"/>
-
       <property name="docShellIsActive">
         <getter>
           <![CDATA[
@@ -263,13 +259,13 @@
         </setter>
       </property>
 
-      <method name="setDocShellIsActiveAndForeground">
-        <parameter name="isActive"/>
+      <method name="preserveLayers">
+        <parameter name="preserve"/>
         <body><![CDATA[
-          // See the explanation for what this does in nsITabParent.ipdl
-
           let {frameLoader} = this.QueryInterface(Components.interfaces.nsIFrameLoaderOwner);
-          frameLoader.tabParent.setDocShellIsActiveAndForeground(isActive);
+          if (frameLoader.tabParent) {
+            frameLoader.tabParent.preserveLayers(preserve);
+          }
         ]]></body>
       </method>
 
@@ -373,9 +369,11 @@
           this._remoteWebNavigationImpl = this._remoteWebNavigation.wrappedJSObject;
           this._remoteWebNavigationImpl.swapBrowser(this);
 
-          // Initialize to the null principal
-          let Services = Components.utils.import("resource://gre/modules/Services.jsm", {}).Services
-          this._contentPrincipal = Services.scriptSecurityManager.createNullPrincipal({});
+          // Initialize contentPrincipal to the about:blank principal for this loadcontext
+          let {Services} = Components.utils.import("resource://gre/modules/Services.jsm", {});
+          let aboutBlank = Services.io.newURI("about:blank", null, null);
+          let ssm = Services.scriptSecurityManager;
+          this._contentPrincipal = ssm.getLoadContextCodebasePrincipal(aboutBlank, this.loadContext);
 
           this.messageManager.addMessageListener("Browser:Init", this);
           this.messageManager.addMessageListener("DOMTitleChanged", this);
@@ -452,9 +450,6 @@
           switch (aMessage.name) {
             case "Browser:Init":
               this._outerWindowID = data.outerWindowID;
-              this.messageManager.sendAsyncMessage("Browser:InitReceived", {
-                initPopup: this.autoCompletePopup != null,
-              });
               break;
             case "DOMTitleChanged":
               this._contentTitle = data.title;
@@ -565,6 +560,15 @@
             }
             this._remoteWebNavigationImpl.canGoBack = false;
             this._remoteWebNavigationImpl.canGoForward = false;
+          ]]>
+        </body>
+      </method>
+
+      <method name="createAboutBlankContentViewer">
+        <parameter name="aPrincipal"/>
+        <body>
+          <![CDATA[
+            this.messageManager.sendAsyncMessage("Browser:CreateAboutBlank", aPrincipal);
           ]]>
         </body>
       </method>

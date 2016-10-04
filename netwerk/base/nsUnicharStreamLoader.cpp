@@ -102,8 +102,17 @@ nsUnicharStreamLoader::OnStopRequest(nsIRequest *aRequest,
   mContext = nullptr;
   mChannel = nullptr;
   mCharset.Truncate();
+  mRawData.Truncate();
+  mRawBuffer.Truncate();
   mBuffer.Truncate();
   return rv;
+}
+
+NS_IMETHODIMP
+nsUnicharStreamLoader::GetRawBuffer(nsACString& aRawBuffer)
+{
+  aRawBuffer = mRawBuffer;
+  return NS_OK;
 }
 
 /* nsIStreamListener implementation */
@@ -196,7 +205,7 @@ nsUnicharStreamLoader::DetermineCharset()
   return rv;
 }
 
-NS_METHOD
+nsresult
 nsUnicharStreamLoader::WriteSegmentFun(nsIInputStream *,
                                        void *aClosure,
                                        const char *aSegment,
@@ -217,6 +226,10 @@ nsUnicharStreamLoader::WriteSegmentFun(nsIInputStream *,
 
   uint32_t capacity = haveRead + dstLen;
   if (!self->mBuffer.SetCapacity(capacity, fallible)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
+  if (!self->mRawBuffer.Append(aSegment, aCount, fallible)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 

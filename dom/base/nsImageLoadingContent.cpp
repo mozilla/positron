@@ -230,8 +230,15 @@ nsImageLoadingContent::OnLoadComplete(imgIRequest* aRequest, nsresult aStatus)
   // Fire the appropriate DOM event.
   if (NS_SUCCEEDED(aStatus)) {
     FireEvent(NS_LITERAL_STRING("load"));
+
+    // Do not fire loadend event for multipart/x-mixed-replace image streams.
+    bool isMultipart;
+    if (NS_FAILED(aRequest->GetMultipart(&isMultipart)) || !isMultipart) {
+      FireEvent(NS_LITERAL_STRING("loadend"));
+    }
   } else {
     FireEvent(NS_LITERAL_STRING("error"));
+    FireEvent(NS_LITERAL_STRING("loadend"));
   }
 
   nsCOMPtr<nsINode> thisNode = do_QueryInterface(static_cast<nsIImageLoadingContent*>(this));
@@ -276,8 +283,9 @@ nsImageLoadingContent::OnUnlockedDraw()
     return;
   }
 
-  if (frame->IsVisibleOrMayBecomeVisibleSoon()) {
-    return;  // Nothing to do.
+  if (frame->GetVisibility() == Visibility::APPROXIMATELY_VISIBLE) {
+    // This frame is already marked visible; there's nothing to do.
+    return;
   }
 
   nsPresContext* presContext = frame->PresContext();
@@ -290,7 +298,7 @@ nsImageLoadingContent::OnUnlockedDraw()
     return;
   }
 
-  presShell->MarkFrameVisible(frame, VisibilityCounter::IN_DISPLAYPORT);
+  presShell->EnsureFrameInApproximatelyVisibleList(frame);
 }
 
 nsresult
@@ -517,7 +525,7 @@ nsImageLoadingContent::FrameDestroyed(nsIFrame* aFrame)
 
   nsIPresShell* presShell = presContext ? presContext->GetPresShell() : nullptr;
   if (presShell) {
-    presShell->MarkFrameNonvisible(aFrame);
+    presShell->RemoveFrameFromApproximatelyVisibleList(aFrame);
   }
 }
 
@@ -588,21 +596,21 @@ nsImageLoadingContent::GetCurrentURI(nsIURI** aURI)
   return result.StealNSResult();
 }
 
-already_AddRefed<nsIStreamListener>
+NS_IMETHODIMP
 nsImageLoadingContent::LoadImageWithChannel(nsIChannel* aChannel,
-                                            ErrorResult& aError)
+                                            nsIStreamListener** aListener)
 {
   imgLoader* loader =
     nsContentUtils::GetImgLoaderForChannel(aChannel, GetOurOwnerDoc());
   if (!loader) {
-    aError.Throw(NS_ERROR_NULL_POINTER);
-    return nullptr;
+    return NS_ERROR_NULL_POINTER;
   }
 
   nsCOMPtr<nsIDocument> doc = GetOurOwnerDoc();
   if (!doc) {
     // Don't bother
-    return nullptr;
+    *aListener = nullptr;
+    return NS_OK;
   }
 
   // XXX what should we do with content policies here, if anything?
@@ -613,36 +621,24 @@ nsImageLoadingContent::LoadImageWithChannel(nsIChannel* aChannel,
   AutoStateChanger changer(this, true);
 
   // Do the load.
-  nsCOMPtr<nsIStreamListener> listener;
   RefPtr<imgRequestProxy>& req = PrepareNextRequest(eImageLoadType_Normal);
   nsresult rv = loader->
-    LoadImageWithChannel(aChannel, this, doc,
-                         getter_AddRefs(listener),
-                         getter_AddRefs(req));
+    LoadImageWithChannel(aChannel, this, doc, aListener, getter_AddRefs(req));
   if (NS_SUCCEEDED(rv)) {
     TrackImage(req);
     ResetAnimationIfNeeded();
-  } else {
-    MOZ_ASSERT(!req, "Shouldn't have non-null request here");
-    // If we don't have a current URI, we might as well store this URI so people
-    // know what we tried (and failed) to load.
-    if (!mCurrentRequest)
-      aChannel->GetURI(getter_AddRefs(mCurrentURI));
-    FireEvent(NS_LITERAL_STRING("error"));
-    aError.Throw(rv);
+    return NS_OK;
   }
-  return listener.forget();
-}
 
-NS_IMETHODIMP
-nsImageLoadingContent::LoadImageWithChannel(nsIChannel* aChannel,
-                                            nsIStreamListener** aListener)
-{
-  NS_ENSURE_ARG_POINTER(aListener);
+  MOZ_ASSERT(!req, "Shouldn't have non-null request here");
+  // If we don't have a current URI, we might as well store this URI so people
+  // know what we tried (and failed) to load.
+  if (!mCurrentRequest)
+    aChannel->GetURI(getter_AddRefs(mCurrentURI));
 
-  ErrorResult result;
-  *aListener = LoadImageWithChannel(aChannel, result).take();
-  return result.StealNSResult();
+  FireEvent(NS_LITERAL_STRING("error"));
+  FireEvent(NS_LITERAL_STRING("loadend"));
+  return rv;
 }
 
 void
@@ -748,31 +744,21 @@ nsImageLoadingContent::LoadImage(const nsAString& aNewURI,
     return NS_OK;
   }
 
-  // Second, parse the URI string to get image URI
-  nsCOMPtr<nsIURI> imageURI;
-  nsresult rv = StringToURI(aNewURI, doc, getter_AddRefs(imageURI));
-  if (NS_FAILED(rv)) {
-    // Cancel image requests and fire error event per spec
+  if (aNewURI.IsEmpty()) {
+    // Cancel image requests and then fire only error event per spec.
     CancelImageRequests(aNotify);
     FireEvent(NS_LITERAL_STRING("error"));
     return NS_OK;
   }
 
-  bool equal;
-
-  if (aNewURI.IsEmpty() &&
-      doc->GetDocumentURI() &&
-      NS_SUCCEEDED(doc->GetDocumentURI()->EqualsExceptRef(imageURI, &equal)) &&
-      equal)  {
-
-    // Loading an embedded img from the same URI as the document URI will not work
-    // as a resource cannot recursively embed itself. Attempting to do so generally
-    // results in having to pre-emptively close down an in-flight HTTP transaction
-    // and then incurring the significant cost of establishing a new TCP channel.
-    // This is generally triggered from <img src="">
-    // In light of that, just skip loading it..
-    // Do make sure to drop our existing image, if any
+  // Second, parse the URI string to get image URI
+  nsCOMPtr<nsIURI> imageURI;
+  nsresult rv = StringToURI(aNewURI, doc, getter_AddRefs(imageURI));
+  if (NS_FAILED(rv)) {
+    // Cancel image requests and then fire error and loadend events per spec
     CancelImageRequests(aNotify);
+    FireEvent(NS_LITERAL_STRING("error"));
+    FireEvent(NS_LITERAL_STRING("loadend"));
     return NS_OK;
   }
 
@@ -793,6 +779,7 @@ nsImageLoadingContent::LoadImage(nsIURI* aNewURI,
     // XXX Why fire an error here? seems like the callers to SetLoadingEnabled
     // don't want/need it.
     FireEvent(NS_LITERAL_STRING("error"));
+    FireEvent(NS_LITERAL_STRING("loadend"));
     return NS_OK;
   }
 
@@ -849,6 +836,7 @@ nsImageLoadingContent::LoadImage(nsIURI* aNewURI,
                                policyType);
   if (!NS_CP_ACCEPTED(cpDecision)) {
     FireEvent(NS_LITERAL_STRING("error"));
+    FireEvent(NS_LITERAL_STRING("loadend"));
     SetBlockedRequest(aNewURI, cpDecision);
     return NS_OK;
   }
@@ -921,7 +909,9 @@ nsImageLoadingContent::LoadImage(nsIURI* aNewURI,
     // know what we tried (and failed) to load.
     if (!mCurrentRequest)
       mCurrentURI = aNewURI;
+
     FireEvent(NS_LITERAL_STRING("error"));
+    FireEvent(NS_LITERAL_STRING("loadend"));
     return NS_OK;
   }
 
@@ -1429,20 +1419,16 @@ nsImageLoadingContent::UnbindFromTree(bool aDeep, bool aNullParent)
 }
 
 void
-nsImageLoadingContent::OnVisibilityChange(Visibility aOldVisibility,
-                                          Visibility aNewVisibility,
+nsImageLoadingContent::OnVisibilityChange(Visibility aNewVisibility,
                                           const Maybe<OnNonvisible>& aNonvisibleAction)
 {
   switch (aNewVisibility) {
-    case Visibility::MAY_BECOME_VISIBLE:
-    case Visibility::IN_DISPLAYPORT:
-      if (aOldVisibility == Visibility::NONVISIBLE) {
-        TrackImage(mCurrentRequest);
-        TrackImage(mPendingRequest);
-      }
+    case Visibility::APPROXIMATELY_VISIBLE:
+      TrackImage(mCurrentRequest);
+      TrackImage(mPendingRequest);
       break;
 
-    case Visibility::NONVISIBLE:
+    case Visibility::APPROXIMATELY_NONVISIBLE:
       UntrackImage(mCurrentRequest, aNonvisibleAction);
       UntrackImage(mPendingRequest, aNonvisibleAction);
       break;
@@ -1468,11 +1454,11 @@ nsImageLoadingContent::TrackImage(imgIRequest* aImage)
   }
 
   // We only want to track this request if we're visible. Ordinarily we check
-  // whether our frame considers itself visible, but in cases where
+  // the visible count, but that requires a frame; in cases where
   // GetOurPrimaryFrame() cannot obtain a frame (e.g. <feImage>), we assume
   // we're visible if FrameCreated() was called.
   nsIFrame* frame = GetOurPrimaryFrame();
-  if ((frame && !frame->IsVisibleOrMayBecomeVisibleSoon()) ||
+  if ((frame && frame->GetVisibility() == Visibility::APPROXIMATELY_NONVISIBLE) ||
       (!frame && !mFrameCreateCalled)) {
     return;
   }

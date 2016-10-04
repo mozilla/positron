@@ -775,10 +775,9 @@ function processPath(path)
       }
       ++curFileStart;
     }
-  } else {
+  } else if (!processPathEntry(path, fileArray)) {
     // If we didn't start with a quote, assume we just have a single file.
-    if (!processPathEntry(path, fileArray))
-      return false;
+    return false;
   }
 
   return fileArray;
@@ -812,7 +811,7 @@ function processPathEntry(path, fileArray)
     file.initWithPath(filePath);
   else if ((filePath.indexOf("/../") > 0) ||
            (filePath.substr(-3) == "/..") ||
-           (filePath.substr(0,3) == "../") ||
+           (filePath.substr(0, 3) == "../") ||
            (filePath == "..")) {
     /* appendRelativePath doesn't allow .. */
     try {

@@ -17,6 +17,7 @@
 #include "nsIAsyncVerifyRedirectCallback.h"
 #include "nsISystemProxySettings.h"
 #include "nsContentUtils.h"
+#include "mozilla/Preferences.h"
 
 //-----------------------------------------------------------------------------
 
@@ -75,7 +76,7 @@ public:
     mPACURL = pacURL;
   }
 
-  NS_IMETHODIMP Run()
+  NS_IMETHOD Run() override
   {
     mCallback->OnQueryComplete(mStatus, mPACString, mPACURL);
     mCallback = nullptr;
@@ -103,7 +104,7 @@ public:
   {
   }
 
-  NS_IMETHODIMP Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread(), "wrong thread");
     mThread->Shutdown();
@@ -124,7 +125,7 @@ public:
   {
   }
 
-  NS_IMETHODIMP Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread(), "wrong thread");
     if (mPACMan->mPACThread) {
@@ -152,7 +153,7 @@ public:
   {
   }
 
-  NS_IMETHODIMP Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread(), "wrong thread");
     mPACMan->mLoader = nullptr;
@@ -194,7 +195,7 @@ public:
     mSetupPACURI = pacURI;
   }
 
-  NS_IMETHODIMP Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(!NS_IsMainThread(), "wrong thread");
     if (mCancel) {
@@ -207,7 +208,8 @@ public:
       mSetupPAC = false;
 
       mPACMan->mPAC.Init(mSetupPACURI,
-                         mSetupPACData);
+                         mSetupPACData,
+                         mPACMan->mIncludePath);
 
       RefPtr<PACLoadComplete> runnable = new PACLoadComplete(mPACMan);
       NS_DispatchToMainThread(runnable);
@@ -299,6 +301,9 @@ PendingPACQuery::Run()
 static bool sThreadLocalSetup = false;
 static uint32_t sThreadLocalIndex = 0xdeadbeef; // out of range
 
+static const char *kPACIncludePath =
+  "network.proxy.autoconfig_url.include_path";
+
 nsPACMan::nsPACMan()
   : mLoadPending(false)
   , mShutdown(false)
@@ -311,6 +316,7 @@ nsPACMan::nsPACMan()
     PR_NewThreadPrivateIndex(&sThreadLocalIndex, nullptr);
   }
   mPAC.SetThreadLocalIndex(sThreadLocalIndex);
+  mIncludePath = Preferences::GetBool(kPACIncludePath, false);
 }
 
 nsPACMan::~nsPACMan()
@@ -453,7 +459,8 @@ nsPACMan::StartLoading()
 
       // NOTE: This results in GetProxyForURI being called
       if (pacURI) {
-        pacURI->GetSpec(mNormalPACURISpec);
+        nsresult rv = pacURI->GetSpec(mNormalPACURISpec);
+        MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
         NS_NewChannel(getter_AddRefs(channel),
                       pacURI,
                       nsContentUtils::GetSystemPrincipal(),

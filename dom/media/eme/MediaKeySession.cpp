@@ -144,9 +144,10 @@ MediaKeySession::UpdateKeyStatusMap()
     nsAutoCString message(
       nsPrintfCString("MediaKeySession[%p,'%s'] key statuses change {",
                       this, NS_ConvertUTF16toUTF8(mSessionId).get()));
+    using IntegerType = typename std::underlying_type<MediaKeyStatus>::type;
     for (const CDMCaps::KeyStatus& status : keyStatuses) {
       message.Append(nsPrintfCString(" (%s,%s)", ToBase64(status.mId).get(),
-        MediaKeyStatusValues::strings[status.mStatus].value));
+        MediaKeyStatusValues::strings[static_cast<IntegerType>(status.mStatus)].value));
     }
     message.Append(" }");
     EME_LOG(message.get());
@@ -197,6 +198,9 @@ MediaKeySession::GenerateRequest(const nsAString& aInitDataType,
       this, NS_ConvertUTF16toUTF8(mSessionId).get());
     return promise.forget();
   }
+
+  Telemetry::Accumulate(Telemetry::VIDEO_CDM_GENERATE_REQUEST_CALLED,
+                        ToCDMTypeTelemetryEnum(mKeySystem));
 
   // Convert initData to base64 for easier logging.
   // Note: CreateSession() Move()s the data out of the array, so we have
@@ -338,7 +342,7 @@ MediaKeySession::Close(ErrorResult& aRv)
   if (IsClosed() || !mKeys->GetCDMProxy()) {
     EME_LOG("MediaKeySession[%p,'%s'] Close() already closed",
             this, NS_ConvertUTF16toUTF8(mSessionId).get());
-    promise->MaybeResolve(JS::UndefinedHandleValue);
+    promise->MaybeResolveWithUndefined();
     return promise.forget();
   }
   PromiseId pid = mKeys->StorePromise(promise);
@@ -361,7 +365,7 @@ MediaKeySession::OnClosed()
   mIsClosed = true;
   mKeys->OnSessionClosed(this);
   mKeys = nullptr;
-  mClosed->MaybeResolve(JS::UndefinedHandleValue);
+  mClosed->MaybeResolveWithUndefined();
 }
 
 bool
@@ -480,6 +484,30 @@ MediaKeySession::SetExpiration(double aExpiration)
           NS_ConvertUTF16toUTF8(mSessionId).get(),
           aExpiration);
   mExpiration = aExpiration;
+}
+
+EventHandlerNonNull*
+MediaKeySession::GetOnkeystatuseschange()
+{
+  return GetEventHandler(nsGkAtoms::onkeystatuseschange, EmptyString());
+}
+
+void
+MediaKeySession::SetOnkeystatuseschange(EventHandlerNonNull* aCallback)
+{
+  SetEventHandler(nsGkAtoms::onkeystatuseschange, EmptyString(), aCallback);
+}
+
+EventHandlerNonNull*
+MediaKeySession::GetOnmessage()
+{
+  return GetEventHandler(nsGkAtoms::onmessage, EmptyString());
+}
+
+void
+MediaKeySession::SetOnmessage(EventHandlerNonNull* aCallback)
+{
+  SetEventHandler(nsGkAtoms::onmessage, EmptyString(), aCallback);
 }
 
 } // namespace dom

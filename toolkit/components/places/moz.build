@@ -69,6 +69,7 @@ if CONFIG['MOZ_PLACES']:
         'PlacesDBUtils.jsm',
         'PlacesRemoteTabsAutocompleteProvider.jsm',
         'PlacesSearchAutocompleteProvider.jsm',
+        'PlacesSyncUtils.jsm',
         'PlacesTransactions.jsm',
         'PlacesUtils.jsm',
     ]
@@ -83,12 +84,6 @@ if CONFIG['MOZ_PLACES']:
         'toolkitplaces.manifest',
         'UnifiedComplete.js',
     ]
-
-    if CONFIG['MOZ_SUITE']:
-        EXTRA_COMPONENTS += [
-            'nsPlacesAutoComplete.js',
-            'nsPlacesAutoComplete.manifest',
-        ]
 
     FINAL_LIBRARY = 'xul'
 

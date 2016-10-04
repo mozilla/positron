@@ -549,10 +549,10 @@ private:
   nsresult EvaluateScript(nsScriptLoadRequest* aRequest);
 
   already_AddRefed<nsIScriptGlobalObject> GetScriptGlobalObject();
-  void FillCompileOptionsForRequest(const mozilla::dom::AutoJSAPI &jsapi,
-                                    nsScriptLoadRequest *aRequest,
-                                    JS::Handle<JSObject *> aScopeChain,
-                                    JS::CompileOptions *aOptions);
+  nsresult FillCompileOptionsForRequest(const mozilla::dom::AutoJSAPI& jsapi,
+                                        nsScriptLoadRequest* aRequest,
+                                        JS::Handle<JSObject*> aScopeChain,
+                                        JS::CompileOptions* aOptions);
 
   uint32_t NumberOfProcessors();
   nsresult PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
@@ -584,6 +584,7 @@ private:
   nsresult CreateModuleScript(nsModuleLoadRequest* aRequest);
   nsresult ProcessFetchedModuleSource(nsModuleLoadRequest* aRequest);
   void ProcessLoadedModuleTree(nsModuleLoadRequest* aRequest);
+  bool InstantiateModuleTree(nsModuleLoadRequest* aRequest);
   void StartFetchingModuleDependencies(nsModuleLoadRequest* aRequest);
 
   RefPtr<mozilla::GenericPromise>
@@ -637,6 +638,8 @@ private:
   // Module map
   nsRefPtrHashtable<nsURIHashKey, mozilla::GenericPromise::Private> mFetchingModules;
   nsRefPtrHashtable<nsURIHashKey, nsModuleScript> mFetchedModules;
+
+  nsCOMPtr<nsIConsoleReportCollector> mReporter;
 };
 
 class nsScriptLoadHandler final : public nsIIncrementalStreamLoaderObserver

@@ -101,7 +101,6 @@ this.InsecurePasswordUtils = {
       let uri = Services.io.newURI(aForm.rootElement.action || aForm.rootElement.baseURI,
                                    null, null);
       let principal = gScriptSecurityManager.getCodebasePrincipal(uri);
-      let host = uri.host;
 
       if (uri.schemeIs("http")) {
         isFormSubmitHTTP = true;
@@ -127,14 +126,12 @@ this.InsecurePasswordUtils = {
       } else {
         passwordSafety = 2;
       }
+    } else if (isFormSubmitSecure) {
+      passwordSafety = 3;
+    } else if (isFormSubmitHTTP) {
+      passwordSafety = 4;
     } else {
-      if (isFormSubmitSecure) {
-        passwordSafety = 3;
-      } else if (isFormSubmitHTTP) {
-        passwordSafety = 4;
-      } else {
-        passwordSafety = 5;
-      }
+      passwordSafety = 5;
     }
 
     Services.telemetry.getHistogramById("PWMGR_LOGIN_PAGE_SAFETY").add(passwordSafety);

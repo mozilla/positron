@@ -2,6 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+import os
 import pprint
 from datetime import datetime
 
@@ -9,6 +10,7 @@ import mozfile
 
 from marionette import MarionetteTestCase
 from marionette_driver import Wait
+from marionette_driver.errors import NoSuchWindowException
 
 from firefox_puppeteer.api.prefs import Preferences
 from firefox_puppeteer.api.software_update import SoftwareUpdate
@@ -114,10 +116,12 @@ class UpdateTestCase(FirefoxTestCase):
         try:
             self.browser.tabbar.close_all_tabs([self.browser.tabbar.selected_tab])
 
+            # Add content of the update log file for detailed failures when applying an update
+            self.updates[self.current_update_index]['update_log'] = self.read_update_log()
+
             # Print results for now until we have treeherder integration
             output = pprint.pformat(self.updates)
             self.logger.info('Update test results: \n{}'.format(output))
-
         finally:
             super(UpdateTestCase, self).tearDown()
 
@@ -231,7 +235,6 @@ class UpdateTestCase(FirefoxTestCase):
             try:
                 # If updates have already been found, proceed to download
                 if dialog.wizard.selected_panel in [dialog.wizard.updates_found_basic,
-                                                    dialog.wizard.updates_found_billboard,
                                                     dialog.wizard.error_patching,
                                                     ]:
                     dialog.select_next_page()
@@ -282,22 +285,6 @@ class UpdateTestCase(FirefoxTestCase):
                 window.deck.selected_panel != window.deck.download_and_install),
                 message='Download of the update has been started.')
 
-        # In case of update failures, clicking the update button will open the
-        # old update wizard dialog.
-        if window.deck.selected_panel == window.deck.apply_billboard:
-            dialog = self.browser.open_window(
-                callback=lambda _: window.deck.update_button.click(),
-                expected_window_class=UpdateWizardDialog
-            )
-            Wait(self.marionette).until(
-                lambda _: dialog.wizard.selected_panel == dialog.wizard.updates_found_basic,
-                message='An update has been found.')
-
-            download_via_update_wizard(dialog)
-            dialog.close()
-
-            return
-
         if wait_for_finish:
             start_time = datetime.now()
             self.wait_for_download_finished(window, timeout)
@@ -332,8 +319,10 @@ class UpdateTestCase(FirefoxTestCase):
         self.restart()
 
     def download_and_apply_forced_update(self):
-        # The update wizard dialog opens automatically after the restart
-        dialog = self.windows.switch_to(lambda win: type(win) is UpdateWizardDialog)
+        # The update wizard dialog opens automatically after the restart but with a short delay
+        dialog = Wait(self.marionette, ignored_exceptions=[NoSuchWindowException]).until(
+            lambda _: self.windows.switch_to(lambda win: type(win) is UpdateWizardDialog)
+        )
 
         # In case of a broken complete update the about window has to be used
         if self.updates[self.current_update_index]['patch']['is_complete']:
@@ -372,11 +361,25 @@ class UpdateTestCase(FirefoxTestCase):
         # Restart Firefox to apply the update
         self.restart()
 
+    def read_update_log(self):
+        """Read the content of the update log file for the last update attempt."""
+        path = os.path.join(os.path.dirname(self.software_update.staging_directory),
+                            'last-update.log')
+        try:
+            with open(path, 'rb') as f:
+                return f.read().splitlines()
+        except IOError as exc:
+            self.logger.warning(str(exc))
+            return None
+
     def remove_downloaded_update(self):
-        """Remove an already downloaded update from the update staging directory."""
-        self.logger.info('Clean-up update staging directory: {}'.format(
-            self.software_update.staging_directory))
-        mozfile.remove(self.software_update.staging_directory)
+        """Remove an already downloaded update from the update staging directory.
+
+        Hereby not only remove the update subdir but everything below 'updates'.
+        """
+        path = os.path.dirname(self.software_update.staging_directory)
+        self.logger.info('Clean-up update staging directory: {}'.format(path))
+        mozfile.remove(path)
 
     def restore_config_files(self):
         # Reset channel-prefs.js file if modified

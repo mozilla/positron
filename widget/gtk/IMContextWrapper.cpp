@@ -179,6 +179,7 @@ IMContextWrapper::IMContextWrapper(nsWindow* aOwnerWindow)
     , mLayoutChanged(false)
     , mSetCursorPositionOnKeyEvent(true)
     , mPendingResettingIMContext(false)
+    , mRetrieveSurroundingSignalReceived(false)
 {
     static bool sFirstInstance = true;
     if (sFirstInstance) {
@@ -930,6 +931,9 @@ IMContextWrapper::OnSelectionChange(nsWindow* aCaller,
                                     const IMENotification& aIMENotification)
 {
     mSelection.Assign(aIMENotification);
+    bool retrievedSurroundingSignalReceived =
+      mRetrieveSurroundingSignalReceived;
+    mRetrieveSurroundingSignalReceived = false;
 
     if (MOZ_UNLIKELY(IsDestroyed())) {
         return;
@@ -943,7 +947,8 @@ IMContextWrapper::OnSelectionChange(nsWindow* aCaller,
          "mSelectionChangeData={ mOffset=%u, Length()=%u, mReversed=%s, "
          "mWritingMode=%s, mCausedByComposition=%s, "
          "mCausedBySelectionEvent=%s, mOccurredDuringComposition=%s "
-         "} }), mCompositionState=%s, mIsDeletingSurrounding=%s",
+         "} }), mCompositionState=%s, mIsDeletingSurrounding=%s, "
+         "mRetrieveSurroundingSignalReceived=%s",
          this, aCaller, selectionChangeData.mOffset,
          selectionChangeData.Length(),
          ToChar(selectionChangeData.mReversed),
@@ -951,7 +956,8 @@ IMContextWrapper::OnSelectionChange(nsWindow* aCaller,
          ToChar(selectionChangeData.mCausedByComposition),
          ToChar(selectionChangeData.mCausedBySelectionEvent),
          ToChar(selectionChangeData.mOccurredDuringComposition),
-         GetCompositionStateName(), ToChar(mIsDeletingSurrounding)));
+         GetCompositionStateName(), ToChar(mIsDeletingSurrounding),
+         ToChar(retrievedSurroundingSignalReceived)));
 
     if (aCaller != mLastFocusedWindow) {
         MOZ_LOG(gGtkIMLog, LogLevel::Error,
@@ -1000,7 +1006,8 @@ IMContextWrapper::OnSelectionChange(nsWindow* aCaller,
     }
 
     bool occurredBeforeComposition =
-      IsComposing() && !selectionChangeData.mOccurredDuringComposition;
+      IsComposing() && !selectionChangeData.mOccurredDuringComposition &&
+      !selectionChangeData.mCausedByComposition;
     if (occurredBeforeComposition) {
         mPendingResettingIMContext = true;
     }
@@ -1011,7 +1018,18 @@ IMContextWrapper::OnSelectionChange(nsWindow* aCaller,
     if (!selectionChangeData.mCausedByComposition &&
         !selectionChangeData.mCausedBySelectionEvent &&
         !occurredBeforeComposition) {
-        ResetIME();
+        // Hack for ibus-pinyin.  ibus-pinyin will synthesize a set of
+        // composition which commits with empty string after calling
+        // gtk_im_context_reset().  Therefore, selecting text causes
+        // unexpectedly removing it.  For preventing it but not breaking the
+        // other IMEs which use surrounding text, we should call it only when
+        // surrounding text has been retrieved after last selection range was
+        // set.  If it's not retrieved, that means that current IME doesn't
+        // have any content cache, so, it must not need the notification of
+        // selection change.
+        if (IsComposing() || retrievedSurroundingSignalReceived) {
+            ResetIME();
+        }
     }
 }
 
@@ -1164,6 +1182,7 @@ IMContextWrapper::OnRetrieveSurroundingNative(GtkIMContext* aContext)
     AppendUTF16toUTF8(nsDependentSubstring(uniStr, cursorPos), utf8Str);
     gtk_im_context_set_surrounding(aContext, utf8Str.get(), utf8Str.Length(),
                                    cursorPosInUTF8);
+    mRetrieveSurroundingSignalReceived = true;
     return TRUE;
 }
 
@@ -1336,6 +1355,9 @@ IMContextWrapper::DispatchCompositionStart(GtkIMContext* aContext)
         return false;
     }
 
+    // Keep the last focused window alive
+    RefPtr<nsWindow> lastFocusedWindow(mLastFocusedWindow);
+
     // XXX The composition start point might be changed by composition events
     //     even though we strongly hope it doesn't happen.
     //     Every composition event should have the start offset for the result
@@ -1347,7 +1369,6 @@ IMContextWrapper::DispatchCompositionStart(GtkIMContext* aContext)
         mProcessingKeyEvent->type == GDK_KEY_PRESS) {
         // If this composition is started by a native keydown event, we need to
         // dispatch our keydown event here (before composition start).
-        nsCOMPtr<nsIWidget> kungFuDeathGrip = mLastFocusedWindow;
         bool isCancelled;
         mLastFocusedWindow->DispatchKeyDownEvent(mProcessingKeyEvent,
                                                  &isCancelled);
@@ -1355,8 +1376,8 @@ IMContextWrapper::DispatchCompositionStart(GtkIMContext* aContext)
             ("0x%p   DispatchCompositionStart(), FAILED, keydown event "
              "is dispatched",
              this));
-        if (static_cast<nsWindow*>(kungFuDeathGrip.get())->IsDestroyed() ||
-            kungFuDeathGrip != mLastFocusedWindow) {
+        if (lastFocusedWindow->IsDestroyed() ||
+            lastFocusedWindow != mLastFocusedWindow) {
             MOZ_LOG(gGtkIMLog, LogLevel::Error,
                 ("0x%p   DispatchCompositionStart(), FAILED, the focused "
                  "widget was destroyed/changed by keydown event",
@@ -1381,7 +1402,6 @@ IMContextWrapper::DispatchCompositionStart(GtkIMContext* aContext)
          this, mCompositionStart));
     mCompositionState = eCompositionState_CompositionStartDispatched;
     nsEventStatus status;
-    RefPtr<nsWindow> lastFocusedWindow = mLastFocusedWindow;
     dispatcher->StartComposition(status);
     if (lastFocusedWindow->IsDestroyed() ||
         lastFocusedWindow != mLastFocusedWindow) {
@@ -1417,7 +1437,6 @@ IMContextWrapper::DispatchCompositionChangeEvent(
             ("0x%p   DispatchCompositionChangeEvent(), the composition "
              "wasn't started, force starting...",
              this));
-        nsCOMPtr<nsIWidget> kungFuDeathGrip = mLastFocusedWindow;
         if (!DispatchCompositionStart(aContext)) {
             return false;
         }
@@ -1522,7 +1541,6 @@ IMContextWrapper::DispatchCompositionCommitEvent(
             ("0x%p   DispatchCompositionCommitEvent(), "
              "the composition wasn't started, force starting...",
              this));
-        nsCOMPtr<nsIWidget> kungFuDeathGrip(mLastFocusedWindow);
         if (!DispatchCompositionStart(aContext)) {
             return false;
         }

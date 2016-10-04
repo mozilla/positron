@@ -12,7 +12,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/net/NeckoParent.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "HttpChannelParentListener.h"
 #include "nsHttpHandler.h"
 #include "nsNetUtil.h"
@@ -39,7 +39,6 @@
 #include "nsIWindowWatcher.h"
 #include "nsIDocument.h"
 #include "nsStringStream.h"
-#include "nsIExternalHelperAppService.h"
 
 using mozilla::BasePrincipal;
 using namespace mozilla::dom;
@@ -135,7 +134,7 @@ HttpChannelParent::Init(const HttpChannelCreationArgs& aArgs)
                        a.initialRwin(), a.blockAuthPrompt(),
                        a.suspendAfterSynthesizeResponse(),
                        a.allowStaleCacheContent(), a.contentTypeHint(),
-                       a.channelId());
+                       a.channelId(), a.preferredAlternativeType());
   }
   case HttpChannelCreationArgs::THttpChannelConnectArgs:
   {
@@ -267,7 +266,8 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
                                  const bool&                aSuspendAfterSynthesizeResponse,
                                  const bool&                aAllowStaleCacheContent,
                                  const nsCString&           aContentTypeHint,
-                                 const nsCString&           aChannelId)
+                                 const nsCString&           aChannelId,
+                                 const nsCString&           aPreferredAlternativeType)
 {
   nsCOMPtr<nsIURI> uri = DeserializeURI(aURI);
   if (!uri) {
@@ -281,10 +281,8 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
   nsCOMPtr<nsIURI> apiRedirectToUri = DeserializeURI(aAPIRedirectToURI);
   nsCOMPtr<nsIURI> topWindowUri = DeserializeURI(aTopWindowURI);
 
-  nsCString uriSpec;
-  uri->GetSpec(uriSpec);
   LOG(("HttpChannelParent RecvAsyncOpen [this=%p uri=%s]\n",
-       this, uriSpec.get()));
+       this, uri->GetSpecOrDefault().get()));
 
   nsresult rv;
 
@@ -292,8 +290,21 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
   if (NS_FAILED(rv))
     return SendFailedAsyncOpen(rv);
 
+  nsCOMPtr<nsILoadInfo> loadInfo;
+  rv = mozilla::ipc::LoadInfoArgsToLoadInfo(aLoadInfoArgs,
+                                            getter_AddRefs(loadInfo));
+  if (NS_FAILED(rv)) {
+    return SendFailedAsyncOpen(rv);
+  }
+
+  NeckoOriginAttributes attrs;
+  rv = loadInfo->GetOriginAttributes(&attrs);
+  if (NS_FAILED(rv)) {
+    return SendFailedAsyncOpen(rv);
+  }
+
   bool appOffline = false;
-  uint32_t appId = GetAppId();
+  uint32_t appId = attrs.mAppId;
   if (appId != NECKO_UNKNOWN_APP_ID &&
       appId != NECKO_NO_APP_ID) {
     gIOService->IsAppOffline(appId, &appOffline);
@@ -304,13 +315,6 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
     loadFlags |= nsICachingChannel::LOAD_ONLY_FROM_CACHE;
     loadFlags |= nsIRequest::LOAD_FROM_CACHE;
     loadFlags |= nsICachingChannel::LOAD_NO_NETWORK_IO;
-  }
-
-  nsCOMPtr<nsILoadInfo> loadInfo;
-  rv = mozilla::ipc::LoadInfoArgsToLoadInfo(aLoadInfoArgs,
-                                            getter_AddRefs(loadInfo));
-  if (NS_FAILED(rv)) {
-    return SendFailedAsyncOpen(rv);
   }
 
   nsCOMPtr<nsIChannel> channel;
@@ -418,6 +422,7 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
   }
 
   mChannel->SetCacheKey(cacheKey);
+  mChannel->PreferAlternativeDataType(aPreferredAlternativeType);
 
   mChannel->SetAllowStaleCacheContent(aAllowStaleCacheContent);
 
@@ -460,16 +465,9 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
     }
 
     if (setChooseApplicationCache) {
-      DocShellOriginAttributes docShellAttrs;
-      if (mLoadContext) {
-        bool result = mLoadContext->GetOriginAttributes(docShellAttrs);
-        if (!result) {
-          return SendFailedAsyncOpen(NS_ERROR_FAILURE);
-        }
-      }
-
       NeckoOriginAttributes neckoAttrs;
-      neckoAttrs.InheritFromDocShellToNecko(docShellAttrs);
+      NS_GetOriginAttributes(mChannel, neckoAttrs);
+
       PrincipalOriginAttributes attrs;
       attrs.InheritFromNecko(neckoAttrs);
       nsCOMPtr<nsIPrincipal> principal =
@@ -633,10 +631,13 @@ HttpChannelParent::RecvRedirect2Verify(const nsresult& result,
                                        const RequestHeaderTuples& changedHeaders,
                                        const uint32_t& loadFlags,
                                        const OptionalURIParams& aAPIRedirectURI,
-                                       const OptionalCorsPreflightArgs& aCorsPreflightArgs)
+                                       const OptionalCorsPreflightArgs& aCorsPreflightArgs,
+                                       const bool& aForceHSTSPriming,
+                                       const bool& aMixedContentWouldBlock)
 {
   LOG(("HttpChannelParent::RecvRedirect2Verify [this=%p result=%x]\n",
        this, result));
+  nsresult rv;
   if (NS_SUCCEEDED(result)) {
     nsCOMPtr<nsIHttpChannel> newHttpChannel =
         do_QueryInterface(mRedirectChannel);
@@ -669,6 +670,14 @@ HttpChannelParent::RecvRedirect2Verify(const nsresult& result,
         MOZ_RELEASE_ASSERT(newInternalChannel);
         const CorsPreflightArgs& args = aCorsPreflightArgs.get_CorsPreflightArgs();
         newInternalChannel->SetCorsPreflightParameters(args.unsafeHeaders());
+      }
+
+      if (aForceHSTSPriming) {
+        nsCOMPtr<nsILoadInfo> newLoadInfo;
+        rv = newHttpChannel->GetLoadInfo(getter_AddRefs(newLoadInfo));
+        if (NS_SUCCEEDED(rv) && newLoadInfo) {
+          newLoadInfo->SetHSTSPriming(aMixedContentWouldBlock);
+        }
       }
     }
   }
@@ -1030,47 +1039,8 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
   }
 
   nsCOMPtr<nsIEncodedChannel> encodedChannel = do_QueryInterface(aRequest);
-  if (encodedChannel) {
-    if (!mChannel->HaveListenerForTraceableChannel()) {
-      encodedChannel->SetApplyConversion(false);
-    } else {
-      // We have a traceableChannel listener so we need to do a conversion on
-      // the parent. But first we need to check with
-      // external-helper-app-service, e.g. we do not ungzip if url has a gz
-      // extention.
-      // This code is a copy of
-      // nsExternalAppHandler::MaybeApplyDecodingForExtension and should be
-      // kept in sync with it.
-      nsCOMPtr<nsIURI> uri;
-      chan->GetURI(getter_AddRefs(uri));
-      nsCOMPtr<nsIURL> url(do_QueryInterface(uri));
-      if (url) {
-        nsAutoCString extension;
-        url->GetFileExtension(extension);
-        if (!extension.IsEmpty()) {
-          nsCOMPtr<nsIUTF8StringEnumerator> encEnum;
-          encodedChannel->GetContentEncodings(getter_AddRefs(encEnum));
-          if (encEnum) {
-            bool hasMore;
-            nsresult rv = encEnum->HasMore(&hasMore);
-            if (NS_SUCCEEDED(rv) && hasMore) {
-              nsAutoCString encType;
-              rv = encEnum->GetNext(encType);
-              if (NS_SUCCEEDED(rv) && !encType.IsEmpty()) {
-                nsCOMPtr<nsIExternalHelperAppService> helperAppService =
-                  do_GetService("@mozilla.org/uriloader/external-helper-app-service;1");
-                MOZ_ASSERT(helperAppService);
-                bool applyConversion;
-                helperAppService->ApplyDecodingForExtension(extension, encType,
-                                                            &applyConversion);
-                encodedChannel->SetApplyConversion(applyConversion);
-              }
-            }
-          }
-        }
-      }
-    }
-  }
+  if (encodedChannel)
+    encodedChannel->SetApplyConversion(false);
 
   // Keep the cache entry for future use in RecvSetCacheTokenCachedCharset().
   // It could be already released by nsHttpChannel at that time.
@@ -1102,6 +1072,9 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
     }
   }
 
+  nsAutoCString altDataType;
+  mChannel->GetAlternativeDataType(altDataType);
+
   // !!! We need to lock headers and please don't forget to unlock them !!!
   requestHead->Enter();
   nsresult rv = NS_OK;
@@ -1116,7 +1089,7 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
                           mChannel->GetSelfAddr(), mChannel->GetPeerAddr(),
                           redirectCount,
                           cacheKeyValue,
-                          mChannel->HaveListenerForTraceableChannel()))
+                          altDataType))
   {
     rv = NS_ERROR_UNEXPECTED;
   }
@@ -1531,14 +1504,11 @@ HttpChannelParent::StartDiversion()
   //
   // Create a content conversion chain based on mDivertListener and update
   // mDivertListener.
-  // If nsITraceableChannel is added the conversion will be already done.
-  if (!mChannel->HaveListenerForTraceableChannel()) {
-    nsCOMPtr<nsIStreamListener> converterListener;
-    mChannel->DoApplyContentConversions(mDivertListener,
-                                        getter_AddRefs(converterListener));
-    if (converterListener) {
-      mDivertListener = converterListener.forget();
-    }
+  nsCOMPtr<nsIStreamListener> converterListener;
+  mChannel->DoApplyContentConversions(mDivertListener,
+                                      getter_AddRefs(converterListener));
+  if (converterListener) {
+    mDivertListener = converterListener.forget();
   }
 
   // Now mParentListener can be diverted to mDivertListener.
@@ -1572,7 +1542,7 @@ public:
     MOZ_RELEASE_ASSERT(aChannelParent);
     MOZ_RELEASE_ASSERT(NS_FAILED(aErrorCode));
   }
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     mChannelParent->NotifyDiversionFailed(mErrorCode, mSkipResume);
     return NS_OK;
@@ -1639,6 +1609,17 @@ HttpChannelParent::NotifyDiversionFailed(nsresult aErrorCode,
   }
 }
 
+nsresult
+HttpChannelParent::OpenAlternativeOutputStream(const nsACString & type, nsIOutputStream * *_retval)
+{
+  // We need to make sure the child does not call SendDocumentChannelCleanup()
+  // before opening the altOutputStream, because that clears mCacheEntry.
+  if (!mCacheEntry) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  return mCacheEntry->OpenAlternativeOutputStream(type, _retval);
+}
+
 void
 HttpChannelParent::OfflineDisconnect()
 {
@@ -1652,8 +1633,11 @@ uint32_t
 HttpChannelParent::GetAppId()
 {
   uint32_t appId = NECKO_UNKNOWN_APP_ID;
-  if (mLoadContext) {
-    mLoadContext->GetAppId(&appId);
+  if (mChannel) {
+    NeckoOriginAttributes attrs;
+    if (NS_GetOriginAttributes(mChannel, attrs)) {
+      appId = attrs.mAppId;
+    }
   }
   return appId;
 }

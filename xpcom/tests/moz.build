@@ -30,7 +30,6 @@ SimplePrograms([
     'TestRacingServiceManager',
     'TestRegistrationOrder',
     'TestThreadPoolListener',
-    'TestTimers',
     'TestUnicodeArguments',
 ])
 
@@ -59,11 +58,11 @@ GeckoCppUnitTests([
     'TestNsRefPtr',
     'TestObserverArray',
     'TestObserverService',
-    'TestPipe',
     'TestStringAPI',
     'TestTArray',
     'TestTextFormatter',
-    'TestThreadUtils'
+    'TestThreadUtils',
+    'TestTimers'
 ])
 
 if CONFIG['MOZ_MEMORY']:
@@ -84,9 +83,10 @@ if CONFIG['MOZ_DEBUG'] and CONFIG['OS_ARCH'] not in ('WINNT'):
         'TestDeadlockDetectorScalability',
     ])
 
-TEST_HARNESS_FILES.xpcshell.xpcom.tests.unit += [
-    '!/dist/bin/components/xpcomtest.xpt',
-]
+if CONFIG['COMPILE_ENVIRONMENT']:
+    TEST_HARNESS_FILES.xpcshell.xpcom.tests.unit += [
+        '!/dist/bin/components/xpcomtest.xpt',
+    ]
 
 XPIDL_MODULE = 'xpcomtest'
 XPIDL_SOURCES += [

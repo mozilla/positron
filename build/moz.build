@@ -15,11 +15,6 @@ if CONFIG['OS_ARCH'] == 'WINNT':
 else:
     DIRS += ['unix']
 
-if CONFIG['OS_TARGET'] == 'Android' and CONFIG['MOZ_ANDROID_CXX_STL'] == 'mozstlport':
-    DIRS += ['stlport']
-    if CONFIG['ENABLE_INTL_API']:
-        DIRS += ['gabi++']
-
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
     DIRS += ['annotationProcessors']
 
@@ -100,4 +95,11 @@ if CONFIG['MOZ_VALGRIND']:
         'valgrind/cross-architecture.sup',
         'valgrind/i386-redhat-linux-gnu.sup',
         'valgrind/x86_64-redhat-linux-gnu.sup',
+    ]
+
+if CONFIG['MOZ_ARTIFACT_BUILDS']:
+    # Ensure a pre-built interfaces.xpt installed to the objdir by the artifact
+    # code is included by the top-level chrome.manifest.
+    EXTRA_COMPONENTS += [
+        'prebuilt-interfaces.manifest',
     ]

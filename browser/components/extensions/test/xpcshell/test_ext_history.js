@@ -17,6 +17,7 @@ add_task(function* test_delete() {
     browser.history.onVisitRemoved.addListener(data => {
       if (data.allHistory) {
         historyClearedCount++;
+        browser.test.assertEq(0, data.urls.length, "onVisitRemoved received an empty urls array");
       } else {
         browser.test.assertEq(1, data.urls.length, "onVisitRemoved received one URL");
         removedUrls.push(data.urls[0]);
@@ -288,7 +289,6 @@ add_task(function* test_add_url() {
     [{}, "default"],
     [{visitTime: new Date()}, "with_date"],
     [{visitTime: Date.now()}, "with_ms_number"],
-    [{visitTime: Date.now().toString()}, "with_ms_string"],
     [{visitTime: new Date().toISOString()}, "with_iso_string"],
     [{transition: "typed"}, "valid_transition"],
   ];

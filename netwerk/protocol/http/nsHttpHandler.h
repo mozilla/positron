@@ -241,14 +241,16 @@ public:
     void UpdateAltServiceMapping(AltSvcMapping *map,
                                  nsProxyInfo *proxyInfo,
                                  nsIInterfaceRequestor *callbacks,
-                                 uint32_t caps)
+                                 uint32_t caps,
+                                 const NeckoOriginAttributes &originAttributes)
     {
-        mConnMgr->UpdateAltServiceMapping(map, proxyInfo, callbacks, caps);
+        mConnMgr->UpdateAltServiceMapping(map, proxyInfo, callbacks, caps,
+                                          originAttributes);
     }
 
-    AltSvcMapping *GetAltServiceMapping(const nsACString &scheme,
-                                        const nsACString &host,
-                                        int32_t port, bool pb)
+    already_AddRefed<AltSvcMapping> GetAltServiceMapping(const nsACString &scheme,
+                                                         const nsACString &host,
+                                                         int32_t port, bool pb)
     {
         return mConnMgr->GetAltServiceMapping(scheme, host, port, pb);
     }
@@ -364,6 +366,11 @@ public:
     bool KeepEmptyResponseHeadersAsEmtpyString() const
     {
         return mKeepEmptyResponseHeadersAsEmtpyString;
+    }
+
+    uint32_t DefaultHpackBuffer() const
+    {
+        return mDefaultHpackBuffer;
     }
 
 private:
@@ -585,6 +592,9 @@ private:
     // (Bug 6699259)
     bool mKeepEmptyResponseHeadersAsEmtpyString;
 
+    // The default size (in bytes) of the HPACK decompressor table.
+    uint32_t mDefaultHpackBuffer;
+
 private:
     // For Rate Pacing Certain Network Events. Only assign this pointer on
     // socket thread.
@@ -631,6 +641,7 @@ private:
     // UUID generator for channelIds
     nsCOMPtr<nsIUUIDGenerator> mUUIDGen;
 
+public:
     nsresult NewChannelId(nsID *channelId);
 };
 

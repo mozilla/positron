@@ -8,7 +8,7 @@
 #include "mozilla/plugins/PluginWidgetParent.h"
 #include "PluginWidgetProxy.h"
 
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/DebugOnly.h"
 #include "nsDebug.h"
 
@@ -43,7 +43,7 @@ PluginWidgetChild::RecvSetScrollCaptureId(const uint64_t& aScrollCaptureId,
   PluginInstanceParent* instance =
     PluginInstanceParent::LookupPluginInstanceByID(aPluginInstanceId);
   if (instance) {
-    NS_WARN_IF(NS_FAILED(instance->SetScrollCaptureId(aScrollCaptureId)));
+    Unused << NS_WARN_IF(NS_FAILED(instance->SetScrollCaptureId(aScrollCaptureId)));
   }
 
   return true;

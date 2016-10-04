@@ -13,7 +13,7 @@ const protocol = require("devtools/shared/protocol");
 const Services = require("Services");
 const { isWindowIncluded } = require("devtools/shared/layout/utils");
 const { highlighterSpec, customHighlighterSpec } = require("devtools/shared/specs/highlighters");
-const { isXUL, isNodeValid } = require("./highlighters/utils/markup");
+const { isXUL } = require("./highlighters/utils/markup");
 const { SimpleOutlineHighlighter } = require("./highlighters/simple-outline");
 
 const HIGHLIGHTER_PICKED_TIMER = 1000;
@@ -72,7 +72,7 @@ exports.register = register;
  * The InspectorActor will always return the same instance of
  * HighlighterActor if asked several times and this instance is used in the
  * toolbox to highlighter elements's box-model from the markup-view,
- * layout-view, console, debugger, ... as well as select elements with the
+ * box model view, console, debugger, ... as well as select elements with the
  * pointer (pick).
  *
  * Other types of highlighter actors exist and can be accessed via the
@@ -182,9 +182,7 @@ var HighlighterActor = exports.HighlighterActor = protocol.ActorClassWithSpec(hi
    * all options may be supported by all types of highlighters.
    */
   showBoxModel: function (node, options = {}) {
-    if (node && isNodeValid(node.rawNode)) {
-      this._highlighter.show(node.rawNode, options);
-    } else {
+    if (!node || !this._highlighter.show(node.rawNode, options)) {
       this._highlighter.hide();
     }
   },
@@ -468,7 +466,7 @@ var CustomHighlighterActor = exports.CustomHighlighterActor = protocol.ActorClas
    * (FF41+)
    */
   show: function (node, options) {
-    if (!node || !isNodeValid(node.rawNode) || !this._highlighter) {
+    if (!node || !this._highlighter) {
       return false;
     }
 
@@ -580,6 +578,10 @@ HighlighterEnvironment.prototype = {
     return this._win || this._tabActor;
   },
 
+  get isXUL() {
+    return isXUL(this.window);
+  },
+
   get window() {
     if (!this.isInitialized) {
       throw new Error("Initialize HighlighterEnvironment with a tabActor " +
@@ -655,6 +657,10 @@ HighlighterEnvironment.prototype = {
 const { BoxModelHighlighter } = require("./highlighters/box-model");
 register(BoxModelHighlighter);
 exports.BoxModelHighlighter = BoxModelHighlighter;
+
+const { CssGridHighlighter } = require("./highlighters/css-grid");
+register(CssGridHighlighter);
+exports.CssGridHighlighter = CssGridHighlighter;
 
 const { CssTransformHighlighter } = require("./highlighters/css-transform");
 register(CssTransformHighlighter);

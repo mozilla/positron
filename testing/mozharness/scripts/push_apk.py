@@ -58,19 +58,15 @@ class PushAPK(BaseScript, GooglePlayMixin, VirtualenvMixin):
             "dest": "apk_file_x86",
             "help": "The path to the x86 APK file",
         }],
-        [["--apk-armv7-v9"], {
-            "dest": "apk_file_armv7_v9",
-            "help": "The path to the ARM v7 API v9 APK file",
-        }],
         [["--apk-armv7-v15"], {
             "dest": "apk_file_armv7_v15",
             "help": "The path to the ARM v7 API v15 APK file",
         }],
-        [["--apk-armv6"], {
-            "dest": "apk_file_armv6",
-            "help": "The path to the ARM v6 APK file",
+        [["--rollout-percentage"], {
+            "dest": "rollout_percentage",
+            "help": "The rollout percentage (update percentage)",
+            "default": "None"
         }],
-
 
     ]
 
@@ -118,6 +114,9 @@ class PushAPK(BaseScript, GooglePlayMixin, VirtualenvMixin):
         """ Check that the given values are correct,
         files exists, etc
         """
+        if "package_name" not in self.config:
+            self.fatal("--package-name is mandatory")
+
         if self.config['track'] not in self.track_values:
             self.fatal("Unknown track value " + self.config['track'])
 
@@ -125,17 +124,19 @@ class PushAPK(BaseScript, GooglePlayMixin, VirtualenvMixin):
             self.fatal("Unknown package name value " +
                        self.config['package_name'])
 
+        if self.config['track'] == "rollout" and self.config["rollout_percentage"] is "None":
+            self.fatal("When using track='rollout', --rollout-percentage must be provided too")
+
+        if self.config["rollout_percentage"] is not "None":
+            self.percentage = float(self.config["rollout_percentage"])
+            if self.percentage < 0 or self.percentage > 100:
+                self.fatal("Percentage should be between 0 and 100")
+
         if not os.path.isfile(self.config['apk_file_x86']):
             self.fatal("Could not find " + self.config['apk_file_x86'])
 
-        if self.config.get('apk_file_armv7_v9') and not os.path.isfile(self.config['apk_file_armv7_v9']):
-            self.fatal("Could not find " + self.config['apk_file_armv7_v9'])
-
         if not os.path.isfile(self.config['apk_file_armv7_v15']):
             self.fatal("Could not find " + self.config['apk_file_armv7_v15'])
-
-        if self.config.get('apk_file_armv6') and not os.path.isfile(self.config['apk_file_armv6']):
-            self.fatal("Could not find " + self.config['apk_file_armv6'])
 
         if not os.path.isfile(self.config['google_play_credentials_file']):
             self.fatal("Could not find " + self.config['google_play_credentials_file'])
@@ -172,37 +173,25 @@ class PushAPK(BaseScript, GooglePlayMixin, VirtualenvMixin):
 
                 versions.append(apk_response['versionCode'])
 
-                locales = self.translationMgmt.get_list_locales(package_code)
-                locales.append(u'en-US')
-                nb_locales = 0
-                for locale in locales:
-                    translation = self.translationMgmt.get_translation(package_code, locale)
-                    whatsnew = translation.get("whatsnew")
-                    if locale == "en-GB":
-                        self.log("Ignoring en-GB as locale")
-                        continue
-                    locale = self.translationMgmt.locale_mapping(locale)
-                    self.log('Locale "%s" what\'s new has been updated to "%s"'
-                             % (locale, whatsnew))
-
-                    listing_response = service.edits().apklistings().update(
-                        editId=edit_id, packageName=self.config['package_name'], language=locale,
-                        apkVersionCode=apk_response['versionCode'],
-                        body={'recentChanges': whatsnew}).execute()
-
-                    self.log('Listing for language %s was updated.'
-                           % listing_response['language'])
+                if 'aurora' in self.config['package_name']:
+                    self.warning('Aurora is not supported by store_l10n. Skipping what\'s new.')
+                else:
+                    self._push_whats_new(package_code, service, edit_id, apk_response)
 
             except client.AccessTokenRefreshError:
                 self.log('The credentials have been revoked or expired,'
                          'please re-run the application to re-authorize')
+
+        upload_body = {u'versionCodes': versions}
+        if self.config["rollout_percentage"] is not "None":
+            upload_body[u'userFraction'] = self.percentage/100
 
         # Set the track for all apk
         service.edits().tracks().update(
             editId=edit_id,
             track=self.config['track'],
             packageName=self.config['package_name'],
-            body={u'versionCodes': versions}).execute()
+            body=upload_body).execute()
         self.log('Application "%s" set to track "%s" for versions %s' %
                  (self.config['package_name'], self.config['track'], versions))
 
@@ -211,15 +200,32 @@ class PushAPK(BaseScript, GooglePlayMixin, VirtualenvMixin):
             editId=edit_id, packageName=self.config['package_name']).execute()
         self.log('Edit "%s" has been committed' % (commit_request['id']))
 
+    def _push_whats_new(self, package_code, service, edit_id, apk_response):
+        locales = self.translationMgmt.get_list_locales(package_code)
+        locales.append(u'en-US')
+
+        for locale in locales:
+            translation = self.translationMgmt.get_translation(package_code, locale)
+            whatsnew = translation.get("whatsnew")
+            if locale == "en-GB":
+                self.log("Ignoring en-GB as locale")
+                continue
+            locale = self.translationMgmt.locale_mapping(locale)
+            self.log('Locale "%s" what\'s new has been updated to "%s"'
+                     % (locale, whatsnew))
+
+            listing_response = service.edits().apklistings().update(
+                editId=edit_id, packageName=self.config['package_name'], language=locale,
+                apkVersionCode=apk_response['versionCode'],
+                body={'recentChanges': whatsnew}).execute()
+
+            self.log('Listing for language %s was updated.' % listing_response['language'])
+
     def push_apk(self):
         """ Upload the APK files """
         self.check_argument()
         service = self.connect_to_play()
         apks = [self.config['apk_file_armv7_v15'], self.config['apk_file_x86']]
-        if self.config.get('apk_file_armv6'):
-            apks.append(self.config['apk_file_armv6'])
-        if self.config.get('apk_file_armv7_v9'):
-            apks.append(self.config['apk_file_armv7_v9'])
         self.upload_apks(service, apks)
 
     def test(self):

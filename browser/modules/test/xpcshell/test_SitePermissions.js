@@ -8,8 +8,8 @@ Components.utils.import("resource://gre/modules/Services.jsm");
 
 add_task(function* testPermissionsListing() {
   Assert.deepEqual(SitePermissions.listPermissions().sort(),
-    ["camera","cookie","desktop-notification","geo","image",
-     "indexedDB","install","microphone","popup"],
+    ["camera", "cookie", "desktop-notification", "geo", "image",
+     "indexedDB", "install", "microphone", "popup", "screen"],
     "Correct list of all permissions");
 });
 
@@ -45,6 +45,11 @@ add_task(function* testGetAllByURI() {
   SitePermissions.remove(uri, "camera");
   SitePermissions.remove(uri, "desktop-notification");
   Assert.deepEqual(SitePermissions.getAllByURI(uri), []);
+
+  // XXX Bug 1303108 - Control Center should only show non-default permissions
+  SitePermissions.set(uri, "addon", SitePermissions.BLOCK);
+  Assert.deepEqual(SitePermissions.getAllByURI(uri), []);
+  SitePermissions.remove(uri, "addon");
 });
 
 add_task(function* testGetPermissionDetailsByURI() {

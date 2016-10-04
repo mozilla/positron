@@ -176,15 +176,15 @@ TraceLoggerThread::~TraceLoggerThread()
 bool
 TraceLoggerThread::enable()
 {
-    if (enabled > 0) {
-        enabled++;
+    if (enabled_ > 0) {
+        enabled_++;
         return true;
     }
 
     if (failed)
         return false;
 
-    enabled = 1;
+    enabled_ = 1;
     logTimestamp(TraceLogger_Enable);
 
     return true;
@@ -195,7 +195,7 @@ TraceLoggerThread::fail(JSContext* cx, const char* error)
 {
     JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_TRACELOGGER_ENABLE_FAIL, error);
     failed = true;
-    enabled = 0;
+    enabled_ = 0;
 
     return false;
 }
@@ -206,7 +206,7 @@ TraceLoggerThread::enable(JSContext* cx)
     if (!enable())
         return fail(cx, "internal error");
 
-    if (enabled == 1) {
+    if (enabled_ == 1) {
         // Get the top Activation to log the top script/pc (No inlined frames).
         ActivationIterator iter(cx->runtime());
         Activation* act = iter.activation();
@@ -252,21 +252,26 @@ TraceLoggerThread::enable(JSContext* cx)
 }
 
 bool
-TraceLoggerThread::disable()
+TraceLoggerThread::disable(bool force, const char* error)
 {
-    if (failed)
+    if (failed) {
+        MOZ_ASSERT(enabled_ == 0);
         return false;
+    }
 
-    if (enabled == 0)
+    if (enabled_ == 0)
         return true;
 
-    if (enabled > 1) {
-        enabled--;
+    if (enabled_ > 1 && !force) {
+        enabled_--;
         return true;
     }
 
+    if (force)
+        traceLoggerState->maybeSpewError(error);
+
     logTimestamp(TraceLogger_Disable);
-    enabled = 0;
+    enabled_ = 0;
 
     return true;
 }
@@ -358,14 +363,9 @@ TraceLoggerThread::getOrCreateEventPayload(const char* text)
 
     AutoTraceLog internal(this, TraceLogger_Internal);
 
-    size_t len = strlen(text);
-    char* str = js_pod_malloc<char>(len + 1);
+    char* str = js_strdup(text);
     if (!str)
         return nullptr;
-
-    DebugOnly<size_t> ret = snprintf(str, len + 1, "%s", text);
-    MOZ_ASSERT(ret == len);
-    MOZ_ASSERT(strlen(str) == len);
 
     uint32_t textId = nextTextId;
 
@@ -482,7 +482,12 @@ TraceLoggerThread::startEvent(TraceLoggerTextId id) {
 void
 TraceLoggerThread::startEvent(const TraceLoggerEvent& event) {
     if (!event.hasPayload()) {
+        if (!enabled())
+            return;
         startEvent(TraceLogger_Error);
+        disable(/* force = */ true, "TraceLogger encountered an empty event. "
+                                    "Potentially due to OOM during creation of "
+                                    "this event. Disabling TraceLogger.");
         return;
     }
     startEvent(event.payload()->textId());
@@ -495,6 +500,14 @@ TraceLoggerThread::startEvent(uint32_t id)
     MOZ_ASSERT(traceLoggerState);
     if (!traceLoggerState->isTextIdEnabled(id))
        return;
+
+#ifdef DEBUG
+    if (enabled_ > 0) {
+        AutoEnterOOMUnsafeRegion oomUnsafe;
+        if (!graphStack.append(id))
+            oomUnsafe.crash("Could not add item to debug stack.");
+    }
+#endif
 
     log(id);
 }
@@ -521,6 +534,26 @@ TraceLoggerThread::stopEvent(uint32_t id)
     if (!traceLoggerState->isTextIdEnabled(id))
         return;
 
+#ifdef DEBUG
+    if (enabled_ > 0 && !graphStack.empty()) {
+        uint32_t prev = graphStack.popCopy();
+        if (id == TraceLogger_Error || prev == TraceLogger_Error) {
+            // When encountering an Error id the stack will most likely not be correct anymore.
+            // Ignore this.
+        } else if (id == TraceLogger_Engine) {
+            MOZ_ASSERT(prev == TraceLogger_IonMonkey || prev == TraceLogger_Baseline ||
+                       prev == TraceLogger_Interpreter);
+        } else if (id == TraceLogger_Scripts) {
+            MOZ_ASSERT(prev >= TraceLogger_Last);
+        } else if (id >= TraceLogger_Last) {
+            MOZ_ASSERT(prev >= TraceLogger_Last);
+            MOZ_ASSERT_IF(prev != id, strcmp(eventText(id), eventText(prev)) == 0);
+        } else {
+            MOZ_ASSERT(id == prev);
+        }
+    }
+#endif
+
     log(TraceLogger_Stop);
 }
 
@@ -540,13 +573,18 @@ TraceLoggerThread::logTimestamp(uint32_t id)
 void
 TraceLoggerThread::log(uint32_t id)
 {
-    if (enabled == 0)
+    if (enabled_ == 0)
         return;
+
+#ifdef DEBUG
+    if (id == TraceLogger_Disable)
+        graphStack.clear();
+#endif
 
     MOZ_ASSERT(traceLoggerState);
 
     // We request for 3 items to add, since if we don't have enough room
-    // we record the time it took to make more place. To log this information
+    // we record the time it took to make more space. To log this information
     // we need 2 extra free entries.
     if (!events.hasSpaceForAdd(3)) {
         uint64_t start = rdtsc() - traceLoggerState->startupTime;
@@ -674,7 +712,7 @@ TraceLoggerThreadState::init()
         );
         for (uint32_t i = 1; i < TraceLogger_Last; i++) {
             TraceLoggerTextId id = TraceLoggerTextId(i);
-            if (!TLTextIdIsToggable(id))
+            if (!TLTextIdIsTogglable(id))
                 continue;
             printf("  %s\n", TLTextIdString(id));
         }
@@ -685,7 +723,7 @@ TraceLoggerThreadState::init()
 
     for (uint32_t i = 1; i < TraceLogger_Last; i++) {
         TraceLoggerTextId id = TraceLoggerTextId(i);
-        if (TLTextIdIsToggable(id))
+        if (TLTextIdIsTogglable(id))
             enabledTextIds[i] = ContainsFlag(env, TLTextIdString(id));
         else
             enabledTextIds[i] = true;
@@ -753,6 +791,8 @@ TraceLoggerThreadState::init()
     enabledTextIds[TraceLogger_Baseline] = enabledTextIds[TraceLogger_Engine];
     enabledTextIds[TraceLogger_IonMonkey] = enabledTextIds[TraceLogger_Engine];
 
+    enabledTextIds[TraceLogger_Error] = true;
+
     const char* options = getenv("TLOPTIONS");
     if (options) {
         if (strstr(options, "help")) {
@@ -764,6 +804,7 @@ TraceLoggerThreadState::init()
                 "  EnableMainThread        Start logging the main thread immediately.\n"
                 "  EnableOffThread         Start logging helper threads immediately.\n"
                 "  EnableGraph             Enable spewing the tracelogging graph to a file.\n"
+                "  Errors                  Report errors during tracing to stderr.\n"
             );
             printf("\n");
             exit(0);
@@ -771,11 +812,13 @@ TraceLoggerThreadState::init()
         }
 
         if (strstr(options, "EnableMainThread"))
-           mainThreadEnabled = true;
+            mainThreadEnabled = true;
         if (strstr(options, "EnableOffThread"))
-           offThreadEnabled = true;
+            offThreadEnabled = true;
         if (strstr(options, "EnableGraph"))
-           graphSpewingEnabled = true;
+            graphSpewingEnabled = true;
+        if (strstr(options, "Errors"))
+            spewErrors = true;
     }
 
     startupTime = rdtsc();
@@ -790,7 +833,7 @@ TraceLoggerThreadState::init()
 void
 TraceLoggerThreadState::enableTextId(JSContext* cx, uint32_t textId)
 {
-    MOZ_ASSERT(TLTextIdIsToggable(textId));
+    MOZ_ASSERT(TLTextIdIsTogglable(textId));
 
     if (enabledTextIds[textId])
         return;
@@ -813,7 +856,7 @@ TraceLoggerThreadState::enableTextId(JSContext* cx, uint32_t textId)
 void
 TraceLoggerThreadState::disableTextId(JSContext* cx, uint32_t textId)
 {
-    MOZ_ASSERT(TLTextIdIsToggable(textId));
+    MOZ_ASSERT(TLTextIdIsTogglable(textId));
 
     if (!enabledTextIds[textId])
         return;
@@ -893,14 +936,13 @@ TraceLoggerThreadState::forMainThread(PerThreadData* mainThread)
 TraceLoggerThread*
 js::TraceLoggerForCurrentThread()
 {
-    PRThread* thread = PR_GetCurrentThread();
     if (!EnsureTraceLoggerState())
         return nullptr;
-    return traceLoggerState->forThread(thread);
+    return traceLoggerState->forThread(ThisThread::GetId());
 }
 
 TraceLoggerThread*
-TraceLoggerThreadState::forThread(PRThread* thread)
+TraceLoggerThreadState::forThread(const Thread::Id& thread)
 {
     MOZ_ASSERT(initialized);
 
@@ -1017,10 +1059,10 @@ TraceLoggerEvent::~TraceLoggerEvent()
 TraceLoggerEvent&
 TraceLoggerEvent::operator=(const TraceLoggerEvent& other)
 {
-    if (hasPayload())
-        payload()->release();
     if (other.hasPayload())
         other.payload()->use();
+    if (hasPayload())
+        payload()->release();
 
     payload_ = other.payload_;
 

@@ -7,8 +7,8 @@
 #include "DocAccessibleWrap.h"
 
 #include "Compatibility.h"
+#include "DocAccessibleChild.h"
 #include "nsWinUtils.h"
-#include "mozilla/dom/TabChild.h"
 #include "Role.h"
 #include "RootAccessible.h"
 #include "sdnDocAccessible.h"
@@ -42,6 +42,25 @@ IMPL_IUNKNOWN_QUERY_HEAD(DocAccessibleWrap)
     return S_OK;
   }
 IMPL_IUNKNOWN_QUERY_TAIL_INHERITED(HyperTextAccessibleWrap)
+
+STDMETHODIMP
+DocAccessibleWrap::get_accParent(
+      /* [retval][out] */ IDispatch __RPC_FAR *__RPC_FAR *ppdispParent)
+{
+  // We might be a top-level document in a content process.
+  DocAccessibleChild* ipcDoc = IPCDoc();
+  if (!ipcDoc) {
+    return DocAccessible::get_accParent(ppdispParent);
+  }
+  IAccessible* dispParent = ipcDoc->GetParentIAccessible();
+  if (!dispParent) {
+    return S_FALSE;
+  }
+
+  dispParent->AddRef();
+  *ppdispParent = static_cast<IDispatch*>(dispParent);
+  return S_OK;
+}
 
 STDMETHODIMP
 DocAccessibleWrap::get_accValue(VARIANT aVarChild, BSTR __RPC_FAR* aValue)
@@ -85,8 +104,9 @@ DocAccessibleWrap::Shutdown()
   if (nsWinUtils::IsWindowEmulationStarted()) {
     // Destroy window created for root document.
     if (mDocFlags & eTabDocument) {
-      nsWinUtils::sHWNDCache->Remove(mHWND);
-      ::DestroyWindow(static_cast<HWND>(mHWND));
+      HWND hWnd = static_cast<HWND>(mHWND);
+      ::RemovePropW(hWnd, kPropNameDocAcc);
+      ::DestroyWindow(hWnd);
     }
 
     mHWND = nullptr;
@@ -115,18 +135,7 @@ DocAccessibleWrap::DoInitialUpdate()
   if (nsWinUtils::IsWindowEmulationStarted()) {
     // Create window for tab document.
     if (mDocFlags & eTabDocument) {
-      mozilla::dom::TabChild* tabChild =
-        mozilla::dom::TabChild::GetFrom(mDocumentNode->GetShell());
-
       a11y::RootAccessible* rootDocument = RootAccessible();
-
-      mozilla::WindowsHandle nativeData = 0;
-      if (tabChild)
-        tabChild->SendGetWidgetNativeData(&nativeData);
-      else
-        nativeData = reinterpret_cast<mozilla::WindowsHandle>(
-          rootDocument->GetNativeWindow());
-
       bool isActive = true;
       nsIntRect rect(CW_USEDEFAULT, CW_USEDEFAULT, 0, 0);
       if (Compatibility::IsDolphin()) {
@@ -140,12 +149,12 @@ DocAccessibleWrap::DoInitialUpdate()
         docShell->GetIsActive(&isActive);
       }
 
-      HWND parentWnd = reinterpret_cast<HWND>(nativeData);
+      HWND parentWnd = reinterpret_cast<HWND>(rootDocument->GetNativeWindow());
       mHWND = nsWinUtils::CreateNativeWindow(kClassNameTabContent, parentWnd,
                                              rect.x, rect.y,
                                              rect.width, rect.height, isActive);
 
-      nsWinUtils::sHWNDCache->Put(mHWND, this);
+      ::SetPropW(static_cast<HWND>(mHWND), kPropNameDocAcc, (HANDLE)this);
 
     } else {
       DocAccessible* parentDocument = ParentDocument();

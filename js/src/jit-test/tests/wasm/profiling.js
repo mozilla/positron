@@ -1,5 +1,4 @@
 load(libdir + "wasm.js");
-load(libdir + "asserts.js");
 
 // Single-step profiling currently only works in the ARM simulator
 if (!getBuildConfiguration()["arm-simulator"])
@@ -8,10 +7,6 @@ if (!getBuildConfiguration()["arm-simulator"])
 const Module = WebAssembly.Module;
 const Instance = WebAssembly.Instance;
 const Table = WebAssembly.Table;
-
-// Explicitly opt into the new binary format for imports and exports until it
-// is used by default everywhere.
-const textToBinary = str => wasmTextToBinary(str, 'new-format');
 
 function normalize(stack)
 {
@@ -58,7 +53,7 @@ function test(code, expect)
 {
     enableSPSProfiling();
 
-    var f = new Instance(new Module(textToBinary(code))).exports[""];
+    var f = wasmEvalText(code).exports[""];
     enableSingleStepProfiling();
     f();
     assertEqStacks(disableSingleStepProfiling(), expect);
@@ -104,7 +99,7 @@ testError(
 `(module
     (type $good (func))
     (type $bad (func (param i32)))
-    (func $foo (call_indirect $bad (i32.const 0) (i32.const 1)))
+    (func $foo (call_indirect $bad (i32.const 1) (i32.const 0)))
     (func $bar (type $good))
     (table $bar)
     (export "" $foo)
@@ -112,7 +107,7 @@ testError(
 Error);
 
 (function() {
-    var e = new Instance(new Module(textToBinary(`
+    var e = wasmEvalText(`
     (module
         (func $foo (result i32) (i32.const 42))
         (export "foo" $foo)
@@ -120,7 +115,7 @@ Error);
         (table (resizable 10))
         (elem (i32.const 0) $foo $bar)
         (export "tbl" table)
-    )`))).exports;
+    )`).exports;
     assertEq(e.foo(), 42);
     assertEq(e.tbl.get(0)(), 42);
     assertEq(e.tbl.get(1)(), 13);
@@ -152,7 +147,7 @@ Error);
     assertEqStacks(disableSingleStepProfiling(), ["", ">", "0,>", ">", "", ">", "1,>", ">", ""]);
     disableSPSProfiling();
 
-    var e2 = new Instance(new Module(textToBinary(`
+    var e2 = wasmEvalText(`
     (module
         (type $v2i (func (result i32)))
         (import "a" "b" (table 10))
@@ -160,8 +155,7 @@ Error);
         (func $bar (result i32) (i32.const 99))
         (func $baz (param $i i32) (result i32) (call_indirect $v2i (get_local $i)))
         (export "baz" $baz)
-    )`)),
-    {a:{b:e.tbl}}).exports;
+    )`, {a:{b:e.tbl}}).exports;
 
     enableSPSProfiling();
     enableSingleStepProfiling();
@@ -183,13 +177,13 @@ Error);
 })();
 
 (function() {
-    var m1 = new Module(textToBinary(`(module
+    var m1 = new Module(wasmTextToBinary(`(module
         (func $foo (result i32) (i32.const 42))
         (export "foo" $foo)
     )`));
-    var m2 = new Module(textToBinary(`(module
+    var m2 = new Module(wasmTextToBinary(`(module
         (import $foo "a" "foo" (result i32))
-        (func $bar (result i32) (call_import $foo))
+        (func $bar (result i32) (call $foo))
         (export "bar" $bar)
     )`));
 

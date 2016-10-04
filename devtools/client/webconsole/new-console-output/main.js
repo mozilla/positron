@@ -16,9 +16,9 @@ const { BrowserLoader } = Cu.import("resource://devtools/client/shared/browser-l
 // privileges and runs entirely in content scope.
 const NewConsoleOutputWrapper = BrowserLoader({
   baseURI: "resource://devtools/client/webconsole/new-console-output/",
-  window: this}).require("./new-console-output-wrapper");
+  window}).require("./new-console-output-wrapper");
 
-this.NewConsoleOutput = function (parentNode, jsterm) {
+this.NewConsoleOutput = function (parentNode, jsterm, toolbox, owner) {
   console.log("Creating NewConsoleOutput", parentNode, NewConsoleOutputWrapper);
-  return new NewConsoleOutputWrapper(parentNode, jsterm);
+  return new NewConsoleOutputWrapper(parentNode, jsterm, toolbox, owner);
 };

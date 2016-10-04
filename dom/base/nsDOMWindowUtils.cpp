@@ -109,7 +109,7 @@
 #include "mozilla/css/ImageLoader.h"
 #include "mozilla/layers/APZCTreeManager.h" // for layers::ZoomToRectBehavior
 #include "mozilla/dom/Promise.h"
-#include "mozilla/CSSStyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 
 #ifdef XP_WIN
 #undef GetClassName
@@ -650,6 +650,7 @@ nsDOMWindowUtils::SendMouseEvent(const nsAString& aType,
                                  unsigned short aInputSourceArg,
                                  bool aIsDOMEventSynthesized,
                                  bool aIsWidgetEventSynthesized,
+                                 int32_t aButtons,
                                  uint8_t aOptionalArgCount,
                                  bool *aPreventDefault)
 {
@@ -659,7 +660,9 @@ nsDOMWindowUtils::SendMouseEvent(const nsAString& aType,
                               aOptionalArgCount >= 4 ?
                                 aIsDOMEventSynthesized : true,
                               aOptionalArgCount >= 5 ?
-                                aIsWidgetEventSynthesized : false);
+                                aIsWidgetEventSynthesized : false,
+                              aOptionalArgCount >= 6 ?
+                              aButtons : MOUSE_BUTTONS_NOT_SPECIFIED);
 }
 
 NS_IMETHODIMP
@@ -674,6 +677,7 @@ nsDOMWindowUtils::SendMouseEventToWindow(const nsAString& aType,
                                          unsigned short aInputSourceArg,
                                          bool aIsDOMEventSynthesized,
                                          bool aIsWidgetEventSynthesized,
+                                         int32_t aButtons,
                                          uint8_t aOptionalArgCount)
 {
   PROFILER_LABEL("nsDOMWindowUtils", "SendMouseEventToWindow",
@@ -685,7 +689,9 @@ nsDOMWindowUtils::SendMouseEventToWindow(const nsAString& aType,
                               aOptionalArgCount >= 4 ?
                                 aIsDOMEventSynthesized : true,
                               aOptionalArgCount >= 5 ?
-                                aIsWidgetEventSynthesized : false);
+                                aIsWidgetEventSynthesized : false,
+                              aOptionalArgCount >= 6 ?
+                              aButtons : MOUSE_BUTTONS_NOT_SPECIFIED);
 }
 
 NS_IMETHODIMP
@@ -701,11 +707,12 @@ nsDOMWindowUtils::SendMouseEventCommon(const nsAString& aType,
                                        bool aToWindow,
                                        bool *aPreventDefault,
                                        bool aIsDOMEventSynthesized,
-                                       bool aIsWidgetEventSynthesized)
+                                       bool aIsWidgetEventSynthesized,
+                                       int32_t aButtons)
 {
   nsCOMPtr<nsIPresShell> presShell = GetPresShell();
   return nsContentUtils::SendMouseEvent(presShell, aType, aX, aY, aButton,
-      aClickCount, aModifiers, aIgnoreRootScrollFrame, aPressure,
+      aButtons, aClickCount, aModifiers, aIgnoreRootScrollFrame, aPressure,
       aInputSourceArg, aToWindow, aPreventDefault, aIsDOMEventSynthesized,
       aIsWidgetEventSynthesized);
 }
@@ -1245,6 +1252,18 @@ nsDOMWindowUtils::ForceUpdateNativeMenuAt(const nsAString& indexString)
     return NS_ERROR_FAILURE;
 
   return widget->ForceUpdateNativeMenuAt(indexString);
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetSelectionAsPlaintext(nsAString& aResult)
+{
+  // Get the widget to send the event to.
+  nsCOMPtr<nsIWidget> widget = GetWidget();
+  if (!widget) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return widget->GetSelectionAsPlaintext(aResult);
 }
 
 nsIWidget*
@@ -2029,9 +2048,7 @@ nsDOMWindowUtils::SendQueryContentEvent(uint32_t aType,
     nsIFrame* popupFrame =
       nsLayoutUtils::GetPopupFrameForEventCoordinates(presContext->GetRootPresContext(), &dummyEvent);
 
-    LayoutDeviceIntRect widgetBounds;
-    nsresult rv = widget->GetClientBounds(widgetBounds);
-    NS_ENSURE_SUCCESS(rv, rv);
+    LayoutDeviceIntRect widgetBounds = widget->GetClientBounds();
     widgetBounds.MoveTo(0, 0);
 
     // There is no popup frame at the point and the point isn't in our widget,
@@ -2415,7 +2432,7 @@ nsDOMWindowUtils::BeginTabSwitch()
 }
 
 static bool
-ComputeAnimationValue(nsCSSProperty aProperty,
+ComputeAnimationValue(nsCSSPropertyID aProperty,
                       Element* aElement,
                       const nsAString& aInput,
                       StyleAnimationValue& aOutput)
@@ -2675,7 +2692,7 @@ nsDOMWindowUtils::ComputeAnimationDistance(nsIDOMElement* aElement,
   nsCOMPtr<nsIContent> content = do_QueryInterface(aElement, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCSSProperty property =
+  nsCSSPropertyID property =
     nsCSSProps::LookupProperty(aProperty, CSSEnabledState::eIgnoreEnabledState);
   if (property != eCSSProperty_UNKNOWN && nsCSSProps::IsShorthand(property)) {
     property = eCSSProperty_UNKNOWN;
@@ -3627,13 +3644,18 @@ nsDOMWindowUtils::GetOMTAStyle(nsIDOMElement* aElement,
         FrameLayerBuilder::GetDedicatedLayer(frame,
                                              nsDisplayItem::TYPE_OPACITY);
       if (layer) {
-        float value;
         ShadowLayerForwarder* forwarder = layer->Manager()->AsShadowForwarder();
         if (forwarder && forwarder->HasShadowManager()) {
-          forwarder->GetShadowManager()->SendGetOpacity(
-            layer->AsShadowableLayer()->GetShadow(), &value);
-          cssValue = new nsROCSSPrimitiveValue;
-          cssValue->SetNumber(value);
+          float value;
+          bool hadAnimatedOpacity;
+          forwarder->GetShadowManager()->SendGetAnimationOpacity(
+            layer->AsShadowableLayer()->GetShadow(),
+            &value, &hadAnimatedOpacity);
+
+          if (hadAnimatedOpacity) {
+            cssValue = new nsROCSSPrimitiveValue;
+            cssValue->SetNumber(value);
+          }
         }
       }
     } else if (aProperty.EqualsLiteral("transform")) {
@@ -4031,6 +4053,17 @@ nsDOMWindowUtils::RespectDisplayPortSuppression(bool aEnabled)
 {
   nsCOMPtr<nsIPresShell> shell(GetPresShell());
   APZCCallbackHelper::RespectDisplayPortSuppression(aEnabled, shell);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::ForceReflowInterrupt()
+{
+  nsPresContext* pc = GetPresContext();
+  if (!pc) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  pc->SetPendingInterruptFromTest();
   return NS_OK;
 }
 

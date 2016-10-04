@@ -398,6 +398,7 @@ public:
   }
   virtual void DeviceChanged() override
   {
+    MutexAutoLock lock(mMutex);
     if (mAudioSource) {
       mAudioSource->DeviceChanged();
     }
@@ -544,7 +545,7 @@ private:
 
   int mCapIndex;
   int mChannel;
-  TrackID mTrackID;
+  MOZ_INIT_OUTSIDE_CTOR TrackID mTrackID;
   bool mStarted;
 
   nsString mDeviceName;
@@ -570,6 +571,8 @@ class MediaEngineWebRTC : public MediaEngine
   typedef MediaEngine Super;
 public:
   explicit MediaEngineWebRTC(MediaEnginePrefs& aPrefs);
+
+  virtual void SetFakeDeviceChangeEvents() override;
 
   // Clients should ensure to clean-up sources video/audio sources
   // before invoking Shutdown on this class.

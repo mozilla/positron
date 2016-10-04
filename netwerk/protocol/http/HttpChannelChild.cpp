@@ -10,7 +10,7 @@
 
 #include "nsHttp.h"
 #include "nsICacheEntry.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/ipc/FileDescriptorSetChild.h"
@@ -314,7 +314,8 @@ class StartRequestEvent : public ChannelEvent
                     const nsCString& aSecurityInfoSerialization,
                     const NetAddr& aSelfAddr,
                     const NetAddr& aPeerAddr,
-                    const uint32_t& aCacheKey)
+                    const uint32_t& aCacheKey,
+                    const nsCString& altDataType)
   : mChild(aChild)
   , mChannelStatus(aChannelStatus)
   , mResponseHead(aResponseHead)
@@ -328,6 +329,7 @@ class StartRequestEvent : public ChannelEvent
   , mSelfAddr(aSelfAddr)
   , mPeerAddr(aPeerAddr)
   , mCacheKey(aCacheKey)
+  , mAltDataType(altDataType)
   {}
 
   void Run()
@@ -337,7 +339,7 @@ class StartRequestEvent : public ChannelEvent
                            mRequestHeaders, mIsFromCache, mCacheEntryAvailable,
                            mCacheExpirationTime, mCachedCharset,
                            mSecurityInfoSerialization, mSelfAddr, mPeerAddr,
-                           mCacheKey);
+                           mCacheKey, mAltDataType);
   }
  private:
   HttpChannelChild* mChild;
@@ -353,6 +355,7 @@ class StartRequestEvent : public ChannelEvent
   NetAddr mSelfAddr;
   NetAddr mPeerAddr;
   uint32_t mCacheKey;
+  nsCString mAltDataType;
 };
 
 bool
@@ -369,7 +372,7 @@ HttpChannelChild::RecvOnStartRequest(const nsresult& channelStatus,
                                      const NetAddr& peerAddr,
                                      const int16_t& redirectCount,
                                      const uint32_t& cacheKey,
-                                     const bool& contentDecodingWillBeCalledOnParent)
+                                     const nsCString& altDataType)
 {
   LOG(("HttpChannelChild::RecvOnStartRequest [this=%p]\n", this));
   // mFlushedForDiversion and mDivertingToParent should NEVER be set at this
@@ -382,17 +385,14 @@ HttpChannelChild::RecvOnStartRequest(const nsresult& channelStatus,
 
   mRedirectCount = redirectCount;
 
-  if (contentDecodingWillBeCalledOnParent) {
-    SetApplyConversion(false);
-  }
-
   mEventQ->RunOrEnqueue(new StartRequestEvent(this, channelStatus, responseHead,
                                               useResponseHead, requestHeaders,
                                               isFromCache, cacheEntryAvailable,
                                               cacheExpirationTime,
                                               cachedCharset,
                                               securityInfoSerialization,
-                                              selfAddr, peerAddr, cacheKey));
+                                              selfAddr, peerAddr, cacheKey,
+                                              altDataType));
   return true;
 }
 
@@ -408,7 +408,8 @@ HttpChannelChild::OnStartRequest(const nsresult& channelStatus,
                                  const nsCString& securityInfoSerialization,
                                  const NetAddr& selfAddr,
                                  const NetAddr& peerAddr,
-                                 const uint32_t& cacheKey)
+                                 const uint32_t& cacheKey,
+                                 const nsCString& altDataType)
 {
   LOG(("HttpChannelChild::OnStartRequest [this=%p]\n", this));
 
@@ -437,6 +438,10 @@ HttpChannelChild::OnStartRequest(const nsresult& channelStatus,
   mCachedCharset = cachedCharset;
   mSelfAddr = selfAddr;
   mPeerAddr = peerAddr;
+
+  mAvailableCachedAltDataType = altDataType;
+
+  mAfterOnStartRequestBegun = true;
 
   AutoEventEnqueuer ensureSerialDispatch(mEventQ);
 
@@ -775,8 +780,6 @@ HttpChannelChild::DoOnProgress(nsIRequest* aRequest, int64_t progress, int64_t p
     // OnProgress
     //
     if (progress > 0) {
-      MOZ_ASSERT((progressMax == -1) || (progress <= progressMax),
-                 "unexpected progress values");
       mProgressSink->OnProgress(aRequest, nullptr, progress, progressMax);
     }
   }
@@ -920,6 +923,13 @@ HttpChannelChild::OnStopRequest(const nsresult& channelStatus,
 
   ReleaseListeners();
 
+  // DocumentChannelCleanup actually nulls out mCacheEntry in the parent, which
+  // we might need later to open the Alt-Data output stream, so just return here
+  if (!mPreferredCachedAltDataType.IsEmpty()) {
+    mKeptAlive = true;
+    return;
+  }
+
   if (mLoadFlags & LOAD_DOCUMENT_URI) {
     // Keep IPDL channel open, but only for updating security info.
     mKeptAlive = true;
@@ -1018,8 +1028,6 @@ HttpChannelChild::OnProgress(const int64_t& progress,
   if (mProgressSink && NS_SUCCEEDED(mStatus) && mIsPending)
   {
     if (progress > 0) {
-      MOZ_ASSERT((progressMax == -1) || (progress <= progressMax),
-                 "unexpected progress values");
       mProgressSink->OnProgress(this, nullptr, progress, progressMax);
     }
   }
@@ -1326,6 +1334,16 @@ HttpChannelChild::BeginNonIPCRedirect(nsIURI* responseURI,
                               getter_AddRefs(newChannel));
 
   if (NS_SUCCEEDED(rv)) {
+    // Ensure that the new channel shares the original channel's security information,
+    // since it won't be provided via IPC. In particular, if the target of this redirect
+    // is a synthesized response that has its own security info, the pre-redirect channel
+    // has already received it and it must be propagated to the post-redirect channel.
+    nsCOMPtr<nsIHttpChannelChild> channelChild = do_QueryInterface(newChannel);
+    if (mSecurityInfo && channelChild) {
+      HttpChannelChild* httpChannelChild = static_cast<HttpChannelChild*>(channelChild.get());
+      httpChannelChild->OverrideSecurityInfoForNonIPCRedirect(mSecurityInfo);
+    }
+
     rv = gHttpHandler->AsyncOnChannelRedirect(this,
                                               newChannel,
                                               nsIChannelEventSink::REDIRECT_INTERNAL);
@@ -1333,6 +1351,13 @@ HttpChannelChild::BeginNonIPCRedirect(nsIURI* responseURI,
 
   if (NS_FAILED(rv))
     OnRedirectVerifyCallback(rv);
+}
+
+void
+HttpChannelChild::OverrideSecurityInfoForNonIPCRedirect(nsISupports* securityInfo)
+{
+  mResponseCouldBeSynthesized = true;
+  OverrideSecurityInfo(securityInfo);
 }
 
 class Redirect3Event : public ChannelEvent
@@ -1556,7 +1581,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     mChannel->Redirect3Complete();
     mNewChannel->OverrideWithSynthesizedResponse(mHead, mInput, mListener);
     return NS_OK;
@@ -1567,6 +1592,7 @@ NS_IMETHODIMP
 HttpChannelChild::OnRedirectVerifyCallback(nsresult result)
 {
   LOG(("HttpChannelChild::OnRedirectVerifyCallback [this=%p]\n", this));
+  nsresult rv;
   OptionalURIParams redirectURI;
   nsCOMPtr<nsIHttpChannel> newHttpChannel =
       do_QueryInterface(mRedirectChannelChild);
@@ -1582,9 +1608,18 @@ HttpChannelChild::OnRedirectVerifyCallback(nsresult result)
     result = NS_ERROR_DOM_BAD_URI;
   }
 
+  bool forceHSTSPriming = false;
+  bool mixedContentWouldBlock = false;
   if (newHttpChannel) {
     // Must not be called until after redirect observers called.
     newHttpChannel->SetOriginalURI(mOriginalURI);
+
+    nsCOMPtr<nsILoadInfo> newLoadInfo;
+    rv = newHttpChannel->GetLoadInfo(getter_AddRefs(newLoadInfo));
+    if (NS_SUCCEEDED(rv) && newLoadInfo) {
+      forceHSTSPriming = newLoadInfo->GetForceHSTSPriming();
+      mixedContentWouldBlock = newLoadInfo->GetMixedContentWouldBlock();
+    }
   }
 
   if (mRedirectingForSubsequentSynthesizedResponse) {
@@ -1648,7 +1683,8 @@ HttpChannelChild::OnRedirectVerifyCallback(nsresult result)
 
   if (mIPCOpen)
     SendRedirect2Verify(result, *headerTuples, loadFlags, redirectURI,
-                        corsPreflightArgs);
+                        corsPreflightArgs, forceHSTSPriming,
+                        mixedContentWouldBlock);
 
   return NS_OK;
 }
@@ -1758,6 +1794,10 @@ HttpChannelChild::AsyncOpen(nsIStreamListener *listener, nsISupports *aContext)
              "security flags in loadInfo but asyncOpen2() not called");
 
   LOG(("HttpChannelChild::AsyncOpen [this=%p uri=%s]\n", this, mSpec.get()));
+
+#ifdef DEBUG
+  CheckPrivateBrowsing();
+#endif
 
   if (mCanceled)
     return mStatus;
@@ -1890,6 +1930,7 @@ HttpChannelChild::ContinueAsyncOpen()
   openArgs.loadFlags() = mLoadFlags;
   openArgs.requestHeaders() = mClientSetRequestHeaders;
   mRequestHead.Method(openArgs.requestMethod());
+  openArgs.preferredAlternativeType() = mPreferredCachedAltDataType;
 
   nsTArray<mozilla::ipc::FileDescriptor> fds;
   SerializeInputStream(mUploadStream, openArgs.uploadStream(), fds);
@@ -1992,12 +2033,16 @@ HttpChannelChild::ContinueAsyncOpen()
     return NS_ERROR_FAILURE;
   }
 
+  ContentChild* cc = static_cast<ContentChild*>(gNeckoChild->Manager());
+  if (cc->IsShuttingDown()) {
+    return NS_ERROR_FAILURE;
+  }
+
   // The socket transport in the chrome process now holds a logical ref to us
   // until OnStopRequest, or we do a redirect, or we hit an IPDL error.
   AddIPDLReference();
 
-  PBrowserOrId browser = static_cast<ContentChild*>(gNeckoChild->Manager())
-                         ->GetBrowserOrId(tabChild);
+  PBrowserOrId browser = cc->GetBrowserOrId(tabChild);
   if (!gNeckoChild->SendPHttpChannelConstructor(this, browser,
                                                 IPC::SerializedLoadContext(this),
                                                 openArgs)) {
@@ -2156,6 +2201,36 @@ HttpChannelChild::GetAllowStaleCacheContent(bool *aAllowStaleCacheContent)
 {
   NS_ENSURE_ARG(aAllowStaleCacheContent);
   *aAllowStaleCacheContent = mAllowStaleCacheContent;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpChannelChild::PreferAlternativeDataType(const nsACString & aType)
+{
+  ENSURE_CALLED_BEFORE_ASYNC_OPEN();
+  mPreferredCachedAltDataType = aType;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpChannelChild::GetAlternativeDataType(nsACString & aType)
+{
+  // Must be called during or after OnStartRequest
+  if (!mAfterOnStartRequestBegun) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  aType = mAvailableCachedAltDataType;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpChannelChild::OpenAlternativeOutputStream(const nsACString & aType, nsIOutputStream * *_retval)
+{
+  MOZ_ASSERT(NS_IsMainThread(), "Main thread only");
+  RefPtr<AltDataOutputStreamChild> stream =
+    static_cast<AltDataOutputStreamChild*>(gNeckoChild->SendPAltDataOutputStreamConstructor(nsCString(aType), this));
+  stream.forget(_retval);
   return NS_OK;
 }
 

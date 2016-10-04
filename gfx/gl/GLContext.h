@@ -176,6 +176,7 @@ enum class GLRenderer {
     AdrenoTM330,
     AdrenoTM420,
     Mali400MP,
+    Mali450MP,
     SGX530,
     SGX540,
     Tegra,
@@ -1967,6 +1968,9 @@ public:
         BEFORE_GL_CALL;
         mSymbols.fFramebufferTexture2D(target, attachmentPoint, textureTarget, texture, level);
         AFTER_GL_CALL;
+        if (mNeedsCheckAfterAttachTextureToFb) {
+            fCheckFramebufferStatus(target);
+        }
     }
 
     void fFramebufferTextureLayer(GLenum target, GLenum attachment, GLuint texture, GLint level, GLint layer) {
@@ -3531,6 +3535,7 @@ protected:
     bool mNeedsTextureSizeChecks;
     bool mNeedsFlushBeforeDeleteFB;
     bool mTextureAllocCrashesOnMapFailure;
+    bool mNeedsCheckAfterAttachTextureToFb;
     bool mWorkAroundDriverBugs;
 
     bool IsTextureSizeSafeToPassToDriver(GLenum target, GLsizei width, GLsizei height) const {

@@ -19,8 +19,8 @@ var {getInplaceEditorForSpan: inplaceEditor} =
 
 const ROOT_TEST_DIR = getRootDirectory(gTestPath);
 const FRAME_SCRIPT_URL = ROOT_TEST_DIR + "doc_frame_script.js";
-const _STRINGS = Services.strings.createBundle(
-  "chrome://devtools-shared/locale/styleinspector.properties");
+
+const STYLE_INSPECTOR_L10N = new LocalizationHelper("chrome://devtools-shared/locale/styleinspector.properties");
 
 registerCleanupFunction(() => {
   Services.prefs.clearUserPref("devtools.defaultColorUnit");
@@ -177,13 +177,15 @@ var focusEditableField = Task.async(function* (ruleView, editable, xOffset = 1,
  * setting the value of the corresponding css property in the rule-view.
  * Use this function to close the tooltip and make sure the test waits for the
  * ruleview-changed event.
- * @param {Tooltip} tooltip
+ * @param {SwatchBasedEditorTooltip} editorTooltip
  * @param {CSSRuleView} view
  */
-function* hideTooltipAndWaitForRuleViewChanged(tooltip, view) {
+function* hideTooltipAndWaitForRuleViewChanged(editorTooltip, view) {
   let onModified = view.once("ruleview-changed");
-  tooltip.hide();
+  let onHidden = editorTooltip.tooltip.once("hidden");
+  editorTooltip.hide();
   yield onModified;
+  yield onHidden;
 }
 
 /**
@@ -391,9 +393,9 @@ var openColorPickerAndSelectColor = Task.async(function* (view, ruleIndex,
   let cPicker = view.tooltips.colorPicker;
 
   info("Opening the colorpicker by clicking the color swatch");
-  let onShown = cPicker.tooltip.once("shown");
+  let onColorPickerReady = cPicker.once("ready");
   swatch.click();
-  yield onShown;
+  yield onColorPickerReady;
 
   yield simulateColorPickerChange(view, cPicker, newRgba, expectedChange);
 
@@ -429,9 +431,9 @@ var openCubicBezierAndChangeCoords = Task.async(function* (view, ruleIndex,
   let bezierTooltip = view.tooltips.cubicBezier;
 
   info("Opening the cubicBezier by clicking the swatch");
-  let onShown = bezierTooltip.tooltip.once("shown");
+  let onBezierWidgetReady = bezierTooltip.once("ready");
   swatch.click();
-  yield onShown;
+  yield onBezierWidgetReady;
 
   let widget = yield bezierTooltip.widget;
 
@@ -632,7 +634,9 @@ var togglePropStatus = Task.async(function* (view, textProp) {
  */
 var focusNewRuleViewProperty = Task.async(function* (ruleEditor) {
   info("Clicking on a close ruleEditor brace to start editing a new property");
-  ruleEditor.closeBrace.scrollIntoView();
+
+  // Use bottom alignment to avoid scrolling out of the parent element area.
+  ruleEditor.closeBrace.scrollIntoView(false);
   let editor = yield focusEditableField(ruleEditor.ruleView,
     ruleEditor.closeBrace);
 
@@ -811,4 +815,25 @@ function waitForStyleModification(inspector) {
     }
     inspector.on("markupmutation", checkForStyleModification);
   });
+}
+
+/**
+ * Click on the selector icon
+ * @param {DOMNode} icon
+ * @param {CSSRuleView} view
+ */
+function* clickSelectorIcon(icon, view) {
+  let onToggled = view.once("ruleview-selectorhighlighter-toggled");
+  EventUtils.synthesizeMouseAtCenter(icon, {}, view.styleWindow);
+  yield onToggled;
+}
+
+/**
+ * Make sure window is properly focused before sending a key event.
+ * @param {Window} win
+ * @param {Event} key
+ */
+function focusAndSendKey(win, key) {
+  win.document.documentElement.focus();
+  EventUtils.sendKey(key, win);
 }

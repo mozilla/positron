@@ -7,11 +7,8 @@
 #if !defined(MediaDecoder_h_)
 #define MediaDecoder_h_
 
-#ifdef MOZ_EME
-#include "mozilla/CDMProxy.h"
-#endif
-
 #include "mozilla/Atomics.h"
+#include "mozilla/CDMProxy.h"
 #include "mozilla/MozPromise.h"
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/StateMirroring.h"
@@ -27,6 +24,7 @@
 #include "nsITimer.h"
 
 #include "AbstractMediaDecoder.h"
+#include "DecoderDoctorDiagnostics.h"
 #include "MediaDecoderOwner.h"
 #include "MediaEventSource.h"
 #include "MediaMetadataManager.h"
@@ -85,8 +83,6 @@ public:
     MediaDecoderOwner* GetMediaOwner() const override;
     void SetInfinite(bool aInfinite) override;
     void SetMediaSeekable(bool aMediaSeekable) override;
-    void ResetConnectionState() override;
-    nsresult FinishDecoderSetup(MediaResource* aResource) override;
     void NotifyNetworkError() override;
     void NotifyDecodeError() override;
     void NotifyDataArrived() override;
@@ -380,6 +376,10 @@ private:
   // Called from HTMLMediaElement when owner document activity changes
   virtual void SetElementVisibility(bool aIsVisible);
 
+  // Force override the visible state to hidden.
+  // Called from HTMLMediaElement when testing of video decode suspend from mochitests.
+  void SetForcedHidden(bool aForcedHidden);
+
   /******
    * The following methods must only be called on the main
    * thread.
@@ -434,14 +434,13 @@ private:
   int64_t GetDownloadPosition();
 
   // Notifies the element that decoding has failed.
-  void DecodeError();
+  void DecodeError(const MediaResult& aError);
 
   // Indicate whether the media is same-origin with the element.
   void UpdateSameOriginStatus(bool aSameOrigin);
 
   MediaDecoderOwner* GetOwner() const override;
 
-#ifdef MOZ_EME
   typedef MozPromise<RefPtr<CDMProxy>, bool /* aIgnored */, /* IsExclusive = */ true> CDMProxyPromise;
 
   // Resolved when a CDMProxy is available and the capabilities are known or
@@ -449,22 +448,13 @@ private:
   RefPtr<CDMProxyPromise> RequestCDMProxy() const;
 
   void SetCDMProxy(CDMProxy* aProxy);
-#endif
 
   void EnsureTelemetryReported();
-
-#ifdef MOZ_RAW
-  static bool IsRawEnabled();
-#endif
 
   static bool IsOggEnabled();
   static bool IsOpusEnabled();
   static bool IsWaveEnabled();
   static bool IsWebMEnabled();
-
-#ifdef NECKO_PROTOCOL_rtsp
-  static bool IsRtspEnabled();
-#endif
 
 #ifdef MOZ_OMX_DECODER
   static bool IsOmxEnabled();
@@ -598,6 +588,9 @@ private:
   DataArrivedEvent() override { return &mDataArrivedEvent; }
 
   void OnPlaybackEvent(MediaEventType aEvent);
+  void OnPlaybackErrorEvent(const MediaResult& aError);
+
+  void OnDecoderDoctorEvent(DecoderDoctorEvent aEvent);
 
   void OnMediaNotSeekable()
   {
@@ -622,10 +615,8 @@ private:
 
   RefPtr<ResourceCallback> mResourceCallback;
 
-#ifdef MOZ_EME
   MozPromiseHolder<CDMProxyPromise> mCDMProxyPromiseHolder;
   RefPtr<CDMProxyPromise> mCDMProxyPromise;
-#endif
 
 protected:
   // The promise resolving/rejection is queued as a "micro-task" which will be
@@ -709,6 +700,12 @@ protected:
   // only be accessed from main thread.
   nsAutoPtr<MediaInfo> mInfo;
 
+  // Tracks the visiblity status from HTMLMediaElement
+  bool mElementVisible;
+
+  // If true, forces the decoder to be considered hidden.
+  bool mForcedHidden;
+
   // True if MediaDecoder is in dormant state.
   bool mIsDormant;
 
@@ -731,6 +728,8 @@ protected:
   MediaEventListener mFirstFrameLoadedListener;
 
   MediaEventListener mOnPlaybackEvent;
+  MediaEventListener mOnPlaybackErrorEvent;
+  MediaEventListener mOnDecoderDoctorEvent;
   MediaEventListener mOnMediaNotSeekable;
 
 protected:
@@ -762,7 +761,7 @@ protected:
   Canonical<double> mVolume;
 
   // PlaybackRate and pitch preservation status we should start at.
-  Canonical<double> mPlaybackRate;
+  double mPlaybackRate = 1;
 
   Canonical<bool> mPreservesPitch;
 
@@ -825,9 +824,6 @@ public:
   AbstractCanonical<double>* CanonicalVolume() {
     return &mVolume;
   }
-  AbstractCanonical<double>* CanonicalPlaybackRate() {
-    return &mPlaybackRate;
-  }
   AbstractCanonical<bool>* CanonicalPreservesPitch() {
     return &mPreservesPitch;
   }
@@ -886,12 +882,6 @@ private:
   // When the media stream ends, we can know the duration, thus the stream is
   // no longer considered to be infinite.
   void SetInfinite(bool aInfinite);
-
-  // Reset the decoder and notify the media element that
-  // server connection is closed.
-  void ResetConnectionState();
-
-  nsresult FinishDecoderSetup(MediaResource* aResource);
 
   // Called by MediaResource when the principal of the resource has
   // changed. Called on main thread only.

@@ -8,10 +8,21 @@
 #define CertVerifier_h
 
 #include "BRNameMatchingPolicy.h"
+#include "CTVerifyResult.h"
 #include "OCSPCache.h"
 #include "ScopedNSSTypes.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/UniquePtr.h"
 #include "pkix/pkixtypes.h"
+
+namespace mozilla { namespace ct {
+
+// Including MultiLogCTVerifier.h would bring along all of its dependent
+// headers and force us to export them in moz.build. Just forward-declare
+// the class here instead.
+class MultiLogCTVerifier;
+
+} } // namespace mozilla::ct
 
 namespace mozilla { namespace psm {
 
@@ -27,8 +38,8 @@ enum class KeySizeStatus {
 enum class SHA1ModeResult {
   NeverChecked = 0,
   SucceededWithoutSHA1 = 1,
-  SucceededWithSHA1Before2016 = 2,
-  SucceededWithImportedRoot = 3,
+  SucceededWithImportedRoot = 2,
+  SucceededWithImportedRootOrSHA1Before2016 = 3,
   SucceededWithSHA1 = 4,
   Failed = 5,
 };
@@ -48,6 +59,21 @@ public:
 
   void Reset() { accumulateForRoot = false; accumulateResult = false; }
 };
+
+class CertificateTransparencyInfo
+{
+public:
+  // Was CT enabled?
+  bool enabled;
+  // Did we receive and process any binary SCT data from the supported sources?
+  bool processedSCTs;
+  // Verification result of the processed SCTs.
+  mozilla::ct::CTVerifyResult verifyResult;
+
+  void Reset() { enabled = false; processedSCTs = false; verifyResult.Reset(); }
+};
+
+class NSSCertDBTrustDomain;
 
 class CertVerifier
 {
@@ -79,15 +105,18 @@ public:
                /*out*/ UniqueCERTCertList& builtChain,
                        Flags flags = 0,
        /*optional in*/ const SECItem* stapledOCSPResponse = nullptr,
+       /*optional in*/ const SECItem* sctsFromTLS = nullptr,
       /*optional out*/ SECOidTag* evOidPolicy = nullptr,
       /*optional out*/ OCSPStaplingStatus* ocspStaplingStatus = nullptr,
       /*optional out*/ KeySizeStatus* keySizeStatus = nullptr,
       /*optional out*/ SHA1ModeResult* sha1ModeResult = nullptr,
-      /*optional out*/ PinningTelemetryInfo* pinningTelemetryInfo = nullptr);
+      /*optional out*/ PinningTelemetryInfo* pinningTelemetryInfo = nullptr,
+      /*optional out*/ CertificateTransparencyInfo* ctInfo = nullptr);
 
   SECStatus VerifySSLServerCert(
                     const UniqueCERTCertificate& peerCert,
        /*optional*/ const SECItem* stapledOCSPResponse,
+       /*optional*/ const SECItem* sctsFromTLS,
                     mozilla::pkix::Time time,
        /*optional*/ void* pinarg,
                     const char* hostname,
@@ -98,7 +127,8 @@ public:
    /*optional out*/ OCSPStaplingStatus* ocspStaplingStatus = nullptr,
    /*optional out*/ KeySizeStatus* keySizeStatus = nullptr,
    /*optional out*/ SHA1ModeResult* sha1ModeResult = nullptr,
-   /*optional out*/ PinningTelemetryInfo* pinningTelemetryInfo = nullptr);
+   /*optional out*/ PinningTelemetryInfo* pinningTelemetryInfo = nullptr,
+   /*optional out*/ CertificateTransparencyInfo* ctInfo = nullptr);
 
   enum PinningMode {
     pinningDisabled = 0,
@@ -110,8 +140,12 @@ public:
   enum class SHA1Mode {
     Allowed = 0,
     Forbidden = 1,
-    Before2016 = 2,
+    // There used to be a policy that only allowed SHA1 for certificates issued
+    // before 2016. This is no longer available. If a user has selected this
+    // policy in about:config, it now maps to Forbidden.
+    UsedToBeBefore2016ButNowIsForbidden = 2,
     ImportedRoot = 3,
+    ImportedRootOrBefore2016 = 4,
   };
 
   enum OcspDownloadConfig {
@@ -122,11 +156,17 @@ public:
   enum OcspStrictConfig { ocspRelaxed = 0, ocspStrict };
   enum OcspGetConfig { ocspGetDisabled = 0, ocspGetEnabled = 1 };
 
+  enum class CertificateTransparencyMode {
+    Disabled = 0,
+    TelemetryOnly = 1,
+  };
+
   CertVerifier(OcspDownloadConfig odc, OcspStrictConfig osc,
                OcspGetConfig ogc, uint32_t certShortLifetimeInDays,
                PinningMode pinningMode, SHA1Mode sha1Mode,
                BRNameMatchingPolicy::Mode nameMatchingMode,
-               NetscapeStepUpPolicy netscapeStepUpPolicy);
+               NetscapeStepUpPolicy netscapeStepUpPolicy,
+               CertificateTransparencyMode ctMode);
   ~CertVerifier();
 
   void ClearOCSPCache() { mOCSPCache.Clear(); }
@@ -139,18 +179,30 @@ public:
   const SHA1Mode mSHA1Mode;
   const BRNameMatchingPolicy::Mode mNameMatchingMode;
   const NetscapeStepUpPolicy mNetscapeStepUpPolicy;
+  const CertificateTransparencyMode mCTMode;
 
 private:
   OCSPCache mOCSPCache;
 
+  // We only have a forward declaration of MultiLogCTVerifier (see above),
+  // so we keep a pointer to it and allocate dynamically.
+  UniquePtr<mozilla::ct::MultiLogCTVerifier> mCTVerifier;
+
+  void LoadKnownCTLogs();
+  mozilla::pkix::Result VerifySignedCertificateTimestamps(
+                     NSSCertDBTrustDomain& trustDomain,
+                     const UniqueCERTCertList& builtChain,
+                     mozilla::pkix::Input sctsFromTLS,
+                     mozilla::pkix::Time time,
+    /*optional out*/ CertificateTransparencyInfo* ctInfo);
+
   // Returns true if the configured SHA1 mode is more restrictive than the given
   // mode. SHA1Mode::Forbidden is more restrictive than any other mode except
-  // Forbidden. Next is Before2016, then ImportedRoot, then Allowed.
-  // (A mode is never more restrictive than itself.)
+  // Forbidden. Next is ImportedRoot, then ImportedRootOrBefore2016, then
+  // Allowed. (A mode is never more restrictive than itself.)
   bool SHA1ModeMoreRestrictiveThanGivenMode(SHA1Mode mode);
 };
 
-void InitCertVerifierLog();
 mozilla::pkix::Result IsCertBuiltInRoot(CERTCertificate* cert, bool& result);
 mozilla::pkix::Result CertListContainsExpectedKeys(
   const CERTCertList* certList, const char* hostname, mozilla::pkix::Time time,

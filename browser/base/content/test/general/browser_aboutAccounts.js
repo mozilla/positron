@@ -66,7 +66,7 @@ var gTests = [
           deferred.resolve();
         }
       });
-    } catch(e) {
+    } catch (e) {
       ok(false, "Failed to get all commands");
       deferred.reject();
     }
@@ -318,7 +318,7 @@ var gTests = [
 
     let response = yield readyPromise;
     // We are expecting the iframe to be on the "signup" URL
-    let expected = fxAccounts.getAccountsSignUpURI();
+    let expected = yield fxAccounts.promiseAccountsSignUpURI();
     is(response.data.url, expected);
 
     // and expect no signed in user.
@@ -415,7 +415,7 @@ function test()
 {
   waitForExplicitFinish();
 
-  Task.spawn(function () {
+  Task.spawn(function* () {
     for (let test of gTests) {
       info(test.desc);
       try {

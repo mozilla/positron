@@ -30,6 +30,7 @@ struct LoadInfoArgs
 {
   OptionalPrincipalInfo requestingPrincipalInfo;
   PrincipalInfo         triggeringPrincipalInfo;
+  PrincipalInfo         principalToInheritInfo;
   uint32_t              securityFlags;
   uint32_t              contentPolicyType;
   uint32_t              tainting;
@@ -50,6 +51,8 @@ struct LoadInfoArgs
   nsCString[]           corsUnsafeHeaders;
   bool                  forcePreflight;
   bool                  isPreflight;
+  bool                  forceHSTSPriming;
+  bool                  mixedContentWouldBlock;
 };
 
 /**
@@ -125,6 +128,7 @@ struct HttpChannelOpenArgs
   bool                        allowStaleCacheContent;
   nsCString                   contentTypeHint;
   nsCString                   channelId;
+  nsCString                   preferredAlternativeType;
 };
 
 struct HttpChannelConnectArgs

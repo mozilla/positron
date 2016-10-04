@@ -35,7 +35,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     nsCOMPtr<nsIStatusReporterManager> mgr =
       do_GetService("@mozilla.org/status-reporter-manager;1");
@@ -87,14 +87,12 @@ static nsresult
 DumpReport(nsIFileOutputStream* aOStream, const nsCString& aProcess,
            const nsCString& aName, const nsCString& aDescription)
 {
-  int pid;
   if (aProcess.IsEmpty()) {
-    pid = getpid();
+    int pid = getpid();
     nsPrintfCString pidStr("PID %u", pid);
     DUMP(aOStream, "\n  {\n  \"Process\": \"");
     DUMP(aOStream, pidStr.get());
   } else {
-    pid = 0;
     DUMP(aOStream, "\n  {  \"Unknown Process\": \"");
   }
 

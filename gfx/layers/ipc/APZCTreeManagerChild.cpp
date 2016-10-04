@@ -7,9 +7,26 @@
 #include "mozilla/layers/APZCTreeManagerChild.h"
 
 #include "InputData.h"                  // for InputData
+#include "mozilla/dom/TabParent.h"      // for TabParent
+#include "mozilla/layers/APZCCallbackHelper.h" // for APZCCallbackHelper
+#include "mozilla/layers/RemoteCompositorSession.h" // for RemoteCompositorSession
 
 namespace mozilla {
 namespace layers {
+
+APZCTreeManagerChild::APZCTreeManagerChild()
+  : mCompositorSession(nullptr)
+{
+}
+
+void
+APZCTreeManagerChild::SetCompositorSession(RemoteCompositorSession* aSession)
+{
+  // Exactly one of mCompositorSession and aSession must be null (i.e. either
+  // we're setting mCompositorSession or we're clearing it).
+  MOZ_ASSERT(!mCompositorSession ^ !aSession);
+  mCompositorSession = aSession;
+}
 
 nsEventStatus
 APZCTreeManagerChild::ReceiveInputEvent(
@@ -201,6 +218,48 @@ void APZCTreeManagerChild::TransformEventRefPoint(
     ScrollableLayerGuid* aOutTargetGuid)
 {
   SendTransformEventRefPoint(*aRefPoint, aRefPoint, aOutTargetGuid);
+}
+
+bool
+APZCTreeManagerChild::RecvHandleTap(const TapType& aType,
+                                    const LayoutDevicePoint& aPoint,
+                                    const Modifiers& aModifiers,
+                                    const ScrollableLayerGuid& aGuid,
+                                    const uint64_t& aInputBlockId)
+{
+  MOZ_ASSERT(XRE_IsParentProcess());
+  if (mCompositorSession &&
+      mCompositorSession->RootLayerTreeId() == aGuid.mLayersId &&
+      mCompositorSession->GetContentController()) {
+    mCompositorSession->GetContentController()->HandleTap(aType, aPoint,
+        aModifiers, aGuid, aInputBlockId);
+    return true;
+  }
+  dom::TabParent* tab = dom::TabParent::GetTabParentFromLayersId(aGuid.mLayersId);
+  if (tab) {
+    tab->SendHandleTap(aType, aPoint, aModifiers, aGuid, aInputBlockId);
+  }
+  return true;
+}
+
+bool
+APZCTreeManagerChild::RecvNotifyPinchGesture(const PinchGestureType& aType,
+                                             const ScrollableLayerGuid& aGuid,
+                                             const LayoutDeviceCoord& aSpanChange,
+                                             const Modifiers& aModifiers)
+{
+  // This will only get sent from the GPU process to the parent process, so
+  // this function should never get called in the content process.
+  MOZ_ASSERT(XRE_IsParentProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+
+  // We want to handle it in this process regardless of what the target guid
+  // of the pinch is. This may change in the future.
+  if (mCompositorSession &&
+      mCompositorSession->GetWidget()) {
+    APZCCallbackHelper::NotifyPinchGesture(aType, aSpanChange, aModifiers, mCompositorSession->GetWidget());
+  }
+  return true;
 }
 
 void

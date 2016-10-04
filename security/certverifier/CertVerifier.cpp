@@ -9,10 +9,14 @@
 #include <stdint.h>
 
 #include "BRNameMatchingPolicy.h"
+#include "CTKnownLogs.h"
 #include "ExtendedValidation.h"
+#include "MultiLogCTVerifier.h"
 #include "NSSCertDBTrustDomain.h"
 #include "NSSErrorsService.h"
 #include "cert.h"
+#include "mozilla/Assertions.h"
+#include "mozilla/Casting.h"
 #include "nsNSSComponent.h"
 #include "nsServiceManagerUtils.h"
 #include "pk11pub.h"
@@ -23,6 +27,7 @@
 #include "secmod.h"
 #include "sslerr.h"
 
+using namespace mozilla::ct;
 using namespace mozilla::pkix;
 using namespace mozilla::psm;
 
@@ -41,7 +46,8 @@ CertVerifier::CertVerifier(OcspDownloadConfig odc,
                            PinningMode pinningMode,
                            SHA1Mode sha1Mode,
                            BRNameMatchingPolicy::Mode nameMatchingMode,
-                           NetscapeStepUpPolicy netscapeStepUpPolicy)
+                           NetscapeStepUpPolicy netscapeStepUpPolicy,
+                           CertificateTransparencyMode ctMode)
   : mOCSPDownloadConfig(odc)
   , mOCSPStrict(osc == ocspStrict)
   , mOCSPGETEnabled(ogc == ocspGetEnabled)
@@ -50,15 +56,12 @@ CertVerifier::CertVerifier(OcspDownloadConfig odc,
   , mSHA1Mode(sha1Mode)
   , mNameMatchingMode(nameMatchingMode)
   , mNetscapeStepUpPolicy(netscapeStepUpPolicy)
+  , mCTMode(ctMode)
 {
+  LoadKnownCTLogs();
 }
 
 CertVerifier::~CertVerifier()
-{
-}
-
-void
-InitCertVerifierLog()
 {
 }
 
@@ -125,17 +128,17 @@ BuildCertChainForOneKeyUsage(NSSCertDBTrustDomain& trustDomain, Input certDER,
                              /*optional out*/ CertVerifier::OCSPStaplingStatus*
                                                 ocspStaplingStatus)
 {
-  trustDomain.ResetOCSPStaplingStatus();
+  trustDomain.ResetAccumulatedState();
   Result rv = BuildCertChain(trustDomain, certDER, time,
                              EndEntityOrCA::MustBeEndEntity, ku1,
                              eku, requiredPolicy, stapledOCSPResponse);
   if (rv == Result::ERROR_INADEQUATE_KEY_USAGE) {
-    trustDomain.ResetOCSPStaplingStatus();
+    trustDomain.ResetAccumulatedState();
     rv = BuildCertChain(trustDomain, certDER, time,
                         EndEntityOrCA::MustBeEndEntity, ku2,
                         eku, requiredPolicy, stapledOCSPResponse);
     if (rv == Result::ERROR_INADEQUATE_KEY_USAGE) {
-      trustDomain.ResetOCSPStaplingStatus();
+      trustDomain.ResetAccumulatedState();
       rv = BuildCertChain(trustDomain, certDER, time,
                           EndEntityOrCA::MustBeEndEntity, ku3,
                           eku, requiredPolicy, stapledOCSPResponse);
@@ -150,18 +153,166 @@ BuildCertChainForOneKeyUsage(NSSCertDBTrustDomain& trustDomain, Input certDER,
   return rv;
 }
 
+void
+CertVerifier::LoadKnownCTLogs()
+{
+  mCTVerifier = MakeUnique<MultiLogCTVerifier>();
+  for (const CTLogInfo& log : kCTLogList) {
+    Input publicKey;
+    Result rv = publicKey.Init(
+      BitwiseCast<const uint8_t*, const char*>(log.logKey), log.logKeyLength);
+    if (rv != Success) {
+      MOZ_ASSERT_UNREACHABLE("Failed reading a log key for a known CT Log");
+      continue;
+    }
+    rv = mCTVerifier->AddLog(publicKey);
+    if (rv != Success) {
+      MOZ_ASSERT_UNREACHABLE("Failed initializing a known CT Log");
+      continue;
+    }
+  }
+}
+
+Result
+CertVerifier::VerifySignedCertificateTimestamps(
+  NSSCertDBTrustDomain& trustDomain, const UniqueCERTCertList& builtChain,
+  Input sctsFromTLS, Time time,
+  /*optional out*/ CertificateTransparencyInfo* ctInfo)
+{
+  if (ctInfo) {
+    ctInfo->Reset();
+  }
+  if (mCTMode == CertificateTransparencyMode::Disabled) {
+    return Success;
+  }
+  if (ctInfo) {
+    ctInfo->enabled = true;
+  }
+
+  if (!builtChain || CERT_LIST_EMPTY(builtChain)) {
+    return Result::FATAL_ERROR_INVALID_ARGS;
+  }
+
+  bool gotScts = false;
+  Input embeddedSCTs = trustDomain.GetSCTListFromCertificate();
+  if (embeddedSCTs.GetLength() > 0) {
+    gotScts = true;
+    MOZ_LOG(gCertVerifierLog, LogLevel::Debug,
+            ("Got embedded SCT data of length %zu\n",
+              static_cast<size_t>(embeddedSCTs.GetLength())));
+  }
+  Input sctsFromOCSP = trustDomain.GetSCTListFromOCSPStapling();
+  if (sctsFromOCSP.GetLength() > 0) {
+    gotScts = true;
+    MOZ_LOG(gCertVerifierLog, LogLevel::Debug,
+            ("Got OCSP SCT data of length %zu\n",
+              static_cast<size_t>(sctsFromOCSP.GetLength())));
+  }
+  if (sctsFromTLS.GetLength() > 0) {
+    gotScts = true;
+    MOZ_LOG(gCertVerifierLog, LogLevel::Debug,
+            ("Got TLS SCT data of length %zu\n",
+              static_cast<size_t>(sctsFromTLS.GetLength())));
+  }
+  if (!gotScts) {
+    return Success;
+  }
+
+  CERTCertListNode* endEntityNode = CERT_LIST_HEAD(builtChain);
+  if (!endEntityNode) {
+    return Result::FATAL_ERROR_INVALID_ARGS;
+  }
+  CERTCertListNode* issuerNode = CERT_LIST_NEXT(endEntityNode);
+  if (!issuerNode) {
+    // Issuer certificate is required for SCT verification.
+    return Success;
+  }
+
+  CERTCertificate* endEntity = endEntityNode->cert;
+  CERTCertificate* issuer = issuerNode->cert;
+  if (!endEntity || !issuer) {
+    return Result::FATAL_ERROR_INVALID_ARGS;
+  }
+
+  Input endEntityDER;
+  Result rv = endEntityDER.Init(endEntity->derCert.data,
+                                endEntity->derCert.len);
+  if (rv != Success) {
+    return rv;
+  }
+
+  Input issuerPublicKeyDER;
+  rv = issuerPublicKeyDER.Init(issuer->derPublicKey.data,
+                               issuer->derPublicKey.len);
+  if (rv != Success) {
+    return rv;
+  }
+
+  CTVerifyResult result;
+  rv = mCTVerifier->Verify(endEntityDER, issuerPublicKeyDER,
+                           embeddedSCTs, sctsFromOCSP, sctsFromTLS, time,
+                           result);
+  if (rv != Success) {
+    MOZ_LOG(gCertVerifierLog, LogLevel::Debug,
+            ("SCT verification failed with fatal error %i\n", rv));
+    return rv;
+  }
+
+  if (MOZ_LOG_TEST(gCertVerifierLog, LogLevel::Debug)) {
+    size_t verifiedCount = 0;
+    size_t unknownLogCount = 0;
+    size_t invalidSignatureCount = 0;
+    size_t invalidTimestampCount = 0;
+    for (const SignedCertificateTimestamp& sct : result.scts) {
+      switch (sct.verificationStatus) {
+        case SignedCertificateTimestamp::VerificationStatus::OK:
+          verifiedCount++;
+          break;
+        case SignedCertificateTimestamp::VerificationStatus::UnknownLog:
+          unknownLogCount++;
+          break;
+        case SignedCertificateTimestamp::VerificationStatus::InvalidSignature:
+          invalidSignatureCount++;
+          break;
+        case SignedCertificateTimestamp::VerificationStatus::InvalidTimestamp:
+          invalidTimestampCount++;
+          break;
+        case SignedCertificateTimestamp::VerificationStatus::None:
+        default:
+          MOZ_ASSERT_UNREACHABLE("Unexpected SCT verificationStatus");
+      }
+    }
+    MOZ_LOG(gCertVerifierLog, LogLevel::Debug,
+            ("SCT verification result: "
+             "verified=%zu unknownLog=%zu "
+             "invalidSignature=%zu invalidTimestamp=%zu "
+             "decodingErrors=%zu\n",
+             verifiedCount, unknownLogCount,
+             invalidSignatureCount, invalidTimestampCount,
+             result.decodingErrors));
+  }
+
+  if (ctInfo) {
+    ctInfo->processedSCTs = true;
+    ctInfo->verifyResult = Move(result);
+  }
+  return Success;
+}
+
 bool
 CertVerifier::SHA1ModeMoreRestrictiveThanGivenMode(SHA1Mode mode)
 {
   switch (mSHA1Mode) {
     case SHA1Mode::Forbidden:
       return mode != SHA1Mode::Forbidden;
-    case SHA1Mode::Before2016:
-      return mode != SHA1Mode::Forbidden && mode != SHA1Mode::Before2016;
     case SHA1Mode::ImportedRoot:
+      return mode != SHA1Mode::Forbidden && mode != SHA1Mode::ImportedRoot;
+    case SHA1Mode::ImportedRootOrBefore2016:
       return mode == SHA1Mode::Allowed;
     case SHA1Mode::Allowed:
       return false;
+    // MSVC warns unless we explicitly handle this now-unused option.
+    case SHA1Mode::UsedToBeBefore2016ButNowIsForbidden:
     default:
       MOZ_ASSERT(false, "unexpected SHA1Mode type");
       return true;
@@ -177,11 +328,13 @@ CertVerifier::VerifyCert(CERTCertificate* cert, SECCertificateUsage usage,
                  /*out*/ UniqueCERTCertList& builtChain,
             /*optional*/ const Flags flags,
             /*optional*/ const SECItem* stapledOCSPResponseSECItem,
+            /*optional*/ const SECItem* sctsFromTLSSECItem,
         /*optional out*/ SECOidTag* evOidPolicy,
         /*optional out*/ OCSPStaplingStatus* ocspStaplingStatus,
         /*optional out*/ KeySizeStatus* keySizeStatus,
         /*optional out*/ SHA1ModeResult* sha1ModeResult,
-        /*optional out*/ PinningTelemetryInfo* pinningTelemetryInfo)
+        /*optional out*/ PinningTelemetryInfo* pinningTelemetryInfo,
+        /*optional out*/ CertificateTransparencyInfo* ctInfo)
 {
   MOZ_LOG(gCertVerifierLog, LogLevel::Debug, ("Top of VerifyCert\n"));
 
@@ -257,6 +410,15 @@ CertVerifier::VerifyCert(CERTCertificate* cert, SECCertificateUsage usage,
     stapledOCSPResponse = &stapledOCSPResponseInput;
   }
 
+  Input sctsFromTLSInput;
+  if (sctsFromTLSSECItem) {
+    rv = sctsFromTLSInput.Init(sctsFromTLSSECItem->data,
+                               sctsFromTLSSECItem->len);
+    // Silently discard the error of the extension being too big,
+    // do not fail the verification.
+    MOZ_ASSERT(rv == Success);
+  }
+
   switch (usage) {
     case certificateUsageSSLClient: {
       // XXX: We don't really have a trust bit for SSL client authentication so
@@ -287,15 +449,15 @@ CertVerifier::VerifyCert(CERTCertificate* cert, SECCertificateUsage usage,
       // results of setting the default policy to a particular configuration.
       SHA1Mode sha1ModeConfigurations[] = {
         SHA1Mode::Forbidden,
-        SHA1Mode::Before2016,
         SHA1Mode::ImportedRoot,
+        SHA1Mode::ImportedRootOrBefore2016,
         SHA1Mode::Allowed,
       };
 
       SHA1ModeResult sha1ModeResults[] = {
         SHA1ModeResult::SucceededWithoutSHA1,
-        SHA1ModeResult::SucceededWithSHA1Before2016,
         SHA1ModeResult::SucceededWithImportedRoot,
+        SHA1ModeResult::SucceededWithImportedRootOrSHA1Before2016,
         SHA1ModeResult::SucceededWithSHA1,
       };
 
@@ -350,15 +512,6 @@ CertVerifier::VerifyCert(CERTCertificate* cert, SECCertificateUsage usage,
                                           KeyPurposeId::id_kp_serverAuth,
                                           evPolicy, stapledOCSPResponse,
                                           ocspStaplingStatus);
-        // If we succeeded with the SHA1Mode of only allowing imported roots to
-        // issue SHA1 certificates after 2015, if the chain we built doesn't
-        // terminate with an imported root, we must reject it. (This only works
-        // because we try SHA1 configurations in order of decreasing
-        // strictness.)
-        // Note that if there existed a certificate chain with a built-in root
-        // that had SHA1 certificates issued before 2016, it would have already
-        // been accepted. If such a chain had SHA1 certificates issued after
-        // 2015, it will only be accepted in the SHA1Mode::Allowed case.
         if (rv == Success &&
             sha1ModeConfigurations[i] == SHA1Mode::ImportedRoot) {
           bool isBuiltInRoot = false;
@@ -378,6 +531,12 @@ CertVerifier::VerifyCert(CERTCertificate* cert, SECCertificateUsage usage,
           }
           if (sha1ModeResult) {
             *sha1ModeResult = sha1ModeResults[i];
+          }
+          rv = VerifySignedCertificateTimestamps(trustDomain, builtChain,
+                                                 sctsFromTLSInput, time,
+                                                 ctInfo);
+          if (rv != Success) {
+            break;
           }
         }
       }
@@ -442,15 +601,6 @@ CertVerifier::VerifyCert(CERTCertificate* cert, SECCertificateUsage usage,
                                             CertPolicyId::anyPolicy,
                                             stapledOCSPResponse,
                                             ocspStaplingStatus);
-          // If we succeeded with the SHA1Mode of only allowing imported roots
-          // to issue SHA1 certificates after 2015, if the chain we built
-          // doesn't terminate with an imported root, we must reject it. (This
-          // only works because we try SHA1 configurations in order of
-          // decreasing strictness.)
-          // Note that if there existed a certificate chain with a built-in root
-          // that had SHA1 certificates issued before 2016, it would have
-          // already been accepted. If such a chain had SHA1 certificates issued
-          // after 2015, it will only be accepted in the SHA1Mode::Allowed case.
           if (rv == Success &&
               sha1ModeConfigurations[j] == SHA1Mode::ImportedRoot) {
             bool isBuiltInRoot = false;
@@ -469,6 +619,12 @@ CertVerifier::VerifyCert(CERTCertificate* cert, SECCertificateUsage usage,
             if (sha1ModeResult) {
               *sha1ModeResult = sha1ModeResults[j];
             }
+            rv = VerifySignedCertificateTimestamps(trustDomain, builtChain,
+                                                   sctsFromTLSInput, time,
+                                                   ctInfo);
+            if (rv != Success) {
+              break;
+            }
           }
         }
       }
@@ -480,10 +636,13 @@ CertVerifier::VerifyCert(CERTCertificate* cert, SECCertificateUsage usage,
       if (keySizeStatus) {
         *keySizeStatus = KeySizeStatus::AlreadyBad;
       }
-      // Only collect CERT_CHAIN_SHA1_POLICY_STATUS telemetry indicating a
-      // failure when mSHA1Mode is the default.
-      // NB: When we change the default, we have to change this.
-      if (sha1ModeResult && mSHA1Mode == SHA1Mode::ImportedRoot) {
+      // The telemetry probe CERT_CHAIN_SHA1_POLICY_STATUS gives us feedback on
+      // the result of setting a specific policy. However, we don't want noise
+      // from users who have manually set the policy to Allowed or Forbidden, so
+      // we only collect for ImportedRoot or ImportedRootOrBefore2016.
+      if (sha1ModeResult &&
+          (mSHA1Mode == SHA1Mode::ImportedRoot ||
+           mSHA1Mode == SHA1Mode::ImportedRootOrBefore2016)) {
         *sha1ModeResult = SHA1ModeResult::Failed;
       }
 
@@ -496,7 +655,7 @@ CertVerifier::VerifyCert(CERTCertificate* cert, SECCertificateUsage usage,
                                        mCertShortLifetimeInDays,
                                        pinningDisabled, MIN_RSA_BITS_WEAK,
                                        ValidityCheckingMode::CheckingOff,
-                                       mSHA1Mode, mNetscapeStepUpPolicy,
+                                       SHA1Mode::Allowed, mNetscapeStepUpPolicy,
                                        builtChain, nullptr, nullptr);
       rv = BuildCertChain(trustDomain, certDER, time,
                           EndEntityOrCA::MustBeCA, KeyUsage::keyCertSign,
@@ -648,6 +807,7 @@ CertVerifier::VerifyCert(CERTCertificate* cert, SECCertificateUsage usage,
 SECStatus
 CertVerifier::VerifySSLServerCert(const UniqueCERTCertificate& peerCert,
                      /*optional*/ const SECItem* stapledOCSPResponse,
+                     /*optional*/ const SECItem* sctsFromTLS,
                                   Time time,
                      /*optional*/ void* pinarg,
                                   const char* hostname,
@@ -658,7 +818,8 @@ CertVerifier::VerifySSLServerCert(const UniqueCERTCertificate& peerCert,
                  /*optional out*/ OCSPStaplingStatus* ocspStaplingStatus,
                  /*optional out*/ KeySizeStatus* keySizeStatus,
                  /*optional out*/ SHA1ModeResult* sha1ModeResult,
-                 /*optional out*/ PinningTelemetryInfo* pinningTelemetryInfo)
+                 /*optional out*/ PinningTelemetryInfo* pinningTelemetryInfo,
+                 /*optional out*/ CertificateTransparencyInfo* ctInfo)
 {
   PR_ASSERT(peerCert);
   // XXX: PR_ASSERT(pinarg)
@@ -678,9 +839,10 @@ CertVerifier::VerifySSLServerCert(const UniqueCERTCertificate& peerCert,
   // if VerifyCert succeeded.
   SECStatus rv = VerifyCert(peerCert.get(), certificateUsageSSLServer, time,
                             pinarg, hostname, builtChain, flags,
-                            stapledOCSPResponse, evOidPolicy,
-                            ocspStaplingStatus, keySizeStatus,
-                            sha1ModeResult, pinningTelemetryInfo);
+                            stapledOCSPResponse, sctsFromTLS,
+                            evOidPolicy, ocspStaplingStatus, keySizeStatus,
+                            sha1ModeResult, pinningTelemetryInfo,
+                            ctInfo);
   if (rv != SECSuccess) {
     return rv;
   }
@@ -716,7 +878,8 @@ CertVerifier::VerifySSLServerCert(const UniqueCERTCertificate& peerCert,
   }
 
   Input hostnameInput;
-  result = hostnameInput.Init(uint8_t_ptr_cast(hostname), strlen(hostname));
+  result = hostnameInput.Init(BitwiseCast<const uint8_t*, const char*>(hostname),
+                              strlen(hostname));
   if (result != Success) {
     PR_SetError(SEC_ERROR_INVALID_ARGS, 0);
     return SECFailure;

@@ -20,7 +20,7 @@
 #include "DocumentType.h"
 #include "nsHTMLParts.h"
 #include "nsCRT.h"
-#include "mozilla/CSSStyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 #include "mozilla/css/Loader.h"
 #include "nsGkAtoms.h"
 #include "nsContentUtils.h"
@@ -411,7 +411,7 @@ nsXMLContentSink::OnTransformDone(nsresult aResult,
 }
 
 NS_IMETHODIMP
-nsXMLContentSink::StyleSheetLoaded(StyleSheetHandle aSheet,
+nsXMLContentSink::StyleSheetLoaded(StyleSheet* aSheet,
                                    bool aWasAlternate,
                                    nsresult aStatus)
 {
@@ -1303,8 +1303,7 @@ nsXMLContentSink::ReportError(const char16_t* aErrorText,
   mDocument->RemoveObserver(this);
   mIsDocumentObserver = false;
 
-  // Clear the current content and
-  // prepare to set <parsererror> as the document root
+  // Clear the current content
   nsCOMPtr<nsIDOMNode> node(do_QueryInterface(mDocument));
   if (node) {
     for (;;) {
@@ -1332,6 +1331,12 @@ nsXMLContentSink::ReportError(const char16_t* aErrorText,
   mContentStack.Clear();
   mNotifyLevel = 0;
 
+  // return leaving the document empty if we're asked to not add a <parsererror> root node
+  if (mDocument->SuppressParserErrorElement()) {
+    return NS_OK;
+  }
+
+  // prepare to set <parsererror> as the document root
   rv = HandleProcessingInstruction(u"xml-stylesheet",
                                    u"href=\"chrome://global/locale/intl.css\" type=\"text/css\"");
   NS_ENSURE_SUCCESS(rv, rv);

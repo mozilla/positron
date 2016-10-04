@@ -48,13 +48,8 @@ define(function (require, exports, module) {
     // Make sure it's a string.
     text = text + "";
 
-    // Use default limit if necessary.
-    if (!limit) {
-      limit = 50;
-    }
-
     // Crop the string only if a limit is actually specified.
-    if (limit <= 0) {
+    if (!limit || limit <= 0) {
       return text;
     }
 
@@ -109,6 +104,10 @@ define(function (require, exports, module) {
     return {};
   }
 
+  function getURLDisplayString(url) {
+    return cropString(url);
+  }
+
   function isDataURL(url) {
     return (url && url.substr(0, 5) == "data:");
   }
@@ -147,4 +146,5 @@ define(function (require, exports, module) {
   exports.parseURLParams = parseURLParams;
   exports.parseURLEncodedText = parseURLEncodedText;
   exports.getFileName = getFileName;
+  exports.getURLDisplayString = getURLDisplayString;
 });

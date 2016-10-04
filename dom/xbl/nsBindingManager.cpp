@@ -49,7 +49,7 @@
 #include "nsThreadUtils.h"
 #include "mozilla/dom/NodeListBinding.h"
 #include "mozilla/dom/ScriptSettings.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -770,7 +770,7 @@ nsBindingManager::MediumFeaturesChanged(nsPresContext* aPresContext,
 }
 
 void
-nsBindingManager::AppendAllSheets(nsTArray<StyleSheetHandle>& aArray)
+nsBindingManager::AppendAllSheets(nsTArray<StyleSheet*>& aArray)
 {
   if (!mBoundContentSet) {
     return;

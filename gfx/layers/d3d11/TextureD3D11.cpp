@@ -11,7 +11,7 @@
 #include "gfx2DGlue.h"
 #include "gfxPrefs.h"
 #include "ReadbackManagerD3D11.h"
-#include "mozilla/gfx/DeviceManagerD3D11.h"
+#include "mozilla/gfx/DeviceManagerDx.h"
 #include "mozilla/gfx/Logging.h"
 
 namespace mozilla {
@@ -365,7 +365,7 @@ D3D11TextureData::Create(IntSize aSize, SurfaceFormat aFormat, SourceSurface* aS
   // to use from any thread.
   RefPtr<ID3D11Device> device = aDevice;
   if (!device) {
-    device = DeviceManagerD3D11::Get()->GetContentDevice();
+    device = DeviceManagerDx::Get()->GetContentDevice();
     if (!device) {
       return nullptr;
     }
@@ -457,7 +457,7 @@ D3D11TextureData::Create(SourceSurface* aSurface,
 }
 
 void
-D3D11TextureData::Deallocate(ClientIPCAllocator* aAllocator)
+D3D11TextureData::Deallocate(LayersIPCChannel* aAllocator)
 {
   mDrawTarget = nullptr;
   mTexture = nullptr;
@@ -467,7 +467,7 @@ already_AddRefed<TextureClient>
 CreateD3D11TextureClientWithDevice(IntSize aSize, SurfaceFormat aFormat,
                                    TextureFlags aTextureFlags, TextureAllocationFlags aAllocFlags,
                                    ID3D11Device* aDevice,
-                                   ClientIPCAllocator* aAllocator)
+                                   LayersIPCChannel* aAllocator)
 {
   TextureData* data = D3D11TextureData::Create(aSize, aFormat, aAllocFlags, aDevice);
   if (!data) {
@@ -477,7 +477,8 @@ CreateD3D11TextureClientWithDevice(IntSize aSize, SurfaceFormat aFormat,
 }
 
 TextureData*
-D3D11TextureData::CreateSimilar(ClientIPCAllocator* aAllocator,
+D3D11TextureData::CreateSimilar(LayersIPCChannel* aAllocator,
+                                LayersBackend aLayersBackend,
                                 TextureFlags aFlags,
                                 TextureAllocationFlags aAllocFlags) const
 {
@@ -491,8 +492,7 @@ D3D11TextureData::GetDXGIResource(IDXGIResource** aOutResource)
 }
 
 DXGIYCbCrTextureData*
-DXGIYCbCrTextureData::Create(ClientIPCAllocator* aAllocator,
-                             TextureFlags aFlags,
+DXGIYCbCrTextureData::Create(TextureFlags aFlags,
                              IUnknown* aTextureY,
                              IUnknown* aTextureCb,
                              IUnknown* aTextureCr,
@@ -523,8 +523,7 @@ DXGIYCbCrTextureData::Create(ClientIPCAllocator* aAllocator,
 }
 
 DXGIYCbCrTextureData*
-DXGIYCbCrTextureData::Create(ClientIPCAllocator* aAllocator,
-                             TextureFlags aFlags,
+DXGIYCbCrTextureData::Create(TextureFlags aFlags,
                              ID3D11Texture2D* aTextureY,
                              ID3D11Texture2D* aTextureCb,
                              ID3D11Texture2D* aTextureCr,
@@ -568,7 +567,7 @@ DXGIYCbCrTextureData::Create(ClientIPCAllocator* aAllocator,
     return nullptr;
   }
 
-  return DXGIYCbCrTextureData::Create(aAllocator, aFlags,
+  return DXGIYCbCrTextureData::Create(aFlags,
                                       aTextureY, aTextureCb, aTextureCr,
                                       handleY, handleCb, handleCr,
                                       aSize, aSizeY, aSizeCbCr);
@@ -595,7 +594,7 @@ DXGIYCbCrTextureData::Serialize(SurfaceDescriptor& aOutDescriptor)
 }
 
 void
-DXGIYCbCrTextureData::Deallocate(ClientIPCAllocator*)
+DXGIYCbCrTextureData::Deallocate(LayersIPCChannel*)
 {
   mHoldRefs[0] = nullptr;
   mHoldRefs[1] = nullptr;
@@ -696,7 +695,7 @@ DXGITextureHostD3D11::GetDevice()
     return nullptr;
   }
 
-  return DeviceManagerD3D11::Get()->GetCompositorDevice();
+  return DeviceManagerDx::Get()->GetCompositorDevice();
 }
 
 static CompositorD3D11* AssertD3D11Compositor(Compositor* aCompositor)
@@ -734,10 +733,39 @@ bool
 DXGITextureHostD3D11::Lock()
 {
   if (!mCompositor) {
-    NS_WARNING("no suitable compositor");
+    // Make an early return here if we call SetCompositor() with an incompatible
+    // compositor. This check tries to prevent the problem where we use that
+    // incompatible compositor to compose this texture.
     return false;
   }
 
+  return LockInternal();
+}
+
+bool
+DXGITextureHostD3D11::LockWithoutCompositor()
+{
+  // Unlike the normal Lock() function, this function may be called when
+  // mCompositor is nullptr such as during WebVR frame submission. So, there is
+  // no 'mCompositor' checking here.
+  return LockInternal();
+}
+
+void
+DXGITextureHostD3D11::Unlock()
+{
+  UnlockInternal();
+}
+
+void
+DXGITextureHostD3D11::UnlockWithoutCompositor()
+{
+  UnlockInternal();
+}
+
+bool
+DXGITextureHostD3D11::LockInternal()
+{
   if (!GetDevice()) {
     NS_WARNING("trying to lock a TextureHost without a D3D device");
     return false;
@@ -758,7 +786,7 @@ DXGITextureHostD3D11::Lock()
 }
 
 void
-DXGITextureHostD3D11::Unlock()
+DXGITextureHostD3D11::UnlockInternal()
 {
   UnlockD3DTexture(mTextureSource->GetD3D11Texture());
 }
@@ -832,7 +860,7 @@ DXGIYCbCrTextureHostD3D11::GetDevice()
     return nullptr;
   }
 
-  return DeviceManagerD3D11::Get()->GetCompositorDevice();
+  return DeviceManagerDx::Get()->GetCompositorDevice();
 }
 
 void
@@ -1156,7 +1184,7 @@ SyncObjectD3D11::FinalizeFrame()
   HRESULT hr;
 
   if (!mD3D11Texture && mD3D11SyncedTextures.size()) {
-    RefPtr<ID3D11Device> device = DeviceManagerD3D11::Get()->GetContentDevice();
+    RefPtr<ID3D11Device> device = DeviceManagerDx::Get()->GetContentDevice();
 
     hr = device->OpenSharedResource(mHandle, __uuidof(ID3D11Texture2D), (void**)(ID3D11Texture2D**)getter_AddRefs(mD3D11Texture));
 
@@ -1199,7 +1227,7 @@ SyncObjectD3D11::FinalizeFrame()
     box.front = box.top = box.left = 0;
     box.back = box.bottom = box.right = 1;
 
-    RefPtr<ID3D11Device> dev = DeviceManagerD3D11::Get()->GetContentDevice();
+    RefPtr<ID3D11Device> dev = DeviceManagerDx::Get()->GetContentDevice();
     if (!dev) {
       if (gfxWindowsPlatform::GetPlatform()->DidRenderingDeviceReset()) {
         return;

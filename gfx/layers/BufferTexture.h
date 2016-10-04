@@ -22,11 +22,13 @@ class BufferTextureData : public TextureData
 {
 public:
   static BufferTextureData* Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
-                                   gfx::BackendType aMoz2DBackend,TextureFlags aFlags,
+                                   gfx::BackendType aMoz2DBackend,
+                                   LayersBackend aLayersBackend,
+                                   TextureFlags aFlags,
                                    TextureAllocationFlags aAllocFlags,
-                                   ClientIPCAllocator* aAllocator);
+                                   LayersIPCChannel* aAllocator);
 
-  static BufferTextureData* CreateForYCbCr(ClientIPCAllocator* aAllocator,
+  static BufferTextureData* CreateForYCbCr(KnowsCompositor* aAllocator,
                                            gfx::IntSize aYSize,
                                            gfx::IntSize aCbCrSize,
                                            StereoMode aStereoMode,
@@ -35,7 +37,7 @@ public:
   // It is generally better to use CreateForYCbCr instead.
   // This creates a half-initialized texture since we don't know the sizes and
   // offsets in the buffer.
-  static BufferTextureData* CreateForYCbCrWithBufferSize(ClientIPCAllocator* aAllocator,
+  static BufferTextureData* CreateForYCbCrWithBufferSize(KnowsCompositor* aAllocator,
                                                          int32_t aSize,
                                                          TextureFlags aTextureFlags);
 
@@ -68,7 +70,7 @@ protected:
 
   gfx::SurfaceFormat GetFormat() const;
 
-  static BufferTextureData* CreateInternal(ClientIPCAllocator* aAllocator,
+  static BufferTextureData* CreateInternal(LayersIPCChannel* aAllocator,
                                            const BufferDescriptor& aDesc,
                                            gfx::BackendType aMoz2DBackend,
                                            int32_t aBufferSize,

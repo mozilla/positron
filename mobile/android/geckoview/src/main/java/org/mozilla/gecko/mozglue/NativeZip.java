@@ -17,6 +17,7 @@ public class NativeZip implements NativeReference {
     private static final int STORE = 0;
 
     private volatile long mObj;
+    @JNITarget
     private InputStream mInput;
 
     public NativeZip(String path) {
@@ -34,11 +35,7 @@ public class NativeZip implements NativeReference {
     }
 
     @Override
-    public void finalize() {
-        release();
-    }
-
-    public void close() {
+    protected void finalize() {
         release();
     }
 

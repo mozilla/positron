@@ -471,6 +471,7 @@ GLContext::GLContext(CreateContextFlags flags, const SurfaceCaps& caps,
     mNeedsTextureSizeChecks(false),
     mNeedsFlushBeforeDeleteFB(false),
     mTextureAllocCrashesOnMapFailure(false),
+    mNeedsCheckAfterAttachTextureToFb(false),
     mWorkAroundDriverBugs(true),
     mHeavyGLCallsSinceLastFlush(false)
 {
@@ -788,7 +789,7 @@ GLContext::InitWithPrefixImpl(const char* prefix, bool trygl)
 
     // The order of these strings must match up with the order of the enum
     // defined in GLContext.h for vendor IDs.
-    const char* vendorMatchStrings[size_t(GLVendor::Other)] = {
+    const char* vendorMatchStrings[size_t(GLVendor::Other) + 1] = {
         "Intel",
         "NVIDIA",
         "ATI",
@@ -797,7 +798,8 @@ GLContext::InitWithPrefixImpl(const char* prefix, bool trygl)
         "nouveau",
         "Vivante",
         "VMware, Inc.",
-        "ARM"
+        "ARM",
+        "Unknown"
     };
 
     mVendor = GLVendor::Other;
@@ -810,7 +812,7 @@ GLContext::InitWithPrefixImpl(const char* prefix, bool trygl)
 
     // The order of these strings must match up with the order of the enum
     // defined in GLContext.h for renderer IDs.
-    const char* rendererMatchStrings[size_t(GLRenderer::Other)] = {
+    const char* rendererMatchStrings[size_t(GLRenderer::Other) + 1] = {
         "Adreno 200",
         "Adreno 205",
         "Adreno (TM) 200",
@@ -820,13 +822,15 @@ GLContext::InitWithPrefixImpl(const char* prefix, bool trygl)
         "Adreno (TM) 330",
         "Adreno (TM) 420",
         "Mali-400 MP",
+        "Mali-450 MP",
         "PowerVR SGX 530",
         "PowerVR SGX 540",
         "NVIDIA Tegra",
         "Android Emulator",
         "Gallium 0.4 on llvmpipe",
         "Intel HD Graphics 3000 OpenGL Engine",
-        "Microsoft Basic Render Driver"
+        "Microsoft Basic Render Driver",
+        "Unknown"
     };
 
     mRenderer = GLRenderer::Other;
@@ -838,20 +842,10 @@ GLContext::InitWithPrefixImpl(const char* prefix, bool trygl)
     }
 
     if (ShouldSpew()) {
-        const char* vendors[size_t(GLVendor::Other)] = {
-            "Intel",
-            "NVIDIA",
-            "ATI",
-            "Qualcomm"
-        };
-
-        MOZ_ASSERT(glVendorString);
-        if (mVendor < GLVendor::Other) {
-            printf_stderr("OpenGL vendor ('%s') recognized as: %s\n",
-                          glVendorString, vendors[size_t(mVendor)]);
-        } else {
-            printf_stderr("OpenGL vendor ('%s') not recognized.\n", glVendorString);
-        }
+        printf_stderr("GL_VENDOR: %s\n", glVendorString);
+        printf_stderr("mVendor: %s\n", vendorMatchStrings[size_t(mVendor)]);
+        printf_stderr("GL_RENDERER: %s\n", glRendererString);
+        printf_stderr("mRenderer: %s\n", rendererMatchStrings[size_t(mRenderer)]);
     }
 
     ////////////////
@@ -1069,6 +1063,17 @@ GLContext::InitWithPrefixImpl(const char* prefix, bool trygl)
         // Bug 1164027. Driver crashes when functions such as
         // glTexImage2D fail due to virtual memory exhaustion.
         mTextureAllocCrashesOnMapFailure = true;
+    }
+#endif
+#if MOZ_WIDGET_ANDROID
+    if (mWorkAroundDriverBugs &&
+        Renderer() == GLRenderer::SGX540 &&
+        AndroidBridge::Bridge()->GetAPIVersion() <= 15) {
+        // Bug 1288446. Driver sometimes crashes when uploading data to a
+        // texture if the render target has changed since the texture was
+        // rendered from. Calling glCheckFramebufferStatus after
+        // glFramebufferTexture2D prevents the crash.
+        mNeedsCheckAfterAttachTextureToFb = true;
     }
 #endif
 
@@ -1797,7 +1802,8 @@ GLContext::InitExtensions()
         }
 
         if (Vendor() == GLVendor::ARM &&
-            Renderer() == GLRenderer::Mali400MP)
+            (Renderer() == GLRenderer::Mali400MP ||
+             Renderer() == GLRenderer::Mali450MP))
         {
             // Bug 1264505
             MarkExtensionUnsupported(OES_EGL_image_external);

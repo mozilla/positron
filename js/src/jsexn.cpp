@@ -12,6 +12,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/Sprintf.h"
 
 #include <string.h>
 
@@ -84,7 +85,8 @@ static const ClassOps ErrorObjectClassOps = {
     { \
         js_Error_str, /* yes, really */ \
         JSCLASS_HAS_CACHED_PROTO(JSProto_##name) | \
-        JSCLASS_HAS_RESERVED_SLOTS(ErrorObject::RESERVED_SLOTS), \
+        JSCLASS_HAS_RESERVED_SLOTS(ErrorObject::RESERVED_SLOTS) | \
+        JSCLASS_BACKGROUND_FINALIZE, \
         &ErrorObjectClassOps, \
         classSpecPtr \
     }
@@ -114,7 +116,7 @@ ErrorObject::subErrorClassSpec_ = {
 };
 
 const ClassSpec
-ErrorObject::debuggeeWouldRunClassSpec_ = {
+ErrorObject::nonGlobalErrorClassSpec_ = {
     ErrorObject::createConstructor,
     ErrorObject::createProto,
     nullptr,
@@ -136,9 +138,10 @@ ErrorObject::classes[JSEXN_LIMIT] = {
     IMPLEMENT_ERROR_CLASS(TypeError,      &ErrorObject::subErrorClassSpec_),
     IMPLEMENT_ERROR_CLASS(URIError,       &ErrorObject::subErrorClassSpec_),
 
-    // DebuggeeWouldRun is a subclass of Error but is accessible via the
-    // Debugger constructor, not the global.
-    IMPLEMENT_ERROR_CLASS(DebuggeeWouldRun, &ErrorObject::debuggeeWouldRunClassSpec_)
+    // These Error subclasses are not accessible via the global object:
+    IMPLEMENT_ERROR_CLASS(DebuggeeWouldRun, &ErrorObject::nonGlobalErrorClassSpec_),
+    IMPLEMENT_ERROR_CLASS(CompileError,   &ErrorObject::nonGlobalErrorClassSpec_),
+    IMPLEMENT_ERROR_CLASS(RuntimeError,   &ErrorObject::nonGlobalErrorClassSpec_)
 };
 
 JSErrorReport*
@@ -260,6 +263,7 @@ js::ComputeStackString(JSContext* cx)
 static void
 exn_finalize(FreeOp* fop, JSObject* obj)
 {
+    MOZ_ASSERT(fop->maybeOffMainThread());
     if (JSErrorReport* report = obj->as<ErrorObject>().getErrorReport())
         fop->free_(report);
 }
@@ -701,12 +705,11 @@ ErrorReport::ReportAddonExceptionToTelementry(JSContext* cx)
         filename = "FILE_NOT_FOUND";
     }
     char histogramKey[64];
-    snprintf(histogramKey, sizeof(histogramKey),
-            "%s %s %s %u",
-            addonIdChars.get(),
-            funname,
-            filename,
-            (reportp ? reportp->lineno : 0) );
+    SprintfLiteral(histogramKey, "%s %s %s %u",
+                   addonIdChars.get(),
+                   funname,
+                   filename,
+                   (reportp ? reportp->lineno : 0) );
     cx->runtime()->addTelemetry(JS_TELEMETRY_ADDON_EXCEPTIONS, 1, histogramKey);
 }
 
@@ -860,7 +863,7 @@ ErrorReport::init(JSContext* cx, HandleValue exn,
         //
         // but without the reporting bits.  Instead it just puts all
         // the stuff we care about in our ownedReport and message_.
-        if (!populateUncaughtExceptionReport(cx, message_)) {
+        if (!populateUncaughtExceptionReportUTF8(cx, message_)) {
             // Just give up.  We're out of memory or something; not much we can
             // do here.
             return false;
@@ -874,17 +877,17 @@ ErrorReport::init(JSContext* cx, HandleValue exn,
 }
 
 bool
-ErrorReport::populateUncaughtExceptionReport(JSContext* cx, ...)
+ErrorReport::populateUncaughtExceptionReportUTF8(JSContext* cx, ...)
 {
     va_list ap;
     va_start(ap, cx);
-    bool ok = populateUncaughtExceptionReportVA(cx, ap);
+    bool ok = populateUncaughtExceptionReportUTF8VA(cx, ap);
     va_end(ap);
     return ok;
 }
 
 bool
-ErrorReport::populateUncaughtExceptionReportVA(JSContext* cx, va_list ap)
+ErrorReport::populateUncaughtExceptionReportUTF8VA(JSContext* cx, va_list ap)
 {
     new (&ownedReport) JSErrorReport();
     ownedReport.flags = JSREPORT_ERROR;
@@ -905,7 +908,7 @@ ErrorReport::populateUncaughtExceptionReportVA(JSContext* cx, va_list ap)
 
     if (!ExpandErrorArgumentsVA(cx, GetErrorMessage, nullptr,
                                 JSMSG_UNCAUGHT_EXCEPTION, &ownedMessage,
-                                nullptr, ArgumentsAreASCII, &ownedReport, ap)) {
+                                nullptr, ArgumentsAreUTF8, &ownedReport, ap)) {
         return false;
     }
 

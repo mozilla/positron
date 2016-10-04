@@ -7,7 +7,9 @@
 
 #include "nsISupports.h"
 #include "mozilla/net/ChannelEventQueue.h"
+#include "mozilla/Unused.h"
 #include "nsThreadUtils.h"
+#include "mozilla/Unused.h"
 
 namespace mozilla {
 namespace net {
@@ -35,6 +37,7 @@ ChannelEventQueue::FlushQueue()
   // destructor) unless we make sure its refcount doesn't drop to 0 while this
   // method is running.
   nsCOMPtr<nsISupports> kungFuDeathGrip(mOwner);
+  mozilla::Unused << kungFuDeathGrip; // Not used in this function
 
   // Prevent flushed events from flushing the queue recursively
   {
@@ -73,7 +76,7 @@ ChannelEventQueue::Resume()
       mTargetThread->Dispatch(event.forget(), NS_DISPATCH_NORMAL);
     } else {
       MOZ_RELEASE_ASSERT(NS_IsMainThread());
-      NS_WARN_IF(NS_FAILED(NS_DispatchToCurrentThread(event.forget())));
+      Unused << NS_WARN_IF(NS_FAILED(NS_DispatchToCurrentThread(event.forget())));
     }
   }
 }

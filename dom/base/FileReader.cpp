@@ -181,7 +181,7 @@ FileReader::GetResult(JSContext* aCx,
   }
 }
 
-static NS_IMETHODIMP
+static nsresult
 ReadFuncBinaryString(nsIInputStream* in,
                      void* closure,
                      const char* fromRawSegment,
@@ -701,7 +701,7 @@ nsresult
 FileReader::IncreaseBusyCounter()
 {
   if (mWorkerPrivate && mBusyCount++ == 0 &&
-      !HoldWorker(mWorkerPrivate)) {
+      !HoldWorker(mWorkerPrivate, Closing)) {
     return NS_ERROR_FAILURE;
   }
 

@@ -102,6 +102,15 @@ treecol {
 }
 
 /* header */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.header[hidden=true] {
+  display: none;
+}
 
 #header-advanced {
   border-bottom: none;
@@ -488,6 +497,8 @@ description > html|a {
 .fxaAccountBoxButtons {
   margin-bottom: 0 !important;
   margin-top: 11px;
+  display: flex;
+  align-items: center;
 }
 
 .fxaAccountBoxButtons > * {

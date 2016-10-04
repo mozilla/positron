@@ -366,7 +366,7 @@ nsSVGPathGeometryFrame::GetFrameForPoint(const gfxPoint& aPoint)
       // coordinate system in order for non-scaled stroke to be correct.
       // Naturally we also need to transform the point into the same
       // coordinate system in order to hit-test against the path.
-      point = ToMatrix(userToOuterSVG) * point;
+      point = ToMatrix(userToOuterSVG).TransformPoint(point);
       RefPtr<PathBuilder> builder =
         path->TransformedCopyToBuilder(ToMatrix(userToOuterSVG), fillRule);
       path = builder->Finish();
@@ -676,7 +676,8 @@ nsSVGPathGeometryFrame::GetBBoxContribution(const Matrix &aToBBoxUserspace,
         properties.GetMarkerMidFrame(),
         properties.GetMarkerEndFrame(),
       };
-      PR_STATIC_ASSERT(MOZ_ARRAY_LENGTH(markerFrames) == nsSVGMark::eTypeCount);
+      static_assert(MOZ_ARRAY_LENGTH(markerFrames) == nsSVGMark::eTypeCount,
+                    "Number of Marker frames should be equal to eTypeCount");
 
       for (uint32_t i = 0; i < num; i++) {
         nsSVGMark& mark = marks[i];
@@ -898,7 +899,8 @@ nsSVGPathGeometryFrame::PaintMarkers(gfxContext& aContext,
           properties.GetMarkerMidFrame(),
           properties.GetMarkerEndFrame(),
         };
-        PR_STATIC_ASSERT(MOZ_ARRAY_LENGTH(markerFrames) == nsSVGMark::eTypeCount);
+        static_assert(MOZ_ARRAY_LENGTH(markerFrames) == nsSVGMark::eTypeCount,
+                      "Number of Marker frames should be equal to eTypeCount");
 
         for (uint32_t i = 0; i < num; i++) {
           nsSVGMark& mark = marks[i];

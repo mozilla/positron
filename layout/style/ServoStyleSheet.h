@@ -11,7 +11,6 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/ServoBindingHelpers.h"
 #include "mozilla/StyleSheet.h"
-#include "mozilla/StyleSheetHandle.h"
 #include "mozilla/StyleSheetInfo.h"
 #include "nsStringFwd.h"
 
@@ -31,20 +30,18 @@ public:
 
   NS_INLINE_DECL_REFCOUNTING(ServoStyleSheet)
 
-  bool IsApplicable() const;
   bool HasRules() const;
 
-  nsIDocument* GetOwningDocument() const;
   void SetOwningDocument(nsIDocument* aDocument);
 
-  StyleSheetHandle GetParentSheet() const;
-  void AppendStyleSheet(StyleSheetHandle aSheet);
+  ServoStyleSheet* GetParentSheet() const;
+  void AppendStyleSheet(ServoStyleSheet* aSheet);
 
-  void ParseSheet(const nsAString& aInput,
-                  nsIURI* aSheetURI,
-                  nsIURI* aBaseURI,
-                  nsIPrincipal* aSheetPrincipal,
-                  uint32_t aLineNumber);
+  MOZ_MUST_USE nsresult ParseSheet(const nsAString& aInput,
+                                   nsIURI* aSheetURI,
+                                   nsIURI* aBaseURI,
+                                   nsIPrincipal* aSheetPrincipal,
+                                   uint32_t aLineNumber);
 
   size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
 

@@ -234,7 +234,7 @@ public:
     NS_DECL_ISUPPORTS
 
     // nsIObserver implementation.
-    NS_IMETHODIMP
+    NS_IMETHOD
     Observe(nsISupports *aSubject, const char *aTopic, const char16_t *aData) override
     {
         MOZ_ASSERT(!nsCRT::strcmp(aTopic, "clear-origin-data"));
@@ -263,6 +263,6 @@ nsApplicationCacheService::AppClearDataObserverInit()
   nsCOMPtr<nsIObserverService> observerService = services::GetObserverService();
   if (observerService) {
     RefPtr<AppCacheClearDataObserver> obs = new AppCacheClearDataObserver();
-    observerService->AddObserver(obs, "clear-origin-data", /*holdsWeak=*/ false);
+    observerService->AddObserver(obs, "clear-origin-data", /*ownsWeak=*/ false);
   }
 }

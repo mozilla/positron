@@ -793,6 +793,8 @@ ImageBitmap::CreateInternal(nsIGlobalObject* aGlobal, HTMLImageElement& aImageEl
 ImageBitmap::CreateInternal(nsIGlobalObject* aGlobal, HTMLVideoElement& aVideoEl,
                             const Maybe<IntRect>& aCropRect, ErrorResult& aRv)
 {
+  aVideoEl.MarkAsContentSource(mozilla::dom::HTMLVideoElement::CallerAPI::CREATE_IMAGEBITMAP);
+
   // Check network state.
   if (aVideoEl.NetworkState() == HTMLMediaElement::NETWORK_EMPTY) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
@@ -1218,7 +1220,8 @@ protected:
     // (1) error occurs during reading of the object
     // (2) the image data is not in a supported file format
     // (3) the image data is corrupted
-    // All these three cases should reject promise with null value
+    // All these three cases should reject the promise with "InvalidStateError"
+    // DOMException
     if (!imageBitmap) {
       return false;
     }
@@ -1279,7 +1282,7 @@ private:
     RefPtr<layers::Image> data = DecodeAndCropBlob(*mBlob, mCropRect, sourceSize);
 
     if (NS_WARN_IF(!data)) {
-      mPromise->MaybeRejectWithNull();
+      mPromise->MaybeReject(NS_ERROR_DOM_INVALID_STATE_ERR);
       return nullptr;
     }
 
@@ -1375,7 +1378,7 @@ private:
     }
 
     if (NS_WARN_IF(!data)) {
-      mPromise->MaybeRejectWithNull();
+      mPromise->MaybeReject(NS_ERROR_DOM_INVALID_STATE_ERR);
       return nullptr;
     }
 

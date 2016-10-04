@@ -13,6 +13,7 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/Sprintf.h"
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -125,7 +126,6 @@ js::DestroyContext(JSContext* cx)
         MOZ_CRASH("Attempted to destroy a context while it is in a request.");
 
     cx->roots.checkNoGCRooters();
-    cx->roots.finishPersistentRoots();
 
     /*
      * Dump remaining type inference results while we still have a context.
@@ -317,8 +317,20 @@ checkReportFlags(JSContext* cx, unsigned* flags)
     return false;
 }
 
+#ifdef DEBUG
+static void
+AssertIsASCII(const char* s)
+{
+    while (*s) {
+        MOZ_ASSERT((*s & 0x80) == 0);
+        s++;
+    }
+}
+#endif
+
 bool
-js::ReportErrorVA(JSContext* cx, unsigned flags, const char* format, va_list ap)
+js::ReportErrorVA(JSContext* cx, unsigned flags, const char* format,
+                  ErrorArgumentsType argumentsType, va_list ap)
 {
     char* message;
     char16_t* ucmessage;
@@ -336,9 +348,25 @@ js::ReportErrorVA(JSContext* cx, unsigned flags, const char* format, va_list ap)
     }
     messagelen = strlen(message);
 
+#ifdef DEBUG
+    if (argumentsType == ArgumentsAreASCII)
+        AssertIsASCII(message);
+#endif
+
     report.flags = flags;
     report.errorNumber = JSMSG_USER_DEFINED_ERROR;
-    report.ucmessage = ucmessage = InflateString(cx, message, &messagelen);
+    if (argumentsType == ArgumentsAreASCII || argumentsType == ArgumentsAreLatin1) {
+        ucmessage = InflateString(cx, message, &messagelen);
+    } else {
+        JS::UTF8Chars utf8(message, messagelen);
+        size_t unused;
+        ucmessage = LossyUTF8CharsToNewTwoByteCharsZ(cx, utf8, &unused).get();
+    }
+    if (!ucmessage) {
+        js_free(message);
+        return false;
+    }
+    report.ucmessage = ucmessage;
     PopulateReportBlame(cx, &report);
 
     warning = JSREPORT_IS_WARNING(report.flags);
@@ -351,7 +379,7 @@ js::ReportErrorVA(JSContext* cx, unsigned flags, const char* format, va_list ap)
 
 /* |callee| requires a usage string provided by JS_DefineFunctionsWithHelp. */
 void
-js::ReportUsageError(JSContext* cx, HandleObject callee, const char* msg)
+js::ReportUsageErrorASCII(JSContext* cx, HandleObject callee, const char* msg)
 {
     const char* usageStr = "usage";
     PropertyName* usageAtom = Atomize(cx, usageStr, strlen(usageStr))->asPropertyName();
@@ -366,7 +394,7 @@ js::ReportUsageError(JSContext* cx, HandleObject callee, const char* msg)
         return;
 
     if (!usage.isString()) {
-        JS_ReportError(cx, "%s", msg);
+        JS_ReportErrorASCII(cx, "%s", msg);
     } else {
         JSString* str = usage.toString();
         if (!str->ensureFlat(cx))
@@ -538,15 +566,28 @@ class MOZ_RAII AutoMessageArgs
         for (uint16_t i = 0; i < count_; i++) {
             if (passed_) {
                 lengths_[i] = js_strlen(args_[i]);
-            } else if (typeArg == ArgumentsAreASCII) {
-                char* charArg = va_arg(ap, char*);
+            } else if (typeArg == ArgumentsAreASCII || typeArg == ArgumentsAreLatin1) {
+                const char* charArg = va_arg(ap, char*);
                 size_t charArgLength = strlen(charArg);
+
+#ifdef DEBUG
+                if (typeArg == ArgumentsAreASCII)
+                    AssertIsASCII(charArg);
+#endif
+
                 args_[i] = InflateString(cx, charArg, &charArgLength);
                 if (!args_[i])
                     return false;
                 allocatedElements_ = true;
                 MOZ_ASSERT(charArgLength == js_strlen(args_[i]));
                 lengths_[i] = charArgLength;
+            } else if (typeArg == ArgumentsAreUTF8) {
+                const char* charArg = va_arg(ap, char*);
+                JS::UTF8Chars utf8(charArg, strlen(charArg));
+                args_[i] = LossyUTF8CharsToNewTwoByteCharsZ(cx, utf8, &lengths_[i]).get();
+                if (!args_[i])
+                    return false;
+                allocatedElements_ = true;
             } else {
                 args_[i] = va_arg(ap, char16_t*);
                 lengths_[i] = js_strlen(args_[i]);
@@ -589,6 +630,11 @@ js::ExpandErrorArgumentsVA(ExclusiveContext* cx, JSErrorCallback callback,
 
     if (efs) {
         reportp->exnType = efs->exnType;
+
+#ifdef DEBUG
+        if (argumentsType == ArgumentsAreASCII)
+            AssertIsASCII(efs->format);
+#endif
 
         uint16_t argCount = efs->argCount;
         MOZ_RELEASE_ASSERT(argCount <= JS::MaxNumErrorArguments);
@@ -835,7 +881,7 @@ js::ReportMissingArg(JSContext* cx, HandleValue v, unsigned arg)
     char argbuf[11];
     UniqueChars bytes;
 
-    snprintf(argbuf, sizeof argbuf, "%u", arg);
+    SprintfLiteral(argbuf, "%u", arg);
     if (IsFunctionObject(v)) {
         RootedAtom name(cx, v.toObject().as<JSFunction>().name());
         bytes = DecompileValueGenerator(cx, JSDVG_SEARCH_STACK, v, name);
@@ -883,7 +929,8 @@ js::GetErrorMessage(void* userRef, const unsigned errorNumber)
 
 ExclusiveContext::ExclusiveContext(JSRuntime* rt, PerThreadData* pt, ContextKind kind,
                                    const JS::ContextOptions& options)
-  : ContextFriendFields(rt),
+  : ContextFriendFields(kind == Context_JS),
+    runtime_(rt),
     helperThread_(nullptr),
     contextKind_(kind),
     options_(options),
@@ -921,7 +968,10 @@ JSContext::JSContext(JSRuntime* parentRuntime)
     generatingError(false),
     data(nullptr),
     outstandingRequests(0),
-    jitIsBroken(false)
+    jitIsBroken(false),
+    asyncStackForNewActivations(this),
+    asyncCauseForNewActivations(nullptr),
+    asyncCallIsExplicit(false)
 {
     MOZ_ASSERT(static_cast<ContextFriendFields*>(this) ==
                ContextFriendFields::get(this));
@@ -1097,6 +1147,26 @@ ExclusiveContext::stackLimitForJitCode(StackKind kind)
 #endif
 }
 
+void
+JSContext::resetJitStackLimit()
+{
+    // Note that, for now, we use the untrusted limit for ion. This is fine,
+    // because it's the most conservative limit, and if we hit it, we'll bail
+    // out of ion into the interpreter, which will do a proper recursion check.
+#ifdef JS_SIMULATOR
+    jitStackLimit_ = jit::Simulator::StackLimit();
+#else
+    jitStackLimit_ = nativeStackLimit[StackForUntrustedScript];
+#endif
+    jitStackLimitNoInterrupt_ = jitStackLimit_;
+}
+
+void
+JSContext::initJitStackLimit()
+{
+    resetJitStackLimit();
+}
+
 JSVersion
 JSContext::findVersion() const
 {
@@ -1144,14 +1214,14 @@ void
 CompartmentChecker::check(InterpreterFrame* fp)
 {
     if (fp)
-        check(fp->scopeChain());
+        check(fp->environmentChain());
 }
 
 void
 CompartmentChecker::check(AbstractFramePtr frame)
 {
     if (frame)
-        check(frame.scopeChain());
+        check(frame.environmentChain());
 }
 #endif
 
@@ -1159,7 +1229,7 @@ void
 AutoEnterOOMUnsafeRegion::crash(const char* reason)
 {
     char msgbuf[1024];
-    snprintf(msgbuf, sizeof(msgbuf), "[unhandlable oom] %s", reason);
+    SprintfLiteral(msgbuf, "[unhandlable oom] %s", reason);
     MOZ_ReportAssertionFailure(msgbuf, __FILE__, __LINE__);
     MOZ_CRASH();
 }

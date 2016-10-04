@@ -2209,16 +2209,17 @@ Assembler::as_BranchPool(uint32_t value, RepatchLabel* label, ARMBuffer::PoolEnt
 }
 
 BufferOffset
-Assembler::as_FImm64Pool(VFPRegister dest, double value, Condition c)
+Assembler::as_FImm64Pool(VFPRegister dest, wasm::RawF64 value, Condition c)
 {
     MOZ_ASSERT(dest.isDouble());
     PoolHintPun php;
     php.phd.init(0, c, PoolHintData::PoolVDTR, dest);
-    return allocEntry(1, 2, (uint8_t*)&php.raw, (uint8_t*)&value);
+    uint64_t d = value.bits();
+    return allocEntry(1, 2, (uint8_t*)&php.raw, (uint8_t*)&d);
 }
 
 BufferOffset
-Assembler::as_FImm32Pool(VFPRegister dest, float value, Condition c)
+Assembler::as_FImm32Pool(VFPRegister dest, wasm::RawF32 value, Condition c)
 {
     // Insert floats into the double pool as they have the same limitations on
     // immediate offset. This wastes 4 bytes padding per float. An alternative
@@ -2226,7 +2227,8 @@ Assembler::as_FImm32Pool(VFPRegister dest, float value, Condition c)
     MOZ_ASSERT(dest.isSingle());
     PoolHintPun php;
     php.phd.init(0, c, PoolHintData::PoolVDTR, dest);
-    return allocEntry(1, 1, (uint8_t*)&php.raw, (uint8_t*)&value);
+    uint32_t f = value.bits();
+    return allocEntry(1, 1, (uint8_t*)&php.raw, (uint8_t*)&f);
 }
 
 // Pool callbacks stuff:
@@ -3379,27 +3381,6 @@ Assembler::BailoutTableStart(uint8_t* code)
     inst = inst->skipPool();
     MOZ_ASSERT(inst->is<InstBLImm>());
     return (uint8_t*) inst;
-}
-
-void
-Assembler::UpdateBoundsCheck(uint8_t* patchAt, uint32_t heapLength)
-{
-    Instruction* inst = (Instruction*) patchAt;
-    MOZ_ASSERT(inst->is<InstCMP>());
-    InstCMP* cmp = inst->as<InstCMP>();
-
-    Register index;
-    cmp->extractOp1(&index);
-
-    MOZ_ASSERT(cmp->extractOp2().isImm8());
-
-    Imm8 imm8 = Imm8(heapLength);
-    MOZ_ASSERT(!imm8.invalid);
-
-    *inst = InstALU(InvalidReg, index, imm8, OpCmp, SetCC, Always);
-    // NOTE: we don't update the Auto Flush Cache!  this function is currently
-    // only called from within ModuleGenerator::finish, which does that
-    // for us. Don't call this!
 }
 
 InstructionIterator::InstructionIterator(Instruction* i_)

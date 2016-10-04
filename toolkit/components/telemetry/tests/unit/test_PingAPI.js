@@ -65,13 +65,12 @@ var getArchivedPingsInfo = Task.async(function*() {
   return archivedPings;
 });
 
-function run_test() {
+add_task(function* test_setup() {
   do_get_profile(true);
   // Make sure we don't generate unexpected pings due to pref changes.
-  setEmptyPrefWatchlist();
+  yield setEmptyPrefWatchlist();
   Services.prefs.setBoolPref(PREF_TELEMETRY_ENABLED, true);
-  run_next_test();
-}
+});
 
 add_task(function* test_archivedPings() {
   // TelemetryController should not be fully initialized at this point.
@@ -445,6 +444,27 @@ add_task(function* test_InvalidPingType() {
               "Ping type should have been rejected.");
     Assert.equal(histogram.snapshot(type).sum, 1,
                  "Should have counted this as an invalid ping type.");
+  }
+});
+
+add_task(function* test_InvalidPayloadType() {
+  const PAYLOAD_TYPES = [
+    19,
+    "string",
+    [1, 2, 3, 4],
+    null,
+    undefined,
+  ];
+
+  let histogram = Telemetry.getHistogramById("TELEMETRY_INVALID_PAYLOAD_SUBMITTED");
+  for (let i = 0; i < PAYLOAD_TYPES.length; i++) {
+    histogram.clear();
+    Assert.equal(histogram.snapshot().sum, 0,
+      "Should not have counted this invalid payload yet: " + JSON.stringify(PAYLOAD_TYPES[i]));
+    Assert.ok(yield promiseRejects(TelemetryController.submitExternalPing("payload-test", PAYLOAD_TYPES[i])),
+      "Payload type should have been rejected.");
+    Assert.equal(histogram.snapshot().sum, 1,
+      "Should have counted this as an invalid payload type.");
   }
 });
 

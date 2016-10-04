@@ -29,16 +29,43 @@ class TypedArrayObject;
 
 namespace wasm {
 
+// Creates a testing-only NaN JS object with fields as described above, for
+// T=float or T=double.
+
+template<typename T>
+JSObject*
+CreateCustomNaNObject(JSContext* cx, T* addr);
+
+// Converts a testing-only NaN JS object with a nan_low field to a float32 NaN
+// with nan_low as the payload.
+
+bool
+ReadCustomFloat32NaNObject(JSContext* cx, HandleValue v, uint32_t* ret);
+
+// Converts a testing-only NaN JS object with nan_{low,high} components to a
+// double NaN with nan_low|(nan_high)>>32 as the payload.
+
+bool
+ReadCustomDoubleNaNObject(JSContext* cx, HandleValue v, uint64_t* ret);
+
+// Creates a JS object containing two fields (low: low 32 bits; high: high 32
+// bits) of a given Int64 value. For testing purposes only.
+
+JSObject*
+CreateI64Object(JSContext* cx, int64_t i64);
+
+// Reads an int64 from a JS object with the same shape as described in the
+// comment above. For testing purposes only.
+
+bool
+ReadI64Object(JSContext* cx, HandleValue v, int64_t* i64);
+
 // Return whether WebAssembly can be compiled on this platform.
 // This must be checked and must be true to call any of the top-level wasm
 // eval/compile methods.
 
 bool
 HasCompilerSupport(ExclusiveContext* cx);
-
-// Return whether WebAssembly has int64 support on this platform.
-bool
-IsI64Implemented();
 
 // Compiles the given binary wasm module given the ArrayBufferObject
 // and links the module's imports with the given import object.
@@ -58,6 +85,9 @@ extern bool
 IsExportedFunction(JSFunction* fun);
 
 extern bool
+IsExportedWasmFunction(JSFunction* fun);
+
+extern bool
 IsExportedFunction(const Value& v, MutableHandleFunction f);
 
 extern Instance&
@@ -67,11 +97,11 @@ extern WasmInstanceObject*
 ExportedFunctionToInstanceObject(JSFunction* fun);
 
 extern uint32_t
-ExportedFunctionToIndex(JSFunction* fun);
+ExportedFunctionToDefinitionIndex(JSFunction* fun);
 
 } // namespace wasm
 
-// 'Wasm' and its one function 'instantiateModule' are transitional APIs and
+// 'Wasm' and its one field 'experimentalVersion' are transitional APIs and
 // will be removed (replaced by 'WebAssembly') before release.
 
 extern const Class WasmClass;
@@ -121,9 +151,9 @@ class WasmInstanceObject : public NativeObject
     static void finalize(FreeOp* fop, JSObject* obj);
     static void trace(JSTracer* trc, JSObject* obj);
 
-    // ExportMap maps from function index to exported function object. This map
-    // is weak to avoid holding objects alive; the point is just to ensure a
-    // unique object identity for any given function object.
+    // ExportMap maps from function definition index to exported function
+    // object. This map is weak to avoid holding objects alive; the point is
+    // just to ensure a unique object identity for any given function object.
     using ExportMap = GCHashMap<uint32_t,
                                 ReadBarrieredFunction,
                                 DefaultHasher<uint32_t>,
@@ -151,6 +181,8 @@ class WasmInstanceObject : public NativeObject
                                     HandleWasmInstanceObject instanceObj,
                                     uint32_t funcIndex,
                                     MutableHandleFunction fun);
+
+    const wasm::CodeRange& getExportedFunctionCodeRange(HandleFunction fun);
 };
 
 // The class of WebAssembly.Memory. A WasmMemoryObject references an ArrayBuffer
@@ -159,9 +191,24 @@ class WasmInstanceObject : public NativeObject
 class WasmMemoryObject : public NativeObject
 {
     static const unsigned BUFFER_SLOT = 0;
+    static const unsigned OBSERVERS_SLOT = 1;
     static const ClassOps classOps_;
+    static void finalize(FreeOp* fop, JSObject* obj);
+    static bool bufferGetterImpl(JSContext* cx, const CallArgs& args);
+    static bool bufferGetter(JSContext* cx, unsigned argc, Value* vp);
+    static bool growImpl(JSContext* cx, const CallArgs& args);
+    static bool grow(JSContext* cx, unsigned argc, Value* vp);
+
+    using InstanceSet = GCHashSet<ReadBarrieredWasmInstanceObject,
+                                  MovableCellHasher<ReadBarrieredWasmInstanceObject>,
+                                  SystemAllocPolicy>;
+    using WeakInstanceSet = JS::WeakCache<InstanceSet>;
+    bool hasObservers() const;
+    WeakInstanceSet& observers() const;
+    WeakInstanceSet* getOrCreateObservers(JSContext* cx);
+
   public:
-    static const unsigned RESERVED_SLOTS = 1;
+    static const unsigned RESERVED_SLOTS = 2;
     static const Class class_;
     static const JSPropertySpec properties[];
     static const JSFunctionSpec methods[];
@@ -171,6 +218,10 @@ class WasmMemoryObject : public NativeObject
                                     Handle<ArrayBufferObjectMaybeShared*> buffer,
                                     HandleObject proto);
     ArrayBufferObjectMaybeShared& buffer() const;
+
+    bool movingGrowable() const;
+    bool addMovingGrowObserver(JSContext* cx, WasmInstanceObject* instance);
+    static uint32_t grow(HandleWasmMemoryObject memory, uint32_t delta, JSContext* cx);
 };
 
 // The class of WebAssembly.Table. A WasmTableObject holds a refcount on a
@@ -190,6 +241,8 @@ class WasmTableObject : public NativeObject
     static bool get(JSContext* cx, unsigned argc, Value* vp);
     static bool setImpl(JSContext* cx, const CallArgs& args);
     static bool set(JSContext* cx, unsigned argc, Value* vp);
+    static bool growImpl(JSContext* cx, const CallArgs& args);
+    static bool grow(JSContext* cx, unsigned argc, Value* vp);
 
   public:
     static const unsigned RESERVED_SLOTS = 1;
@@ -201,7 +254,7 @@ class WasmTableObject : public NativeObject
     // Note that, after creation, a WasmTableObject's table() is not initialized
     // and must be initialized before use.
 
-    static WasmTableObject* create(JSContext* cx, uint32_t length);
+    static WasmTableObject* create(JSContext* cx, wasm::ResizableLimits limits);
     wasm::Table& table() const;
 };
 

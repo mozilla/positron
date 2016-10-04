@@ -7,10 +7,6 @@
 
 "use strict";
 
-/* eslint-disable mozilla/reject-some-requires */
-const {Cc, Ci} = require("chrome");
-/* eslint-enable mozilla/reject-some-requires */
-
 // Page size for pageup/pagedown
 const PAGE_SIZE = 10;
 const DEFAULT_MAX_CHILDREN = 100;
@@ -50,21 +46,21 @@ const Heritage = require("sdk/core/heritage");
 const {parseAttribute} =
       require("devtools/client/shared/node-attribute-parser");
 const {Task} = require("devtools/shared/task");
-const {scrollIntoViewIfNeeded} = require("devtools/shared/layout/utils");
+const {scrollIntoViewIfNeeded} = require("devtools/client/shared/scroll");
 const {PrefObserver} = require("devtools/client/styleeditor/utils");
 const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
 const {template} = require("devtools/shared/gcli/templater");
 const nodeConstants = require("devtools/shared/dom-node-constants");
 const nodeFilterConstants = require("devtools/shared/dom-node-filter-constants");
-/* eslint-disable mozilla/reject-some-requires */
-const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
-/* eslint-enable mozilla/reject-some-requires */
 const {getCssProperties} = require("devtools/shared/fronts/css-properties");
+const {KeyCodes} = require("devtools/client/shared/keycodes");
 
 const {AutocompletePopup} = require("devtools/client/shared/autocomplete-popup");
+const clipboardHelper = require("devtools/shared/platform/clipboard");
 
-XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
-  "resource://gre/modules/PluralForm.jsm");
+const {PluralForm} = require("devtools/shared/plural-form");
+const {LocalizationHelper} = require("devtools/shared/l10n");
+const INSPECTOR_L10N = new LocalizationHelper("devtools/locale/inspector.properties");
 
 /**
  * Vocabulary for the purposes of this file:
@@ -230,11 +226,7 @@ MarkupView.prototype = {
 
     let container = target.container;
     if (this._hoveredNode !== container.node) {
-      if (container.node.nodeType !== nodeConstants.TEXT_NODE) {
-        this._showBoxModel(container.node);
-      } else {
-        this._hideBoxModel();
-      }
+      this._showBoxModel(container.node);
     }
     this._showContainerAsHovered(container.node);
 
@@ -438,8 +430,6 @@ MarkupView.prototype = {
   /**
    * Hide the box model highlighter on a given node front
    *
-   * @param  {NodeFront} nodeFront
-   *         The node to hide the highlighter for
    * @param  {Boolean} forceHide
    *         See toolbox-highlighter-utils/unhighlight
    * @return {Promise} Resolves when the highlighter for this nodeFront is
@@ -688,7 +678,7 @@ MarkupView.prototype = {
     ["markupView.hide.key",
      "markupView.edit.key",
      "markupView.scrollInto.key"].forEach(name => {
-       let key = this.strings.GetStringFromName(name);
+       let key = INSPECTOR_L10N.getStr(name);
        shortcuts.on(key, (_, event) => this._onShortcut(name, event));
      });
 
@@ -1668,9 +1658,9 @@ MarkupView.prototype = {
         if (!(children.hasFirst && children.hasLast)) {
           let nodesCount = container.node.numChildren;
           let showAllString = PluralForm.get(nodesCount,
-            this.strings.GetStringFromName("markupView.more.showAll2"));
+            INSPECTOR_L10N.getStr("markupView.more.showAll2"));
           let data = {
-            showing: this.strings.GetStringFromName("markupView.more.showing"),
+            showing: INSPECTOR_L10N.getStr("markupView.more.showing"),
             showAll: showAllString.replace("#1", nodesCount),
             allButtonClick: () => {
               container.maxChildren = -1;
@@ -2273,12 +2263,12 @@ MarkupContainer.prototype = {
 
     // Ignore all keystrokes that originated in editors except for when 'Tab' is
     // pressed.
-    if (isInput && keyCode !== event.DOM_VK_TAB) {
+    if (isInput && keyCode !== KeyCodes.DOM_VK_TAB) {
       return;
     }
 
     switch (keyCode) {
-      case event.DOM_VK_TAB:
+      case KeyCodes.DOM_VK_TAB:
         // Only handle 'Tab' if tabbable element is on the edge (first or last).
         if (isInput) {
           // Corresponding tabbable element is editor's next sibling.
@@ -2299,7 +2289,7 @@ MarkupContainer.prototype = {
           }
         }
         break;
-      case event.DOM_VK_ESCAPE:
+      case KeyCodes.DOM_VK_ESCAPE:
         this.clearFocus();
         this.markup.getContainer(this.markup._rootNode).elt.focus();
         if (this.isDragging) {
@@ -3617,14 +3607,5 @@ function getAutocompleteMaxWidth(element, container) {
   let containerRect = container.getBoundingClientRect();
   return containerRect.right - elementRect.left - 2;
 }
-
-loader.lazyGetter(MarkupView.prototype, "strings", () => Services.strings.createBundle(
-  "chrome://devtools/locale/inspector.properties"
-));
-
-XPCOMUtils.defineLazyGetter(this, "clipboardHelper", function () {
-  return Cc["@mozilla.org/widget/clipboardhelper;1"]
-    .getService(Ci.nsIClipboardHelper);
-});
 
 exports.MarkupView = MarkupView;

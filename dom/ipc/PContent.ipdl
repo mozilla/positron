@@ -4,7 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-include protocol PAPZ;
 include protocol PBackground;
 include protocol PBlob;
 include protocol PBluetooth;
@@ -57,6 +56,7 @@ include protocol PWebBrowserPersistDocument;
 include protocol PWebrtcGlobal;
 include protocol PPresentation;
 include protocol PVRManager;
+include protocol PVideoDecoderManager;
 include protocol PFlyWebPublishedServer;
 include DOMTypes;
 include JavaScriptTypes;
@@ -95,11 +95,14 @@ using mozilla::dom::TabId from "mozilla/dom/ipc/IdType.h";
 using mozilla::dom::ContentParentId from "mozilla/dom/ipc/IdType.h";
 using mozilla::LayoutDeviceIntPoint from "Units.h";
 using struct LookAndFeelInt from "mozilla/widget/WidgetMessageUtils.h";
-using class mozilla::dom::ipc::StructuredCloneData from "ipc/IPCMessageUtils.h";
+using class mozilla::dom::MessagePort from "mozilla/dom/MessagePort.h";
+using class mozilla::dom::ipc::StructuredCloneData from "mozilla/dom/ipc/StructuredCloneData.h";
 using mozilla::DataStorageType from "ipc/DataStorageIPCUtils.h";
 using mozilla::DocShellOriginAttributes from "mozilla/ipc/BackgroundUtils.h";
 using struct mozilla::layers::TextureFactoryIdentifier from "mozilla/layers/CompositorTypes.h";
 using struct mozilla::dom::FlyWebPublishOptions from "mozilla/dom/FlyWebPublishOptionsIPCSerializer.h";
+using mozilla::Telemetry::Accumulation from "mozilla/TelemetryComms.h";
+using mozilla::Telemetry::KeyedAccumulation from "mozilla/TelemetryComms.h";
 
 union ChromeRegistryItem
 {
@@ -324,12 +327,6 @@ union FileDescOrError {
     nsresult;
 };
 
-union OptionalContentId
-{
-  ContentParentId;
-  void_t;
-};
-
 struct DomainPolicyClone
 {
     bool        active;
@@ -389,7 +386,6 @@ prio(normal upto urgent) sync protocol PContent
     parent opens PGMPService;
     child opens PBackground;
 
-    manages PAPZ;
     manages PBlob;
     manages PBluetooth;
     manages PBrowser;
@@ -469,9 +465,18 @@ both:
 
 child:
     // Give the content process its endpoints to the compositor.
-    async InitCompositor(Endpoint<PCompositorBridgeChild> compositor);
-    async InitImageBridge(Endpoint<PImageBridgeChild> bridge);
-    async InitVRManager(Endpoint<PVRManagerChild> endpoint);
+    async InitRendering(
+      Endpoint<PCompositorBridgeChild> compositor,
+      Endpoint<PImageBridgeChild> imageBridge,
+      Endpoint<PVRManagerChild> vr);
+
+    // Re-create the rendering stack using the given endpoints. This is sent
+    // after the compositor process has crashed. The new endpoints may be to a
+    // newly launched GPU process, or the compositor thread of the UI process.
+    async ReinitRendering(
+      Endpoint<PCompositorBridgeChild> compositor,
+      Endpoint<PImageBridgeChild> bridge,
+      Endpoint<PVRManagerChild> vr);
 
     /**
      * Enable system-level sandboxing features, if available.  Can
@@ -482,6 +487,11 @@ child:
 
     async PMemoryReportRequest(uint32_t generation, bool anonymize,
                                bool minimizeMemoryUsage, MaybeFileDesc DMDFile);
+
+    /**
+     * Sent to notify that aTabId has been allocated aLayersId
+     */
+    async NotifyLayerAllocated(TabId aTabId, uint64_t aLayersId);
 
     async SpeakerManagerNotify();
 
@@ -503,8 +513,6 @@ child:
 
     async PTestShell();
 
-    async PAPZ(TabId tabId);
-
     async RegisterChrome(ChromePackage[] packages, SubstitutionMapping[] substitutions,
                          OverrideMapping[] overrides, nsCString locale, bool reset);
     async RegisterChromeItem(ChromeRegistryItem item);
@@ -515,8 +523,6 @@ child:
     async SetConnectivity(bool connectivity);
 
     async NotifyVisited(URIParams uri);
-
-    async SystemMemoryAvailable(uint64_t getterId, uint32_t memoryAvailable);
 
     async PreferenceUpdate(PrefSetting pref);
     async VarUpdate(GfxVarUpdate var);
@@ -547,6 +553,11 @@ child:
      * Start accessibility engine in content process.
      */
     async ActivateA11y();
+
+    /**
+     * Shutdown accessibility engine in content process (if not in use).
+     */
+    async ShutdownA11y();
 
     async AppInfo(nsCString version, nsCString buildID, nsCString name, nsCString UAName,
                   nsCString ID, nsCString vendor);
@@ -658,6 +669,11 @@ child:
      * Notify the child that the Gecko Media Plugins installed changed.
      */
     async NotifyGMPsChanged();
+
+    /**
+     * Notify the child that cache is emptied.
+     */
+    async NotifyEmptyHTTPCache();
 
     /**
      * Send a `push` event without data to a service worker in the child.
@@ -773,6 +789,8 @@ parent:
 
     sync PCrashReporter(NativeThreadId tid, uint32_t processType);
 
+    sync InitVideoDecoderManager() returns (Endpoint<PVideoDecoderManagerChild> endpoint);
+
     /**
      * Is this token compatible with the provided version?
      *
@@ -817,12 +835,10 @@ parent:
                          uint8_t[] keyHandle)
         returns (uint8_t[] signature);
 
-    async GetSystemMemory(uint64_t getterId);
-
     sync IsSecureURI(uint32_t type, URIParams uri, uint32_t flags)
         returns (bool isSecureURI);
 
-    async AccumulateMixedContentHSTS(URIParams uri, bool active);
+    async AccumulateMixedContentHSTS(URIParams uri, bool active, bool hasHSTSPriming);
 
     sync GetLookAndFeelCache()
         returns (LookAndFeelInt[] lookAndFeelIntCache);
@@ -1136,7 +1152,7 @@ parent:
      * Request graphics initialization information from the parent.
      */
     sync GetGraphicsDeviceInitData()
-        returns (DeviceInitData aData);
+        returns (ContentDeviceData aData);
 
     sync CreateWindow(nullable PBrowser aThisTab,
                       PBrowser aNewTab,
@@ -1213,6 +1229,12 @@ parent:
                                                 Principal principal);
 
      async UnstoreAndBroadcastBlobURLUnregistration(nsCString url);
+
+    /**
+     * Messages for communicating child Telemetry to the parent process
+     */
+    async AccumulateChildHistogram(Accumulation[] accumulations);
+    async AccumulateChildKeyedHistogram(KeyedAccumulation[] accumulations);
 
 both:
      async AsyncMessage(nsString aMessage, CpowEntry[] aCpows,

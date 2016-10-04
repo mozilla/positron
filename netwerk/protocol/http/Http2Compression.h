@@ -13,6 +13,7 @@
 #include "nsDeque.h"
 #include "nsString.h"
 #include "nsIMemoryReporter.h"
+#include "mozilla/Telemetry.h"
 
 namespace mozilla {
 namespace net {
@@ -65,6 +66,7 @@ public:
   Http2BaseCompressor();
   virtual ~Http2BaseCompressor();
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+  nsresult SetInitialMaxBufferSize(uint32_t maxBufferSize);
 
 protected:
   const static uint32_t kDefaultMaxBuffer = 4096;
@@ -72,11 +74,21 @@ protected:
   virtual void ClearHeaderTable();
   virtual void MakeRoom(uint32_t amount, const char *direction);
   virtual void DumpState();
+  virtual void SetMaxBufferSizeInternal(uint32_t maxBufferSize);
 
   nsACString *mOutput;
   nvFIFO mHeaderTable;
 
   uint32_t mMaxBuffer;
+  uint32_t mMaxBufferSetting;
+  bool mSetInitialMaxBufferSizeAllowed;
+
+  uint32_t mPeakSize;
+  uint32_t mPeakCount;
+  MOZ_INIT_OUTSIDE_CTOR
+  Telemetry::ID mPeakSizeID;
+  MOZ_INIT_OUTSIDE_CTOR
+  Telemetry::ID mPeakCountID;
 
 private:
   RefPtr<HpackDynamicTableReporter> mDynamicReporter;
@@ -87,7 +99,11 @@ class Http2Compressor;
 class Http2Decompressor final : public Http2BaseCompressor
 {
 public:
-  Http2Decompressor() { };
+  Http2Decompressor()
+  {
+    mPeakSizeID = Telemetry::HPACK_PEAK_SIZE_DECOMPRESSOR;
+    mPeakCountID = Telemetry::HPACK_PEAK_COUNT_DECOMPRESSOR;
+  };
   virtual ~Http2Decompressor() { } ;
 
   // NS_OK: Produces the working set of HTTP/1 formatted headers
@@ -99,7 +115,6 @@ public:
   void GetScheme(nsACString &hdr) { hdr = mHeaderScheme; }
   void GetPath(nsACString &hdr) { hdr = mHeaderPath; }
   void GetMethod(nsACString &hdr) { hdr = mHeaderMethod; }
-  void SetCompressor(Http2Compressor *compressor) { mCompressor = compressor; }
 
 private:
   nsresult DoIndexed();
@@ -122,8 +137,6 @@ private:
   nsresult DecodeFinalHuffmanCharacter(const HuffmanIncomingTable *table,
                                        uint8_t &c, uint8_t &bitsLeft);
 
-  Http2Compressor *mCompressor;
-
   nsCString mHeaderStatus;
   nsCString mHeaderHost;
   nsCString mHeaderScheme;
@@ -143,10 +156,12 @@ class Http2Compressor final : public Http2BaseCompressor
 {
 public:
   Http2Compressor() : mParsedContentLength(-1),
-                      mMaxBufferSetting(kDefaultMaxBuffer),
                       mBufferSizeChangeWaiting(false),
                       mLowestBufferSizeWaiting(0)
-  { };
+  {
+    mPeakSizeID = Telemetry::HPACK_PEAK_SIZE_COMPRESSOR;
+    mPeakCountID = Telemetry::HPACK_PEAK_COUNT_COMPRESSOR;
+  };
   virtual ~Http2Compressor() { }
 
   // HTTP/1 formatted header block as input - HTTP/2 formatted
@@ -159,7 +174,6 @@ public:
   int64_t GetParsedContentLength() { return mParsedContentLength; } // -1 on not found
 
   void SetMaxBufferSize(uint32_t maxBufferSize);
-  nsresult SetMaxBufferSizeInternal(uint32_t maxBufferSize);
 
 private:
   enum outputCode {
@@ -178,7 +192,6 @@ private:
   void EncodeTableSizeChange(uint32_t newMaxSize);
 
   int64_t mParsedContentLength;
-  uint32_t mMaxBufferSetting;
   bool mBufferSizeChangeWaiting;
   uint32_t mLowestBufferSizeWaiting;
 };

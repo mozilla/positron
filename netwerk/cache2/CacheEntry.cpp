@@ -844,11 +844,6 @@ void CacheEntry::InvokeAvailableCallback(Callback const & aCallback)
     return;
   }
 
-  if (NS_SUCCEEDED(mFileStatus) && !aCallback.mSecret) {
-    // Let the last-fetched and fetch-count properties be updated.
-    mFile->OnFetched();
-  }
-
   if (mIsDoomed || aCallback.mNotWanted) {
     LOG(("  doomed or not wanted, notifying OCEA with NS_ERROR_CACHE_KEY_NOT_FOUND"));
     aCallback.mCallback->OnCacheEntryAvailable(
@@ -864,6 +859,8 @@ void CacheEntry::InvokeAvailableCallback(Callback const & aCallback)
       mozilla::MutexAutoLock lock(mLock);
       BackgroundOp(Ops::FRECENCYUPDATE);
     }
+
+    OnFetched(aCallback);
 
     RefPtr<CacheEntryHandle> handle = NewHandle();
     aCallback.mCallback->OnCacheEntryAvailable(
@@ -886,6 +883,8 @@ void CacheEntry::InvokeAvailableCallback(Callback const & aCallback)
 
   // Consumer will be responsible to fill or validate the entry metadata and data.
 
+  OnFetched(aCallback);
+
   RefPtr<CacheEntryHandle> handle = NewWriteHandle();
   rv = aCallback.mCallback->OnCacheEntryAvailable(
     handle, state == WRITING, nullptr, NS_OK);
@@ -899,6 +898,14 @@ void CacheEntry::InvokeAvailableCallback(Callback const & aCallback)
   }
 
   LOG(("  writing/revalidating"));
+}
+
+void CacheEntry::OnFetched(Callback const & aCallback)
+{
+  if (NS_SUCCEEDED(mFileStatus) && !aCallback.mSecret) {
+    // Let the last-fetched and fetch-count properties be updated.
+    mFile->OnFetched();
+  }
 }
 
 CacheEntryHandle* CacheEntry::NewHandle()
@@ -923,8 +930,14 @@ void CacheEntry::OnHandleClosed(CacheEntryHandle const* aHandle)
 
   mozilla::MutexAutoLock lock(mLock);
 
-  if (IsDoomed() && mHandlesCount == 0 && NS_SUCCEEDED(mFileStatus)) {
+  if (IsDoomed() && NS_SUCCEEDED(mFileStatus) &&
+      // Note: mHandlesCount is dropped before this method is called
+      (mHandlesCount == 0 ||
+       (mHandlesCount == 1 && mWriter && mWriter != aHandle))
+      ) {
     // This entry is no longer referenced from outside and is doomed.
+    // We can do this also when there is just reference from the writer,
+    // no one else could ever reach the written data.
     // Tell the file to kill the handle, i.e. bypass any I/O operations
     // on it except removing the file.
     mFile->Kill();
@@ -1115,6 +1128,19 @@ NS_IMETHODIMP CacheEntry::SetExpirationTime(uint32_t aExpirationTime)
 NS_IMETHODIMP CacheEntry::OpenInputStream(int64_t offset, nsIInputStream * *_retval)
 {
   LOG(("CacheEntry::OpenInputStream [this=%p]", this));
+  return OpenInputStreamInternal(offset, nullptr, _retval);
+}
+
+NS_IMETHODIMP CacheEntry::OpenAlternativeInputStream(const nsACString & type, nsIInputStream * *_retval)
+{
+  LOG(("CacheEntry::OpenAlternativeInputStream [this=%p, type=%s]", this,
+       PromiseFlatCString(type).get()));
+  return OpenInputStreamInternal(0, PromiseFlatCString(type).get(), _retval);
+}
+
+nsresult CacheEntry::OpenInputStreamInternal(int64_t offset, const char *aAltDataType, nsIInputStream * *_retval)
+{
+  LOG(("CacheEntry::OpenInputStreamInternal [this=%p]", this));
 
   NS_ENSURE_SUCCESS(mFileStatus, NS_ERROR_NOT_AVAILABLE);
 
@@ -1123,7 +1149,12 @@ NS_IMETHODIMP CacheEntry::OpenInputStream(int64_t offset, nsIInputStream * *_ret
   RefPtr<CacheEntryHandle> selfHandle = NewHandle();
 
   nsCOMPtr<nsIInputStream> stream;
-  rv = mFile->OpenInputStream(selfHandle, getter_AddRefs(stream));
+  if (aAltDataType) {
+    rv = mFile->OpenAlternativeInputStream(selfHandle, aAltDataType,
+                                           getter_AddRefs(stream));
+  } else {
+    rv = mFile->OpenInputStream(selfHandle, getter_AddRefs(stream));
+  }
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsISeekableStream> seekable =
@@ -1172,6 +1203,30 @@ NS_IMETHODIMP CacheEntry::OpenOutputStream(int64_t offset, nsIOutputStream * *_r
   // Invoke any pending readers now.
   InvokeCallbacks();
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP CacheEntry::OpenAlternativeOutputStream(const nsACString & type, nsIOutputStream * *_retval)
+{
+  LOG(("CacheEntry::OpenAlternativeOutputStream [this=%p, type=%s]", this,
+       PromiseFlatCString(type).get()));
+
+  nsresult rv;
+
+  mozilla::MutexAutoLock lock(mLock);
+
+  if (!mHasData || mState < READY || mOutputStream || mIsDoomed) {
+    LOG(("  entry not in state to write alt-data"));
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  nsCOMPtr<nsIOutputStream> stream;
+  rv = mFile->OpenAlternativeOutputStream(nullptr,
+                                          PromiseFlatCString(type).get(),
+                                          getter_AddRefs(stream));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  stream.swap(*_retval);
   return NS_OK;
 }
 
@@ -1451,6 +1506,17 @@ NS_IMETHODIMP CacheEntry::GetDataSize(int64_t *aDataSize)
   return NS_OK;
 }
 
+
+NS_IMETHODIMP CacheEntry::GetAltDataSize(int64_t *aDataSize)
+{
+  LOG(("CacheEntry::GetAltDataSize [this=%p]", this));
+  if (NS_FAILED(mFileStatus)) {
+    return mFileStatus;
+  }
+  return mFile->GetAltDataSize(aDataSize);
+}
+
+
 NS_IMETHODIMP CacheEntry::MarkValid()
 {
   // NOT IMPLEMENTED ACTUALLY
@@ -1653,6 +1719,17 @@ void CacheEntry::DoomFile()
   nsresult rv = NS_ERROR_NOT_AVAILABLE;
 
   if (NS_SUCCEEDED(mFileStatus)) {
+    if (mHandlesCount == 0 ||
+        (mHandlesCount == 1 && mWriter)) {
+      // We kill the file also when there is just reference from the writer,
+      // no one else could ever reach the written data.  Obvisouly also
+      // when there is no reference at all (should we ever end up here
+      // in that case.)
+      // Tell the file to kill the handle, i.e. bypass any I/O operations
+      // on it except removing the file.
+      mFile->Kill();
+    }
+
     // Always calls the callback asynchronously.
     rv = mFile->Doom(mDoomCallback ? this : nullptr);
     if (NS_SUCCEEDED(rv)) {
@@ -1799,7 +1876,6 @@ NS_IMETHODIMP CacheOutputCloseListener::Run()
 size_t CacheEntry::SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const
 {
   size_t n = 0;
-  nsCOMPtr<nsISizeOf> sizeOf;
 
   n += mCallbacks.ShallowSizeOfExcludingThis(mallocSizeOf);
   if (mFile) {

@@ -104,13 +104,11 @@ pref("app.update.log", false);
 // the failure.
 pref("app.update.backgroundMaxErrors", 10);
 
-// The aus update xml certificate checks for application update are disabled on
-// Windows, Mac OS X, and Linux since the mar signature check are implemented on
-// these platforms and is sufficient to prevent us from applying a mar that is
-// not valid. Bug 1182352 will remove the update xml certificate checks and the
-// following two preferences.
+// When |app.update.cert.requireBuiltIn| is true or not specified the
+// final certificate and all certificates the connection is redirected to before
+// the final certificate for the url specified in the |app.update.url|
+// preference must be built-in.
 pref("app.update.cert.requireBuiltIn", false);
-pref("app.update.cert.checkAttributes", false);
 
 // Whether or not app updates are enabled
 pref("app.update.enabled", true);
@@ -330,6 +328,12 @@ pref("browser.download.folderList", 1);
 pref("browser.download.manager.addToRecentDocs", true);
 pref("browser.download.manager.resumeOnWakeDelay", 10000);
 
+#ifdef RELEASE_BUILD
+pref("browser.download.showPanelDropmarker", false);
+#else
+pref("browser.download.showPanelDropmarker", true);
+#endif
+
 // This allows disabling the animated notifications shown by
 // the Downloads Indicator when a download starts or completes.
 pref("browser.download.animateNotifications", true);
@@ -372,12 +376,6 @@ pref("browser.search.context.loadInBackground", false);
 
 // comma seperated list of of engines to hide in the search panel.
 pref("browser.search.hiddenOneOffs", "");
-
-#ifdef XP_WIN
-pref("browser.search.redirectWindowsSearch", true);
-#else
-pref("browser.search.redirectWindowsSearch", false);
-#endif
 
 pref("browser.search.reset.enabled", true);
 
@@ -522,6 +520,8 @@ pref("privacy.sanitize.migrateFx3Prefs",    false);
 
 pref("privacy.panicButton.enabled",         true);
 
+pref("privacy.firstparty.isolate",          false);
+
 pref("network.proxy.share_proxy_settings",  false); // use the same proxy settings for all protocols
 
 // simple gestures support
@@ -629,6 +629,11 @@ pref("accessibility.typeaheadfind", false);
 pref("accessibility.typeaheadfind.timeout", 5000);
 pref("accessibility.typeaheadfind.linksonly", false);
 pref("accessibility.typeaheadfind.flashBar", 1);
+
+#ifdef NIGHTLY_BUILD
+pref("findbar.highlightAll", true);
+pref("findbar.modalHighlight", true);
+#endif
 
 // Tracks when accessibility is loaded into the previous session.
 pref("accessibility.loadedInLastSession", false);
@@ -967,15 +972,23 @@ pref("security.sandbox.windows.log.stackTraceDepth", 0);
 #endif
 
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX) && defined(MOZ_CONTENT_SANDBOX)
-// This pref is discussed in bug 1083344, the naming is inspired from its Windows
-// counterpart, but on Mac it's an integer which means:
+// This pref is discussed in bug 1083344, the naming is inspired from its
+// Windows counterpart, but on Mac it's an integer which means:
 // 0 -> "no sandbox"
-// 1 -> "an imperfect sandbox designed to allow firefox to run reasonably well"
-// 2 -> "an ideal sandbox which may break many things"
+// 1 -> "preliminary content sandboxing enabled: write access to
+//       home directory is prevented"
+// 2 -> "preliminary content sandboxing enabled with profile protection:
+//       write access to home directory is prevented, read and write access
+//       to ~/Library and profile directories are prevented (excluding
+//       $PROFILE/{extensions,weave})"
 // This setting is read when the content process is started. On Mac the content
 // process is killed when all windows are closed, so a change will take effect
 // when the 1st window is opened.
+#if defined(NIGHTLY_BUILD)
+pref("security.sandbox.content.level", 2);
+#else
 pref("security.sandbox.content.level", 1);
+#endif
 #endif
 
 #if defined(XP_LINUX) && defined(MOZ_SANDBOX) && defined(MOZ_CONTENT_SANDBOX)
@@ -1212,8 +1225,8 @@ pref("social.shareDirectory", "https://activations.cdn.mozilla.net/sharePanel.ht
 pref("security.mixed_content.block_active_content", true);
 
 // Show degraded UI for http pages with password fields.
-// Only for Nightly and Dev Edition for not, not for beta or release.
-#ifndef RELEASE_BUILD
+// Only for Nightly, Dev Edition and early beta, not for late beta or release.
+#ifdef EARLY_BETA_OR_EARLIER
 pref("security.insecure_password.ui.enabled", true);
 #else
 pref("security.insecure_password.ui.enabled", false);
@@ -1282,6 +1295,10 @@ pref("identity.fxaccounts.remote.signin.uri", "https://accounts.firefox.com/sign
 // The remote content URL where FxAccountsWebChannel messages originate.
 pref("identity.fxaccounts.remote.webchannel.uri", "https://accounts.firefox.com/");
 
+// The value of the context query parameter passed in some fxa requests when config
+// discovery is enabled.
+pref("identity.fxaccounts.contextParam", "fx_desktop_v3");
+
 // The URL we take the user to when they opt to "manage" their Firefox Account.
 // Note that this will always need to be in the same TLD as the
 // "identity.fxaccounts.remote.signup.uri" pref.
@@ -1318,7 +1335,18 @@ pref("ui.key.menuAccessKeyFocuses", true);
 #endif
 
 // Encrypted media extensions.
+#ifdef XP_LINUX
+// On Linux EME is visible but disabled by default. This is so that the
+// "Play DRM content" checkbox in the Firefox UI is unchecked by default.
+// DRM requires downloading and installing proprietary binaries, which
+// users on an open source operating systems didn't opt into. The first
+// time a site using EME is encountered, the user will be prompted to
+// enable DRM, whereupon the EME plugin binaries will be downloaded if
+// permission is granted.
+pref("media.eme.enabled", false);
+#else
 pref("media.eme.enabled", true);
+#endif
 pref("media.eme.apiVisible", true);
 
 // Decode using Gecko Media Plugins in <video>, if a system decoder is not
@@ -1345,21 +1373,16 @@ pref("media.gmp.trial-create.enabled", true);
 
 #ifdef MOZ_ADOBE_EME
 pref("media.gmp-eme-adobe.visible", true);
-pref("media.gmp-eme-adobe.enabled", true);
+// When Adobe EME is enabled in the build system, we don't actually enable
+// the plugin by default, so that it doesn't download and install by default.
+// When Adobe EME is first used, Firefox will prompt the user to enable it,
+// and then download the CDM.
+pref("media.gmp-eme-adobe.enabled", false);
 #endif
 
 #ifdef MOZ_WIDEVINE_EME
 pref("media.gmp-widevinecdm.visible", true);
-// On Linux Widevine is visible but disabled by default. This is because
-// enabling Widevine downloads a proprietary binary, which users on an open
-// source operating system didn't opt into. The first time a site using EME
-// is encountered, the user will be prompted to enable EME, whereupon the
-// EME plugin binary will be downloaded if permission is granted.
-#ifdef XP_LINUX
-pref("media.gmp-widevinecdm.enabled", false);
-#else
 pref("media.gmp-widevinecdm.enabled", true);
-#endif
 #endif
 
 // Play with different values of the decay time and get telemetry,
@@ -1437,6 +1460,12 @@ pref("dom.ipc.cpow.timeout", 500);
 // Causes access on unsafe CPOWs from browser code to throw by default.
 pref("dom.ipc.cpows.forbid-unsafe-from-browser", true);
 
+// Don't allow add-ons marked as multiprocessCompatible to use CPOWs.
+pref("dom.ipc.cpows.forbid-cpows-in-compat-addons", true);
+
+// ...except for these add-ons:
+pref("dom.ipc.cpows.allow-cpows-in-compat-addons", "{b9db16a4-6edc-47ec-a1f4-b86292ed211d},firegestures@xuldev.org,{DDC359D1-844A-42a7-9AA1-88A850A938A8},privateTab@infocatcher,mousegesturessuite@lemon_juice.addons.mozilla.org,treestyletab@piro.sakura.ne.jp,cliqz@cliqz.com,{AE93811A-5C9A-4d34-8462-F7B864FC4696},contextsearch2@lwz.addons.mozilla.org,{EF522540-89F5-46b9-B6FE-1829E2B572C6},{677a8f98-fd64-40b0-a883-b8c95d0cbf17},images@wink.su,fx-devtools,toolkit/require,url_advisor@kaspersky.com,{d10d0bf8-f5b5-c8b4-a8b2-2b9879e08c5d},{dc572301-7619-498c-a57d-39143191b318},dta@downthemall.net,{86095750-AD15-46d8-BF32-C0789F7E6A32},screenwise-prod@google.com,{91aa5abe-9de4-4347-b7b5-322c38dd9271},secureLogin@blueimp.net,ich@maltegoetz.de,come.back.block.image.from@cat-in-136.blogspot.com,{7b1bf0b6-a1b9-42b0-b75d-252036438bdc},s3crypto@data,{1e0fd655-5aea-4b4c-a583-f76ef1e3af9c},akahuku.fx.sp@toshiakisp.github.io,{aff87fa2-a58e-4edd-b852-0a20203c1e17},{1018e4d6-728f-4b20-ad56-37578a4de76b},rehostimage@engy.us,lazarus@interclue.com,{b2e69492-2358-071a-7056-24ad0c3defb1},flashstopper@byo.co.il,{e4a8a97b-f2ed-450b-b12d-ee082ba24781},jid1-f3mYMbCpz2AZYl@jetpack,{8c550e28-88c9-4764-bb52-aa489cf2efcd},{37fa1426-b82d-11db-8314-0800200c9a66},{ac2cfa60-bc96-11e0-962b-0800200c9a66},igetter@presenta.net,killspinners@byo.co.il,abhere2@moztw.org,{fc6339b8-9581-4fc7-b824-dffcb091fcb7},wampi@wink.su,backtrack@byalexv.co.uk,Gladiator_X@mail.ru,{73a6fe31-595d-460b-a920-fcc0f8843232},{46551EC9-40F0-4e47-8E18-8E5CF550CFB8},acewebextension_unlisted@acestream.org,@screen_maker,yasearch@yandex.ru,sp@avast.com,s3google@translator,igetterextension@presenta.net,{C1A2A613-35F1-4FCF-B27F-2840527B6556},screenwise-testing@google.com,helper-sig@savefrom.net,browser-loader,ImageSaver@Merci.chao,proxtube@abz.agency,wrc@avast.com,{9AA46F4F-4DC7-4c06-97AF-5035170634FE},jid1-CikLKKPVkw6ipw@jetpack,artur.dubovoy@gmail.com,nlgfeb@nlgfeb.ext,{A065A84F-95B6-433A-A0C8-4C040B77CE8A},fdm_ffext@freedownloadmanager.org");
+
 // Enable e10s hang monitoring (slow script checking and plugin hang
 // detection).
 pref("dom.ipc.processHangMonitor", true);
@@ -1479,6 +1508,10 @@ pref("browser.esedbreader.loglevel", "Error");
 pref("browser.laterrun.enabled", false);
 
 pref("browser.migrate.automigrate.enabled", false);
+// 4 here means the suggestion notification will be automatically
+// hidden the 4th day, so it will actually be shown on 3 different days.
+pref("browser.migrate.automigrate.daysToOfferUndo", 4);
+pref("browser.migrate.automigrate.ui.enabled", true);
 
 // Enable browser frames for use on desktop.  Only exposed to chrome callers.
 pref("dom.mozBrowserFramesEnabled", true);
@@ -1493,3 +1526,25 @@ pref("print.use_simplify_page", true);
 // Space separated list of URLS that are allowed to send objects (instead of
 // only strings) through webchannels. This list is duplicated in mobile/android/app/mobile.js
 pref("webchannel.allowObject.urlWhitelist", "https://accounts.firefox.com https://content.cdn.mozilla.net https://input.mozilla.org https://support.mozilla.org https://install.mozilla.org");
+
+// Whether or not the browser should scan for unsubmitted
+// crash reports, and then show a notification for submitting
+// those reports.
+#ifdef RELEASE_BUILD
+pref("browser.crashReports.unsubmittedCheck.enabled", false);
+#else
+pref("browser.crashReports.unsubmittedCheck.enabled", true);
+#endif
+
+// chancesUntilSuppress is how many times we'll show the unsubmitted
+// crash report notification across different days and shutdown
+// without a user choice before we suppress the notification for
+// some number of days.
+pref("browser.crashReports.unsubmittedCheck.chancesUntilSuppress", 4);
+pref("browser.crashReports.unsubmittedCheck.autoSubmit", false);
+
+#ifdef NIGHTLY_BUILD
+// Enable the (fairly costly) client/server validation on nightly only. The other prefs
+// controlling validation are located in /services/sync/services-sync.js
+pref("services.sync.validation.enabled", true);
+#endif

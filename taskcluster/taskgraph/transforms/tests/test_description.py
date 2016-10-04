@@ -32,7 +32,10 @@ test_description_schema = Schema({
     'description': basestring,
 
     # test suite name, or <suite>/<flavor>
-    'suite': basestring,
+    Required('suite'): Any(
+        basestring,
+        {'by-test-platform': {basestring: basestring}},
+    ),
 
     # the name by which this test suite is addressed in try syntax; defaults to
     # the test-name
@@ -50,6 +53,14 @@ test_description_schema = Schema({
     # attributes to appear in the resulting task (later transforms will add the
     # common attributes)
     Optional('attributes'): {basestring: object},
+
+    # The `run_on_projects` attribute, defaulting to "all".  This dictates the
+    # projects on which this task should be included in the target task set.
+    # See the attributes documentation for details.
+    Optional('run-on-projects', default=['all']): Any(
+        [basestring],
+        {'by-test-platform': {basestring: [basestring]}},
+    ),
 
     # the sheriffing tier for this task (default: set based on test platform)
     Optional('tier'): int,
@@ -77,14 +88,19 @@ test_description_schema = Schema({
 
     # The EC2 instance size to run these tests on.
     Required('instance-size', default='default'): Any(
-        Any('default', 'large', 'xlarge'),
-        {'by-test-platform': {basestring: Any('default', 'large', 'xlarge')}},
+        Any('default', 'large', 'xlarge', 'legacy'),
+        {'by-test-platform': {basestring: Any('default', 'large', 'xlarge', 'legacy')}},
     ),
 
     # Whether the task requires loopback audio or video (whatever that may mean
     # on the platform)
     Required('loopback-audio', default=False): bool,
     Required('loopback-video', default=False): bool,
+
+    # Whether the test can run using a software GL implementation on Linux
+    # using the GL compositor. May not be used with "legacy" sized instances
+    # due to poor LLVMPipe performance (bug 1296086).
+    Optional('allow-software-gl-layers', default=True): bool,
 
     # The worker implementation for this test, as dictated by policy and by the
     # test platform.
@@ -114,6 +130,9 @@ test_description_schema = Schema({
         {'by-test-platform': {basestring: int}},
     ),
 
+    # Whether to perform a gecko checkout.
+    Required('checkout', default=False): bool,
+
     # What to run
     Required('mozharness'): Any({
         # the mozharness script used to run this task
@@ -130,7 +149,10 @@ test_description_schema = Schema({
 
         # additional command-line options for mozharness, beyond those
         # automatically added
-        Required('extra-options', default=[]): [basestring],
+        Required('extra-options', default=[]): Any(
+            [basestring],
+            {'by-test-platform': {basestring: [basestring]}},
+        ),
 
         # the artifact name (including path) to test on the build task; this is
         # generally set in a per-kind transformation
@@ -145,7 +167,7 @@ test_description_schema = Schema({
 
         # The setting for --download-symbols (if omitted, the option will not
         # be passed to mozharness)
-        Optional('download-symbols'): Any(True, False, 'ondemand'),
+        Optional('download-symbols'): Any(True, 'ondemand'),
 
         # If set, then MOZ_NODE_PATH=/usr/local/bin/node is included in the
         # environment.  This is more than just a helpful path setting -- it

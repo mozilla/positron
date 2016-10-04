@@ -8,6 +8,7 @@
 #define PDMFactory_h_
 
 #include "PlatformDecoderModule.h"
+#include "mozilla/Function.h"
 #include "mozilla/StaticMutex.h"
 
 class CDMProxy;
@@ -35,14 +36,17 @@ public:
   bool SupportsMimeType(const nsACString& aMimeType,
                         DecoderDoctorDiagnostics* aDiagnostics) const;
 
-#ifdef MOZ_EME
   // Creates a PlatformDecoderModule that uses a CDMProxy to decrypt or
   // decrypt-and-decode EME encrypted content. If the CDM only decrypts and
   // does not decode, we create a PDM and use that to create MediaDataDecoders
   // that we use on on aTaskQueue to decode the decrypted stream.
   // This is called on the decode task queue.
   void SetCDMProxy(CDMProxy* aProxy);
-#endif
+
+  static constexpr int kYUV400 = 0;
+  static constexpr int kYUV420 = 1;
+  static constexpr int kYUV422 = 2;
+  static constexpr int kYUV444 = 3;
 
 private:
   virtual ~PDMFactory();

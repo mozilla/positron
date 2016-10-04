@@ -9,7 +9,7 @@
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
 #include "mozilla/RefPtr.h"             // for RefPtr, already_AddRefed, etc
 #include "mozilla/layers/LayersTypes.h"
-#include "mozilla/layers/CompositableForwarder.h"
+#include "mozilla/layers/TextureForwarder.h"
 #include "mozilla/gfx/Types.h"
 #include "mozilla/Vector.h"
 
@@ -63,6 +63,16 @@ public:
   virtual TextureClient* GetTextureClient() { return nullptr; }
 
   virtual void OnShutdown() {}
+
+  virtual bool SetForwarder(KnowsCompositor* aFwd) { return true; }
+
+  /**
+   * Return true if this provider preserves the drawing state (clips, transforms,
+   * etc.) across frames. In practice this means users of the provider can skip
+   * popping all of the clips at the end of the frames and pushing them back at
+   * the beginning of the following frames, which can be costly (cf. bug 1294351).
+   */
+  virtual bool PreservesDrawingState() const = 0;
 };
 
 
@@ -86,6 +96,7 @@ public:
 
   virtual void ReturnSnapshot(already_AddRefed<gfx::SourceSurface> aSnapshot) override;
 
+  virtual bool PreservesDrawingState() const override { return true; }
 private:
   ~PersistentBufferProviderBasic();
 
@@ -106,7 +117,7 @@ public:
 
   static already_AddRefed<PersistentBufferProviderShared>
   Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
-         CompositableForwarder* aFwd);
+         KnowsCompositor* aFwd);
 
   virtual LayersBackend GetType() override { return LayersBackend::LAYERS_CLIENT; }
 
@@ -124,9 +135,12 @@ public:
 
   virtual void OnShutdown() override { Destroy(); }
 
+  virtual bool SetForwarder(KnowsCompositor* aFwd) override;
+
+  virtual bool PreservesDrawingState() const override { return false; }
 protected:
   PersistentBufferProviderShared(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
-                                 CompositableForwarder* aFwd,
+                                 KnowsCompositor* aFwd,
                                  RefPtr<TextureClient>& aTexture);
 
   ~PersistentBufferProviderShared();
@@ -138,7 +152,7 @@ protected:
 
   gfx::IntSize mSize;
   gfx::SurfaceFormat mFormat;
-  RefPtr<CompositableForwarder> mFwd;
+  RefPtr<KnowsCompositor> mFwd;
   Vector<RefPtr<TextureClient>, 4> mTextures;
   // Offset of the texture in mTextures that the canvas uses.
   Maybe<uint32_t> mBack;

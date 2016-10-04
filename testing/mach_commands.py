@@ -61,6 +61,16 @@ TEST_SUITES = {
         'mach_command': 'crashtest-ipc',
         'kwargs': {'test_file': None},
     },
+    'firefox-ui-functional': {
+        'aliases': ('Fxfn',),
+        'mach_command': 'firefox-ui-functional',
+        'kwargs': {},
+    },
+    'firefox-ui-update': {
+        'aliases': ('Fxup',),
+        'mach_command': 'firefox-ui-update',
+        'kwargs': {},
+    },
     'jetpack': {
         'aliases': ('J',),
         'mach_command': 'jetpack-test',
@@ -92,10 +102,6 @@ TEST_SUITES = {
     'mochitest-plain': {
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'plain', 'test_paths': None},
-    },
-    'luciddream': {
-        'mach_command': 'luciddream',
-        'kwargs': {'test_paths': None},
     },
     'python': {
         'mach_command': 'python-test',
@@ -142,6 +148,14 @@ TEST_FLAVORS = {
     'chrome': {
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'chrome', 'test_paths': []},
+    },
+    'firefox-ui-functional': {
+        'mach_command': 'firefox-ui-functional',
+        'kwargs': {'tests': []},
+    },
+    'firefox-ui-update': {
+        'mach_command': 'firefox-ui-update',
+        'kwargs': {'tests': []},
     },
     'marionette': {
         'mach_command': 'marionette-test',
@@ -457,7 +471,11 @@ class CheckSpiderMonkeyCommand(MachCommandBase):
         check_masm_cmd = [sys.executable, os.path.join(self.topsrcdir, 'config', 'check_macroassembler_style.py')]
         check_masm_result = subprocess.call(check_masm_cmd, cwd=os.path.join(self.topsrcdir, 'js', 'src'))
 
-        all_passed = jittest_result and jstest_result and jsapi_tests_result and check_style_result and check_masm_result
+        print('running check-js-msg-encoding')
+        check_js_msg_cmd = [sys.executable, os.path.join(self.topsrcdir, 'config', 'check_js_msg_encoding.py')]
+        check_js_msg_result = subprocess.call(check_js_msg_cmd, cwd=self.topsrcdir)
+
+        all_passed = jittest_result and jstest_result and jsapi_tests_result and check_style_result and check_masm_result and check_js_msg_result
 
         return all_passed
 

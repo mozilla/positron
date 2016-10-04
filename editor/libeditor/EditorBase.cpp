@@ -219,7 +219,9 @@ EditorBase::Init(nsIDOMDocument* aDoc,
                  uint32_t aFlags,
                  const nsAString& aValue)
 {
-  NS_PRECONDITION(aDoc, "bad arg");
+  MOZ_ASSERT(mAction == EditAction::none,
+             "Initializing during an edit action is an error");
+  MOZ_ASSERT(aDoc);
   if (!aDoc)
     return NS_ERROR_NULL_POINTER;
 
@@ -1772,7 +1774,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     // Note that we don't need to check mDispatchInputEvent here.  We need
     // to check it only when the editor requests to dispatch the input event.
@@ -3435,7 +3437,7 @@ IsElementVisible(Element* aElement)
     nsComputedDOMStyle::GetStyleContextForElementNoFlush(aElement,
                                                          nullptr, nullptr);
   if (styleContext) {
-    return styleContext->StyleDisplay()->mDisplay != NS_STYLE_DISPLAY_NONE;
+    return styleContext->StyleDisplay()->mDisplay != StyleDisplay::None;
   }
   return false;
 }
@@ -4235,7 +4237,7 @@ EditorBase::CreateTxnForComposition(const nsAString& aStringToInsert)
 }
 
 NS_IMETHODIMP
-EditorBase::CreateTxnForAddStyleSheet(StyleSheetHandle aSheet,
+EditorBase::CreateTxnForAddStyleSheet(StyleSheet* aSheet,
                                       AddStyleSheetTransaction** aTransaction)
 {
   RefPtr<AddStyleSheetTransaction> transaction = new AddStyleSheetTransaction();
@@ -4250,7 +4252,7 @@ EditorBase::CreateTxnForAddStyleSheet(StyleSheetHandle aSheet,
 
 NS_IMETHODIMP
 EditorBase::CreateTxnForRemoveStyleSheet(
-              StyleSheetHandle aSheet,
+              StyleSheet* aSheet,
               RemoveStyleSheetTransaction** aTransaction)
 {
   RefPtr<RemoveStyleSheetTransaction> transaction =

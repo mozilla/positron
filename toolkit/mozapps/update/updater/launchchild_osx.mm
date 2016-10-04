@@ -34,14 +34,14 @@ void LaunchChild(int argc, const char** argv)
 
   @try {
     NSString* launchPath = [NSString stringWithUTF8String:argv[0]];
-    NSMutableArray* arguments = [NSMutableArray arrayWithCapacity:argc];
+    NSMutableArray* arguments = [NSMutableArray arrayWithCapacity:argc - 1];
     for (int i = 1; i < argc; i++) {
       [arguments addObject:[NSString stringWithUTF8String:argv[i]]];
     }
     [NSTask launchedTaskWithLaunchPath:launchPath
                              arguments:arguments];
   } @catch (NSException* e) {
-    // Ignore any exception.
+    NSLog(@"%@: %@", e.name, e.reason);
   }
 }
 
@@ -108,12 +108,12 @@ id ConnectToUpdateServer()
   MacAutoreleasePool pool;
 
   id updateServer = nil;
-  @try {
-    BOOL isConnected = NO;
-    int currTry = 0;
-    const int numRetries = 10; // Number of IPC connection retries before
-                               // giving up.
-    while (!isConnected && currTry < numRetries) {
+  BOOL isConnected = NO;
+  int currTry = 0;
+  const int numRetries = 10; // Number of IPC connection retries before
+                             // giving up.
+  while (!isConnected && currTry < numRetries) {
+    @try {
       updateServer = (id)[NSConnection
         rootProxyForConnectionWithRegisteredName:
           @"org.mozilla.updater.server"
@@ -129,9 +129,14 @@ id ConnectToUpdateServer()
       } else {
         isConnected = YES;
       }
+    } @catch (NSException* e) {
+      NSLog(@"Encountered exception, retrying: %@: %@", e.name, e.reason);
+      sleep(1); // Wait 1 second.
+      currTry++;
     }
-  } @catch (NSException* e) {
-    // Ignore exceptions.
+  }
+  if (!isConnected) {
+    NSLog(@"Failed to connect to update server after several retries.");
     return nil;
   }
   return updateServer;

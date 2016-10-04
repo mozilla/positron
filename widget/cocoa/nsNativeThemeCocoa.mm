@@ -1195,7 +1195,7 @@ static const CellRenderSettings pushButtonSettings = {
 void
 nsNativeThemeCocoa::DrawPushButton(CGContextRef cgContext, const HIRect& inBoxRect,
                                    EventStates inState, uint8_t aWidgetType,
-                                   nsIFrame* aFrame)
+                                   nsIFrame* aFrame, float aOriginalHeight)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
@@ -1225,7 +1225,10 @@ nsNativeThemeCocoa::DrawPushButton(CGContextRef cgContext, const HIRect& inBoxRe
     // If the button is tall enough, draw the square button style so that
     // buttons with non-standard content look good. Otherwise draw normal
     // rounded aqua buttons.
-    if (inBoxRect.size.height > DO_SQUARE_BUTTON_HEIGHT) {
+    // This comparison is done based on the height that is calculated without
+    // the top, because the snapped height can be affected by the top of the
+    // rect and that may result in different height depending on the top value.
+    if (aOriginalHeight > DO_SQUARE_BUTTON_HEIGHT) {
       [cell setBezelStyle:NSShadowlessSquareBezelStyle];
       DrawCellWithScaling(cell, cgContext, inBoxRect, NSRegularControlSize,
                           NSZeroSize, NSMakeSize(14, 0), NULL, mCellDrawView,
@@ -1389,7 +1392,7 @@ nsNativeThemeCocoa::DrawButton(CGContextRef cgContext, ThemeButtonKind inKind,
   if (inState.HasState(NS_EVENT_STATE_FOCUS) && isActive)
     bdi.adornment |= kThemeAdornmentFocus;
 
-  if (inIsDefault && !isDisabled && isActive &&
+  if (inIsDefault && !isDisabled &&
       !inState.HasState(NS_EVENT_STATE_ACTIVE)) {
     bdi.adornment |= kThemeAdornmentDefault;
     bdi.animation.time.start = 0;
@@ -2284,6 +2287,7 @@ nsNativeThemeCocoa::DrawWidgetBackground(nsRenderingContext* aContext,
   gfx::Rect nativeDirtyRect = NSRectToRect(aDirtyRect, p2a);
   gfxRect nativeWidgetRect(aRect.x, aRect.y, aRect.width, aRect.height);
   nativeWidgetRect.ScaleInverse(gfxFloat(p2a));
+  float nativeWidgetHeight = round(nativeWidgetRect.Height());
   nativeWidgetRect.Round();
   if (nativeWidgetRect.IsEmpty())
     return NS_OK; // Don't attempt to draw invisible widgets.
@@ -2294,6 +2298,7 @@ nsNativeThemeCocoa::DrawWidgetBackground(nsRenderingContext* aContext,
   if (hidpi) {
     // Use high-resolution drawing.
     nativeWidgetRect.Scale(0.5f);
+    nativeWidgetHeight *= 0.5f;
     nativeDirtyRect.Scale(0.5f);
     aDrawTarget.SetTransform(aDrawTarget.GetTransform().PreScale(2.0f, 2.0f));
   }
@@ -2463,16 +2468,28 @@ nsNativeThemeCocoa::DrawWidgetBackground(nsRenderingContext* aContext,
 
     case NS_THEME_BUTTON:
       if (IsDefaultButton(aFrame)) {
-        if (!IsDisabled(aFrame, eventState) && FrameIsInActiveWindow(aFrame) &&
+        // Check whether the default button is in a document that does not
+        // match the :-moz-window-inactive pseudoclass. This activeness check
+        // is different from the other "active window" checks in this file
+        // because we absolutely need the button's default button appearance to
+        // be in sync with its text color, and the text color is changed by
+        // such a :-moz-window-inactive rule. (That's because on 10.10 and up,
+        // default buttons in active windows have blue background and white
+        // text, and default buttons in inactive windows have white background
+        // and black text.)
+        EventStates docState = aFrame->GetContent()->OwnerDoc()->GetDocumentState();
+        bool isInActiveWindow = !docState.HasState(NS_DOCUMENT_STATE_WINDOW_INACTIVE);
+        if (!IsDisabled(aFrame, eventState) && isInActiveWindow &&
             !QueueAnimatedContentForRefresh(aFrame->GetContent(), 10)) {
           NS_WARNING("Unable to animate button!");
         }
-        DrawButton(cgContext, kThemePushButton, macRect, true,
+        DrawButton(cgContext, kThemePushButton, macRect, isInActiveWindow,
                    kThemeButtonOff, kThemeAdornmentNone, eventState, aFrame);
       } else if (IsButtonTypeMenu(aFrame)) {
         DrawDropdown(cgContext, macRect, eventState, aWidgetType, aFrame);
       } else {
-        DrawPushButton(cgContext, macRect, eventState, aWidgetType, aFrame);
+        DrawPushButton(cgContext, macRect, eventState, aWidgetType, aFrame,
+                       nativeWidgetHeight);
       }
       break;
 
@@ -2483,7 +2500,8 @@ nsNativeThemeCocoa::DrawWidgetBackground(nsRenderingContext* aContext,
     case NS_THEME_MAC_HELP_BUTTON:
     case NS_THEME_MAC_DISCLOSURE_BUTTON_OPEN:
     case NS_THEME_MAC_DISCLOSURE_BUTTON_CLOSED:
-      DrawPushButton(cgContext, macRect, eventState, aWidgetType, aFrame);
+      DrawPushButton(cgContext, macRect, eventState, aWidgetType, aFrame,
+                     nativeWidgetHeight);
       break;
 
     case NS_THEME_BUTTON_BEVEL:

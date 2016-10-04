@@ -411,7 +411,15 @@ ModuleNamespaceObject::ProxyHandler::getOwnPropertyDescriptor(JSContext* cx, Han
             return true;
         }
 
-        // TODO: Implement @@toStringTag here and in has() and get() methods.
+        if (symbol == cx->wellKnownSymbols().toStringTag) {
+            RootedValue value(cx, StringValue(cx->names().Module));
+            desc.object().set(proxy);
+            desc.setWritable(false);
+            desc.setEnumerable(false);
+            desc.setConfigurable(true);
+            desc.setValue(value);
+            return true;
+        }
 
         return true;
     }
@@ -450,10 +458,8 @@ ModuleNamespaceObject::ProxyHandler::has(JSContext* cx, HandleObject proxy, Hand
     Rooted<ModuleNamespaceObject*> ns(cx, &proxy->as<ModuleNamespaceObject>());
     if (JSID_IS_SYMBOL(id)) {
         Rooted<JS::Symbol*> symbol(cx, JSID_TO_SYMBOL(id));
-        if (symbol == cx->wellKnownSymbols().iterator)
-            return true;
-
-        return false;
+        return symbol == cx->wellKnownSymbols().iterator ||
+               symbol == cx->wellKnownSymbols().toStringTag;
     }
 
     *bp = ns->bindings().has(id);
@@ -469,6 +475,11 @@ ModuleNamespaceObject::ProxyHandler::get(JSContext* cx, HandleObject proxy, Hand
         Rooted<JS::Symbol*> symbol(cx, JSID_TO_SYMBOL(id));
         if (symbol == cx->wellKnownSymbols().iterator) {
             vp.set(getEnumerateFunction(proxy));
+            return true;
+        }
+
+        if (symbol == cx->wellKnownSymbols().toStringTag) {
+            vp.setString(cx->names().Module);
             return true;
         }
 
@@ -564,7 +575,8 @@ ModuleObject::classOps_ = {
 ModuleObject::class_ = {
     "Module",
     JSCLASS_HAS_RESERVED_SLOTS(ModuleObject::SlotCount) |
-    JSCLASS_IS_ANONYMOUS,
+    JSCLASS_IS_ANONYMOUS |
+    JSCLASS_BACKGROUND_FINALIZE,
     &ModuleObject::classOps_
 };
 
@@ -588,7 +600,7 @@ ModuleObject::isInstance(HandleValue value)
 }
 
 /* static */ ModuleObject*
-ModuleObject::create(ExclusiveContext* cx, HandleObject enclosingStaticScope)
+ModuleObject::create(ExclusiveContext* cx)
 {
     RootedObject proto(cx, cx->global()->getModulePrototype());
     RootedObject obj(cx, NewObjectWithGivenProto(cx, &class_, proto));
@@ -596,7 +608,6 @@ ModuleObject::create(ExclusiveContext* cx, HandleObject enclosingStaticScope)
         return nullptr;
 
     RootedModuleObject self(cx, &obj->as<ModuleObject>());
-    self->initReservedSlot(StaticScopeSlot, ObjectOrNullValue(enclosingStaticScope));
 
     Zone* zone = cx->zone();
     IndirectBindingMap* bindings = zone->new_<IndirectBindingMap>(zone);
@@ -621,6 +632,7 @@ ModuleObject::create(ExclusiveContext* cx, HandleObject enclosingStaticScope)
 /* static */ void
 ModuleObject::finalize(js::FreeOp* fop, JSObject* obj)
 {
+    MOZ_ASSERT(fop->maybeOffMainThread());
     ModuleObject* self = &obj->as<ModuleObject>();
     if (self->hasImportBindings())
         fop->delete_(&self->importBindings());
@@ -771,18 +783,15 @@ ModuleObject::IsFrozen(JSContext* cx, HandleModuleObject self)
 inline static void
 AssertModuleScopesMatch(ModuleObject* module)
 {
-    MOZ_ASSERT(IsStaticGlobalLexicalScope(module->enclosingStaticScope()));
-    MOZ_ASSERT(module->initialEnvironment().enclosingScope().as<ClonedBlockObject>().staticScope() ==
-               module->enclosingStaticScope());
+    MOZ_ASSERT(module->enclosingScope()->is<GlobalScope>());
+    MOZ_ASSERT(IsGlobalLexicalEnvironment(&module->initialEnvironment().enclosingEnvironment()));
 }
 
 void
-ModuleObject::fixScopesAfterCompartmentMerge(JSContext* cx)
+ModuleObject::fixEnvironmentsAfterCompartmentMerge(JSContext* cx)
 {
     AssertModuleScopesMatch(this);
-    Rooted<ClonedBlockObject*> lexicalScope(cx, &script()->global().lexicalScope());
-    setReservedSlot(StaticScopeSlot, ObjectValue(lexicalScope->staticBlock()));
-    initialEnvironment().setEnclosingScope(lexicalScope);
+    initialEnvironment().fixEnclosingEnvironmentAfterCompartmentMerge(script()->global());
     AssertModuleScopesMatch(this);
 }
 
@@ -832,10 +841,10 @@ ModuleObject::initialEnvironment() const
     return getReservedSlot(InitialEnvironmentSlot).toObject().as<ModuleEnvironmentObject>();
 }
 
-JSObject*
-ModuleObject::enclosingStaticScope() const
+Scope*
+ModuleObject::enclosingScope() const
 {
-    return getReservedSlot(StaticScopeSlot).toObjectOrNull();
+    return script()->enclosingScope();
 }
 
 /* static */ void
@@ -886,7 +895,7 @@ ModuleObject::instantiateFunctionDeclarations(JSContext* cx, HandleModuleObject 
 
     FunctionDeclarationVector* funDecls = self->functionDeclarations();
     if (!funDecls) {
-        JS_ReportError(cx, "Module function declarations have already been instantiated");
+        JS_ReportErrorASCII(cx, "Module function declarations have already been instantiated");
         return false;
     }
 
@@ -927,7 +936,7 @@ ModuleObject::evaluate(JSContext* cx, HandleModuleObject self, MutableHandleValu
     RootedScript script(cx, self->script());
     RootedModuleEnvironmentObject scope(cx, self->environment());
     if (!scope) {
-        JS_ReportError(cx, "Module declarations have not yet been instantiated");
+        JS_ReportErrorASCII(cx, "Module declarations have not yet been instantiated");
         return false;
     }
 

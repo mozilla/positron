@@ -408,55 +408,6 @@ class TreeMetadataEmitter(LoggingMixin):
                     '%s %s of crate %s refers to a non-existent path' % (description, dep_crate_name, crate_name),
                     context)
 
-    def _verify_local_paths(self, context, crate_dir, config):
-        """Verify that a Cargo.toml config specifies local paths for all its dependencies."""
-        crate_name = config['package']['name']
-
-        # This is not exactly how cargo works (cargo would permit
-        # identically-named packages with different versions in the same
-        # library), but we want to try and avoid using multiple
-        # different versions of a single package for code size reasons.
-        if crate_name not in self._crate_directories:
-            self._crate_directories[crate_name] = crate_dir
-        else:
-            previous_dir = self._crate_directories[crate_name]
-            if crate_dir != previous_dir:
-                raise SandboxValidationError(
-                    'Crate %s found at multiple paths: %s, %s' % (crate_name, crate_dir, previous_dir),
-                    context)
-
-        # This check should ideally be positioned when we're recursing through
-        # dependencies, but then we would never get the chance to run the
-        # duplicated names check above.
-        if crate_name in self._crate_verified_local:
-            return
-
-        crate_deps = config.get('dependencies', {})
-        if crate_deps:
-            self._verify_deps(context, crate_dir, crate_name, crate_deps)
-
-        has_custom_build = 'build' in config['package']
-        build_deps = config.get('build-dependencies', {})
-        if has_custom_build and build_deps:
-            self._verify_deps(context, crate_dir, crate_name, build_deps,
-                              description='Build dependency')
-
-        # We have now verified that all the declared dependencies of
-        # this crate have local paths.  Now verify recursively.
-        self._crate_verified_local.add(crate_name)
-
-        if crate_deps:
-            for dep_crate_name, values in crate_deps.iteritems():
-                rel_dep_dir = mozpath.normpath(mozpath.join(crate_dir, values['path']))
-                dep_toml = mozpath.join(context.config.topsrcdir, rel_dep_dir, 'Cargo.toml')
-                self._verify_local_paths(context, rel_dep_dir, self._parse_cargo_file(dep_toml))
-
-        if has_custom_build and build_deps:
-            for dep_crate_name, values in build_deps.iteritems():
-                rel_dep_dir = mozpath.normpath(mozpath.join(crate_dir, values['path']))
-                dep_toml = mozpath.join(context.config.topsrcdir, rel_dep_dir, 'Cargo.toml')
-                self._verify_local_paths(context, rel_dep_dir, self._parse_cargo_file(dep_toml))
-
     def _rust_library(self, context, libname, static_args):
         # We need to note any Rust library for linking purposes.
         cargo_file = mozpath.join(context.srcdir, 'Cargo.toml')
@@ -472,6 +423,7 @@ class TreeMetadataEmitter(LoggingMixin):
                 'library %s does not match Cargo.toml-defined package %s' % (libname, crate_name),
                 context)
 
+        # Check that the [lib.crate-type] field is correct
         lib_section = config.get('lib', None)
         if not lib_section:
             raise SandboxValidationError(
@@ -485,17 +437,42 @@ class TreeMetadataEmitter(LoggingMixin):
                 context)
 
         crate_type = crate_type[0]
-        if crate_type != 'staticlib':
+        if crate_type != 'rlib':
             raise SandboxValidationError(
                 'crate-type %s is not permitted for %s' % (crate_type, libname),
                 context)
 
-        self._verify_local_paths(context, context.relsrcdir, config)
+        # Check that the [profile.{dev,release}.panic] field is "abort"
+        profile_section = config.get('profile', None)
+        if not profile_section:
+            raise SandboxValidationError(
+                'Cargo.toml for %s has no [profile] section' % libname,
+                context)
+
+        for profile_name in ['dev', 'release']:
+            profile = profile_section.get(profile_name, None)
+            if not profile:
+                raise SandboxValidationError(
+                    'Cargo.toml for %s has no [profile.%s] section' % (libname, profile_name),
+                    context)
+
+            panic = profile.get('panic', None)
+            if panic != 'abort':
+                raise SandboxValidationError(
+                    ('Cargo.toml for %s does not specify `panic = "abort"`'
+                     ' in [profile.%s] section') % (libname, profile_name),
+                    context)
 
         return RustLibrary(context, libname, cargo_file, crate_type, **static_args)
 
     def _handle_linkables(self, context, passthru, generated_files):
-        has_linkables = False
+        linkables = []
+        host_linkables = []
+        def add_program(prog, var):
+            if var.startswith('HOST_'):
+                host_linkables.append(prog)
+            else:
+                linkables.append(prog)
 
         for kind, cls in [('PROGRAM', Program), ('HOST_PROGRAM', HostProgram)]:
             program = context.get(kind)
@@ -508,7 +485,7 @@ class TreeMetadataEmitter(LoggingMixin):
                 self._binaries[program] = cls(context, program)
                 self._linkage.append((context, self._binaries[program],
                     kind.replace('PROGRAM', 'USE_LIBS')))
-                has_linkables = True
+                add_program(self._binaries[program], kind)
 
         for kind, cls in [
                 ('SIMPLE_PROGRAMS', SimpleProgram),
@@ -525,7 +502,7 @@ class TreeMetadataEmitter(LoggingMixin):
                 self._linkage.append((context, self._binaries[program],
                     'HOST_USE_LIBS' if kind == 'HOST_SIMPLE_PROGRAMS'
                     else 'USE_LIBS'))
-                has_linkables = True
+                add_program(self._binaries[program], kind)
 
         host_libname = context.get('HOST_LIBRARY_NAME')
         libname = context.get('LIBRARY_NAME')
@@ -537,7 +514,7 @@ class TreeMetadataEmitter(LoggingMixin):
             lib = HostLibrary(context, host_libname)
             self._libs[host_libname].append(lib)
             self._linkage.append((context, lib, 'HOST_USE_LIBS'))
-            has_linkables = True
+            host_linkables.append(lib)
 
         final_lib = context.get('FINAL_LIBRARY')
         if not libname and final_lib:
@@ -684,7 +661,7 @@ class TreeMetadataEmitter(LoggingMixin):
                 lib = SharedLibrary(context, libname, **shared_args)
                 self._libs[libname].append(lib)
                 self._linkage.append((context, lib, 'USE_LIBS'))
-                has_linkables = True
+                linkables.append(lib)
                 generated_files.add(lib.lib_name)
                 if is_component and not context['NO_COMPONENTS_MANIFEST']:
                     yield ChromeManifestEntry(context,
@@ -708,19 +685,7 @@ class TreeMetadataEmitter(LoggingMixin):
                     lib = StaticLibrary(context, libname, **static_args)
                 self._libs[libname].append(lib)
                 self._linkage.append((context, lib, 'USE_LIBS'))
-
-                # Multiple staticlibs for a library means multiple copies
-                # of the Rust runtime, which will result in linking errors
-                # later on.
-                if is_rust_library:
-                    staticlibs = [l for l in self._libs[libname]
-                                  if isinstance(l, RustLibrary) and l.crate_type == 'staticlib']
-                    if len(staticlibs) > 1:
-                        raise SandboxValidationError(
-                            'Cannot have multiple Rust staticlibs in %s: %s' % (libname, ', '.join(l.basename for l in staticlibs)),
-                            context)
-
-                has_linkables = True
+                linkables.append(lib)
 
             if lib_defines:
                 if not libname:
@@ -731,7 +696,7 @@ class TreeMetadataEmitter(LoggingMixin):
         # Only emit sources if we have linkables defined in the same context.
         # Note the linkables are not emitted in this function, but much later,
         # after aggregation (because of e.g. USE_LIBS processing).
-        if not has_linkables:
+        if not (linkables or host_linkables):
             return
 
         sources = defaultdict(list)
@@ -806,6 +771,10 @@ class TreeMetadataEmitter(LoggingMixin):
             HOST_SOURCES=(HostSources, None, ['.c', '.mm', '.cpp']),
             UNIFIED_SOURCES=(UnifiedSources, None, ['.c', '.mm', '.cpp']),
         )
+        # Track whether there are any C++ source files.
+        # Technically this won't do the right thing for SIMPLE_PROGRAMS in
+        # a directory with mixed C and C++ source, but it's not that important.
+        cxx_sources = defaultdict(bool)
 
         for variable, (klass, gen_klass, suffixes) in varmap.items():
             allowed_suffixes = set().union(*[suffix_map[s] for s in suffixes])
@@ -824,6 +793,8 @@ class TreeMetadataEmitter(LoggingMixin):
                 sorted_files = sorted(srcs, key=canonical_suffix_for_file)
                 for canonical_suffix, files in itertools.groupby(
                         sorted_files, canonical_suffix_for_file):
+                    if canonical_suffix in ('.cpp', '.mm'):
+                        cxx_sources[variable] = True
                     arglist = [context, list(files), canonical_suffix]
                     if (variable.startswith('UNIFIED_') and
                             'FILES_PER_UNIFIED_FILE' in context):
@@ -835,6 +806,16 @@ class TreeMetadataEmitter(LoggingMixin):
             if flags.flags:
                 ext = mozpath.splitext(f)[1]
                 yield PerSourceFlag(context, f, flags.flags)
+
+        # If there are any C++ sources, set all the linkables defined here
+        # to require the C++ linker.
+        for vars, linkable_items in ((('SOURCES', 'UNIFIED_SOURCES'), linkables),
+                                     (('HOST_SOURCES',), host_linkables)):
+            for var in vars:
+                if cxx_sources[var]:
+                    for l in linkable_items:
+                        l.cxx_link = True
+                    break
 
 
     def emit_from_context(self, context):

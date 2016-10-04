@@ -7,15 +7,12 @@
 #ifndef EME_LOG_H_
 #define EME_LOG_H_
 
+#include "VideoUtils.h"
 #include "mozilla/Logging.h"
 #include "nsString.h"
 #include "nsTArray.h"
 
 namespace mozilla {
-
-static const char* const kEMEKeySystemClearkey = "org.w3.clearkey";
-static const char* const kEMEKeySystemWidevine = "com.widevine.alpha";
-static const char* const kEMEKeySystemPrimetime = "com.adobe.primetime";
 
 namespace dom {
 class ArrayBufferViewOrArrayBuffer;
@@ -108,6 +105,16 @@ KeySystemToGMPName(const nsAString& aKeySystem);
 
 bool
 IsClearkeyKeySystem(const nsAString& aKeySystem);
+
+enum CDMType {
+  eClearKey = 0,
+  ePrimetime = 1,
+  eWidevine = 2,
+  eUnknown = 3
+};
+
+CDMType
+ToCDMTypeTelemetryEnum(const nsString& aKeySystem);
 
 } // namespace mozilla
 

@@ -4,9 +4,9 @@
 
 package org.mozilla.gecko;
 
+import org.mozilla.gecko.annotation.ReflectionTarget;
 import org.mozilla.gecko.annotation.RobocopTarget;
 import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.util.BundleEventListener;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoEventListener;
@@ -32,7 +32,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 @RobocopTarget
 public final class EventDispatcher {
     private static final String LOGTAG = "GeckoEventDispatcher";
-    private static final String GUID = "__guid__";
+    /* package */ static final String GUID = "__guid__";
     private static final String STATUS_ERROR = "error";
     private static final String STATUS_SUCCESS = "success";
 
@@ -58,11 +58,12 @@ public final class EventDispatcher {
     private final Map<String, List<BundleEventListener>> mBackgroundThreadListeners =
         new HashMap<String, List<BundleEventListener>>(DEFAULT_BACKGROUND_EVENTS_COUNT);
 
+    @ReflectionTarget
     public static EventDispatcher getInstance() {
         return INSTANCE;
     }
 
-    private EventDispatcher() {
+    public EventDispatcher() {
     }
 
     private <T> void registerListener(final Class<?> listType,
@@ -160,6 +161,7 @@ public final class EventDispatcher {
                          mUiThreadListeners, listener, events);
     }
 
+    @ReflectionTarget
     public void registerBackgroundThreadListener(final BundleEventListener listener,
                                                  final String... events) {
         checkNotRegisteredElsewhere(mBackgroundThreadListeners, events);
@@ -189,18 +191,31 @@ public final class EventDispatcher {
         unregisterListener(mBackgroundThreadListeners, listener, events);
     }
 
-    public void dispatchEvent(final NativeJSContainer message) {
-        // First try native listeners.
-        final String type = message.optString("type", null);
-        if (type == null) {
-            Log.e(LOGTAG, "JSON message must have a type property");
-            return;
-        }
-
+    private List<NativeEventListener> getNativeListeners(final String type) {
         final List<NativeEventListener> listeners;
         synchronized (mGeckoThreadNativeListeners) {
             listeners = mGeckoThreadNativeListeners.get(type);
         }
+        return listeners;
+    }
+
+    private List<GeckoEventListener> getGeckoListeners(final String type) {
+        final List<GeckoEventListener> listeners;
+        synchronized (mGeckoThreadJSONListeners) {
+            listeners = mGeckoThreadJSONListeners.get(type);
+        }
+        return listeners;
+    }
+
+    public boolean dispatchEvent(final NativeJSContainer message) {
+        // First try native listeners.
+        final String type = message.optString("type", null);
+        if (type == null) {
+            Log.e(LOGTAG, "JSON message must have a type property");
+            return true; // It may seem odd to return true here, but it's necessary to preserve the correct behavior.
+        }
+
+        final List<NativeEventListener> listeners = getNativeListeners(type);
 
         final String guid = message.optString(GUID, null);
         EventCallback callback = null;
@@ -212,11 +227,11 @@ public final class EventDispatcher {
             if (listeners.isEmpty()) {
                 Log.w(LOGTAG, "No listeners for " + type);
 
-                // There were native listeners, and they're gone.  Dispatch an error rather than
-                // looking for JSON listeners.
-                if (callback != null) {
-                    callback.sendError("No listeners for request");
-                }
+                // There were native listeners, and they're gone.  Return a failure rather than
+                // looking for JSON listeners. This is an optimization, as we can safely assume
+                // that an event which previously had native listeners will never have JSON
+                // listeners.
+                return false;
             }
             try {
                 for (final NativeEventListener listener : listeners) {
@@ -227,34 +242,120 @@ public final class EventDispatcher {
             }
             // If we found native listeners, we assume we don't have any other types of listeners
             // and return early. This assumption is checked when registering listeners.
-            return;
+            return true;
         }
 
         // Check for thread event listeners before checking for JSON event listeners,
         // because checking for thread listeners is very fast and doesn't require us to
         // serialize into JSON and construct a JSONObject.
-        if (dispatchToThread(type, message, callback,
-                             mUiThreadListeners, ThreadUtils.getUiHandler()) ||
-            dispatchToThread(type, message, callback,
-                             mBackgroundThreadListeners, ThreadUtils.getBackgroundHandler())) {
-
+        if (dispatchToThreads(type, message, /* bundle */ null, callback)) {
             // If we found thread listeners, we assume we don't have any other types of listeners
             // and return early. This assumption is checked when registering listeners.
-            return;
+            return true;
         }
 
         try {
             // If we didn't find native listeners, try JSON listeners.
-            dispatchEvent(new JSONObject(message.toString()), callback);
+            return dispatchEvent(new JSONObject(message.toString()), callback);
         } catch (final JSONException e) {
             Log.e(LOGTAG, "Cannot parse JSON", e);
         } catch (final UnsupportedOperationException e) {
             Log.e(LOGTAG, "Cannot convert message to JSON", e);
         }
+
+        return true;
+    }
+
+    /**
+     * Dispatch event to any registered Bundle listeners (non-Gecko thread listeners).
+     *
+     * @param message Bundle message with "type" value specifying the event type.
+     */
+    public void dispatch(final Bundle message) {
+        dispatch(message, /* callback */ null);
+    }
+
+    /**
+     * Dispatch event to any registered Bundle listeners (non-Gecko thread listeners).
+     *
+     * @param message Bundle message with "type" value specifying the event type.
+     * @param callback Optional object for callbacks from events.
+     */
+    public void dispatch(final Bundle message, final EventCallback callback) {
+        if (message == null) {
+            throw new IllegalArgumentException("Null message");
+        }
+
+        final String type = message.getCharSequence("type").toString();
+        if (type == null) {
+            Log.e(LOGTAG, "Bundle message must have a type property");
+            return;
+        }
+        dispatchToThreads(type, /* js */ null, message, /* callback */ callback);
+    }
+
+    /**
+     * Dispatch event to any registered Bundle listeners (non-Gecko thread listeners).
+     *
+     * @param type Event type
+     * @param message Bundle message
+     */
+    public void dispatch(final String type, final Bundle message) {
+        dispatch(type, message, /* callback */ null);
+    }
+
+    /**
+     * Dispatch event to any registered Bundle listeners (non-Gecko thread listeners).
+     *
+     * @param type Event type
+     * @param message Bundle message
+     * @param callback Optional object for callbacks from events.
+     */
+    public void dispatch(final String type, final Bundle message, final EventCallback callback) {
+        dispatchToThreads(type, /* js */ null, message, /* callback */ callback);
+    }
+
+    private boolean dispatchToThreads(final String type,
+                                      final NativeJSObject jsMessage,
+                                      final Bundle bundleMessage,
+                                      final EventCallback callback) {
+        if (dispatchToThread(type, jsMessage, bundleMessage, callback,
+                             mUiThreadListeners, ThreadUtils.getUiHandler())) {
+            return true;
+        }
+
+        if (dispatchToThread(type, jsMessage, bundleMessage, callback,
+                             mBackgroundThreadListeners, ThreadUtils.getBackgroundHandler())) {
+            return true;
+        }
+
+        if (jsMessage == null) {
+            Log.w(LOGTAG, "No listeners for " + type + " in dispatchToThreads");
+        }
+
+        if (!AppConstants.RELEASE_BUILD && jsMessage == null) {
+            // We're dispatching a Bundle message. Because Gecko thread listeners are not
+            // supported for Bundle messages, do a sanity check to make sure we don't have
+            // matching Gecko thread listeners.
+            boolean hasGeckoListener = false;
+            synchronized (mGeckoThreadNativeListeners) {
+                hasGeckoListener |= mGeckoThreadNativeListeners.containsKey(type);
+            }
+            synchronized (mGeckoThreadJSONListeners) {
+                hasGeckoListener |= mGeckoThreadJSONListeners.containsKey(type);
+            }
+            if (hasGeckoListener) {
+                throw new IllegalStateException(
+                        "Dispatching Bundle message to Gecko listener " + type);
+            }
+        }
+
+        return false;
     }
 
     private boolean dispatchToThread(final String type,
-                                     final NativeJSObject message,
+                                     final NativeJSObject jsMessage,
+                                     final Bundle bundleMessage,
                                      final EventCallback callback,
                                      final Map<String, List<BundleEventListener>> listenersMap,
                                      final Handler thread) {
@@ -269,19 +370,15 @@ public final class EventDispatcher {
             }
 
             if (listeners.isEmpty()) {
-                Log.w(LOGTAG, "No listeners for " + type);
+                Log.w(LOGTAG, "No listeners for " + type + " in dispatchToThread");
 
                 // There were native listeners, and they're gone.
-                // Dispatch an error rather than looking for more listeners.
-                if (callback != null) {
-                    callback.sendError("No listeners for request");
-                }
-                return true;
+                return false;
             }
 
             final Bundle messageAsBundle;
             try {
-                messageAsBundle = message.toBundle();
+                messageAsBundle = jsMessage != null ? jsMessage.toBundle() : bundleMessage;
             } catch (final NativeJSObject.InvalidPropertyException e) {
                 Log.e(LOGTAG, "Exception occurred while handling " + type, e);
                 return true;
@@ -300,7 +397,7 @@ public final class EventDispatcher {
         }
     }
 
-    public void dispatchEvent(final JSONObject message, final EventCallback callback) {
+    public boolean dispatchEvent(final JSONObject message, final EventCallback callback) {
         // {
         //   "type": "value",
         //   "event_specific": "value",
@@ -308,25 +405,22 @@ public final class EventDispatcher {
         try {
             final String type = message.getString("type");
 
-            List<GeckoEventListener> listeners;
-            synchronized (mGeckoThreadJSONListeners) {
-                listeners = mGeckoThreadJSONListeners.get(type);
-            }
-            if (listeners == null || listeners.isEmpty()) {
-                Log.w(LOGTAG, "No listeners for " + type);
+            final List<GeckoEventListener> listeners = getGeckoListeners(type);
 
-                // If there are no listeners, dispatch an error.
-                if (callback != null) {
-                    callback.sendError("No listeners for request");
-                }
-                return;
+            if (listeners == null || listeners.isEmpty()) {
+                Log.w(LOGTAG, "No listeners for " + type + " in dispatchEvent");
+
+                return false;
             }
+
             for (final GeckoEventListener listener : listeners) {
                 listener.handleMessage(type, message);
             }
         } catch (final JSONException e) {
             Log.e(LOGTAG, "handleGeckoMessage throws " + e, e);
         }
+
+        return true;
     }
 
     @RobocopTarget
@@ -360,7 +454,7 @@ public final class EventDispatcher {
         }
     }
 
-    private static class GeckoEventCallback implements EventCallback {
+    /* package */ static class GeckoEventCallback implements EventCallback {
         private final String guid;
         private final String type;
         private boolean sent;

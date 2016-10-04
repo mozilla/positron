@@ -78,9 +78,16 @@ public:
   MOCK_METHOD2(RequestFlingSnap, void(const FrameMetrics::ViewID& aScrollId, const mozilla::CSSPoint& aDestination));
   MOCK_METHOD2(AcknowledgeScrollUpdate, void(const FrameMetrics::ViewID&, const uint32_t& aScrollGeneration));
   MOCK_METHOD5(HandleTap, void(TapType, const LayoutDevicePoint&, Modifiers, const ScrollableLayerGuid&, uint64_t));
+  MOCK_METHOD4(NotifyPinchGesture, void(PinchGestureInput::PinchGestureType, const ScrollableLayerGuid&, LayoutDeviceCoord, Modifiers));
   // Can't use the macros with already_AddRefed :(
   void PostDelayedTask(already_AddRefed<Runnable> aTask, int aDelayMs) {
     RefPtr<Runnable> task = aTask;
+  }
+  bool IsRepaintThread() {
+    return NS_IsMainThread();
+  }
+  void DispatchToRepaintThread(already_AddRefed<Runnable> aTask) {
+    NS_DispatchToMainThread(Move(aTask));
   }
   MOCK_METHOD3(NotifyAPZStateChange, void(const ScrollableLayerGuid& aGuid, APZStateChange aChange, int aArg));
   MOCK_METHOD0(NotifyFlushComplete, void());

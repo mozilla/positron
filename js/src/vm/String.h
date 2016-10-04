@@ -1174,6 +1174,10 @@ NewStringDontDeflate(js::ExclusiveContext* cx, CharT* chars, size_t length);
 extern JSLinearString*
 NewDependentString(JSContext* cx, JSString* base, size_t start, size_t length);
 
+/* Take ownership of an array of Latin1Chars. */
+extern JSFlatString*
+NewLatin1StringZ(js::ExclusiveContext* cx, UniqueChars chars);
+
 /* Copy a counted string and GC-allocate a descriptor for it. */
 template <js::AllowGC allowGC, typename CharT>
 extern JSFlatString*
@@ -1204,6 +1208,17 @@ inline JSFlatString*
 NewStringCopyZ(js::ExclusiveContext* cx, const char* s)
 {
     return NewStringCopyN<allowGC>(cx, s, strlen(s));
+}
+
+template <js::AllowGC allowGC>
+extern JSFlatString*
+NewStringCopyUTF8N(JSContext* cx, const JS::UTF8Chars utf8);
+
+template <js::AllowGC allowGC>
+inline JSFlatString*
+NewStringCopyUTF8Z(JSContext* cx, const JS::ConstUTF8CharsZ utf8)
+{
+    return NewStringCopyUTF8N<allowGC>(cx, JS::UTF8Chars(utf8.c_str(), strlen(utf8.c_str())));
 }
 
 } /* namespace js */

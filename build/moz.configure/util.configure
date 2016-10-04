@@ -64,6 +64,32 @@ def normsep(path):
 
 @imports('ctypes')
 @imports(_from='ctypes', _import='wintypes')
+@imports(_from='mozbuild.configure.constants', _import='WindowsBinaryType')
+def windows_binary_type(path):
+    """Obtain the type of a binary on Windows.
+
+    Returns WindowsBinaryType constant.
+    """
+    GetBinaryTypeW = ctypes.windll.kernel32.GetBinaryTypeW
+    GetBinaryTypeW.argtypes = [wintypes.LPWSTR, wintypes.POINTER(wintypes.DWORD)]
+    GetBinaryTypeW.restype = wintypes.BOOL
+
+    bin_type = wintypes.DWORD()
+    res = GetBinaryTypeW(path, ctypes.byref(bin_type))
+    if not res:
+        die('could not obtain binary type of %s' % path)
+
+    if bin_type.value == 0:
+        return WindowsBinaryType('win32')
+    elif bin_type.value == 6:
+        return WindowsBinaryType('win64')
+    # If we see another binary type, something is likely horribly wrong.
+    else:
+        die('unsupported binary type on %s: %s' % (path, bin_type))
+
+
+@imports('ctypes')
+@imports(_from='ctypes', _import='wintypes')
 def get_GetShortPathNameW():
     GetShortPathNameW = ctypes.windll.kernel32.GetShortPathNameW
     GetShortPathNameW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR,
@@ -302,6 +328,24 @@ def namespace(**kwargs):
     return ReadOnlyNamespace(**kwargs)
 
 
+# Turn an object into an object that can be used as an argument to @depends.
+# The given object can be a literal value, a function that takes no argument,
+# or, for convenience, a @depends function.
+@template
+@imports(_from='inspect', _import='isfunction')
+@imports(_from='mozbuild.configure', _import='DependsFunction')
+def dependable(obj):
+    if isinstance(obj, DependsFunction):
+        return obj
+    if isfunction(obj):
+        return depends('--help')(lambda _: obj())
+    return depends('--help')(lambda _: obj)
+
+
+always = dependable(True)
+never = dependable(False)
+
+
 # Some @depends function return namespaces, and one could want to use one
 # specific attribute from such a namespace as a "value" given to functions
 # such as `set_config`. But those functions do not take immediate values.
@@ -349,6 +393,9 @@ def depends_when(*args, **kwargs):
     if not len(kwargs) == 1 and kwargs.get('when'):
         die('depends_when requires a single keyword argument, "when"')
     when = kwargs['when']
+    if not when:
+        return depends(*args)
+
     def decorator(fn):
         @depends(when, *args)
         def wrapper(val, *args):

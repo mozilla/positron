@@ -58,6 +58,8 @@ using namespace mozilla::psm;
 
 namespace {
 
+#define MAX_ALPN_LENGTH 255
+
 void
 getSiteKey(const nsACString& hostName, uint16_t port,
            /*out*/ nsCSubstring& key)
@@ -87,6 +89,7 @@ nsNSSSocketInfo::nsNSSSocketInfo(SharedSSLState& aState, uint32_t providerFlags)
     mRememberClientAuthCertificate(false),
     mPreliminaryHandshakeDone(false),
     mNPNCompleted(false),
+    mEarlyDataAccepted(false),
     mFalseStartCallbackCalled(false),
     mFalseStarted(false),
     mIsFullHandshake(false),
@@ -308,6 +311,71 @@ nsNSSSocketInfo::GetNegotiatedNPN(nsACString& aNegotiatedNPN)
 }
 
 NS_IMETHODIMP
+nsNSSSocketInfo::GetAlpnEarlySelection(nsACString& aAlpnSelected)
+{
+  nsNSSShutDownPreventionLock locker;
+  if (isAlreadyShutDown() || isPK11LoggedOut()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  SSLNextProtoState alpnState;
+  unsigned char chosenAlpn[MAX_ALPN_LENGTH];
+  unsigned int chosenAlpnLen;
+  SECStatus rv = SSL_GetNextProto(mFd, &alpnState, chosenAlpn, &chosenAlpnLen,
+                                  AssertedCast<unsigned int>(ArrayLength(chosenAlpn)));
+
+  if (rv != SECSuccess || alpnState != SSL_NEXT_PROTO_EARLY_VALUE ||
+      chosenAlpnLen == 0) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  aAlpnSelected.Assign(BitwiseCast<char*, unsigned char*>(chosenAlpn),
+                       chosenAlpnLen);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNSSSocketInfo::GetEarlyDataAccepted(bool* aAccepted)
+{
+  *aAccepted = mEarlyDataAccepted;
+  return NS_OK;
+}
+
+void
+nsNSSSocketInfo::SetEarlyDataAccepted(bool aAccepted)
+{
+  mEarlyDataAccepted = aAccepted;
+}
+
+NS_IMETHODIMP
+nsNSSSocketInfo::DriveHandshake()
+{
+  nsNSSShutDownPreventionLock locker;
+  if (isAlreadyShutDown() || isPK11LoggedOut()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  if (!mFd) {
+    return NS_ERROR_FAILURE;
+  }
+  PRErrorCode errorCode = GetErrorCode();
+  if (errorCode) {
+    return GetXPCOMFromNSSError(errorCode);
+  }
+
+  SECStatus rv = SSL_ForceHandshake(mFd);
+
+  if (rv != SECSuccess) {
+    errorCode = PR_GetError();
+    if (errorCode == PR_WOULD_BLOCK_ERROR) {
+      return NS_BASE_STREAM_WOULD_BLOCK;
+    }
+
+    SetCanceled(errorCode, PlainErrorMessage);
+    return GetXPCOMFromNSSError(errorCode);
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsNSSSocketInfo::IsAcceptableForHost(const nsACString& hostname, bool* _retval)
 {
   // If this is the same hostname then the certicate status does not
@@ -375,10 +443,15 @@ nsNSSSocketInfo::IsAcceptableForHost(const nsACString& hostname, bool* _retval)
   nsAutoCString hostnameFlat(PromiseFlatCString(hostname));
   CertVerifier::Flags flags = CertVerifier::FLAG_LOCAL_ONLY;
   UniqueCERTCertList unusedBuiltChain;
-  SECStatus rv = certVerifier->VerifySSLServerCert(nssCert, nullptr,
+  SECStatus rv = certVerifier->VerifySSLServerCert(nssCert,
+                                                   nullptr, // stapledOCSPResponse
+                                                   nullptr, // sctsFromTLSExtension
                                                    mozilla::pkix::Now(),
-                                                   nullptr, hostnameFlat.get(),
-                                                   unusedBuiltChain, false, flags);
+                                                   nullptr, // pinarg
+                                                   hostnameFlat.get(),
+                                                   unusedBuiltChain,
+                                                   false, // save intermediates
+                                                   flags);
   if (rv != SECSuccess) {
     return NS_OK;
   }
@@ -2424,8 +2497,29 @@ nsSSLIOLayerSetOptions(PRFileDesc* fd, bool forSTARTTLS,
     }
   }
 
+  // Include a modest set of named groups.
+  const SSLNamedGroup namedGroups[] = {
+    ssl_grp_ec_curve25519, ssl_grp_ec_secp256r1, ssl_grp_ec_secp384r1,
+    ssl_grp_ec_secp521r1, ssl_grp_ffdhe_2048, ssl_grp_ffdhe_3072
+  };
+  if (SECSuccess != SSL_NamedGroupConfig(fd, namedGroups,
+                                         mozilla::ArrayLength(namedGroups))) {
+    return NS_ERROR_FAILURE;
+  }
+  // This ensures that we send key shares for X25519 and P-256 in TLS 1.3, so
+  // that servers are less likely to use HelloRetryRequest.
+  if (SECSuccess != SSL_SendAdditionalKeyShares(fd, 2)) {
+    return NS_ERROR_FAILURE;
+  }
+
   bool enabled = infoObject->SharedState().IsOCSPStaplingEnabled();
   if (SECSuccess != SSL_OptionSet(fd, SSL_ENABLE_OCSP_STAPLING, enabled)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  bool sctsEnabled = infoObject->SharedState().IsSignedCertTimestampsEnabled();
+  if (SECSuccess != SSL_OptionSet(fd, SSL_ENABLE_SIGNED_CERT_TIMESTAMPS,
+      sctsEnabled)) {
     return NS_ERROR_FAILURE;
   }
 

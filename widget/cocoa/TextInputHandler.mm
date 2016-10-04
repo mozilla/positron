@@ -698,7 +698,7 @@ TISInputSourceWrapper::IsForRTLLanguage()
     bool ret = TranslateToString(kVK_ANSI_A, 0, eKbdType_ANSI, str);
     NS_ENSURE_TRUE(ret, ret);
     char16_t ch = str.IsEmpty() ? char16_t(0) : str.CharAt(0);
-    mIsRTL = UCS2_CHAR_IS_BIDI(ch) || ch == 0xD802 || ch == 0xD803;
+    mIsRTL = UCS2_CHAR_IS_BIDI(ch);
   }
   return mIsRTL != 0;
 }
@@ -1534,7 +1534,7 @@ TextInputHandler::HandleKeyDownEvent(NSEvent* aNativeEvent)
     [NSCursor setHiddenUntilMouseMoves:YES];
   }
 
-  RefPtr<nsChildView> kungFuDeathGrip(mWidget);
+  RefPtr<nsChildView> widget(mWidget);
 
   KeyEventState* currentKeyEvent = PushKeyEvent(aNativeEvent);
   AutoKeyEventStateCleaner remover(this);
@@ -1553,7 +1553,7 @@ TextInputHandler::HandleKeyDownEvent(NSEvent* aNativeEvent)
         return false;
       }
 
-      WidgetKeyboardEvent imeEvent(true, eKeyDown, mWidget);
+      WidgetKeyboardEvent imeEvent(true, eKeyDown, widget);
       currentKeyEvent->InitKeyEvent(this, imeEvent);
       imeEvent.mPluginTextEventString.Assign(committed);
       nsEventStatus status = nsEventStatus_eIgnore;
@@ -1574,7 +1574,7 @@ TextInputHandler::HandleKeyDownEvent(NSEvent* aNativeEvent)
     return false;
   }
 
-  WidgetKeyboardEvent keydownEvent(true, eKeyDown, mWidget);
+  WidgetKeyboardEvent keydownEvent(true, eKeyDown, widget);
   currentKeyEvent->InitKeyEvent(this, keydownEvent);
 
   nsEventStatus status = nsEventStatus_eIgnore;
@@ -1613,7 +1613,7 @@ TextInputHandler::HandleKeyDownEvent(NSEvent* aNativeEvent)
   // Don't call interpretKeyEvents when a plugin has focus.  If we call it,
   // for example, a character is inputted twice during a composition in e10s
   // mode.
-  if (!mWidget->IsPluginFocused() && (IsIMEEnabled() || IsASCIICapableOnly())) {
+  if (!widget->IsPluginFocused() && (IsIMEEnabled() || IsASCIICapableOnly())) {
     MOZ_LOG(gLog, LogLevel::Info,
       ("%p TextInputHandler::HandleKeyDownEvent, calling interpretKeyEvents",
        this));
@@ -1647,7 +1647,7 @@ TextInputHandler::HandleKeyDownEvent(NSEvent* aNativeEvent)
       return false;
     }
 
-    WidgetKeyboardEvent keypressEvent(true, eKeyPress, mWidget);
+    WidgetKeyboardEvent keypressEvent(true, eKeyPress, widget);
     currentKeyEvent->InitKeyEvent(this, keypressEvent);
 
     // If we called interpretKeyEvents and this isn't normal character input
@@ -1743,6 +1743,7 @@ TextInputHandler::HandleFlagsChanged(NSEvent* aNativeEvent)
   }
 
   RefPtr<nsChildView> kungFuDeathGrip(mWidget);
+  mozilla::Unused << kungFuDeathGrip; // Not referenced within this function
 
   MOZ_LOG(gLog, LogLevel::Info,
     ("%p TextInputHandler::HandleFlagsChanged, aNativeEvent=%p, "
@@ -2195,7 +2196,7 @@ TextInputHandler::InsertText(NSAttributedString* aAttrString,
     return;
   }
 
-  RefPtr<nsChildView> kungFuDeathGrip(mWidget);
+  RefPtr<nsChildView> widget(mWidget);
 
   // If the replacement range is specified, select the range.  Then, the
   // selection will be replaced by the later keypress event.
@@ -2214,7 +2215,7 @@ TextInputHandler::InsertText(NSAttributedString* aAttrString,
   }
 
   // Dispatch keypress event with char instead of compositionchange event
-  WidgetKeyboardEvent keypressEvent(true, eKeyPress, mWidget);
+  WidgetKeyboardEvent keypressEvent(true, eKeyPress, widget);
   // XXX Why do we need to dispatch keypress event for not inputting any
   //     string?  If it wants to delete the specified range, should we
   //     dispatch an eContentCommandDelete event instead?  Because this
@@ -2263,7 +2264,7 @@ TextInputHandler::InsertText(NSAttributedString* aAttrString,
 bool
 TextInputHandler::DoCommandBySelector(const char* aSelector)
 {
-  RefPtr<nsChildView> kungFuDeathGrip(mWidget);
+  RefPtr<nsChildView> widget(mWidget);
 
   KeyEventState* currentKeyEvent = GetCurrentKeyEvent();
 
@@ -2289,7 +2290,7 @@ TextInputHandler::DoCommandBySelector(const char* aSelector)
       return false;
     }
 
-    WidgetKeyboardEvent keypressEvent(true, eKeyPress, mWidget);
+    WidgetKeyboardEvent keypressEvent(true, eKeyPress, widget);
     currentKeyEvent->InitKeyEvent(this, keypressEvent);
 
     nsEventStatus status = nsEventStatus_eIgnore;
@@ -2807,14 +2808,21 @@ IMEInputHandler::CreateTextRangeArray(NSAttributedString *aAttrString,
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
 
+  RefPtr<mozilla::TextRangeArray> textRangeArray =
+                                      new mozilla::TextRangeArray();
+
+  // Note that we shouldn't append ranges when composition string
+  // is empty because it may cause TextComposition confused.
+  if (![aAttrString length]) {
+    return textRangeArray.forget();
+  }
+
   // Convert the Cocoa range into the TextRange Array used in Gecko.
   // Iterate through the attributed string and map the underline attribute to
   // Gecko IME textrange attributes.  We may need to change the code here if
   // we change the implementation of validAttributesForMarkedText.
   NSRange limitRange = NSMakeRange(0, [aAttrString length]);
   uint32_t rangeCount = GetRangeCount(aAttrString);
-  RefPtr<mozilla::TextRangeArray> textRangeArray =
-                                      new mozilla::TextRangeArray();
   for (uint32_t i = 0; i < rangeCount && limitRange.length > 0; i++) {
     NSRange effectiveRange;
     id attributeValue = [aAttrString attribute:NSUnderlineStyleAttributeName
@@ -3267,13 +3275,24 @@ IMEInputHandler::GetAttributedSubstringFromRange(NSRange& aRange,
 
   nsAutoString str;
   WidgetQueryContentEvent textContent(true, eQueryTextContent, mWidget);
-  textContent.InitForQueryTextContent(aRange.location, aRange.length);
+  WidgetQueryContentEvent::Options options;
+  int64_t startOffset = aRange.location;
+  if (IsIMEComposing()) {
+    // The composition may be at different offset from the selection start
+    // offset at dispatching compositionstart because start of composition
+    // is fixed when composition string becomes non-empty in the editor.
+    // Therefore, we need to use query event which is relative to insertion
+    // point.
+    options.mRelativeToInsertionPoint = true;
+    startOffset -= mIMECompositionStart;
+  }
+  textContent.InitForQueryTextContent(startOffset, aRange.length, options);
   textContent.RequestFontRanges();
   DispatchEvent(textContent);
 
   MOZ_LOG(gLog, LogLevel::Info,
     ("%p IMEInputHandler::GetAttributedSubstringFromRange, "
-     "textContent={ mSucceeded=%s, mReply={ mString=\"%s\", mOffset=%llu } }",
+     "textContent={ mSucceeded=%s, mReply={ mString=\"%s\", mOffset=%u } }",
      this, TrueOrFalse(textContent.mSucceeded),
      NS_ConvertUTF16toUTF8(textContent.mReply.mString).get(),
      textContent.mReply.mOffset));
@@ -3350,7 +3369,7 @@ IMEInputHandler::SelectedRange()
 
   MOZ_LOG(gLog, LogLevel::Info,
     ("%p IMEInputHandler::SelectedRange, selection={ mSucceeded=%s, "
-     "mReply={ mOffset=%llu, mString.Length()=%llu } }",
+     "mReply={ mOffset=%u, mString.Length()=%u } }",
      this, TrueOrFalse(selection.mSucceeded), selection.mReply.mOffset,
      selection.mReply.mString.Length()));
 
@@ -3435,7 +3454,18 @@ IMEInputHandler::FirstRectForCharacterRange(NSRange& aRange,
   bool useCaretRect = (aRange.length == 0);
   if (!useCaretRect) {
     WidgetQueryContentEvent charRect(true, eQueryTextRect, mWidget);
-    charRect.InitForQueryTextRect(aRange.location, 1);
+    WidgetQueryContentEvent::Options options;
+    int64_t startOffset = aRange.location;
+    if (IsIMEComposing()) {
+      // The composition may be at different offset from the selection start
+      // offset at dispatching compositionstart because start of composition
+      // is fixed when composition string becomes non-empty in the editor.
+      // Therefore, we need to use query event which is relative to insertion
+      // point.
+      options.mRelativeToInsertionPoint = true;
+      startOffset -= mIMECompositionStart;
+    }
+    charRect.InitForQueryTextRect(startOffset, 1, options);
     DispatchEvent(charRect);
     if (charRect.mSucceeded) {
       r = charRect.mReply.mRect;
@@ -3450,7 +3480,18 @@ IMEInputHandler::FirstRectForCharacterRange(NSRange& aRange,
 
   if (useCaretRect) {
     WidgetQueryContentEvent caretRect(true, eQueryCaretRect, mWidget);
-    caretRect.InitForQueryCaretRect(aRange.location);
+    WidgetQueryContentEvent::Options options;
+    int64_t startOffset = aRange.location;
+    if (IsIMEComposing()) {
+      // The composition may be at different offset from the selection start
+      // offset at dispatching compositionstart because start of composition
+      // is fixed when composition string becomes non-empty in the editor.
+      // Therefore, we need to use query event which is relative to insertion
+      // point.
+      options.mRelativeToInsertionPoint = true;
+      startOffset -= mIMECompositionStart;
+    }
+    caretRect.InitForQueryCaretRect(startOffset, options);
     DispatchEvent(caretRect);
     if (!caretRect.mSucceeded) {
       return rect;

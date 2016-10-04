@@ -11,7 +11,7 @@
 
 #include "mozilla/css/StyleRule.h"
 
-#include "mozilla/CSSStyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/css/GroupRule.h"
 #include "mozilla/css/Declaration.h"
@@ -1499,10 +1499,8 @@ StyleRule::List(FILE* out, int32_t aIndent) const
     if (sheet) {
       nsIURI* uri = sheet->GetSheetURI();
       if (uri) {
-        nsAutoCString uristr;
         str.Append(" /* ");
-        uri->GetSpec(uristr);
-        str.Append(uristr);
+        str.Append(uri->GetSpecOrDefault());
         str.Append(':');
         str.AppendInt(mLineNumber);
         str.Append(" */");

@@ -8,33 +8,73 @@ const React = require("devtools/client/shared/vendor/react");
 const ReactDOM = require("devtools/client/shared/vendor/react-dom");
 const { Provider } = require("devtools/client/shared/vendor/react-redux");
 
-const actions = require("devtools/client/webconsole/new-console-output/actions/messages");
-const { store } = require("devtools/client/webconsole/new-console-output/store");
+const actions = require("devtools/client/webconsole/new-console-output/actions/index");
+const { configureStore } = require("devtools/client/webconsole/new-console-output/store");
 
 const ConsoleOutput = React.createFactory(require("devtools/client/webconsole/new-console-output/components/console-output"));
 const FilterBar = React.createFactory(require("devtools/client/webconsole/new-console-output/components/filter-bar"));
 
-function NewConsoleOutputWrapper(parentNode, jsterm) {
-  let childComponent = ConsoleOutput({ jsterm });
-  let filterBar = FilterBar({});
-  let provider = React.createElement(
-    Provider,
-    { store: store },
-    React.DOM.div(
-      {className: "webconsole-output-wrapper"},
-      filterBar,
-      childComponent
-  ));
-  this.body = ReactDOM.render(provider, parentNode);
+const store = configureStore();
+
+function NewConsoleOutputWrapper(parentNode, jsterm, toolbox, owner) {
+  this.parentNode = parentNode;
+  this.parentNode = parentNode;
+  this.jsterm = jsterm;
+  this.toolbox = toolbox;
+  this.owner = owner;
+
+  this.init = this.init.bind(this);
 }
 
 NewConsoleOutputWrapper.prototype = {
+  init: function () {
+    const sourceMapService = this.toolbox ? this.toolbox._sourceMapService : null;
+
+    let childComponent = ConsoleOutput({
+      hudProxyClient: this.jsterm.hud.proxy.client,
+      sourceMapService,
+      onViewSourceInDebugger: frame => this.toolbox.viewSourceInDebugger.call(
+        this.toolbox,
+        frame.url,
+        frame.line
+      ),
+      openNetworkPanel: (requestId) => {
+        return this.toolbox.selectTool("netmonitor").then(panel => {
+          return panel.panelWin.NetMonitorController.inspectRequest(requestId);
+        });
+      },
+      openLink: (url) => {
+        this.owner.openLink(url);
+      },
+    });
+    let filterBar = FilterBar({});
+    let provider = React.createElement(
+      Provider,
+      { store },
+      React.DOM.div(
+        {className: "webconsole-output-wrapper"},
+        filterBar,
+        childComponent
+    ));
+
+    this.body = ReactDOM.render(provider, this.parentNode);
+  },
   dispatchMessageAdd: (message) => {
     store.dispatch(actions.messageAdd(message));
   },
+  dispatchMessagesAdd: (messages) => {
+    const batchedActions = messages.map(message => actions.messageAdd(message));
+    store.dispatch(actions.batchActions(batchedActions));
+  },
   dispatchMessagesClear: () => {
     store.dispatch(actions.messagesClear());
-  }
+  },
+  getLastMessage: function() {
+    // Return the last message in the DOM as the message that was just dispatched. This may not
+    // always be correct in the case of filtered messages, but it's close enough for our tests.
+    let messageNodes = this.parentNode.querySelectorAll(".message");
+    return messageNodes[messageNodes.length - 1]
+  },
 };
 
 // Exports from this module

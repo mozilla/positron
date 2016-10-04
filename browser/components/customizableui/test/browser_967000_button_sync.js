@@ -117,10 +117,7 @@ function* asyncCleanup() {
 }
 
 // When Sync is not setup.
-add_task(() => openPrefsFromMenuPanel("PanelUI-remotetabs-setupsync", "syncbutton"));
-add_task(asyncCleanup);
-// Test that uitour is in progress, the entrypoint is `uitour` and not `menupanel`
-add_task(() => openPrefsFromMenuPanel("PanelUI-remotetabs-setupsync", "uitour"));
+add_task(() => openPrefsFromMenuPanel("PanelUI-remotetabs-setupsync", "synced-tabs"));
 add_task(asyncCleanup);
 
 // When Sync is configured in a "needs reauthentication" state.
@@ -129,7 +126,7 @@ add_task(function* () {
   document.getElementById("sync-reauth-state").hidden = false;
   document.getElementById("sync-setup-state").hidden = true;
   document.getElementById("sync-syncnow-state").hidden = true;
-  yield openPrefsFromMenuPanel("PanelUI-remotetabs-reauthsync", "syncbutton")
+  yield openPrefsFromMenuPanel("PanelUI-remotetabs-reauthsync", "synced-tabs")
 });
 
 // Test the mobile promo links

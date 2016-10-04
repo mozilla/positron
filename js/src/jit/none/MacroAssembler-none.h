@@ -84,7 +84,7 @@ static constexpr Register ABINonArgReturnReg1 = { Registers::invalid_reg };
 
 static constexpr Register WasmTableCallScratchReg = { Registers::invalid_reg };
 static constexpr Register WasmTableCallSigReg = { Registers::invalid_reg };
-static constexpr Register WasmTableCallIndexReg = { Register::invalid_reg };
+static constexpr Register WasmTableCallIndexReg = { Registers::invalid_reg };
 static constexpr Register WasmTlsReg = { Registers::invalid_reg };
 
 static constexpr uint32_t ABIStackAlignment = 4;
@@ -109,6 +109,8 @@ class Assembler : public AssemblerShared
         LessThan,
         LessThanOrEqual,
         Overflow,
+        CarrySet,
+        CarryClear,
         Signed,
         NotSigned,
         Zero,
@@ -146,8 +148,6 @@ class Assembler : public AssemblerShared
     static void ToggleToJmp(CodeLocationLabel) { MOZ_CRASH(); }
     static void ToggleToCmp(CodeLocationLabel) { MOZ_CRASH(); }
     static void ToggleCall(CodeLocationLabel, bool) { MOZ_CRASH(); }
-
-    static void UpdateBoundsCheck(uint8_t*, uint32_t) { MOZ_CRASH(); }
 
     static uintptr_t GetPointer(uint8_t*) { MOZ_CRASH(); }
 
@@ -352,8 +352,6 @@ class MacroAssemblerNone : public Assembler
     template <typename T, typename S> void atomicXor16(const T& value, const S& mem) { MOZ_CRASH(); }
     template <typename T, typename S> void atomicXor32(const T& value, const S& mem) { MOZ_CRASH(); }
 
-    void clampIntToUint8(Register) { MOZ_CRASH(); }
-
     Register splitTagForTest(ValueOperand) { MOZ_CRASH(); }
 
     void boxDouble(FloatRegister, ValueOperand) { MOZ_CRASH(); }
@@ -391,6 +389,8 @@ class MacroAssemblerNone : public Assembler
 
     void loadConstantDouble(double, FloatRegister) { MOZ_CRASH(); }
     void loadConstantFloat32(float, FloatRegister) { MOZ_CRASH(); }
+    void loadConstantDouble(wasm::RawF64, FloatRegister) { MOZ_CRASH(); }
+    void loadConstantFloat32(wasm::RawF32, FloatRegister) { MOZ_CRASH(); }
     Condition testInt32Truthy(bool, ValueOperand) { MOZ_CRASH(); }
     Condition testStringTruthy(bool, ValueOperand) { MOZ_CRASH(); }
 

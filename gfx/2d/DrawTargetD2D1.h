@@ -93,6 +93,8 @@ public:
                     const DrawOptions &aOptions = DrawOptions()) override;
   virtual void PushClip(const Path *aPath) override;
   virtual void PushClipRect(const Rect &aRect) override;
+  virtual void PushDeviceSpaceClipRects(const IntRect* aRects, uint32_t aCount) override;
+
   virtual void PopClip() override;
   virtual void PushLayer(bool aOpaque, Float aOpacity,
                          SourceSurface* aMask,
@@ -128,6 +130,9 @@ public:
   virtual void *GetNativeSurface(NativeSurfaceType aType) override { return nullptr; }
 
   virtual void DetachAllSnapshots() override { MarkChanged(); }
+
+  virtual void GetGlyphRasterizationMetrics(ScaledFont *aScaledFont, const uint16_t* aGlyphIndices,
+                                            uint32_t aNumGlyphs, GlyphMetrics* aGlyphMetrics) override;
 
   bool Init(const IntSize &aSize, SurfaceFormat aFormat);
   bool Init(ID3D11Texture2D* aTexture, SurfaceFormat aFormat);
@@ -181,7 +186,7 @@ private:
   void AddDependencyOnSource(SourceSurfaceD2D1* aSource);
 
   // Must be called with all clips popped and an identity matrix set.
-  already_AddRefed<ID2D1Image> GetImageForLayerContent();
+  already_AddRefed<ID2D1Image> GetImageForLayerContent(bool aShouldPreserveContent = true);
 
   ID2D1Image* CurrentTarget()
   {
@@ -212,8 +217,11 @@ private:
   already_AddRefed<ID2D1SolidColorBrush> GetSolidColorBrush(const D2D_COLOR_F& aColor);
   already_AddRefed<ID2D1Brush> CreateBrushForPattern(const Pattern &aPattern, Float aAlpha = 1.0f);
 
+  void PushClipGeometry(ID2D1Geometry* aGeometry, const D2D1_MATRIX_3X2_F& aTransform, bool aPixelAligned = false);
+
   void PushD2DLayer(ID2D1DeviceContext *aDC, ID2D1Geometry *aGeometry, const D2D1_MATRIX_3X2_F &aTransform,
-                    bool aForceIgnoreAlpha = false, const D2D1_RECT_F& aLayerRect = D2D1::InfiniteRect());
+                    bool aPixelAligned = false, bool aForceIgnoreAlpha = false,
+                    const D2D1_RECT_F& aLayerRect = D2D1::InfiniteRect());
 
   IntSize mSize;
 
@@ -237,13 +245,12 @@ private:
   struct PushedClip
   {
     D2D1_RECT_F mBounds;
-    union {
-      // If mPath is non-null, the mTransform member will be used, otherwise
-      // the mIsPixelAligned member is valid.
-      D2D1_MATRIX_3X2_F mTransform;
-      bool mIsPixelAligned;
-    };
-    RefPtr<PathD2D> mPath;
+    // If mGeometry is non-null, the mTransform member will be used.
+    D2D1_MATRIX_3X2_F mTransform;
+    RefPtr<ID2D1Geometry> mGeometry;
+    // Indicates if mBounds, and when non-null, mGeometry with mTransform
+    // applied, are pixel-aligned.
+    bool mIsPixelAligned;
   };
 
   // List of pushed layers.
@@ -273,6 +280,12 @@ private:
   TargetSet mDependingOnTargets;
 
   uint32_t mUsedCommandListsSincePurge;
+  // When a BlendEffect has been drawn to a command list, and that command list is
+  // subsequently used -again- as an input to a blend effect for a command list,
+  // this causes an infinite recursion inside D2D as it tries to resolve the bounds.
+  // If we resolve the current command list before this happens
+  // we can avoid the subsequent hang. (See bug 1293586)
+  bool mDidComplexBlendWithListInList;
 
   static ID2D1Factory1 *mFactory;
   static IDWriteFactory *mDWriteFactory;

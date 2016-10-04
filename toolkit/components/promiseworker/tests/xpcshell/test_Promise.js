@@ -98,7 +98,8 @@ add_task(function* test_transfer_with_meta() {
   Assert.equal(array.buffer.byteLength, 0, "The buffer has been detached");
 
   // Check that the result is correct
-  Assert.equal(result.toString(), "[object Uint8Array]", "The result appears to be a Typed Array");
+  Assert.equal(Object.prototype.toString.call(result), "[object Uint8Array]",
+               "The result appears to be a Typed Array");
   Assert.equal(result.byteLength, 4, "The result has the right size");
 
   for (let i = 0; i < 4; ++i) {
@@ -106,6 +107,11 @@ add_task(function* test_transfer_with_meta() {
   }
 });
 
-function run_test() {
-  run_next_test();
-}
+add_task(function* test_throw_error() {
+  try {
+    yield worker.post("throwError", ["error message"]);
+    Assert.ok(false, "should have thrown");
+  } catch (ex) {
+    Assert.equal(ex.message, "Error: error message");
+  }
+});

@@ -10,6 +10,7 @@
 #include "gfxPrefs.h"
 #include "mozilla/layers/ImageBridgeParent.h" // for ImageBridgeParent
 #include "mozilla/layers/TextureHost.h"       // for TextureHost
+#include "mozilla/layers/TextureForwarder.h"
 
 namespace mozilla {
 namespace layers {
@@ -87,48 +88,6 @@ HostIPCAllocator::SendPendingAsyncMessages()
   mPendingAsyncMessage.clear();
 }
 
-void
-CompositorBridgeParentIPCAllocator::NotifyNotUsed(PTextureParent* aTexture, uint64_t aTransactionId)
-{
-  RefPtr<TextureHost> texture = TextureHost::AsTextureHost(aTexture);
-  if (!texture) {
-    return;
-  }
-
-  if (!(texture->GetFlags() & TextureFlags::RECYCLE) &&
-     !texture->NeedsFenceHandle()) {
-    return;
-  }
-
-  if (texture->GetFlags() & TextureFlags::RECYCLE) {
-    SendFenceHandleIfPresent(aTexture);
-    uint64_t textureId = TextureHost::GetTextureSerial(aTexture);
-    mPendingAsyncMessage.push_back(
-      OpNotifyNotUsed(textureId, aTransactionId));
-    return;
-  }
-
-  // Gralloc requests to deliver fence to client side.
-  // If client side does not use TextureFlags::RECYCLE flag,
-  // The fence can not be delivered via LayerTransactionParent.
-  // TextureClient might wait the fence delivery on main thread.
-
-  MOZ_ASSERT(ImageBridgeParent::GetInstance(GetChildProcessId()));
-  if (ImageBridgeParent::GetInstance(GetChildProcessId())) {
-    // Send message back via PImageBridge.
-    ImageBridgeParent::NotifyNotUsedToNonRecycle(
-      GetChildProcessId(),
-      aTexture,
-      aTransactionId);
-   } else {
-     NS_ERROR("ImageBridgeParent should exist");
-   }
-
-   if (!IsAboutToSendAsyncMessages()) {
-     SendPendingAsyncMessages();
-   }
-}
-
 // XXX - We should actually figure out the minimum shmem allocation size on
 // a certain platform and use that.
 const uint32_t sShmemPageSize = 4096;
@@ -137,15 +96,21 @@ const uint32_t sShmemPageSize = 4096;
 const uint32_t sSupportedBlockSize = 4;
 #endif
 
-FixedSizeSmallShmemSectionAllocator::FixedSizeSmallShmemSectionAllocator(ClientIPCAllocator* aShmProvider)
+FixedSizeSmallShmemSectionAllocator::FixedSizeSmallShmemSectionAllocator(LayersIPCChannel* aShmProvider)
 : mShmProvider(aShmProvider)
 {
-  MOZ_ASSERT(mShmProvider && mShmProvider->AsShmemAllocator());
+  MOZ_ASSERT(mShmProvider);
 }
 
 FixedSizeSmallShmemSectionAllocator::~FixedSizeSmallShmemSectionAllocator()
 {
   ShrinkShmemSectionHeap();
+}
+
+bool
+FixedSizeSmallShmemSectionAllocator::IPCOpen() const
+{
+  return mShmProvider->IPCOpen();
 }
 
 bool
@@ -174,7 +139,7 @@ FixedSizeSmallShmemSectionAllocator::AllocShmemSection(uint32_t aSize, ShmemSect
 
   if (!aShmemSection->shmem().IsWritable()) {
     ipc::Shmem tmp;
-    if (!GetShmAllocator()->AllocUnsafeShmem(sShmemPageSize, OptimalShmemType(), &tmp)) {
+    if (!mShmProvider->AllocUnsafeShmem(sShmemPageSize, OptimalShmemType(), &tmp)) {
       return false;
     }
 
@@ -275,7 +240,7 @@ FixedSizeSmallShmemSectionAllocator::ShrinkShmemSectionHeap()
   while (i < mUsedShmems.size()) {
     ShmemSectionHeapHeader* header = mUsedShmems[i].get<ShmemSectionHeapHeader>();
     if (header->mAllocatedBlocks == 0) {
-      GetShmAllocator()->DeallocShmem(mUsedShmems[i]);
+      mShmProvider->DeallocShmem(mUsedShmems[i]);
       // We don't particularly care about order, move the last one in the array
       // to this position.
       if (i < mUsedShmems.size() - 1) {

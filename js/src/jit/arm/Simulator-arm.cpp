@@ -35,6 +35,7 @@
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/SizePrintfMacros.h"
 
+#include "asmjs/WasmInstance.h"
 #include "asmjs/WasmSignalHandlers.h"
 #include "jit/arm/Assembler-arm.h"
 #include "jit/arm/disasm/Constants-arm.h"
@@ -390,9 +391,9 @@ bool Simulator::ICacheCheckingEnabled = false;
 int64_t Simulator::StopSimAt = -1L;
 
 Simulator*
-Simulator::Create()
+Simulator::Create(JSContext* cx)
 {
-    Simulator* sim = js_new<Simulator>();
+    Simulator* sim = js_new<Simulator>(cx);
     if (!sim)
         return nullptr;
 
@@ -1075,7 +1076,8 @@ Simulator::FlushICache(void* start_addr, size_t size)
     }
 }
 
-Simulator::Simulator()
+Simulator::Simulator(JSContext* cx)
+  : cx_(cx)
 {
     // Set up simulator support first. Some of this information is needed to
     // setup the architecture state.
@@ -1496,9 +1498,34 @@ Simulator::exclusiveMonitorClear()
     exclusiveMonitorHeld_ = false;
 }
 
+// WebAssembly memories contain an extra region of guard pages (see
+// WasmArrayRawBuffer comment). The guard pages catch out-of-bounds accesses
+// using a signal handler that redirects PC to a stub that safely reports an
+// error. However, if the handler is hit by the simulator, the PC is in C++ code
+// and cannot be redirected. Therefore, we must avoid hitting the handler by
+// redirecting in the simulator before the real handler would have been hit.
+bool
+Simulator::handleWasmFault(int32_t addr, unsigned numBytes)
+{
+    WasmActivation* act = cx_->wasmActivationStack();
+    if (!act)
+        return false;
+
+    void* pc = reinterpret_cast<void*>(get_pc());
+    wasm::Instance* instance = act->compartment()->wasm.lookupInstanceDeprecated(pc);
+    if (!instance || !instance->memoryAccessInGuardRegion((uint8_t*)addr, numBytes))
+        return false;
+
+    set_pc(int32_t(instance->codeSegment().outOfBoundsCode()));
+    return true;
+}
+
 int
 Simulator::readW(int32_t addr, SimInstruction* instr, UnalignedPolicy f)
 {
+    if (handleWasmFault(addr, 4))
+        return -1;
+
     if ((addr & 3) == 0 || (f == AllowUnaligned && !HasAlignmentFault())) {
         intptr_t* ptr = reinterpret_cast<intptr_t*>(addr);
         return *ptr;
@@ -1522,6 +1549,9 @@ Simulator::readW(int32_t addr, SimInstruction* instr, UnalignedPolicy f)
 void
 Simulator::writeW(int32_t addr, int value, SimInstruction* instr, UnalignedPolicy f)
 {
+    if (handleWasmFault(addr, 4))
+        return;
+
     if ((addr & 3) == 0 || (f == AllowUnaligned && !HasAlignmentFault())) {
         intptr_t* ptr = reinterpret_cast<intptr_t*>(addr);
         *ptr = value;
@@ -1594,6 +1624,9 @@ Simulator::writeExW(int32_t addr, int value, SimInstruction* instr)
 uint16_t
 Simulator::readHU(int32_t addr, SimInstruction* instr)
 {
+    if (handleWasmFault(addr, 2))
+        return UINT16_MAX;
+
     // The regexp engine emits unaligned loads, so we don't check for them here
     // like most of the other methods do.
     if ((addr & 1) == 0 || !HasAlignmentFault()) {
@@ -1617,6 +1650,9 @@ Simulator::readHU(int32_t addr, SimInstruction* instr)
 int16_t
 Simulator::readH(int32_t addr, SimInstruction* instr)
 {
+    if (handleWasmFault(addr, 2))
+        return -1;
+
     if ((addr & 1) == 0 || !HasAlignmentFault()) {
         int16_t* ptr = reinterpret_cast<int16_t*>(addr);
         return *ptr;
@@ -1638,6 +1674,9 @@ Simulator::readH(int32_t addr, SimInstruction* instr)
 void
 Simulator::writeH(int32_t addr, uint16_t value, SimInstruction* instr)
 {
+    if (handleWasmFault(addr, 2))
+        return;
+
     if ((addr & 1) == 0 || !HasAlignmentFault()) {
         uint16_t* ptr = reinterpret_cast<uint16_t*>(addr);
         *ptr = value;
@@ -1658,6 +1697,9 @@ Simulator::writeH(int32_t addr, uint16_t value, SimInstruction* instr)
 void
 Simulator::writeH(int32_t addr, int16_t value, SimInstruction* instr)
 {
+    if (handleWasmFault(addr, 2))
+        return;
+
     if ((addr & 1) == 0 || !HasAlignmentFault()) {
         int16_t* ptr = reinterpret_cast<int16_t*>(addr);
         *ptr = value;
@@ -1711,6 +1753,9 @@ Simulator::writeExH(int32_t addr, uint16_t value, SimInstruction* instr)
 uint8_t
 Simulator::readBU(int32_t addr)
 {
+    if (handleWasmFault(addr, 1))
+        return UINT8_MAX;
+
     uint8_t* ptr = reinterpret_cast<uint8_t*>(addr);
     return *ptr;
 }
@@ -1739,6 +1784,9 @@ Simulator::writeExB(int32_t addr, uint8_t value)
 int8_t
 Simulator::readB(int32_t addr)
 {
+    if (handleWasmFault(addr, 1))
+        return -1;
+
     int8_t* ptr = reinterpret_cast<int8_t*>(addr);
     return *ptr;
 }
@@ -1746,6 +1794,9 @@ Simulator::readB(int32_t addr)
 void
 Simulator::writeB(int32_t addr, uint8_t value)
 {
+    if (handleWasmFault(addr, 1))
+        return;
+
     uint8_t* ptr = reinterpret_cast<uint8_t*>(addr);
     *ptr = value;
 }
@@ -1753,6 +1804,9 @@ Simulator::writeB(int32_t addr, uint8_t value)
 void
 Simulator::writeB(int32_t addr, int8_t value)
 {
+    if (handleWasmFault(addr, 1))
+        return;
+
     int8_t* ptr = reinterpret_cast<int8_t*>(addr);
     *ptr = value;
 }
@@ -2633,17 +2687,15 @@ Simulator::softwareInterrupt(SimInstruction* instr)
 void
 Simulator::canonicalizeNaN(double* value)
 {
-    *value = !JitOptions.wasmTestMode && FPSCR_default_NaN_mode_
-             ? JS::CanonicalizeNaN(*value)
-             : *value;
+    if (!JitOptions.wasmTestMode && FPSCR_default_NaN_mode_)
+        *value = JS::CanonicalizeNaN(*value);
 }
 
 void
 Simulator::canonicalizeNaN(float* value)
 {
-    *value = !JitOptions.wasmTestMode && FPSCR_default_NaN_mode_
-             ? JS::CanonicalizeNaN(*value)
-             : *value;
+    if (!JitOptions.wasmTestMode && FPSCR_default_NaN_mode_)
+        *value = JS::CanonicalizeNaN(*value);
 }
 
 // Stop helper functions.
@@ -3635,25 +3687,23 @@ Simulator::decodeTypeVFP(SimInstruction* instr)
             } else if ((instr->opc2Value() == 0x0) && (instr->opc3Value() == 0x3)) {
                 // vabs
                 if (instr->szValue() == 0x1) {
-                    double dm_value;
-                    get_double_from_d_register(vm, &dm_value);
-
-                    uint64_t u64 = mozilla::BitwiseCast<uint64_t>(dm_value);
-                    u64 &= 0x7fffffffffffffffu;
-                    double dd_value;
-                    mozilla::BitwiseCast(u64, &dd_value);
-
+                    union {
+                        double f64;
+                        uint64_t u64;
+                    } u;
+                    get_double_from_d_register(vm, &u.f64);
+                    u.u64 &= 0x7fffffffffffffffu;
+                    double dd_value = u.f64;
                     canonicalizeNaN(&dd_value);
                     set_d_register_from_double(vd, dd_value);
                 } else {
-                    float fm_value;
-                    get_float_from_s_register(vm, &fm_value);
-
-                    uint32_t u32 = mozilla::BitwiseCast<uint32_t>(fm_value);
-                    u32 &= 0x7fffffffu;
-                    float fd_value;
-                    mozilla::BitwiseCast(u32, &fd_value);
-
+                    union {
+                        float f32;
+                        uint32_t u32;
+                    } u;
+                    get_float_from_s_register(vm, &u.f32);
+                    u.u32 &= 0x7fffffffu;
+                    float fd_value = u.f32;
                     canonicalizeNaN(&fd_value);
                     set_s_register_from_float(vd, fd_value);
                 }

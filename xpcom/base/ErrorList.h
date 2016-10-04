@@ -522,6 +522,8 @@
   ERROR(NS_ERROR_DOM_UNKNOWN_ERR,                  FAILURE(30)),
   ERROR(NS_ERROR_DOM_DATA_ERR,                     FAILURE(31)),
   ERROR(NS_ERROR_DOM_OPERATION_ERR,                FAILURE(32)),
+  /* https://heycam.github.io/webidl/#notallowederror */
+  ERROR(NS_ERROR_DOM_NOT_ALLOWED_ERR,              FAILURE(33)),
   /* DOM error codes defined by us */
   ERROR(NS_ERROR_DOM_SECMAN_ERR,                   FAILURE(1001)),
   ERROR(NS_ERROR_DOM_WRONG_TYPE_ERR,               FAILURE(1002)),
@@ -551,6 +553,18 @@
    * nothing if an uncatchable exception was thrown).
    */
   ERROR(NS_ERROR_DOM_EXCEPTION_ON_JSCONTEXT,       FAILURE(1018)),
+
+  ERROR(NS_ERROR_DOM_MALFORMED_URI,                FAILURE(1019)),
+  ERROR(NS_ERROR_DOM_INVALID_HEADER_NAME,          FAILURE(1020)),
+
+  ERROR(NS_ERROR_DOM_INVALID_STATE_XHR_HAS_INVALID_CONTEXT,                            FAILURE(1021)),
+  ERROR(NS_ERROR_DOM_INVALID_STATE_XHR_MUST_BE_OPENED,                                 FAILURE(1022)),
+  ERROR(NS_ERROR_DOM_INVALID_STATE_XHR_MUST_NOT_BE_SENDING,                            FAILURE(1023)),
+  ERROR(NS_ERROR_DOM_INVALID_STATE_XHR_MUST_NOT_BE_LOADING_OR_DONE,                    FAILURE(1024)),
+  ERROR(NS_ERROR_DOM_INVALID_STATE_XHR_HAS_WRONG_RESPONSETYPE_FOR_RESPONSEXML,         FAILURE(1025)),
+  ERROR(NS_ERROR_DOM_INVALID_STATE_XHR_HAS_WRONG_RESPONSETYPE_FOR_RESPONSETEXT,        FAILURE(1026)),
+  ERROR(NS_ERROR_DOM_INVALID_STATE_XHR_CHUNKED_RESPONSETYPES_UNSUPPORTED_FOR_SYNC,     FAILURE(1027)),
+  ERROR(NS_ERROR_DOM_INVALID_ACCESS_XHR_TIMEOUT_AND_RESPONSETYPE_UNSUPPORTED_FOR_SYNC, FAILURE(1028)),
 
   /* May be used to indicate when e.g. setting a property value didn't
    * actually change the value, like for obj.foo = "bar"; obj.foo = "bar";
@@ -952,7 +966,6 @@
   /* ======================================================================= */
 #define MODULE NS_ERROR_MODULE_DOM_ANIM
   ERROR(NS_ERROR_DOM_ANIM_MISSING_PROPS_ERR,              FAILURE(1)),
-  ERROR(NS_ERROR_DOM_ANIM_NO_EFFECT_ERR,                  FAILURE(2)),
 #undef MODULE
 
   /* ======================================================================= */
@@ -965,6 +978,31 @@
   ERROR(NS_ERROR_DOM_PUSH_SERVICE_UNREACHABLE,      FAILURE(4)),
   ERROR(NS_ERROR_DOM_PUSH_INVALID_KEY_ERR,          FAILURE(5)),
   ERROR(NS_ERROR_DOM_PUSH_MISMATCHED_KEY_ERR,       FAILURE(6)),
+#undef MODULE
+
+  /* ======================================================================= */
+  /* 41: NS_ERROR_MODULE_DOM_MEDIA */
+  /* ======================================================================= */
+#define MODULE NS_ERROR_MODULE_DOM_MEDIA
+  /* HTMLMediaElement API errors from https://html.spec.whatwg.org/multipage/embedded-content.html#media-elements */
+  ERROR(NS_ERROR_DOM_MEDIA_ABORT_ERR,           FAILURE(1)),
+  ERROR(NS_ERROR_DOM_MEDIA_NOT_ALLOWED_ERR,     FAILURE(2)),
+  ERROR(NS_ERROR_DOM_MEDIA_NOT_SUPPORTED_ERR,   FAILURE(3)),
+
+  /* HTMLMediaElement internal decoding error */
+  ERROR(NS_ERROR_DOM_MEDIA_DECODE_ERR,          FAILURE(4)),
+  ERROR(NS_ERROR_DOM_MEDIA_FATAL_ERR,           FAILURE(5)),
+  ERROR(NS_ERROR_DOM_MEDIA_METADATA_ERR,        FAILURE(6)),
+  ERROR(NS_ERROR_DOM_MEDIA_OVERFLOW_ERR,        FAILURE(7)),
+  ERROR(NS_ERROR_DOM_MEDIA_END_OF_STREAM,       FAILURE(8)),
+  ERROR(NS_ERROR_DOM_MEDIA_WAITING_FOR_DATA,    FAILURE(9)),
+  ERROR(NS_ERROR_DOM_MEDIA_CANCELED,            FAILURE(10)),
+  ERROR(NS_ERROR_DOM_MEDIA_MEDIASINK_ERR,       FAILURE(11)),
+  ERROR(NS_ERROR_DOM_MEDIA_DEMUXER_ERR,         FAILURE(12)),
+  ERROR(NS_ERROR_DOM_MEDIA_CDM_ERR,             FAILURE(13)),
+
+  /* Internal platform-related errors */
+  ERROR(NS_ERROR_DOM_MEDIA_CUBEB_INITIALIZATION_ERR,  FAILURE(101)),
 #undef MODULE
 
   /* ======================================================================= */

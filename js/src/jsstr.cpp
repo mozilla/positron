@@ -13,7 +13,7 @@
 #include "mozilla/PodOperations.h"
 #include "mozilla/Range.h"
 #include "mozilla/TypeTraits.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 #include <ctype.h>
 #include <limits>
@@ -45,7 +45,6 @@
 #include "vm/Printer.h"
 #include "vm/RegExpObject.h"
 #include "vm/RegExpStatics.h"
-#include "vm/ScopeObject.h"
 #include "vm/StringBuffer.h"
 
 #include "vm/Interpreter-inl.h"

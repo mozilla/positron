@@ -34,6 +34,8 @@ namespace layers {
 
 using mozilla::dom::TabChild;
 
+class IAPZCTreeManager;
+class APZCTreeManagerChild;
 class ClientLayerManager;
 class CompositorBridgeParent;
 class TextureClient;
@@ -41,12 +43,13 @@ class TextureClientPool;
 struct FrameMetrics;
 
 class CompositorBridgeChild final : public PCompositorBridgeChild,
-                                    public TextureForwarder,
-                                    public ShmemAllocator
+                                    public TextureForwarder
 {
   typedef InfallibleTArray<AsyncParentMessageData> AsyncParentMessageArray;
 
 public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(CompositorBridgeChild, override);
+
   explicit CompositorBridgeChild(ClientLayerManager *aLayerManager);
 
   void Destroy();
@@ -62,6 +65,7 @@ public:
    * Initialize the singleton compositor bridge for a content process.
    */
   static bool InitForContent(Endpoint<PCompositorBridgeChild>&& aEndpoint);
+  static bool ReinitForContent(Endpoint<PCompositorBridgeChild>&& aEndpoint);
 
   static RefPtr<CompositorBridgeChild> CreateRemote(
     const uint64_t& aProcessToken,
@@ -158,10 +162,9 @@ public:
   bool SendStopFrameTimeRecording(const uint32_t& startIndex, nsTArray<float>* intervals);
   bool SendNotifyRegionInvalidated(const nsIntRegion& region);
   bool SendRequestNotifyAfterRemotePaint();
-  bool SendClearVisibleRegions(uint64_t aLayersId, uint32_t aPresShellId);
-  bool SendUpdateVisibleRegion(VisibilityCounter aCounter,
-                               const ScrollableLayerGuid& aGuid,
-                               const mozilla::CSSIntRegion& aRegion);
+  bool SendClearApproximatelyVisibleRegions(uint64_t aLayersId, uint32_t aPresShellId);
+  bool SendNotifyApproximatelyVisibleRegion(const ScrollableLayerGuid& aGuid,
+                                            const mozilla::CSSIntRegion& aRegion);
   bool IsSameProcess() const override;
 
   virtual bool IPCOpen() const override { return mCanSend; }
@@ -187,10 +190,12 @@ public:
 
   virtual void CancelWaitForRecycle(uint64_t aTextureId) override;
 
-  TextureClientPool* GetTexturePool(LayersBackend aBackend,
+  TextureClientPool* GetTexturePool(KnowsCompositor* aAllocator,
                                     gfx::SurfaceFormat aFormat,
                                     TextureFlags aFlags);
   void ClearTexturePool();
+
+  virtual FixedSizeSmallShmemSectionAllocator* GetTileLockAllocator() override;
 
   void HandleMemoryPressure();
 
@@ -209,9 +214,17 @@ public:
   PCompositorWidgetChild* AllocPCompositorWidgetChild(const CompositorWidgetInitData& aInitData) override;
   bool DeallocPCompositorWidgetChild(PCompositorWidgetChild* aActor) override;
 
-  virtual ShmemAllocator* AsShmemAllocator() override { return this; }
+  RefPtr<IAPZCTreeManager> GetAPZCTreeManager(uint64_t aLayerTreeId);
+
+  PAPZCTreeManagerChild* AllocPAPZCTreeManagerChild(const uint64_t& aLayersId) override;
+  bool DeallocPAPZCTreeManagerChild(PAPZCTreeManagerChild* aActor) override;
+
+  PAPZChild* AllocPAPZChild(const uint64_t& aLayersId) override;
+  bool DeallocPAPZChild(PAPZChild* aActor) override;
 
   void ProcessingError(Result aCode, const char* aReason) override;
+
+  void WillEndTransaction();
 
 private:
   // Private destructor, to discourage deletion outside of Release():
@@ -237,6 +250,10 @@ private:
 
   virtual bool
   RecvRemotePaintIsReady() override;
+
+  bool RecvObserveLayerUpdate(const uint64_t& aLayersId,
+                              const uint64_t& aEpoch,
+                              const bool& aActive) override;
 
   // Class used to store the shared FrameMetrics, mutex, and APZCId  in a hash table
   class SharedFrameMetricsData {
@@ -302,6 +319,8 @@ private:
   AutoTArray<RefPtr<TextureClientPool>,2> mTexturePools;
 
   uint64_t mProcessToken;
+
+  FixedSizeSmallShmemSectionAllocator* mSectionAllocator;
 };
 
 } // namespace layers

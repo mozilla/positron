@@ -76,7 +76,7 @@ using namespace mozilla::dom;
 
 nsIIOService    *nsScriptSecurityManager::sIOService = nullptr;
 nsIStringBundle *nsScriptSecurityManager::sStrBundle = nullptr;
-JSRuntime       *nsScriptSecurityManager::sRuntime   = 0;
+JSContext       *nsScriptSecurityManager::sContext   = nullptr;
 bool nsScriptSecurityManager::sStrictFileOriginPolicy = true;
 
 ///////////////////////////
@@ -147,14 +147,15 @@ GetPrincipalDomainOrigin(nsIPrincipal* aPrincipal,
   return GetOriginFromURI(uri, aOrigin);
 }
 
-inline void SetPendingException(JSContext *cx, const char *aMsg)
+inline void SetPendingExceptionASCII(JSContext *cx, const char *aMsg)
 {
-    JS_ReportError(cx, "%s", aMsg);
+    JS_ReportErrorASCII(cx, "%s", aMsg);
 }
 
 inline void SetPendingException(JSContext *cx, const char16_t *aMsg)
 {
-    JS_ReportError(cx, "%hs", aMsg);
+    // FIXME: Need to convert to UTF-8 (bug XXX).
+    JS_ReportErrorLatin1(cx, "%hs", aMsg);
 }
 
 // Helper class to get stuff from the ClassInfo and not waste extra time with
@@ -256,8 +257,10 @@ nsScriptSecurityManager::AppStatusForPrincipal(nsIPrincipal *aPrin)
     // mozbrowser frames.
     bool inIsolatedMozBrowser = aPrin->GetIsInIsolatedMozBrowserElement();
 
-    NS_WARN_IF_FALSE(appId != nsIScriptSecurityManager::UNKNOWN_APP_ID,
-                     "Asking for app status on a principal with an unknown app id");
+    NS_WARNING_ASSERTION(
+      appId != nsIScriptSecurityManager::UNKNOWN_APP_ID,
+      "Asking for app status on a principal with an unknown app id");
+
     // Installed apps have a valid app id (not NO_APP_ID or UNKNOWN_APP_ID)
     // and they are not inside a mozbrowser.
     if (appId == nsIScriptSecurityManager::NO_APP_ID ||
@@ -360,17 +363,17 @@ nsScriptSecurityManager::GetChannelResultPrincipal(nsIChannel* aChannel,
             return NS_OK;
         }
 
-        bool forceInterit = loadInfo->GetForceInheritPrincipal();
-        if (aIgnoreSandboxing && !forceInterit) {
+        bool forceInherit = loadInfo->GetForceInheritPrincipal();
+        if (aIgnoreSandboxing && !forceInherit) {
           // Check if SEC_FORCE_INHERIT_PRINCIPAL was dropped because of
           // sandboxing:
           if (loadInfo->GetLoadingSandboxed() &&
               loadInfo->GetForceInheritPrincipalDropped()) {
-            forceInterit = true;
+            forceInherit = true;
           }
         }
-        if (forceInterit) {
-            NS_ADDREF(*aPrincipal = loadInfo->TriggeringPrincipal());
+        if (forceInherit) {
+            NS_ADDREF(*aPrincipal = loadInfo->PrincipalToInherit());
             return NS_OK;
         }
 
@@ -381,15 +384,15 @@ nsScriptSecurityManager::GetChannelResultPrincipal(nsIChannel* aChannel,
 
             nsCOMPtr<nsIURI> uri;
             nsresult rv = NS_GetFinalChannelURI(aChannel, getter_AddRefs(uri));
-            NS_ENSURE_SUCCESS(rv, rv);
-            nsCOMPtr<nsIPrincipal> triggeringPrincipal = loadInfo->TriggeringPrincipal();
+            NS_ENSURE_SUCCESS(rv, rv); 
+            nsCOMPtr<nsIPrincipal> principalToInherit = loadInfo->PrincipalToInherit();
             bool inheritForAboutBlank = loadInfo->GetAboutBlankInherits();
 
-            if (nsContentUtils::ChannelShouldInheritPrincipal(triggeringPrincipal,
-                                                               uri,
-                                                               inheritForAboutBlank,
-                                                               false)) {
-                triggeringPrincipal.forget(aPrincipal);
+            if (nsContentUtils::ChannelShouldInheritPrincipal(principalToInherit,
+                                                              uri,
+                                                              inheritForAboutBlank,
+                                                              false)) {
+                principalToInherit.forget(aPrincipal);
                 return NS_OK;
             }
         }
@@ -434,37 +437,20 @@ nsScriptSecurityManager::GetChannelURIPrincipal(nsIChannel* aChannel,
     nsresult rv = NS_GetFinalChannelURI(aChannel, getter_AddRefs(uri));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsCOMPtr<nsILoadContext> loadContext;
-    NS_QueryNotificationCallbacks(aChannel, loadContext);
-
     nsCOMPtr<nsILoadInfo> loadInfo;
     aChannel->GetLoadInfo(getter_AddRefs(loadInfo));
-    nsContentPolicyType contentPolicyType = nsIContentPolicy::TYPE_INVALID;
-    if (loadInfo) {
-      contentPolicyType = loadInfo->GetExternalContentPolicyType();
-    }
 
+    // Inherit the origin attributes from loadInfo.
+    // If this is a top-level document load, the origin attributes of the
+    // loadInfo will be set from nsDocShell::DoURILoad.
+    // For subresource loading, the origin attributes of the loadInfo is from
+    // its loadingPrincipal.
     PrincipalOriginAttributes attrs;
-    if (nsIContentPolicy::TYPE_DOCUMENT == contentPolicyType ||
-        nsIContentPolicy::TYPE_SUBDOCUMENT == contentPolicyType) {
-      // If it's document or sub-document, inherit originAttributes from
-      // the document.
-      if (loadContext) {
-        DocShellOriginAttributes docShellAttrs;
-        loadContext->GetOriginAttributes(docShellAttrs);
-        attrs.InheritFromDocShellToDoc(docShellAttrs, uri);
-      }
-    } else {
-      // Inherit origin attributes from loading principal if any.
-      nsCOMPtr<nsIPrincipal> loadingPrincipal;
-      if (loadInfo) {
-        loadInfo->GetLoadingPrincipal(getter_AddRefs(loadingPrincipal));
-      }
-      if (loadingPrincipal) {
-        attrs = BasePrincipal::Cast(loadingPrincipal)->OriginAttributesRef();
-      }
-    }
 
+    // For addons loadInfo might be null.
+    if (loadInfo) {
+      attrs.InheritFromNecko(loadInfo->GetOriginAttributes());
+    }
     rv = MaybeSetAddonIdFromURI(attrs, uri);
     NS_ENSURE_SUCCESS(rv, rv);
     nsCOMPtr<nsIPrincipal> prin = BasePrincipal::CreateCodebasePrincipal(uri, attrs);
@@ -611,7 +597,7 @@ nsScriptSecurityManager::CheckLoadURIFromScript(JSContext *cx, nsIURI *aURI)
     nsAutoCString msg("Access to '");
     msg.Append(spec);
     msg.AppendLiteral("' from script denied");
-    SetPendingException(cx, msg.get());
+    SetPendingExceptionASCII(cx, msg.get());
     return NS_ERROR_DOM_BAD_URI;
 }
 
@@ -1197,21 +1183,6 @@ nsScriptSecurityManager::CreateNullPrincipal(JS::Handle<JS::Value> aOriginAttrib
 }
 
 NS_IMETHODIMP
-nsScriptSecurityManager::CreateExpandedPrincipal(nsIPrincipal** aPrincipalArray, uint32_t aLength,
-                                                 nsIPrincipal** aResult)
-{
-  nsTArray<nsCOMPtr<nsIPrincipal>> principals;
-  principals.SetCapacity(aLength);
-  for (uint32_t i = 0; i < aLength; ++i) {
-    principals.AppendElement(aPrincipalArray[i]);
-  }
-
-  nsCOMPtr<nsIPrincipal> p = new nsExpandedPrincipal(principals);
-  p.forget(aResult);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsScriptSecurityManager::GetAppCodebasePrincipal(nsIURI* aURI,
                                                  uint32_t aAppId,
                                                  bool aInIsolatedMozBrowser,
@@ -1335,7 +1306,7 @@ nsScriptSecurityManager::CanCreateInstance(JSContext *cx,
     char cidStr[NSID_LENGTH];
     aCID.ToProvidedString(cidStr);
     errorMsg.Append(cidStr);
-    SetPendingException(cx, errorMsg.get());
+    SetPendingExceptionASCII(cx, errorMsg.get());
     return NS_ERROR_DOM_XPCONNECT_ACCESS_DENIED;
 }
 
@@ -1352,7 +1323,7 @@ nsScriptSecurityManager::CanGetService(JSContext *cx,
     char cidStr[NSID_LENGTH];
     aCID.ToProvidedString(cidStr);
     errorMsg.Append(cidStr);
-    SetPendingException(cx, errorMsg.get());
+    SetPendingExceptionASCII(cx, errorMsg.get());
     return NS_ERROR_DOM_XPCONNECT_ACCESS_DENIED;
 }
 
@@ -1413,19 +1384,18 @@ nsresult nsScriptSecurityManager::Init()
 
     //-- Register security check callback in the JS engine
     //   Currently this is used to control access to function.caller
-    sRuntime = xpc::GetJSRuntime();
+    sContext = danger::GetJSContext();
 
     static const JSSecurityCallbacks securityCallbacks = {
         ContentSecurityPolicyPermitsJSAction,
         JSPrincipalsSubsume,
     };
 
-    JSContext* cx = JS_GetContext(sRuntime);
-    MOZ_ASSERT(!JS_GetSecurityCallbacks(cx));
-    JS_SetSecurityCallbacks(cx, &securityCallbacks);
-    JS_InitDestroyPrincipalsCallback(cx, nsJSPrincipals::Destroy);
+    MOZ_ASSERT(!JS_GetSecurityCallbacks(sContext));
+    JS_SetSecurityCallbacks(sContext, &securityCallbacks);
+    JS_InitDestroyPrincipalsCallback(sContext, nsJSPrincipals::Destroy);
 
-    JS_SetTrustedPrincipals(cx, system);
+    JS_SetTrustedPrincipals(sContext, system);
 
     return NS_OK;
 }
@@ -1448,10 +1418,10 @@ nsScriptSecurityManager::~nsScriptSecurityManager(void)
 void
 nsScriptSecurityManager::Shutdown()
 {
-    if (sRuntime) {
-        JS_SetSecurityCallbacks(JS_GetContext(sRuntime), nullptr);
-        JS_SetTrustedPrincipals(JS_GetContext(sRuntime), nullptr);
-        sRuntime = nullptr;
+    if (sContext) {
+        JS_SetSecurityCallbacks(sContext, nullptr);
+        JS_SetTrustedPrincipals(sContext, nullptr);
+        sContext = nullptr;
     }
 
     NS_IF_RELEASE(sIOService);

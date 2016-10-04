@@ -53,8 +53,22 @@ StructuredCloneReadInfo::StructuredCloneReadInfo()
 
 inline
 StructuredCloneReadInfo::StructuredCloneReadInfo(
+                             StructuredCloneReadInfo&& aCloneReadInfo)
+  : mData(Move(aCloneReadInfo.mData))
+{
+  MOZ_ASSERT(&aCloneReadInfo != this);
+  MOZ_COUNT_CTOR(StructuredCloneReadInfo);
+
+  mFiles.Clear();
+  mFiles.SwapElements(aCloneReadInfo.mFiles);
+  mDatabase = aCloneReadInfo.mDatabase;
+  aCloneReadInfo.mDatabase = nullptr;
+}
+
+inline
+StructuredCloneReadInfo::StructuredCloneReadInfo(
                              SerializedStructuredCloneReadInfo&& aCloneReadInfo)
-  : mData(Move(aCloneReadInfo.data()))
+  : mData(Move(aCloneReadInfo.data().data))
   , mDatabase(nullptr)
 {
   MOZ_COUNT_CTOR(StructuredCloneReadInfo);
@@ -72,7 +86,6 @@ StructuredCloneReadInfo::operator=(StructuredCloneReadInfo&& aCloneReadInfo)
   MOZ_ASSERT(&aCloneReadInfo != this);
 
   mData = Move(aCloneReadInfo.mData);
-  mCloneBuffer = Move(aCloneReadInfo.mCloneBuffer);
   mFiles.Clear();
   mFiles.SwapElements(aCloneReadInfo.mFiles);
   mDatabase = aCloneReadInfo.mDatabase;

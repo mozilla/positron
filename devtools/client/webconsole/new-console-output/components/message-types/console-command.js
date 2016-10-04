@@ -12,13 +12,12 @@ const {
   DOM: dom,
   PropTypes
 } = require("devtools/client/shared/vendor/react");
-const { ConsoleCommand: ConsoleCommandType } = require("devtools/client/webconsole/new-console-output/types");
 const MessageIcon = createFactory(require("devtools/client/webconsole/new-console-output/components/message-icon").MessageIcon);
 
 ConsoleCommand.displayName = "ConsoleCommand";
 
 ConsoleCommand.propTypes = {
-  message: PropTypes.instanceOf(ConsoleCommandType).isRequired,
+  message: PropTypes.object.isRequired,
 };
 
 /**
@@ -26,24 +25,29 @@ ConsoleCommand.propTypes = {
  */
 function ConsoleCommand(props) {
   const { message } = props;
+  const {source, type, level} = message;
 
-  const icon = MessageIcon({severity: message.severity});
+  const icon = MessageIcon({level});
 
-  // @TODO Use of "is" is a temporary hack to get the category and severity
-  // attributes to be applied. There are targeted in webconsole's CSS rules,
-  // so if we remove this hack, we have to modify the CSS rules accordingly.
+  const classes = ["message"];
+
+  classes.push(source);
+  classes.push(type);
+  classes.push(level);
+
   return dom.div({
-    class: "message",
+    className: classes.join(" "),
     ariaLive: "off",
-    is: "fdt-message",
-    category: message.category,
-    severity: message.severity
   },
     // @TODO add timestamp
     // @TODO add indent if necessary
     icon,
-    dom.span({className: "message-body-wrapper message-body devtools-monospace"},
-      dom.span({}, message.messageText)
+    dom.span({ className: "message-body-wrapper" },
+      dom.span({ className: "message-flex-body" },
+        dom.span({ className: "message-body devtools-monospace" },
+          message.messageText
+        )
+      )
     )
   );
 }

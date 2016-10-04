@@ -13,14 +13,13 @@ const EventEmitter = require("devtools/shared/event-emitter");
 const { Cc, Ci } = require("chrome");
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 
-const { LocalizationHelper } = require("devtools/client/shared/l10n");
-const STRINGS_URI = "chrome://devtools/locale/filterwidget.properties";
+const { LocalizationHelper } = require("devtools/shared/l10n");
+const STRINGS_URI = "devtools/locale/filterwidget.properties";
 const L10N = new LocalizationHelper(STRINGS_URI);
 
-const {cssTokenizer} = require("devtools/shared/css-parsing-utils");
+const {cssTokenizer} = require("devtools/shared/css/parsing-utils");
 
-loader.lazyGetter(this, "asyncStorage",
-                  () => require("devtools/shared/async-storage"));
+const asyncStorage = require("devtools/shared/async-storage");
 
 loader.lazyGetter(this, "DOMUtils", () => {
   return Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils);
@@ -116,11 +115,14 @@ const SPECIAL_VALUES = new Set(["none", "unset", "initial", "inherit"]);
  *        The widget container.
  * @param {String} value
  *        CSS filter value
+ * @param {Function} cssIsValid
+ *        Test whether css name / value is valid.
  */
-function CSSFilterEditorWidget(el, value = "") {
+function CSSFilterEditorWidget(el, value = "", cssIsValid) {
   this.doc = el.ownerDocument;
   this.win = this.doc.defaultView;
   this.el = el;
+  this._cssIsValid = cssIsValid;
 
   this._addButtonClick = this._addButtonClick.bind(this);
   this._removeButtonClick = this._removeButtonClick.bind(this);
@@ -132,6 +134,7 @@ function CSSFilterEditorWidget(el, value = "") {
   this._presetClick = this._presetClick.bind(this);
   this._savePreset = this._savePreset.bind(this);
   this._togglePresets = this._togglePresets.bind(this);
+  this._resetFocus = this._resetFocus.bind(this);
 
   // Passed to asyncStorage, requires binding
   this.renderPresets = this.renderPresets.bind(this);
@@ -280,6 +283,7 @@ CSSFilterEditorWidget.prototype = {
     this.filtersList.addEventListener("click", this._removeButtonClick);
     this.filtersList.addEventListener("mousedown", this._mouseDown);
     this.filtersList.addEventListener("keydown", this._keyDown);
+    this.el.addEventListener("mousedown", this._resetFocus);
 
     this.presetsList.addEventListener("click", this._presetClick);
     this.togglePresets.addEventListener("click", this._togglePresets);
@@ -299,6 +303,7 @@ CSSFilterEditorWidget.prototype = {
     this.filtersList.removeEventListener("click", this._removeButtonClick);
     this.filtersList.removeEventListener("mousedown", this._mouseDown);
     this.filtersList.removeEventListener("keydown", this._keyDown);
+    this.el.removeEventListener("mousedown", this._resetFocus);
 
     this.presetsList.removeEventListener("click", this._presetClick);
     this.togglePresets.removeEventListener("click", this._togglePresets);
@@ -610,6 +615,14 @@ CSSFilterEditorWidget.prototype = {
   },
 
   /**
+   * Workaround needed to reset the focus when using a HTML select inside a XUL panel.
+   * See Bug 1294366.
+   */
+  _resetFocus: function () {
+    this.filterSelect.ownerDocument.defaultView.focus();
+  },
+
+  /**
    * Clears the list and renders filters, binding required events.
    * There are some delegated events bound in _addEventListeners method
    */
@@ -678,9 +691,11 @@ CSSFilterEditorWidget.prototype = {
         this.filtersList.querySelector(".filter:last-of-type input");
     if (lastInput) {
       lastInput.focus();
-      // move cursor to end of input
-      const end = lastInput.value.length;
-      lastInput.setSelectionRange(end, end);
+      if (lastInput.type === "text") {
+        // move cursor to end of input
+        const end = lastInput.value.length;
+        lastInput.setSelectionRange(end, end);
+      }
     }
 
     this.emit("render");
@@ -756,7 +771,7 @@ CSSFilterEditorWidget.prototype = {
       // If the specified value is invalid, replace it with the
       // default.
       if (name !== "url") {
-        if (!DOMUtils.cssPropertyIsValid("filter", name + "(" + value + ")")) {
+        if (!this._cssIsValid("filter", name + "(" + value + ")")) {
           value = null;
         }
       }

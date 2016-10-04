@@ -30,15 +30,9 @@ TraceParent(JSTracer* trc, void* data)
     static_cast<JavaScriptParent*>(data)->trace(trc);
 }
 
-JavaScriptParent::JavaScriptParent(JSRuntime* rt)
-  : JavaScriptShared(rt),
-    JavaScriptBase<PJavaScriptParent>(rt)
-{
-}
-
 JavaScriptParent::~JavaScriptParent()
 {
-    JS_RemoveExtraGCRootsTracer(JS_GetContext(rt_), TraceParent, this);
+    JS_RemoveExtraGCRootsTracer(danger::GetJSContext(), TraceParent, this);
 }
 
 bool
@@ -47,7 +41,7 @@ JavaScriptParent::init()
     if (!WrapperOwner::init())
         return false;
 
-    JS_AddExtraGCRootsTracer(JS_GetContext(rt_), TraceParent, this);
+    JS_AddExtraGCRootsTracer(danger::GetJSContext(), TraceParent, this);
     return true;
 }
 
@@ -116,7 +110,7 @@ JavaScriptParent::allowMessage(JSContext* cx)
         if (!xpc::CompartmentPrivate::Get(jsGlobal)->allowCPOWs) {
             if (!addonId && ForbidUnsafeBrowserCPOWs() && !isSafe) {
                 Telemetry::Accumulate(Telemetry::BROWSER_SHIM_USAGE_BLOCKED, 1);
-                JS_ReportError(cx, "unsafe CPOW usage forbidden");
+                JS_ReportErrorASCII(cx, "unsafe CPOW usage forbidden");
                 return false;
             }
 
@@ -128,7 +122,7 @@ JavaScriptParent::allowMessage(JSContext* cx)
                 Telemetry::Accumulate(Telemetry::ADDON_FORBIDDEN_CPOW_USAGE, addonIdCString);
 
                 if (ForbidCPOWsInCompatibleAddon(addonIdCString)) {
-                    JS_ReportError(cx, "CPOW usage forbidden in this add-on");
+                    JS_ReportErrorASCII(cx, "CPOW usage forbidden in this add-on");
                     return false;
                 }
 
@@ -190,9 +184,9 @@ JavaScriptParent::CloneProtocol(Channel* aChannel, ProtocolCloneContext* aCtx)
 }
 
 PJavaScriptParent*
-mozilla::jsipc::NewJavaScriptParent(JSRuntime* rt)
+mozilla::jsipc::NewJavaScriptParent()
 {
-    JavaScriptParent* parent = new JavaScriptParent(rt);
+    JavaScriptParent* parent = new JavaScriptParent();
     if (!parent->init()) {
         delete parent;
         return nullptr;

@@ -5,11 +5,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "GPUProcessManager.h"
 #include "GPUProcessHost.h"
+#include "GPUProcessListener.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/dom/ContentParent.h"
+#include "mozilla/layers/APZCTreeManager.h"
+#include "mozilla/layers/APZCTreeManagerChild.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/layers/ImageBridgeParent.h"
 #include "mozilla/layers/InProcessCompositorSession.h"
+#include "mozilla/layers/LayerTreeOwnerTracker.h"
 #include "mozilla/layers/RemoteCompositorSession.h"
 #include "mozilla/widget/PlatformWidgetTypes.h"
 #ifdef MOZ_WIDGET_SUPPORTS_OOP_COMPOSITING
@@ -22,6 +27,8 @@
 #include "VsyncBridgeChild.h"
 #include "VsyncIOThreadHolder.h"
 #include "VsyncSource.h"
+#include "mozilla/dom/VideoDecoderManagerChild.h"
+#include "mozilla/dom/VideoDecoderManagerParent.h"
 
 namespace mozilla {
 namespace gfx {
@@ -57,10 +64,14 @@ GPUProcessManager::GPUProcessManager()
 {
   mObserver = new Observer(this);
   nsContentUtils::RegisterShutdownObserver(mObserver);
+
+  LayerTreeOwnerTracker::Initialize();
 }
 
 GPUProcessManager::~GPUProcessManager()
 {
+  LayerTreeOwnerTracker::Shutdown();
+
   // The GPU process should have already been shut down.
   MOZ_ASSERT(!mProcess && !mGPUChild);
 
@@ -134,14 +145,20 @@ GPUProcessManager::EnsureGPUReady()
       return;
     }
   }
+
+  if (mGPUChild) {
+    mGPUChild->EnsureGPUReady();
+  }
 }
 
 void
 GPUProcessManager::EnsureImageBridgeChild()
 {
-  if (ImageBridgeChild::IsCreated()) {
+  if (ImageBridgeChild::GetSingleton()) {
     return;
   }
+
+  EnsureGPUReady();
 
   if (!mGPUChild) {
     ImageBridgeChild::InitSameProcess();
@@ -170,6 +187,8 @@ GPUProcessManager::EnsureVRManager()
   if (VRManagerChild::IsCreated()) {
     return;
   }
+
+  EnsureGPUReady();
 
   if (!mGPUChild) {
     VRManagerChild::InitSameProcess();
@@ -227,6 +246,91 @@ GPUProcessManager::OnProcessUnexpectedShutdown(GPUProcessHost* aHost)
   MOZ_ASSERT(mProcess && mProcess == aHost);
 
   DestroyProcess();
+
+  // The shutdown and restart sequence for the GPU process is as follows:
+  //
+  //  (1) The GPU process dies. IPDL will enqueue an ActorDestroy message on
+  //      each channel owning a bridge to the GPU process, on the thread
+  //      owning that channel.
+  //
+  //  (2) The first channel to process its ActorDestroy message will post a
+  //      message to the main thread to call NotifyRemoteActorDestroyed on
+  //      the GPUProcessManager, which calls OnProcessUnexpectedShutdown if
+  //      it has not handled shutdown for this process yet.
+  //
+  //  (3) We then notify each widget that its session with the compositor is
+  //      now invalid. The widget is responsible for destroying its layer
+  //      manager and CompositorBridgeChild. Note that at this stage, not
+  //      all actors may have received ActorDestroy yet. CompositorBridgeChild
+  //      may attempt to send messages, and if this happens, it will probably
+  //      report a MsgDropped error. This is okay.
+  //
+  //  (4) At this point, the UI process has a clean slate: no layers should
+  //      exist for the old compositor. We may make a decision on whether or
+  //      not to re-launch the GPU process. Currently, we do not relaunch it,
+  //      and any new compositors will be created in-process and will default
+  //      to software.
+  //
+  //  (5) Next we notify each ContentParent of the lost connection. It will
+  //      request new endpoints from the GPUProcessManager and forward them
+  //      to its ContentChild. The parent-side of these endpoints may come
+  //      from the compositor thread of the UI process, or the compositor
+  //      thread of the GPU process. However, no actual compositors should
+  //      exist yet.
+  //
+  //  (6) Each ContentChild will receive new endpoints. It will destroy its
+  //      Compositor/ImageBridgeChild singletons and recreate them, as well
+  //      as invalidate all retained layers.
+  //
+  //  (7) In addition, each ContentChild will ask each of its TabChildren
+  //      to re-request association with the compositor for the window
+  //      owning the tab. The sequence of calls looks like:
+  //        (a) [CONTENT] ContentChild::RecvReinitRendering
+  //        (b) [CONTENT] TabChild::ReinitRendering
+  //        (c) [CONTENT] TabChild::SendEnsureLayersConnected
+  //        (d)      [UI] TabParent::RecvEnsureLayersConnected
+  //        (e)      [UI] RenderFrameParent::EnsureLayersConnected
+  //        (f)      [UI] CompositorBridgeChild::SendNotifyChildRecreated
+  //
+  //      Note that at step (e), RenderFrameParent will call GetLayerManager
+  //      on the nsIWidget owning the tab. This step ensures that a compositor
+  //      exists for the window. If we decided to launch a new GPU Process,
+  //      at this point we block until the process has launched and we're
+  //      able to create a new window compositor. Otherwise, if compositing
+  //      is now in-process, this will simply create a new
+  //      CompositorBridgeParent in the UI process. If there are multiple tabs
+  //      in the same window, additional tabs will simply return the already-
+  //      established compositor.
+  //
+  //      Finally, this step serves one other crucial function: tabs must be
+  //      associated with a window compositor or else they can't forward
+  //      layer transactions. So this step both ensures that a compositor
+  //      exists, and that the tab can forward layers.
+  //
+  //  (8) Last, if the window had no remote tabs, step (7) will not have 
+  //      applied, and the window will not have a new compositor just yet.
+  //      The next refresh tick and paint will ensure that one exists, again
+  //      via nsIWidget::GetLayerManager.
+
+  // Build a list of sessions to notify, since notification might delete
+  // entries from the list.
+  nsTArray<RefPtr<RemoteCompositorSession>> sessions;
+  for (auto& session : mRemoteSessions) {
+    sessions.AppendElement(session);
+  }
+
+  // Notify each widget that we have lost the GPU process. This will ensure
+  // that each widget destroys its layer manager and CompositorBridgeChild.
+  for (const auto& session : sessions) {
+    session->NotifySessionLost();
+  }
+
+  // Notify content. This will ensure that each content process re-establishes
+  // a connection to the compositor thread (whether it's in-process or in a
+  // newly launched GPU process).
+  for (const auto& listener : mListeners) {
+    listener->OnCompositorUnexpectedShutdown();
+  }
 }
 
 void
@@ -248,7 +352,7 @@ GPUProcessManager::NotifyRemoteActorDestroyed(const uint64_t& aProcessToken)
   // prematurely terminated, and we're receiving a notification. This
   // can happen if the ActorDestroy for a bridged protocol fires
   // before the ActorDestroy for PGPUChild.
-  DestroyProcess();
+  OnProcessUnexpectedShutdown(mProcess);
 }
 
 void
@@ -288,6 +392,7 @@ GPUProcessManager::CreateTopLevelCompositor(nsBaseWidget* aWidget,
 {
   uint64_t layerTreeId = AllocateLayerTreeId();
 
+  EnsureGPUReady();
   EnsureImageBridgeChild();
   EnsureVRManager();
 
@@ -378,8 +483,17 @@ GPUProcessManager::CreateRemoteSession(nsBaseWidget* aWidget,
     return nullptr;
   }
 
+  RefPtr<APZCTreeManagerChild> apz = nullptr;
+  if (aUseAPZ) {
+    PAPZCTreeManagerChild* papz = child->SendPAPZCTreeManagerConstructor(0);
+    if (!papz) {
+      return nullptr;
+    }
+    apz = static_cast<APZCTreeManagerChild*>(papz);
+  }
+
   RefPtr<RemoteCompositorSession> session =
-    new RemoteCompositorSession(child, widget, aRootLayerTreeId);
+    new RemoteCompositorSession(aWidget, child, widget, apz, aRootLayerTreeId);
   return session.forget();
 #else
   gfxCriticalNote << "Platform does not support out-of-process compositing";
@@ -388,9 +502,26 @@ GPUProcessManager::CreateRemoteSession(nsBaseWidget* aWidget,
 }
 
 bool
+GPUProcessManager::CreateContentBridges(base::ProcessId aOtherProcess,
+                                        ipc::Endpoint<PCompositorBridgeChild>* aOutCompositor,
+                                        ipc::Endpoint<PImageBridgeChild>* aOutImageBridge,
+                                        ipc::Endpoint<PVRManagerChild>* aOutVRBridge)
+{
+  if (!CreateContentCompositorBridge(aOtherProcess, aOutCompositor) ||
+      !CreateContentImageBridge(aOtherProcess, aOutImageBridge) ||
+      !CreateContentVRManager(aOtherProcess, aOutVRBridge))
+  {
+    return false;
+  }
+  return true;
+}
+
+bool
 GPUProcessManager::CreateContentCompositorBridge(base::ProcessId aOtherProcess,
                                                  ipc::Endpoint<PCompositorBridgeChild>* aOutEndpoint)
 {
+  EnsureGPUReady();
+
   ipc::Endpoint<PCompositorBridgeParent> parentPipe;
   ipc::Endpoint<PCompositorBridgeChild> childPipe;
 
@@ -488,10 +619,55 @@ GPUProcessManager::CreateContentVRManager(base::ProcessId aOtherProcess,
   return true;
 }
 
+bool
+GPUProcessManager::CreateContentVideoDecoderManager(base::ProcessId aOtherProcess,
+                                                    ipc::Endpoint<dom::PVideoDecoderManagerChild>* aOutEndpoint)
+{
+  if (!mGPUChild) {
+    return false;
+  }
+
+  ipc::Endpoint<dom::PVideoDecoderManagerParent> parentPipe;
+  ipc::Endpoint<dom::PVideoDecoderManagerChild> childPipe;
+
+  nsresult rv = dom::PVideoDecoderManager::CreateEndpoints(
+    mGPUChild->OtherPid(),
+    aOtherProcess,
+    &parentPipe,
+    &childPipe);
+  if (NS_FAILED(rv)) {
+    gfxCriticalNote << "Could not create content video decoder: " << hexa(int(rv));
+    return false;
+  }
+
+  mGPUChild->SendNewContentVideoDecoderManager(Move(parentPipe));
+
+  *aOutEndpoint = Move(childPipe);
+  return true;
+}
+
 already_AddRefed<IAPZCTreeManager>
 GPUProcessManager::GetAPZCTreeManagerForLayers(uint64_t aLayersId)
 {
   return CompositorBridgeParent::GetAPZCTreeManager(aLayersId);
+}
+
+void
+GPUProcessManager::MapLayerTreeId(uint64_t aLayersId, base::ProcessId aOwningId)
+{
+  LayerTreeOwnerTracker::Get()->Map(aLayersId, aOwningId);
+
+  if (mGPUChild) {
+    mGPUChild->SendAddLayerTreeIdMapping(
+        aLayersId,
+        aOwningId);
+  }
+}
+
+bool
+GPUProcessManager::IsLayerTreeIdMapped(uint64_t aLayersId, base::ProcessId aRequestingId)
+{
+  return LayerTreeOwnerTracker::Get()->IsMapped(aLayersId, aRequestingId);
 }
 
 uint64_t
@@ -504,38 +680,11 @@ GPUProcessManager::AllocateLayerTreeId()
 void
 GPUProcessManager::DeallocateLayerTreeId(uint64_t aLayersId)
 {
+  if (mGPUChild) {
+    mGPUChild->SendDeallocateLayerTreeId(aLayersId);
+    return;
+  }
   CompositorBridgeParent::DeallocateLayerTreeId(aLayersId);
-}
-
-void
-GPUProcessManager::RequestNotifyLayerTreeReady(uint64_t aLayersId, CompositorUpdateObserver* aObserver)
-{
-  CompositorBridgeParent::RequestNotifyLayerTreeReady(aLayersId, aObserver);
-}
-
-void
-GPUProcessManager::RequestNotifyLayerTreeCleared(uint64_t aLayersId, CompositorUpdateObserver* aObserver)
-{
-  CompositorBridgeParent::RequestNotifyLayerTreeCleared(aLayersId, aObserver);
-}
-
-void
-GPUProcessManager::SwapLayerTreeObservers(uint64_t aLayer, uint64_t aOtherLayer)
-{
-  CompositorBridgeParent::SwapLayerTreeObservers(aLayer, aOtherLayer);
-}
-
-bool
-GPUProcessManager::UpdateRemoteContentController(uint64_t aLayersId,
-                                                 dom::ContentParent* aContentParent,
-                                                 const dom::TabId& aTabId,
-                                                 dom::TabParent* aBrowserParent)
-{
-  return CompositorBridgeParent::UpdateRemoteContentController(
-    aLayersId,
-    aContentParent,
-    aTabId,
-    aBrowserParent);
 }
 
 void
@@ -553,6 +702,30 @@ void
 GPUProcessManager::ShutdownVsyncIOThread()
 {
   mVsyncIOThread = nullptr;
+}
+
+void
+GPUProcessManager::RegisterSession(RemoteCompositorSession* aSession)
+{
+  mRemoteSessions.AppendElement(aSession);
+}
+
+void
+GPUProcessManager::UnregisterSession(RemoteCompositorSession* aSession)
+{
+  mRemoteSessions.RemoveElement(aSession);
+}
+
+void
+GPUProcessManager::AddListener(GPUProcessListener* aListener)
+{
+  mListeners.AppendElement(aListener);
+}
+
+void
+GPUProcessManager::RemoveListener(GPUProcessListener* aListener)
+{
+  mListeners.RemoveElement(aListener);
 }
 
 } // namespace gfx

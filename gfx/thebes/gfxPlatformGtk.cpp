@@ -142,6 +142,10 @@ already_AddRefed<gfxASurface>
 gfxPlatformGtk::CreateOffscreenSurface(const IntSize& aSize,
                                        gfxImageFormat aFormat)
 {
+    if (!Factory::AllowedSurfaceSize(aSize)) {
+        return nullptr;
+    }
+
     RefPtr<gfxASurface> newSurface;
     bool needsClear = true;
 #ifdef MOZ_X11
@@ -673,6 +677,7 @@ public:
 
   public:
     GLXDisplay() : mGLContext(nullptr)
+                 , mXDisplay(nullptr)
                  , mSetupLock("GLXVsyncSetupLock")
                  , mVsyncThread("GLXVsyncThread")
                  , mVsyncTask(nullptr)
@@ -705,15 +710,22 @@ public:
         MOZ_ASSERT(!NS_IsMainThread());
         MOZ_ASSERT(!mGLContext, "GLContext already setup!");
 
-        _XDisplay* display = gfxPlatformGtk::GetPlatform()->GetCompositorDisplay();
+        // Create video sync timer on a separate Display to prevent locking the
+        // main thread X display.
+        mXDisplay = XOpenDisplay(nullptr);
+        if (!mXDisplay) {
+          lock.NotifyAll();
+          return;
+        }
+
         // Most compositors wait for vsync events on the root window.
-        Window root = DefaultRootWindow(display);
-        int screen = DefaultScreen(display);
+        Window root = DefaultRootWindow(mXDisplay);
+        int screen = DefaultScreen(mXDisplay);
 
         ScopedXFree<GLXFBConfig> cfgs;
         GLXFBConfig config;
         int visid;
-        if (!gl::GLContextGLX::FindFBConfigForWindow(display, screen, root,
+        if (!gl::GLContextGLX::FindFBConfigForWindow(mXDisplay, screen, root,
                                                      &cfgs, &config, &visid)) {
           lock.NotifyAll();
           return;
@@ -724,7 +736,7 @@ public:
             gl::SurfaceCaps::Any(),
             nullptr,
             false,
-            display,
+            mXDisplay,
             root,
             config,
             false);
@@ -846,10 +858,12 @@ public:
       MOZ_ASSERT(!NS_IsMainThread());
 
       mGLContext = nullptr;
+      XCloseDisplay(mXDisplay);
     }
 
     // Owned by the vsync thread.
     RefPtr<gl::GLContextGLX> mGLContext;
+    _XDisplay* mXDisplay;
     Monitor mSetupLock;
     base::Thread mVsyncThread;
     RefPtr<Runnable> mVsyncTask;

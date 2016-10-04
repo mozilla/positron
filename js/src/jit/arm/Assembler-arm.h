@@ -1587,9 +1587,9 @@ class Assembler : public AssemblerShared
                                Label* documentation = nullptr);
 
     // Load a 64 bit floating point immediate from a pool into a register.
-    BufferOffset as_FImm64Pool(VFPRegister dest, double value, Condition c = Always);
+    BufferOffset as_FImm64Pool(VFPRegister dest, wasm::RawF64 value, Condition c = Always);
     // Load a 32 bit floating point immediate from a pool into a register.
-    BufferOffset as_FImm32Pool(VFPRegister dest, float value, Condition c = Always);
+    BufferOffset as_FImm32Pool(VFPRegister dest, wasm::RawF32 value, Condition c = Always);
 
     // Atomic instructions: ldrex, ldrexh, ldrexb, strex, strexh, strexb.
     //
@@ -1968,7 +1968,6 @@ class Assembler : public AssemblerShared
     static size_t ToggledCallSize(uint8_t* code);
     static void ToggleCall(CodeLocationLabel inst_, bool enabled);
 
-    static void UpdateBoundsCheck(uint8_t* patchAt, uint32_t heapLength);
     void processCodeLabels(uint8_t* rawCode);
 
     bool bailed() {

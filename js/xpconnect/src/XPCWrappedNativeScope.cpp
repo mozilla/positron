@@ -237,7 +237,7 @@ XPCWrappedNativeScope::AttachComponentsObject(JSContext* aCx)
     if (c)
         attrs |= JSPROP_PERMANENT;
 
-    RootedId id(aCx, XPCJSRuntime::Get()->GetStringID(XPCJSRuntime::IDX_COMPONENTS));
+    RootedId id(aCx, XPCJSContext::Get()->GetStringID(XPCJSContext::IDX_COMPONENTS));
     return JS_DefinePropertyById(aCx, global, id, components, attrs);
 }
 
@@ -293,9 +293,11 @@ XPCWrappedNativeScope::EnsureContentXBLScope(JSContext* cx)
     // Use an nsExpandedPrincipal to create asymmetric security.
     nsIPrincipal* principal = GetPrincipal();
     MOZ_ASSERT(!nsContentUtils::IsExpandedPrincipal(principal));
-    nsTArray< nsCOMPtr<nsIPrincipal> > principalAsArray(1);
+    nsTArray<nsCOMPtr<nsIPrincipal>> principalAsArray(1);
     principalAsArray.AppendElement(principal);
-    nsCOMPtr<nsIExpandedPrincipal> ep = new nsExpandedPrincipal(principalAsArray);
+    nsCOMPtr<nsIExpandedPrincipal> ep =
+        new nsExpandedPrincipal(principalAsArray,
+                                BasePrincipal::Cast(principal)->OriginAttributesRef());
 
     // Create the sandbox.
     RootedValue v(cx);
@@ -474,16 +476,16 @@ XPCWrappedNativeScope::~XPCWrappedNativeScope()
     if (mXrayExpandos.initialized())
         mXrayExpandos.destroy();
 
-    JSRuntime* rt = XPCJSRuntime::Get()->Runtime();
-    mContentXBLScope.finalize(rt);
+    JSContext* cx = dom::danger::GetJSContext();
+    mContentXBLScope.finalize(cx);
     for (size_t i = 0; i < mAddonScopes.Length(); i++)
-        mAddonScopes[i].finalize(rt);
-    mGlobalJSObject.finalize(rt);
+        mAddonScopes[i].finalize(cx);
+    mGlobalJSObject.finalize(cx);
 }
 
 // static
 void
-XPCWrappedNativeScope::TraceWrappedNativesInAllScopes(JSTracer* trc, XPCJSRuntime* rt)
+XPCWrappedNativeScope::TraceWrappedNativesInAllScopes(JSTracer* trc, XPCJSContext* cx)
 {
     // Do JS::TraceEdge for all wrapped natives with external references, as
     // well as any DOM expando objects.
@@ -512,7 +514,7 @@ SuspectDOMExpandos(JSObject* obj, nsCycleCollectionNoteRootCallback& cb)
 
 // static
 void
-XPCWrappedNativeScope::SuspectAllWrappers(XPCJSRuntime* rt,
+XPCWrappedNativeScope::SuspectAllWrappers(XPCJSContext* cx,
                                           nsCycleCollectionNoteRootCallback& cb)
 {
     for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
@@ -529,7 +531,7 @@ XPCWrappedNativeScope::SuspectAllWrappers(XPCJSRuntime* rt,
 
 // static
 void
-XPCWrappedNativeScope::UpdateWeakPointersAfterGC(XPCJSRuntime* rt)
+XPCWrappedNativeScope::UpdateWeakPointersAfterGC(XPCJSContext* cx)
 {
     // If this is called from the finalization callback in JSGC_MARK_END then
     // JSGC_FINALIZE_END must always follow it calling
@@ -573,42 +575,6 @@ XPCWrappedNativeScope::UpdateWeakPointersAfterGC(XPCJSRuntime* rt)
         cur = next;
     }
 }
-
-// static
-void
-XPCWrappedNativeScope::MarkAllWrappedNativesAndProtos()
-{
-    for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
-        for (auto i = cur->mWrappedNativeMap->Iter(); !i.Done(); i.Next()) {
-            auto entry = static_cast<Native2WrappedNativeMap::Entry*>(i.Get());
-            entry->value->Mark();
-        }
-        // We need to explicitly mark all the protos too because some protos may be
-        // alive in the hashtable but not currently in use by any wrapper
-        for (auto i = cur->mWrappedNativeProtoMap->Iter(); !i.Done(); i.Next()) {
-            auto entry = static_cast<ClassInfo2WrappedNativeProtoMap::Entry*>(i.Get());
-            entry->value->Mark();
-        }
-    }
-}
-
-#ifdef DEBUG
-// static
-void
-XPCWrappedNativeScope::ASSERT_NoInterfaceSetsAreMarked()
-{
-    for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
-        for (auto i = cur->mWrappedNativeMap->Iter(); !i.Done(); i.Next()) {
-            auto entry = static_cast<Native2WrappedNativeMap::Entry*>(i.Get());
-            entry->value->ASSERT_SetsNotMarked();
-        }
-        for (auto i = cur->mWrappedNativeProtoMap->Iter(); !i.Done(); i.Next()) {
-            auto entry = static_cast<ClassInfo2WrappedNativeProtoMap::Entry*>(i.Get());
-            entry->value->ASSERT_SetNotMarked();
-        }
-    }
-}
-#endif
 
 // static
 void
@@ -810,12 +776,12 @@ XPCWrappedNativeScope::UpdateInterpositionWhitelist(JSContext* cx,
     RootedValue whitelistVal(cx);
     nsresult rv = interposition->GetWhitelist(&whitelistVal);
     if (NS_FAILED(rv)) {
-        JS_ReportError(cx, "Could not get the whitelist from the interposition.");
+        JS_ReportErrorASCII(cx, "Could not get the whitelist from the interposition.");
         return false;
     }
 
     if (!whitelistVal.isObject()) {
-        JS_ReportError(cx, "Whitelist must be an array.");
+        JS_ReportErrorASCII(cx, "Whitelist must be an array.");
         return false;
     }
 
@@ -826,7 +792,7 @@ XPCWrappedNativeScope::UpdateInterpositionWhitelist(JSContext* cx,
     RootedObject whitelistObj(cx, &whitelistVal.toObject());
     whitelistObj = js::UncheckedUnwrap(whitelistObj);
     if (!AccessCheck::isChrome(whitelistObj)) {
-        JS_ReportError(cx, "Whitelist must be from system scope.");
+        JS_ReportErrorASCII(cx, "Whitelist must be from system scope.");
         return false;
     }
 
@@ -838,7 +804,7 @@ XPCWrappedNativeScope::UpdateInterpositionWhitelist(JSContext* cx,
             return false;
 
         if (!isArray) {
-            JS_ReportError(cx, "Whitelist must be an array.");
+            JS_ReportErrorASCII(cx, "Whitelist must be an array.");
             return false;
         }
 
@@ -852,14 +818,14 @@ XPCWrappedNativeScope::UpdateInterpositionWhitelist(JSContext* cx,
                 return false;
 
             if (!idval.isString()) {
-                JS_ReportError(cx, "Whitelist must contain strings only.");
+                JS_ReportErrorASCII(cx, "Whitelist must contain strings only.");
                 return false;
             }
 
             RootedString str(cx, idval.toString());
             str = JS_AtomizeAndPinJSString(cx, str);
             if (!str) {
-                JS_ReportError(cx, "String internization failed.");
+                JS_ReportErrorASCII(cx, "String internization failed.");
                 return false;
             }
 

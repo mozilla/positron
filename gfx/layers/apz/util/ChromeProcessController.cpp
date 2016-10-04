@@ -50,7 +50,7 @@ ChromeProcessController::InitializeRoot()
 void
 ChromeProcessController::RequestContentRepaint(const FrameMetrics& aFrameMetrics)
 {
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(IsRepaintThread());
 
   FrameMetrics metrics = aFrameMetrics;
   if (metrics.IsRootContent()) {
@@ -66,6 +66,18 @@ ChromeProcessController::PostDelayedTask(already_AddRefed<Runnable> aTask, int a
   MessageLoop::current()->PostDelayedTask(Move(aTask), aDelayMs);
 }
 
+bool
+ChromeProcessController::IsRepaintThread()
+{
+  return NS_IsMainThread();
+}
+
+void
+ChromeProcessController::DispatchToRepaintThread(already_AddRefed<Runnable> aTask)
+{
+  NS_DispatchToMainThread(Move(aTask));
+}
+
 void
 ChromeProcessController::Destroy()
 {
@@ -76,6 +88,7 @@ ChromeProcessController::Destroy()
 
   MOZ_ASSERT(MessageLoop::current() == mUILoop);
   mWidget = nullptr;
+  mAPZEventState = nullptr;
 }
 
 nsIPresShell*
@@ -158,6 +171,10 @@ ChromeProcessController::HandleTap(TapType aType,
     return;
   }
 
+  if (!mAPZEventState) {
+    return;
+  }
+
   nsCOMPtr<nsIPresShell> presShell = GetPresShell();
   if (!presShell) {
     return;
@@ -180,13 +197,35 @@ ChromeProcessController::HandleTap(TapType aType,
         aInputBlockId);
     break;
   case TapType::eLongTapUp:
-    mAPZEventState->ProcessLongTapUp();
+    mAPZEventState->ProcessLongTapUp(presShell, point, scale, aModifiers);
     break;
   case TapType::eSentinel:
     // Should never happen, but we need to handle this case branch for the
     // compiler to be happy.
     MOZ_ASSERT(false);
     break;
+  }
+}
+
+void
+ChromeProcessController::NotifyPinchGesture(PinchGestureInput::PinchGestureType aType,
+                                            const ScrollableLayerGuid& aGuid,
+                                            LayoutDeviceCoord aSpanChange,
+                                            Modifiers aModifiers)
+{
+  if (MessageLoop::current() != mUILoop) {
+    mUILoop->PostTask(NewRunnableMethod
+                      <PinchGestureInput::PinchGestureType,
+                       ScrollableLayerGuid,
+                       LayoutDeviceCoord,
+                       Modifiers>(this,
+                          &ChromeProcessController::NotifyPinchGesture,
+                          aType, aGuid, aSpanChange, aModifiers));
+    return;
+  }
+
+  if (mWidget) {
+    APZCCallbackHelper::NotifyPinchGesture(aType, aSpanChange, aModifiers, mWidget.get());
   }
 }
 
@@ -201,6 +240,10 @@ ChromeProcessController::NotifyAPZStateChange(const ScrollableLayerGuid& aGuid,
                        APZStateChange,
                        int>(this, &ChromeProcessController::NotifyAPZStateChange,
                             aGuid, aChange, aArg));
+    return;
+  }
+
+  if (!mAPZEventState) {
     return;
   }
 
@@ -224,6 +267,7 @@ ChromeProcessController::NotifyMozMouseScrollEvent(const FrameMetrics::ViewID& a
 void
 ChromeProcessController::NotifyFlushComplete()
 {
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(IsRepaintThread());
+
   APZCCallbackHelper::NotifyFlushComplete(GetPresShell());
 }

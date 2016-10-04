@@ -179,6 +179,8 @@ nsNSSDialogs::ChooseCertificate(nsIInterfaceRequestor* ctx,
     return NS_ERROR_FAILURE;
   }
 
+  // SetObjects() expects an nsIMutableArray, which is why we can't directly use
+  // |certList| and have to add an extra layer of indirection.
   nsCOMPtr<nsIMutableArray> paramBlockArray = nsArrayBase::Create();
   if (!paramBlockArray) {
     return NS_ERROR_FAILURE;
@@ -269,9 +271,6 @@ nsNSSDialogs::PickCertificate(nsIInterfaceRequestor *ctx,
   uint32_t i;
 
   *canceled = false;
-
-  // Get the parent window for the dialog
-  nsCOMPtr<nsIDOMWindow> parent = do_GetInterface(ctx);
 
   nsCOMPtr<nsIDialogParamBlock> block =
            do_CreateInstance(NS_DIALOGPARAMBLOCK_CONTRACTID);
@@ -434,9 +433,6 @@ nsNSSDialogs::ChooseToken(nsIInterfaceRequestor *aCtx, const char16_t **aTokenLi
   uint32_t i;
 
   *aCanceled = false;
-
-  // Get the parent window for the dialog
-  nsCOMPtr<nsIDOMWindow> parent = do_GetInterface(aCtx);
 
   nsCOMPtr<nsIDialogParamBlock> block =
            do_CreateInstance(NS_DIALOGPARAMBLOCK_CONTRACTID);

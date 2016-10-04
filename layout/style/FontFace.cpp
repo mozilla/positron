@@ -11,7 +11,7 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/TypedArray.h"
 #include "mozilla/dom/UnionTypes.h"
-#include "mozilla/CycleCollectedJSRuntime.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "nsCSSParser.h"
 #include "nsCSSRules.h"
 #include "nsIDocument.h"
@@ -160,8 +160,6 @@ FontFace::CreateForRule(nsISupports* aGlobal,
                         FontFaceSet* aFontFaceSet,
                         nsCSSFontFaceRule* aRule)
 {
-  nsCOMPtr<nsIGlobalObject> globalObject = do_QueryInterface(aGlobal);
-
   RefPtr<FontFace> obj = new FontFace(aGlobal, aFontFaceSet);
   obj->mRule = aRule;
   obj->mSourceType = eSourceType_FontFaceRule;
@@ -597,7 +595,7 @@ FontFace::GetDesc(nsCSSFontDesc aDescID, nsCSSValue& aResult) const
 
 void
 FontFace::GetDesc(nsCSSFontDesc aDescID,
-                  nsCSSProperty aPropID,
+                  nsCSSPropertyID aPropID,
                   nsString& aResult) const
 {
   MOZ_ASSERT(aDescID == eCSSFontDesc_UnicodeRange ||

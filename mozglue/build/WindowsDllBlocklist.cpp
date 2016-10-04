@@ -77,19 +77,21 @@ static DllBlockInfo sWindowsDllBlocklist[] = {
   // { "uxtheme.dll", ALL_VERSIONS },
   // { "uxtheme.dll", 0x0000123400000000ULL },
   // The DLL name must be in lowercase!
-  
+  // The version field is a maximum, that is, we block anything that is
+  // less-than or equal to that version.
+
   // NPFFAddon - Known malware
   { "npffaddon.dll", ALL_VERSIONS},
 
   // AVG 8 - Antivirus vendor AVG, old version, plugin already blocklisted
   {"avgrsstx.dll", MAKE_VERSION(8,5,0,401)},
-  
+
   // calc.dll - Suspected malware
   {"calc.dll", MAKE_VERSION(1,0,0,1)},
 
   // hook.dll - Suspected malware
   {"hook.dll", ALL_VERSIONS},
-  
+
   // GoogleDesktopNetwork3.dll - Extremely old, unversioned instances
   // of this DLL cause crashes
   {"googledesktopnetwork3.dll", UNVERSIONED},
@@ -99,7 +101,7 @@ static DllBlockInfo sWindowsDllBlocklist[] = {
 
   // fgjk4wvb.dll - Suspected malware
   {"fgjk4wvb.dll", MAKE_VERSION(8,8,8,8)},
-  
+
   // radhslib.dll - Naomi internet filter - unmaintained since 2006
   {"radhslib.dll", UNVERSIONED},
 
@@ -126,9 +128,6 @@ static DllBlockInfo sWindowsDllBlocklist[] = {
 
   // sprotector.dll crashes, bug 957258
   {"sprotector.dll", ALL_VERSIONS},
-
-  // Topcrash with Websense Endpoint, bug 828184
-  {"qipcap.dll", MAKE_VERSION(7, 6, 815, 1)},
 
   // leave these two in always for tests
   { "mozdllblockingtest.dll", ALL_VERSIONS },
@@ -220,8 +219,8 @@ static DllBlockInfo sWindowsDllBlocklist[] = {
   { "rlls.dll", ALL_VERSIONS },
   { "rlls64.dll", ALL_VERSIONS },
 
-  // Websense is crashing us on 48 & 49, bug 1291738
-  { "qipcap.dll", MAKE_VERSION(7, 6, 818, 1) },
+  // Vorbis DirectShow filters, bug 1239690.
+  { "vorbis.acm", MAKE_VERSION(0, 0, 3, 6) },
 
   { nullptr, 0 }
 };
@@ -401,7 +400,7 @@ public:
     mReentered = mPreviousDllName && !stricmp(mPreviousDllName, dllName);
     (*sThreadMap)[currentThreadId] = dllName;
   }
-    
+
   ~ReentrancySentinel()
   {
     DWORD currentThreadId = GetCurrentThreadId();
@@ -413,7 +412,7 @@ public:
   {
     return mReentered;
   };
-    
+
   static void InitializeStatics()
   {
     InitializeCriticalSection(&sLock);
@@ -768,8 +767,6 @@ DllBlocklist_Initialize()
   if (GetModuleHandleA("user32.dll")) {
     sUser32BeforeBlocklist = true;
   }
-  // Catch any missing DELAYLOADS for user32.dll
-  MOZ_ASSERT(!sUser32BeforeBlocklist);
 
   NtDllIntercept.Init("ntdll.dll");
 
@@ -817,4 +814,12 @@ DllBlocklist_WriteNotes(HANDLE file)
     WriteFile(file, kUser32BeforeBlocklistParameter,
               kUser32BeforeBlocklistParameterLen, &nBytes, nullptr);
   }
+}
+
+MFBT_API bool
+DllBlocklist_CheckStatus()
+{
+  if (sBlocklistInitFailed || sUser32BeforeBlocklist)
+    return false;
+  return true;
 }

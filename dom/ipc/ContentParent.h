@@ -10,6 +10,7 @@
 #include "mozilla/dom/PContentParent.h"
 #include "mozilla/dom/nsIContentParent.h"
 #include "mozilla/gfx/gfxVarReceiver.h"
+#include "mozilla/gfx/GPUProcessListener.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/FileUtils.h"
@@ -92,6 +93,7 @@ class ContentParent final : public PContentParent
                           , public nsIDOMGeoPositionErrorCallback
                           , public gfx::gfxVarReceiver
                           , public mozilla::LinkedListElement<ContentParent>
+                          , public gfx::GPUProcessListener
 {
   typedef mozilla::ipc::GeckoChildProcessHost GeckoChildProcessHost;
   typedef mozilla::ipc::OptionalURIParams OptionalURIParams;
@@ -268,6 +270,8 @@ public:
                                nsresult* aRv,
                                nsTArray<PluginTag>* aPlugins,
                                uint32_t* aNewPluginEpoch) override;
+
+  virtual bool RecvInitVideoDecoderManager(Endpoint<PVideoDecoderManagerChild>* endpoint) override;
 
   virtual bool RecvUngrabPointer(const uint32_t& aTime) override;
 
@@ -563,6 +567,9 @@ public:
 
   virtual int32_t Pid() const override;
 
+  // Use the PHangMonitor channel to ask the child to repaint a tab.
+  void ForceTabPaint(TabParent* aTabParent, uint64_t aLayerObserverEpoch);
+
 protected:
   void OnChannelConnected(int32_t pid) override;
 
@@ -571,6 +578,7 @@ protected:
   bool ShouldContinueFromReplyTimeout() override;
 
   void OnVarChanged(const GfxVarUpdate& aVar) override;
+  void OnCompositorUnexpectedShutdown() override;
 
 private:
   static nsDataHashtable<nsStringHashKey, ContentParent*> *sAppContentParents;
@@ -703,11 +711,6 @@ private:
   AllocPGMPServiceParent(mozilla::ipc::Transport* aTransport,
                          base::ProcessId aOtherProcess) override;
 
-  PAPZParent*
-  AllocPAPZParent(const TabId& aTabId) override;
-  bool
-  DeallocPAPZParent(PAPZParent* aActor) override;
-
   PSharedBufferManagerParent*
   AllocPSharedBufferManagerParent(mozilla::ipc::Transport* aTranport,
                                    base::ProcessId aOtherProcess) override;
@@ -786,7 +789,8 @@ private:
                                const uint32_t& aFlags, bool* aIsSecureURI) override;
 
   virtual bool RecvAccumulateMixedContentHSTS(const URIParams& aURI,
-                                              const bool& aActive) override;
+                                              const bool& aActive,
+                                              const bool& aHSTSPriming) override;
 
   virtual bool DeallocPHalParent(PHalParent*) override;
 
@@ -1018,8 +1022,6 @@ private:
                                              const bool& aContentOrNormalChannel,
                                              const bool& aAnyChannel) override;
 
-  virtual bool RecvGetSystemMemory(const uint64_t& getterId) override;
-
   virtual bool RecvGetLookAndFeelCache(nsTArray<LookAndFeelInt>* aLookAndFeelIntCache) override;
 
   virtual bool RecvSpeakerManagerGetSpeakerStatus(bool* aValue) override;
@@ -1104,7 +1106,7 @@ private:
 
   virtual bool RecvProfile(const nsCString& aProfile) override;
 
-  virtual bool RecvGetGraphicsDeviceInitData(DeviceInitData* aOut) override;
+  virtual bool RecvGetGraphicsDeviceInitData(ContentDeviceData* aOut) override;
 
   void StartProfiler(nsIProfilerStartParams* aParams);
 
@@ -1141,6 +1143,10 @@ private:
 
   virtual bool RecvDeleteGetFilesRequest(const nsID& aID) override;
 
+  virtual bool RecvAccumulateChildHistogram(
+                  InfallibleTArray<Accumulation>&& aAccumulations) override;
+  virtual bool RecvAccumulateChildKeyedHistogram(
+                  InfallibleTArray<KeyedAccumulation>&& aAccumulations) override;
 public:
   void SendGetFilesResponseAndForget(const nsID& aID,
                                      const GetFilesResponseResult& aResult);

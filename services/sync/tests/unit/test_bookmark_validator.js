@@ -2,6 +2,7 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 Components.utils.import("resource://services-sync/bookmark_validator.js");
+Components.utils.import("resource://services-sync/util.js");
 
 function inspectServerRecords(data) {
   return new BookmarkValidator().inspectServerRecords(data);
@@ -42,13 +43,23 @@ add_test(function test_isr_orphansMultiParents() {
     { id: 'A', type: 'bookmark', parentid: 'D' },
     { id: 'B', type: 'folder', parentid: 'places', children: ['A']},
     { id: 'C', type: 'folder', parentid: 'places', children: ['A']},
+
+  ]).problemData;
+  deepEqual(c.orphans, [{ id: "A", parent: "D" }]);
+  equal(c.multipleParents.length, 1)
+  ok(c.multipleParents[0].parents.indexOf('B') >= 0);
+  ok(c.multipleParents[0].parents.indexOf('C') >= 0);
+  run_next_test();
+});
+
+add_test(function test_isr_orphansMultiParents2() {
+  let c = inspectServerRecords([
+    { id: 'A', type: 'bookmark', parentid: 'D' },
+    { id: 'B', type: 'folder', parentid: 'places', children: ['A']},
   ]).problemData;
   equal(c.orphans.length, 1);
   equal(c.orphans[0].id, 'A');
-  equal(c.multipleParents.length, 1);
-  equal(c.multipleParents[0].child, 'A');
-  ok(c.multipleParents[0].parents.indexOf('B') >= 0);
-  ok(c.multipleParents[0].parents.indexOf('C') >= 0);
+  equal(c.multipleParents.length, 0);
   run_next_test();
 });
 
@@ -91,15 +102,6 @@ add_test(function test_isr_duplicatesAndMissingIDs() {
   ]).problemData;
   equal(c.missingIDs, 1);
   deepEqual(c.duplicates, ['A']);
-  run_next_test();
-});
-
-add_test(function test_isr_wrongParentName() {
-  let c = inspectServerRecords([
-    {id: 'A', type: 'folder', title: 'My Amazing Bookmarks', parentName: '', parentid: 'places', children: ['B']},
-    {id: 'B', type: 'bookmark', title: '', parentName: 'My Awesome Bookmarks', parentid: 'A'},
-  ]).problemData;
-  deepEqual(c.wrongParentName, ['B'])
   run_next_test();
 });
 
@@ -235,6 +237,44 @@ add_test(function test_cswc_differences() {
     deepEqual(c.differences, [{id: 'cccccccccccc', differences: ['type']}]);
   }
   run_next_test();
+});
+
+function validationPing(server, client, duration) {
+  return wait_for_ping(function() {
+    // fake this entirely
+    Svc.Obs.notify("weave:service:sync:start");
+    Svc.Obs.notify("weave:engine:sync:start", null, "bookmarks");
+    Svc.Obs.notify("weave:engine:sync:finish", null, "bookmarks");
+    let data = {
+      duration, // We fake this just so that we can verify it's passed through.
+      recordCount: server.length,
+      problems: new BookmarkValidator().compareServerWithClient(server, client).problemData,
+    };
+    Svc.Obs.notify("weave:engine:validate:finish", data, "bookmarks");
+    Svc.Obs.notify("weave:service:sync:finish");
+  }, true); // Allow "failing" pings, since having validation info indicates failure.
+}
+
+add_task(function *test_telemetry_integration() {
+  let {server, client} = getDummyServerAndClient();
+  // remove "c"
+  server.pop();
+  server[0].children.pop();
+  const duration = 50;
+  let ping = yield validationPing(server, client, duration);
+  ok(ping.engines);
+  let bme = ping.engines.find(e => e.name === "bookmarks");
+  ok(bme);
+  ok(bme.validation);
+  ok(bme.validation.problems)
+  equal(bme.validation.checked, server.length);
+  equal(bme.validation.took, duration);
+  bme.validation.problems.sort((a, b) => String.localeCompare(a.name, b.name));
+  deepEqual(bme.validation.problems, [
+    { name: "sdiff:childGUIDs", count: 1 },
+    { name: "serverMissing", count: 1 },
+    { name: "structuralDifferences", count: 1 },
+  ]);
 });
 
 function run_test() {

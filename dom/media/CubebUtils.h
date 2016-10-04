@@ -9,6 +9,7 @@
 
 #include "cubeb/cubeb.h"
 #include "mozilla/dom/AudioChannelBinding.h"
+#include "mozilla/Maybe.h"
 
 namespace mozilla {
 namespace CubebUtils {
@@ -26,12 +27,7 @@ void ShutdownLibrary();
 // Returns the maximum number of channels supported by the audio hardware.
 uint32_t MaxNumberOfChannels();
 
-// Queries the samplerate the hardware/mixer runs at, and stores it.
-// Can be called on any thread. When this returns, it is safe to call
-// PreferredSampleRate.
-void InitPreferredSampleRate();
-
-// Get the aforementioned sample rate. Thread safe.
+// Get the sample rate the hardware/mixer runs at. Thread safe.
 uint32_t PreferredSampleRate();
 
 void PrefChanged(const char* aPref, void* aClosure);
@@ -41,7 +37,8 @@ cubeb* GetCubebContext();
 cubeb* GetCubebContextUnlocked();
 void ReportCubebStreamInitFailure(bool aIsFirstStream);
 void ReportCubebBackendUsed();
-uint32_t GetCubebLatency();
+uint32_t GetCubebPlaybackLatencyInMilliseconds();
+Maybe<uint32_t> GetCubebMSGLatencyInFrames();
 bool CubebLatencyPrefSet();
 #if defined(__ANDROID__) && defined(MOZ_B2G)
 cubeb_stream_type ConvertChannelToCubebType(dom::AudioChannel aChannel);

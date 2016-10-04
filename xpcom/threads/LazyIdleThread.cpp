@@ -63,8 +63,8 @@ LazyIdleThread::SetWeakIdleObserver(nsIObserver* aObserver)
   ASSERT_OWNING_THREAD();
 
   if (mShutdown) {
-    NS_WARN_IF_FALSE(!aObserver,
-                     "Setting an observer after Shutdown was called!");
+    NS_WARNING_ASSERTION(!aObserver,
+                         "Setting an observer after Shutdown was called!");
     return;
   }
 
@@ -270,7 +270,7 @@ LazyIdleThread::ShutdownThread()
     if (mShutdownMethod == AutomaticShutdown && NS_IsMainThread()) {
       nsCOMPtr<nsIObserverService> obs =
         mozilla::services::GetObserverService();
-      NS_WARN_IF_FALSE(obs, "Failed to get observer service!");
+      NS_WARNING_ASSERTION(obs, "Failed to get observer service!");
 
       if (obs &&
           NS_FAILED(obs->RemoveObserver(this, "xpcom-shutdown-threads"))) {
@@ -369,7 +369,7 @@ LazyIdleThread::Release()
 
     nsCOMPtr<nsIRunnable> runnable =
       NewNonOwningRunnableMethod(this, &LazyIdleThread::SelfDestruct);
-    NS_WARN_IF_FALSE(runnable, "Couldn't make runnable!");
+    NS_WARNING_ASSERTION(runnable, "Couldn't make runnable!");
 
     if (NS_FAILED(NS_DispatchToCurrentThread(runnable))) {
       MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
@@ -456,6 +456,19 @@ LazyIdleThread::GetPRThread(PRThread** aPRThread)
 
   *aPRThread = nullptr;
   return NS_ERROR_NOT_AVAILABLE;
+}
+
+NS_IMETHODIMP
+LazyIdleThread::GetCanInvokeJS(bool* aCanInvokeJS)
+{
+  *aCanInvokeJS = false;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+LazyIdleThread::SetCanInvokeJS(bool aCanInvokeJS)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP

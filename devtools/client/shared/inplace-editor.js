@@ -23,9 +23,9 @@
 
 "use strict";
 
-const {Ci, Cc} = require("chrome");
 const Services = require("Services");
 const focusManager = Services.focus;
+const {KeyCodes} = require("devtools/client/shared/keycodes");
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 const CONTENT_TYPES = {
@@ -42,13 +42,12 @@ const MAX_POPUP_ENTRIES = 500;
 const FOCUS_FORWARD = focusManager.MOVEFOCUS_FORWARD;
 const FOCUS_BACKWARD = focusManager.MOVEFOCUS_BACKWARD;
 
-const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
 const EventEmitter = require("devtools/shared/event-emitter");
 const { findMostRelevantCssPropertyIndex } = require("./suggestion-picker");
 
 /**
  * Helper to check if the provided key matches one of the expected keys.
- * Keys will be prefixed with DOM_VK_ and should match a key in nsIDOMKeyEvent.
+ * Keys will be prefixed with DOM_VK_ and should match a key in KeyCodes.
  *
  * @param {String} key
  *        the key to check (can be a keyCode).
@@ -58,7 +57,7 @@ const { findMostRelevantCssPropertyIndex } = require("./suggestion-picker");
  */
 function isKeyIn(key, ...keys) {
   return keys.some(expectedKey => {
-    return key === Ci.nsIDOMKeyEvent["DOM_VK_" + expectedKey];
+    return key === KeyCodes["DOM_VK_" + expectedKey];
   });
 }
 
@@ -1466,7 +1465,7 @@ InplaceEditor.prototype = {
    * @return {Array} array of CSS property names (Strings)
    */
   _getCSSPropertyList: function () {
-    return CSSPropertyList;
+    return this.cssProperties.getNames().sort();
   },
 
   /**
@@ -1555,11 +1554,3 @@ function copyBoxModelStyles(from, to) {
 function moveFocus(win, direction) {
   return focusManager.moveFocus(win, null, direction, 0);
 }
-
-XPCOMUtils.defineLazyGetter(this, "CSSPropertyList", function () {
-  return domUtils.getCSSPropertyNames(domUtils.INCLUDE_ALIASES).sort();
-});
-
-XPCOMUtils.defineLazyGetter(this, "domUtils", function () {
-  return Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils);
-});

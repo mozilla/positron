@@ -32,6 +32,7 @@
 #if MOZ_WIDGET_GTK != 2
 #include <cairo-gobject.h>
 #include "WidgetStyleCache.h"
+#include "prenv.h"
 #endif
 
 using mozilla::LookAndFeel;
@@ -766,7 +767,6 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
 #endif
         break;
     case eIntID_MacGraphiteTheme:
-    case eIntID_MacLionTheme:
         aResult = 0;
         res = NS_ERROR_NOT_IMPLEMENTED;
         break;
@@ -783,12 +783,6 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
         break;
     case eIntID_SpellCheckerUnderlineStyle:
         aResult = NS_STYLE_TEXT_DECORATION_STYLE_WAVY;
-        break;
-    case eIntID_ImagesInMenus:
-        aResult = moz_gtk_images_in_menus();
-        break;
-    case eIntID_ImagesInButtons:
-        aResult = moz_gtk_images_in_buttons();
         break;
     case eIntID_MenuBarDrag:
         aResult = sMenuSupportsDrag;
@@ -1106,7 +1100,7 @@ nsLookAndFeel::Init()
     gboolean dark;
     g_object_get(settings, dark_setting, &dark, nullptr);
 
-    if (dark) {
+    if (dark && !PR_GetEnv("MOZ_ALLOW_GTK_DARK_THEME")) {
         g_object_set(settings, dark_setting, FALSE, nullptr);
     }
 

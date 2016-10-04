@@ -43,8 +43,6 @@ SharedPlanarYCbCrImage::~SharedPlanarYCbCrImage() {
       ImageBridgeChild::DispatchReleaseTextureClient(mTextureClient);
       mTextureClient = nullptr;
     }
-
-    ImageBridgeChild::DispatchReleaseImageClient(mCompositable.forget().take());
   }
 }
 
@@ -59,7 +57,7 @@ SharedPlanarYCbCrImage::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 }
 
 TextureClient*
-SharedPlanarYCbCrImage::GetTextureClient(CompositableClient* aClient)
+SharedPlanarYCbCrImage::GetTextureClient(KnowsCompositor* aForwarder)
 {
   return mTextureClient.get();
 }
@@ -159,10 +157,9 @@ SharedPlanarYCbCrImage::AdoptData(const Data &aData)
   uint32_t cbOffset = aData.mCbChannel - base;
   uint32_t crOffset = aData.mCrChannel - base;
 
-  auto fwd = mCompositable->GetForwarder()->AsCompositableForwarder();
-  bool hasIntermediateBuffer = fwd ? ComputeHasIntermediateBuffer(gfx::SurfaceFormat::YUV,
-                                                                  fwd->GetCompositorBackendType())
-                                   : true;
+  auto fwd = mCompositable->GetForwarder();
+  bool hasIntermediateBuffer = ComputeHasIntermediateBuffer(gfx::SurfaceFormat::YUV,
+                                                            fwd->GetCompositorBackendType());
 
   static_cast<BufferTextureData*>(mTextureClient->GetInternalData())->SetDesciptor(
     YCbCrDescriptor(aData.mYSize, aData.mCbCrSize, yOffset, cbOffset, crOffset,

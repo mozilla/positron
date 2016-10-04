@@ -24,21 +24,9 @@ ServoStyleSheet::~ServoStyleSheet()
 }
 
 bool
-ServoStyleSheet::IsApplicable() const
-{
-  return !mDisabled && mComplete;
-}
-
-bool
 ServoStyleSheet::HasRules() const
 {
-  return Servo_StyleSheetHasRules(RawSheet());
-}
-
-nsIDocument*
-ServoStyleSheet::GetOwningDocument() const
-{
-  return mDocument;
+  return mSheet && Servo_StyleSheet_HasRules(mSheet);
 }
 
 void
@@ -50,7 +38,7 @@ ServoStyleSheet::SetOwningDocument(nsIDocument* aDocument)
   mDocument = aDocument;
 }
 
-StyleSheetHandle
+ServoStyleSheet*
 ServoStyleSheet::GetParentSheet() const
 {
   // XXXheycam: When we implement support for child sheets, we'll have
@@ -60,7 +48,7 @@ ServoStyleSheet::GetParentSheet() const
 }
 
 void
-ServoStyleSheet::AppendStyleSheet(StyleSheetHandle aSheet)
+ServoStyleSheet::AppendStyleSheet(ServoStyleSheet* aSheet)
 {
   // XXXheycam: When we implement support for child sheets, we'll have
   // to fix SetOwningDocument to propagate the owning document down
@@ -68,7 +56,7 @@ ServoStyleSheet::AppendStyleSheet(StyleSheetHandle aSheet)
   MOZ_CRASH("stylo: not implemented");
 }
 
-void
+nsresult
 ServoStyleSheet::ParseSheet(const nsAString& aInput,
                             nsIURI* aSheetURI,
                             nsIURI* aBaseURI,
@@ -83,14 +71,17 @@ ServoStyleSheet::ParseSheet(const nsAString& aInput,
     new ThreadSafePrincipalHolder(aSheetPrincipal);
 
   nsCString baseString;
-  aBaseURI->GetSpec(baseString);
+  nsresult rv = aBaseURI->GetSpec(baseString);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   NS_ConvertUTF16toUTF8 input(aInput);
-  mSheet = already_AddRefed<RawServoStyleSheet>(Servo_StylesheetFromUTF8Bytes(
+  mSheet = Servo_StyleSheet_FromUTF8Bytes(
       reinterpret_cast<const uint8_t*>(input.get()), input.Length(),
       mParsingMode,
       reinterpret_cast<const uint8_t*>(baseString.get()), baseString.Length(),
-      base, referrer, principal));
+      base, referrer, principal).Consume();
+
+  return NS_OK;
 }
 
 void

@@ -18,10 +18,11 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/DataSurfaceHelpers.h"
+#include "mozilla/HangMonitor.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/WindowsVersion.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsIContentPolicy.h"
 #include "nsContentUtils.h"
 
@@ -451,6 +452,11 @@ struct CoTaskMemFreePolicy
 
 SetThreadDpiAwarenessContextProc WinUtils::sSetThreadDpiAwarenessContext = NULL;
 EnableNonClientDpiScalingProc WinUtils::sEnableNonClientDpiScaling = NULL;
+#ifdef ACCESSIBILITY
+typedef NTSTATUS (NTAPI* NtTestAlertPtr)(VOID);
+static NtTestAlertPtr sNtTestAlert = nullptr;
+#endif
+
 
 /* static */
 void
@@ -485,6 +491,12 @@ WinUtils::Initialize()
         ::GetProcAddress(user32Dll, "SetThreadDpiAwarenessContext");
     }
   }
+
+#ifdef ACCESSIBILITY
+  sNtTestAlert = reinterpret_cast<NtTestAlertPtr>(
+      ::GetProcAddress(::GetModuleHandleW(L"ntdll.dll"), "NtTestAlert"));
+  MOZ_ASSERT(sNtTestAlert);
+#endif
 }
 
 // static
@@ -690,11 +702,31 @@ WinUtils::MonitorFromRect(const gfx::Rect& rect)
   return ::MonitorFromRect(&globalWindowBounds, MONITOR_DEFAULTTONEAREST);
 }
 
+#ifdef ACCESSIBILITY
+#ifndef STATUS_SUCCESS
+#define STATUS_SUCCESS ((NTSTATUS)0x00000000L)
+#endif
+
+static Atomic<bool> sAPCPending;
+
+/* static */
+void
+WinUtils::SetAPCPending()
+{
+  sAPCPending = true;
+}
+#endif // ACCESSIBILITY
+
 /* static */
 bool
 WinUtils::PeekMessage(LPMSG aMsg, HWND aWnd, UINT aFirstMessage,
                       UINT aLastMessage, UINT aOption)
 {
+#ifdef ACCESSIBILITY
+  if (NS_IsMainThread() && sAPCPending.exchange(false)) {
+    while (sNtTestAlert() != STATUS_SUCCESS) ;
+  }
+#endif
 #ifdef NS_ENABLE_TSF
   ITfMessagePump* msgPump = TSFTextStore::GetMessagePump();
   if (msgPump) {
@@ -759,13 +791,25 @@ WinUtils::WaitForMessage(DWORD aTimeoutMs)
     }
     DWORD result = ::MsgWaitForMultipleObjectsEx(0, NULL, aTimeoutMs - elapsed,
                                                  MOZ_QS_ALLEVENT, waitFlags);
-    NS_WARN_IF_FALSE(result != WAIT_FAILED, "Wait failed");
+    NS_WARNING_ASSERTION(result != WAIT_FAILED, "Wait failed");
     if (result == WAIT_TIMEOUT) {
       break;
     }
+#if defined(ACCESSIBILITY)
     if (result == WAIT_IO_COMPLETION) {
+      if (NS_IsMainThread()) {
+        if (sAPCPending.exchange(false)) {
+          // Clear out any pending APCs
+          while (sNtTestAlert() != STATUS_SUCCESS) ;
+        }
+        // We executed an APC that would have woken up the hang monitor. Since
+        // there are no more APCs pending and we are now going to sleep again,
+        // we should notify the hang monitor.
+        mozilla::HangMonitor::Suspend();
+      }
       continue;
     }
+#endif // defined(ACCESSIBILITY)
 
     // Sent messages (via SendMessage and friends) are processed differently
     // than queued messages (via PostMessage); the destination window procedure
@@ -1082,6 +1126,14 @@ WinUtils::GetMouseInputSource()
       nsIDOMMouseEvent::MOZ_SOURCE_TOUCH : nsIDOMMouseEvent::MOZ_SOURCE_PEN;
   }
   return static_cast<uint16_t>(inputSource);
+}
+
+/* static */
+uint16_t
+WinUtils::GetMousePointerID()
+{
+  LPARAM lParamExtraInfo = ::GetMessageExtraInfo();
+  return lParamExtraInfo & TABLET_INK_ID_MASK;
 }
 
 /* static */

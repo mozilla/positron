@@ -125,7 +125,7 @@ var gGestureSupport = {
    */
   _setupGesture: function GS__setupGesture(aEvent, aGesture, aPref, aInc, aDec) {
     // Try to load user-set values from preferences
-    for (let [pref, def] in Iterator(aPref))
+    for (let [pref, def] of Object.entries(aPref))
       aPref[pref] = this._getPref(aGesture + "." + pref, def);
 
     // Keep track of the total deltas and latching behavior
@@ -714,22 +714,20 @@ var gHistorySwipeAnimation = {
 
       // The forward page should be pushed offscreen all the way to the right.
       this._positionBox(this._nextBox, 1);
-    } else {
+    } else if (this._canGoForward) {
       // The intention is to go forward. If there is a page to go forward to,
       // it should slide in from the right (LTR) or left (RTL).
       // Otherwise, the current page should slide to the left (LTR) or
       // right (RTL) and the backdrop should appear in the background.
       // For the backdrop to be visible in that case, the previous page needs
       // to be hidden (if it exists).
-      if (this._canGoForward) {
-        this._nextBox.collapsed = false;
-        let offset = this.isLTR ? 1 : -1;
-        this._positionBox(this._curBox, 0);
-        this._positionBox(this._nextBox, offset + aVal);
-      } else {
-        this._prevBox.collapsed = true;
-        this._positionBox(this._curBox, aVal / dampValue);
-      }
+      this._nextBox.collapsed = false;
+      let offset = this.isLTR ? 1 : -1;
+      this._positionBox(this._curBox, 0);
+      this._positionBox(this._nextBox, offset + aVal);
+    } else {
+      this._prevBox.collapsed = true;
+      this._positionBox(this._curBox, aVal / dampValue);
     }
   },
 

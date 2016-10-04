@@ -12,7 +12,7 @@
 #include "mozilla/Base64.h"
 #include "mozilla/Casting.h"
 #include "mozilla/NotNull.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsArray.h"
 #include "nsCOMPtr.h"
 #include "nsCRT.h"
@@ -36,11 +36,9 @@
 #include "nsUnicharUtils.h"
 #include "nsXULAppAPI.h"
 #include "nspr.h"
-#include "nssb64.h"
 #include "pkix/pkixnss.h"
 #include "pkix/pkixtypes.h"
 #include "pkix/Result.h"
-#include "plbase64.h"
 #include "prerror.h"
 #include "prmem.h"
 #include "prprf.h"
@@ -171,7 +169,7 @@ nsNSSCertificate::~nsNSSCertificate()
     return;
   }
   destructorSafeDestroyNSSReference();
-  shutdown(calledFromObject);
+  shutdown(ShutdownCalledFrom::Object);
 }
 
 void nsNSSCertificate::virtualDestroyNSSReference()
@@ -1319,7 +1317,10 @@ nsNSSCertificate::hasValidEVOidTag(SECOidTag& resultOidTag, bool& validEV)
     nullptr /* XXX pinarg */,
     nullptr /* hostname */,
     unusedBuiltChain,
-    flags, nullptr /* stapledOCSPResponse */, &resultOidTag);
+    flags,
+    nullptr /* stapledOCSPResponse */,
+    nullptr /* sctsFromTLSExtension */,
+    &resultOidTag);
 
   if (rv != SECSuccess) {
     resultOidTag = SEC_OID_UNKNOWN;
@@ -1448,7 +1449,7 @@ nsNSSCertList::~nsNSSCertList()
     return;
   }
   destructorSafeDestroyNSSReference();
-  shutdown(calledFromObject);
+  shutdown(ShutdownCalledFrom::Object);
 }
 
 void nsNSSCertList::virtualDestroyNSSReference()
@@ -1735,7 +1736,7 @@ nsNSSCertListEnumerator::~nsNSSCertListEnumerator()
     return;
   }
   destructorSafeDestroyNSSReference();
-  shutdown(calledFromObject);
+  shutdown(ShutdownCalledFrom::Object);
 }
 
 void nsNSSCertListEnumerator::virtualDestroyNSSReference()

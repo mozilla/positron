@@ -19,7 +19,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/TextComposition.h"
 #include "mozilla/TextEvents.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/TabParent.h"
 
 #ifdef XP_MACOSX
@@ -439,10 +439,16 @@ TextComposition::GetSelectionStartOffset()
 {
   nsCOMPtr<nsIWidget> widget = mPresContext->GetRootWidget();
   WidgetQueryContentEvent selectedTextEvent(true, eQuerySelectedText, widget);
-  if (mRanges && mRanges->HasClauses()) {
+  // Due to a bug of widget, mRanges may not be nullptr even though composition
+  // string is empty.  So, we need to check it here for avoiding to return
+  // odd start offset.
+  if (!mLastData.IsEmpty() && mRanges && mRanges->HasClauses()) {
     selectedTextEvent.InitForQuerySelectedText(
                         ToSelectionType(mRanges->GetFirstClause()->mRangeType));
   } else {
+    NS_WARNING_ASSERTION(
+      !mLastData.IsEmpty() || !mRanges || !mRanges->HasClauses(),
+      "Shouldn't have empty clause info when composition string is empty");
     selectedTextEvent.InitForQuerySelectedText(SelectionType::eNormal);
   }
 

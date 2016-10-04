@@ -83,9 +83,7 @@ addEventListener("blur", function(event) {
   LoginManagerContent.onUsernameInput(event);
 });
 
-var gLastContextMenuEvent = null; // null or a WeakReference to a contextmenu event
 var handleContentContextMenu = function (event) {
-  gLastContextMenuEvent = null;
   let defaultPrevented = event.defaultPrevented;
   if (!Services.prefs.getBoolPref("dom.event.contextmenu.enabled")) {
     let plugin = null;
@@ -100,36 +98,8 @@ var handleContentContextMenu = function (event) {
     defaultPrevented = false;
   }
 
-  if (defaultPrevented) {
+  if (defaultPrevented)
     return;
-  }
-
-  if (event.mozInputSource == Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH) {
-    // If this was triggered by touch, then we don't want to show the actual
-    // context menu until we get the APZ:LongTapUp notification. However, we
-    // will need the |event| object when we get that notification, so we save
-    // it in a WeakReference. That way it won't leak things if we never get
-    // the APZ:LongTapUp notification (which is quite possible).
-    gLastContextMenuEvent = Cu.getWeakReference(event);
-    return;
-  }
-
-  // For non-touch-derived contextmenu events, we can handle it right away.
-  showContentContextMenu(event);
-}
-
-var showContentContextMenu = function (event) {
-  if (event == null) {
-    // If we weren't given an event, then this is being invoked from the
-    // APZ:LongTapUp observer, and the contextmenu event is stashed in
-    // gLastContextMenuEvent.
-    event = (gLastContextMenuEvent ? gLastContextMenuEvent.get() : null);
-    gLastContextMenuEvent = null;
-    if (event == null) {
-      // Still no event? We can't do anything, bail out.
-      return;
-    }
-  }
 
   let addonInfo = {};
   let subject = {
@@ -192,6 +162,9 @@ var showContentContextMenu = function (event) {
 
   let selectionInfo = BrowserUtils.getSelectionDetails(content);
 
+  let loadContext = docShell.QueryInterface(Ci.nsILoadContext);
+  let userContextId = loadContext.originAttributes.userContextId;
+
   if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {
     let editFlags = SpellCheckHelper.isEditable(event.target, content);
     let spellInfo;
@@ -215,7 +188,7 @@ var showContentContextMenu = function (event) {
                      principal, docLocation, charSet, baseURI, referrer,
                      referrerPolicy, contentType, contentDisposition,
                      frameOuterWindowID, selectionInfo, disableSetDesktopBg,
-                     loginFillInfo, parentAllowsMixedContent },
+                     loginFillInfo, parentAllowsMixedContent, userContextId },
                    { event, popupNode: event.target });
   }
   else {
@@ -239,6 +212,7 @@ var showContentContextMenu = function (event) {
       disableSetDesktopBackground: disableSetDesktopBg,
       loginFillInfo,
       parentAllowsMixedContent,
+      userContextId,
     };
   }
 }
@@ -246,11 +220,6 @@ var showContentContextMenu = function (event) {
 Cc["@mozilla.org/eventlistenerservice;1"]
   .getService(Ci.nsIEventListenerService)
   .addSystemEventListener(global, "contextmenu", handleContentContextMenu, false);
-
-Services.obs.addObserver(showContentContextMenu, "APZ:LongTapUp", false);
-addEventListener("unload", () => {
-  Services.obs.removeObserver(showContentContextMenu, "APZ:LongTapUp")
-}, false);
 
 // Values for telemtery bins: see TLS_ERROR_REPORT_UI in Histograms.json
 const TLS_ERROR_REPORT_TELEMETRY_UI_SHOWN = 0;
@@ -500,7 +469,8 @@ var ClickEventHandler = {
                  ctrlKey: event.ctrlKey, metaKey: event.metaKey,
                  altKey: event.altKey, href: null, title: null,
                  bookmark: false, referrerPolicy: referrerPolicy,
-                 originAttributes: principal ? principal.originAttributes : {} };
+                 originAttributes: principal ? principal.originAttributes : {},
+                 isContentWindowPrivate: PrivateBrowsingUtils.isContentWindowPrivate(ownerDoc.defaultView)};
 
     if (href) {
       try {
@@ -537,6 +507,7 @@ var ClickEventHandler = {
           json.allowMixedContent = true;
         } catch (e) {}
       }
+      json.originPrincipal = ownerDoc.nodePrincipal;
 
       sendAsyncMessage("Content:Click", json);
       return;
@@ -627,7 +598,8 @@ var ClickEventHandler = {
       if (node.nodeType == content.Node.ELEMENT_NODE &&
           (node.localName == "a" ||
            node.namespaceURI == "http://www.w3.org/1998/Math/MathML")) {
-        href = node.getAttributeNS("http://www.w3.org/1999/xlink", "href");
+        href = node.getAttribute("href") ||
+               node.getAttributeNS("http://www.w3.org/1999/xlink", "href");
         if (href) {
           baseURI = node.ownerDocument.baseURIObject;
           break;
@@ -713,10 +685,6 @@ PageMetadataMessenger.init();
 
 addEventListener("ActivateSocialFeature", function (aEvent) {
   let document = content.document;
-  if (PrivateBrowsingUtils.isContentWindowPrivate(content)) {
-    Cu.reportError("cannot use social providers in private windows");
-    return;
-  }
   let dwu = content.QueryInterface(Ci.nsIInterfaceRequestor)
                    .getInterface(Ci.nsIDOMWindowUtils);
   if (!dwu.isHandlingUserInput) {
@@ -1194,7 +1162,7 @@ var PageInfoListener = {
           // TODO: Reimplement once bug 714757 is fixed.
           let strVal = val.getStringValue();
           if (strVal.search(/^.*url\(\"?/) > -1) {
-            let url = strVal.replace(/^.*url\(\"?/,"").replace(/\"?\).*$/,"");
+            let url = strVal.replace(/^.*url\(\"?/, "").replace(/\"?\).*$/, "");
             addImage(url, label, strings.notSet, elem, true);
           }
         }

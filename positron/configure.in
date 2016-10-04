@@ -1,10 +1,14 @@
+
+configure_cmd="./configure --engine=spidermonkey --enable-static"
+
 # Determine whether or not to also generate a configuration for a debug build.
 # Regardless of the value of this arg, Node's configuration script will always
 # generate a configuration for a release build.  This only determines whether
 # or not it *also* generates a debug one.
-debug_arg=""
 if test "$MOZ_DEBUG"; then
-    debug_arg="--debug"
+  configure_cmd="${configure_cmd} --debug --with-external-spidermonkey-debug=${_objdir} --with-external-spidermonkey-release=${_objdir}";
+else
+  configure_cmd="${configure_cmd} --with-external-spidermonkey-release=${_objdir}";
 fi
 
 case "$target" in
@@ -20,8 +24,8 @@ export LDFLAGS
 (
   cd ${_topsrcdir}/positron/spidernode &&
   which python2.7 > /dev/null &&
-  exec python2.7 ./configure --engine=spidermonkey --enable-static ${debug_arg} --spidermonkey-obj-dir=${_objdir} ||
-  exec python    ./configure --engine=spidermonkey --enable-static ${debug_arg} --spidermonkey-obj-dir=${_objdir}
+  exec python2.7 ${configure_cmd} ||
+  exec python    ${configure_cmd}
 )
 
 # TODO: uncomment this (and remove the equivalent in old-configure.in)

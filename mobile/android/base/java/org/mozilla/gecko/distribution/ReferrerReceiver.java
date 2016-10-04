@@ -9,7 +9,6 @@ import org.mozilla.gecko.AdjustConstants;
 import org.mozilla.gecko.annotation.RobocopTarget;
 import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoEvent;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -69,6 +68,12 @@ public class ReferrerReceiver extends BroadcastReceiver {
 
         if (TextUtils.equals(referrer.campaign, DISTRIBUTION_UTM_CAMPAIGN)) {
             Distribution.onReceivedReferrer(context, referrer);
+            // We want Adjust information for OTA distributions as well
+            try {
+                AdjustConstants.getAdjustHelper().onReceive(context, intent);
+            } catch (Exception e) {
+                Log.e(LOGTAG, "Got exception in Adjust's onReceive for distribution.", e);
+            }
         } else {
             Log.d(LOGTAG, "Not downloading distribution: non-matching campaign.");
             // If this is a Mozilla campaign, pass the campaign along to Gecko.

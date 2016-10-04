@@ -249,7 +249,7 @@ ClientTiledPaintedLayer::IsScrollingOnCompositor(const FrameMetrics& aParentMetr
 
 bool
 ClientTiledPaintedLayer::UseProgressiveDraw() {
-  if (!gfxPlatform::GetPlatform()->UseProgressivePaint()) {
+  if (!gfxPrefs::ProgressivePaint()) {
     // pref is disabled, so never do progressive
     return false;
   }
@@ -445,10 +445,10 @@ ClientTiledPaintedLayer::RenderLayer()
 
   if (!mContentClient) {
     if (wantSingleTiledContentClient) {
-      mContentClient = new SingleTiledContentClient(this, ClientManager());
+      mContentClient = new SingleTiledContentClient(*this, ClientManager());
       mHaveSingleTiledContentClient = true;
     } else {
-      mContentClient = new MultiTiledContentClient(this, ClientManager());
+      mContentClient = new MultiTiledContentClient(*this, ClientManager());
       mHaveSingleTiledContentClient = false;
     }
 

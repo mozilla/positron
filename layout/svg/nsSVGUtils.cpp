@@ -53,7 +53,7 @@
 #include "nsTextFrame.h"
 #include "SVGContentUtils.h"
 #include "SVGTextFrame.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -659,8 +659,12 @@ nsSVGUtils::PaintFrameWithEffects(nsIFrame *aFrame,
       }
     }
 
-    if (opacity != 1.0f || maskFrame || (clipPathFrame && !isTrivialClip)) {
-      target->PushGroupForBlendBack(gfxContentType::COLOR_ALPHA, opacity, maskSurface, maskTransform);
+    if (maskFrame) {
+      target->PushGroupForBlendBack(gfxContentType::COLOR_ALPHA, 1.0,
+                                    maskSurface, maskTransform);
+    } else if (opacity != 1.0f || (clipPathFrame && !isTrivialClip)) {
+      target->PushGroupForBlendBack(gfxContentType::COLOR_ALPHA, opacity,
+                                    maskSurface, maskTransform);
     }
   }
 
@@ -877,7 +881,7 @@ nsSVGUtils::HitTestRect(const gfx::Matrix &aMatrix,
   }
   gfx::Matrix toRectSpace = aMatrix;
   toRectSpace.Invert();
-  gfx::Point p = toRectSpace * gfx::Point(aX, aY);
+  gfx::Point p = toRectSpace.TransformPoint(gfx::Point(aX, aY));
   return rect.x <= p.x && p.x <= rect.XMost() &&
          rect.y <= p.y && p.y <= rect.YMost();
 }

@@ -51,7 +51,8 @@ class DataSourceSurface;
 class ScaledFont;
 class DrawEventRecorder;
 class VsyncSource;
-class DeviceInitData;
+class ContentDeviceData;
+class GPUDeviceData;
 
 inline uint32_t
 BackendTypeBit(BackendType b)
@@ -236,7 +237,7 @@ public:
     already_AddRefed<DrawTarget>
       CreateSimilarSoftwareDrawTarget(DrawTarget* aDT, const IntSize &aSize, mozilla::gfx::SurfaceFormat aFormat);
 
-    virtual already_AddRefed<DrawTarget>
+    static already_AddRefed<DrawTarget>
       CreateDrawTargetForData(unsigned char* aData, const mozilla::gfx::IntSize& aSize, 
                               int32_t aStride, mozilla::gfx::SurfaceFormat aFormat);
 
@@ -271,10 +272,6 @@ public:
     /// non-accelerated canvas.
     virtual bool UseAcceleratedCanvas();
     virtual void InitializeSkiaCacheLimits();
-
-    /// These should be used instead of directly accessing the preference,
-    /// as different platforms may override the behaviour.
-    virtual bool UseProgressivePaint();
 
     static bool AsyncPanZoomEnabled();
 
@@ -459,7 +456,7 @@ public:
 
     static bool OffMainThreadCompositingEnabled();
 
-    virtual bool CanUseHardwareVideoDecoding();
+    void UpdateCanUseHardwareVideoDecoding();
 
     // Returns a prioritized list of all available compositor backends.
     void GetCompositorBackends(bool useAcceleration, nsTArray<mozilla::layers::LayersBackend>& aBackends);
@@ -648,10 +645,6 @@ public:
 
     virtual void CompositorUpdated() {}
 
-    // Return information on how child processes should initialize graphics
-    // devices. Currently this is only used on Windows.
-    virtual void GetDeviceInitData(mozilla::gfx::DeviceInitData* aOut);
-
     // Plugin async drawing support.
     virtual bool SupportsPluginDirectBitmapDrawing() {
       return false;
@@ -676,11 +669,28 @@ public:
 
     const gfxSkipChars& EmptySkipChars() const { return kEmptySkipChars; }
 
+    /**
+     * Return information on how child processes should initialize graphics
+     * devices.
+     */
+    virtual void BuildContentDeviceData(mozilla::gfx::ContentDeviceData* aOut);
+
+    /**
+     * Imports settings from the GPU process. This should only be called through
+     * GPUProcessManager, in the UI process.
+     */
+    virtual void ImportGPUDeviceData(const mozilla::gfx::GPUDeviceData& aData);
+
 protected:
     gfxPlatform();
     virtual ~gfxPlatform();
 
     virtual void InitAcceleration();
+
+    /**
+     * Called immediately before deleting the gfxPlatform object.
+     */
+    virtual void WillShutdown();
 
     /**
      * Initialized hardware vsync based on each platform.
@@ -703,10 +713,11 @@ protected:
                           uint32_t aContentBitmask, mozilla::gfx::BackendType aContentDefault);
 
     /**
-     * If in a child process, triggers a refresh of device preferences, then returns true.
-     * In a parent process, nothing happens and false is returned.
+     * Content-process only. Requests device preferences from the parent process
+     * and updates any cached settings.
      */
-    virtual bool UpdateDeviceInitData();
+    void FetchAndImportContentDeviceData();
+    virtual void ImportContentDeviceData(const mozilla::gfx::ContentDeviceData& aData);
 
     /**
      * Increase the global device counter after a device has been removed/reset.
@@ -741,7 +752,7 @@ protected:
     static already_AddRefed<mozilla::gfx::ScaledFont>
       GetScaledFontForFontWithCairoSkia(mozilla::gfx::DrawTarget* aTarget, gfxFont* aFont);
 
-    static mozilla::gfx::DeviceInitData& GetParentDevicePrefs();
+    virtual bool CanUseHardwareVideoDecoding();
 
     int8_t  mAllowDownloadableFonts;
     int8_t  mGraphiteShapingEnabled;
@@ -759,7 +770,7 @@ protected:
     // max number of entries in word cache
     int32_t mWordCacheMaxEntries;
 
-    uint32_t mTotalSystemMemory;
+    uint64_t mTotalSystemMemory;
 
     // Hardware vsync source. Only valid on parent process
     RefPtr<mozilla::gfx::VsyncSource> mVsyncSource;

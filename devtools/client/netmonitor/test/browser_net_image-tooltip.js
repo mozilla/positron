@@ -7,7 +7,7 @@
  * Tests if image responses show a popup in the requests menu when hovered.
  */
 add_task(function* test() {
-  let [, debuggee, monitor] = yield initNetMonitor(CONTENT_TYPE_WITHOUT_CACHE_URL);
+  let { tab, monitor } = yield initNetMonitor(CONTENT_TYPE_WITHOUT_CACHE_URL);
   info("Starting test... ");
 
   let { $, EVENTS, ACTIVITY_TYPE, NetMonitorView, NetMonitorController } =
@@ -16,9 +16,9 @@ add_task(function* test() {
   RequestsMenu.lazyUpdate = true;
 
   let onEvents = waitForNetworkEvents(monitor, 7);
-  let onThumbnail = waitFor(monitor.panelWin, EVENTS.RESPONSE_IMAGE_THUMBNAIL_DISPLAYED);
+  let onThumbnail = monitor.panelWin.once(EVENTS.RESPONSE_IMAGE_THUMBNAIL_DISPLAYED);
 
-  debuggee.performRequests();
+  yield performRequests();
   yield onEvents;
   yield onThumbnail;
 
@@ -27,19 +27,30 @@ add_task(function* test() {
 
   // 7 XHRs as before + 1 extra document reload
   onEvents = waitForNetworkEvents(monitor, 8);
-  onThumbnail = waitFor(monitor.panelWin, EVENTS.RESPONSE_IMAGE_THUMBNAIL_DISPLAYED);
+  onThumbnail = monitor.panelWin.once(EVENTS.RESPONSE_IMAGE_THUMBNAIL_DISPLAYED);
 
   info("Reloading the debuggee and performing all requests again...");
   yield NetMonitorController.triggerActivity(ACTIVITY_TYPE.RELOAD.WITH_CACHE_ENABLED);
-  debuggee.performRequests();
+  yield performRequests();
   yield onEvents;
   yield onThumbnail;
 
   info("Checking the image thumbnail after a reload.");
   yield showTooltipAndVerify(RequestsMenu.tooltip, RequestsMenu.items[6]);
 
+  info("Checking if the image thumbnail is hidden when mouse leaves the menu widget");
+  let requestsMenuEl = $("#requests-menu-contents");
+  let onHidden = RequestsMenu.tooltip.once("hidden");
+  EventUtils.synthesizeMouse(requestsMenuEl, 0, 0, {type: "mouseout"}, monitor.panelWin);
+  yield onHidden;
+
   yield teardown(monitor);
-  finish();
+
+  function performRequests() {
+    return ContentTask.spawn(tab.linkedBrowser, {}, function* () {
+      content.wrappedJSObject.performRequests();
+    });
+  }
 
   /**
    * Show a tooltip on the {requestItem} and verify that it was displayed

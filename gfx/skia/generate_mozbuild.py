@@ -326,7 +326,7 @@ def write_cflags(f, values, subsearch, cflag, indent):
   for val in val_list:
     if val.find(subsearch) > 0:
       write_indent(indent)
-      f.write("SOURCES[\'" + val + "\'].flags += [\'" + cflag + "\']\n")
+      f.write("SOURCES[\'" + val + "\'].flags += " + cflag + "\n")
 
 def write_sources(f, values, indent):
 
@@ -429,12 +429,14 @@ def write_mozbuild(sources):
   f.write("if CONFIG['INTEL_ARCHITECTURE']:\n")
   write_sources(f, sources['intel'], 4)
 
-  f.write("elif CONFIG['CPU_ARCH'] == 'arm' and CONFIG['GNU_CC']:\n")
+  f.write("elif CONFIG['CPU_ARCH'] in ('arm', 'aarch64') and CONFIG['GNU_CC']:\n")
   write_sources(f, sources['arm'], 4)
 
-  f.write("    if CONFIG['BUILD_ARM_NEON']:\n")
+  f.write("    if CONFIG['CPU_ARCH'] == 'aarch64':\n")
+  write_sources(f, sources['neon'], 8)
+  f.write("    elif CONFIG['BUILD_ARM_NEON']:\n")
   write_list(f, 'SOURCES', sources['neon'], 8)
-  write_cflags(f, sources['neon'], 'neon', '-mfpu=neon', 8)
+  write_cflags(f, sources['neon'], 'neon', "CONFIG['NEON_FLAGS']", 8)
 
   f.write("else:\n")
   write_sources(f, sources['none'], 4)

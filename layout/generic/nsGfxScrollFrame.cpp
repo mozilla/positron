@@ -7,10 +7,12 @@
 
 #include "nsGfxScrollFrame.h"
 
+#include "ActiveLayerTracker.h"
 #include "base/compiler_specific.h"
 #include "DisplayItemClip.h"
 #include "DisplayItemScrollClip.h"
 #include "nsCOMPtr.h"
+#include "nsIContentViewer.h"
 #include "nsPresContext.h"
 #include "nsView.h"
 #include "nsIScrollable.h"
@@ -61,11 +63,12 @@
 #include "ScrollSnap.h"
 #include "UnitTransforms.h"
 #include "nsPluginFrame.h"
+#include "mozilla/layers/APZCCallbackHelper.h"
 #include <mozilla/layers/AxisPhysicsModel.h>
 #include <mozilla/layers/AxisPhysicsMSDModel.h>
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "mozilla/layers/ScrollLinkedEffectDetector.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "LayersLogging.h"  // for Stringify
 #include <algorithm>
 #include <cstdlib> // for std::abs(int/long)
@@ -76,6 +79,7 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
+using namespace mozilla::layers;
 using namespace mozilla::layout;
 
 static uint32_t
@@ -727,12 +731,19 @@ nsHTMLScrollFrame::ReflowContents(ScrollReflowInput* aState,
 }
 
 void
-nsHTMLScrollFrame::PlaceScrollArea(const ScrollReflowInput& aState,
+nsHTMLScrollFrame::PlaceScrollArea(ScrollReflowInput& aState,
                                    const nsPoint& aScrollPosition)
 {
   nsIFrame *scrolledFrame = mHelper.mScrolledFrame;
   // Set the x,y of the scrolled frame to the correct value
   scrolledFrame->SetPosition(mHelper.mScrollPort.TopLeft() - aScrollPosition);
+
+  // Recompute our scrollable overflow, taking perspective children into
+  // account. Note that this only recomputes the overflow areas stored on the
+  // helper (which are used to compute scrollable length and scrollbar thumb
+  // sizes) but not the overflow areas stored on the frame. This seems to work
+  // for now, but it's possible that we may need to update both in the future.
+  AdjustForPerspective(aState.mContentsOverflowAreas.ScrollableOverflow());
 
   nsRect scrolledArea;
   // Preserve the width or height of empty rects
@@ -836,6 +847,140 @@ GetBrowserRoot(nsIContent* aContent)
   return nullptr;
 }
 
+// When we have perspective set on the outer scroll frame, and transformed
+// children (possibly with preserve-3d) then the effective transform on the
+// child depends on the offset to the scroll frame, which changes as we scroll.
+// This perspective transform can cause the element to move relative to the
+// scrolled inner frame, which would cause the scrollable length changes during
+// scrolling if we didn't account for it. Since we don't want scrollHeight/Width
+// and the size of scrollbar thumbs to change during scrolling, we compute the
+// scrollable overflow by determining the scroll position at which the child
+// becomes completely visible within the scrollport rather than using the union
+// of the overflow areas at their current position.
+void
+GetScrollableOverflowForPerspective(nsIFrame* aScrolledFrame,
+                                    nsIFrame* aCurrentFrame,
+                                    const nsRect aScrollPort,
+                                    nsPoint aOffset,
+                                    nsRect& aScrolledFrameOverflowArea)
+{
+  // Iterate over all children except pop-ups.
+  FrameChildListIDs skip = nsIFrame::kSelectPopupList | nsIFrame::kPopupList;
+  for (nsIFrame::ChildListIterator childLists(aCurrentFrame);
+       !childLists.IsDone(); childLists.Next()) {
+    if (skip.Contains(childLists.CurrentID())) {
+      continue;
+    }
+
+    for (nsIFrame* child : childLists.CurrentList()) {
+      nsPoint offset = aOffset;
+
+      // When we reach a direct child of the scroll, then we record the offset
+      // to convert from that frame's coordinate into the scroll frame's
+      // coordinates. Preserve-3d descendant frames use the same offset as their
+      // ancestors, since TransformRect already converts us into the coordinate
+      // space of the preserve-3d root.
+      if (aScrolledFrame == aCurrentFrame) {
+        offset = child->GetPosition();
+      }
+
+      if (child->Extend3DContext()) {
+        // If we're a preserve-3d frame, then recurse and include our
+        // descendants since overflow of preserve-3d frames is only included
+        // in the post-transform overflow area of the preserve-3d root frame.
+        GetScrollableOverflowForPerspective(aScrolledFrame, child, aScrollPort,
+                                            offset, aScrolledFrameOverflowArea);
+      }
+
+      // If we're transformed, then we want to consider the possibility that
+      // this frame might move relative to the scrolled frame when scrolling.
+      // For preserve-3d, leaf frames have correct overflow rects relative to
+      // themselves. preserve-3d 'nodes' (intermediate frames and the root) have
+      // only their untransformed children included in their overflow relative
+      // to self, which is what we want to include here.
+      if (child->IsTransformed()) {
+        // Compute the overflow rect for this leaf transform frame in the
+        // coordinate space of the scrolled frame.
+        nsPoint scrollPos = aScrolledFrame->GetPosition();
+        nsRect preScroll = nsDisplayTransform::TransformRect(
+          child->GetScrollableOverflowRectRelativeToSelf(), child);
+
+        // Temporarily override the scroll position of the scrolled frame by
+        // 10 CSS pixels, and then recompute what the overflow rect would be.
+        // This scroll position may not be valid, but that shouldn't matter
+        // for our calculations.
+        aScrolledFrame->SetPosition(scrollPos + nsPoint(600, 600));
+        nsRect postScroll = nsDisplayTransform::TransformRect(
+          child->GetScrollableOverflowRectRelativeToSelf(), child);
+        aScrolledFrame->SetPosition(scrollPos);
+
+        // Compute how many app units the overflow rects moves by when we adjust
+        // the scroll position by 1 app unit.
+        double rightDelta =
+          (postScroll.XMost() - preScroll.XMost() + 600.0) / 600.0;
+        double bottomDelta =
+          (postScroll.YMost() - preScroll.YMost() + 600.0) / 600.0;
+
+        // We can't ever have negative scrolling.
+        NS_ASSERTION(rightDelta > 0.0f && bottomDelta > 0.0f,
+                     "Scrolling can't be reversed!");
+
+        // Move preScroll into the coordinate space of the scrollport.
+        preScroll += offset + scrollPos;
+
+        // For each of the four edges of preScroll, figure out how far they
+        // extend beyond the scrollport. Ignore negative values since that means
+        // that side is already scrolled in to view and we don't need to add
+        // overflow to account for it.
+        nsMargin overhang(std::max(0, aScrollPort.Y() - preScroll.Y()),
+                          std::max(0, preScroll.XMost() - aScrollPort.XMost()),
+                          std::max(0, preScroll.YMost() - aScrollPort.YMost()),
+                          std::max(0, aScrollPort.X() - preScroll.X()));
+
+        // Scale according to rightDelta/bottomDelta to adjust for the different
+        // scroll rates.
+        overhang.top /= bottomDelta;
+        overhang.right /= rightDelta;
+        overhang.bottom /= bottomDelta;
+        overhang.left /= rightDelta;
+
+        // Take the minimum overflow rect that would allow the current scroll
+        // position, using the size of the scroll port and offset by the
+        // inverse of the scroll position.
+        nsRect overflow = aScrollPort - scrollPos;
+
+        // Expand it by our margins to get an overflow rect that would allow all
+        // edges of our transformed content to be scrolled into view.
+        overflow.Inflate(overhang);
+
+        // Merge it with the combined overflow
+        aScrolledFrameOverflowArea.UnionRect(aScrolledFrameOverflowArea,
+                                             overflow);
+      } else if (aCurrentFrame == aScrolledFrame) {
+        aScrolledFrameOverflowArea.UnionRect(
+          aScrolledFrameOverflowArea,
+          child->GetScrollableOverflowRectRelativeToParent());
+      }
+    }
+  }
+}
+
+void
+nsHTMLScrollFrame::AdjustForPerspective(nsRect& aScrollableOverflow)
+{
+  // If we have perspective that is being applied to our children, then
+  // the effective transform on the child depends on the relative position
+  // of the child to us and changes during scrolling.
+  if (!ChildrenHavePerspective()) {
+    return;
+  }
+  aScrollableOverflow.SetEmpty();
+  GetScrollableOverflowForPerspective(mHelper.mScrolledFrame,
+                                      mHelper.mScrolledFrame,
+                                      mHelper.mScrollPort,
+                                      nsPoint(), aScrollableOverflow);
+}
+
 void
 nsHTMLScrollFrame::Reflow(nsPresContext*           aPresContext,
                           ReflowOutput&     aDesiredSize,
@@ -893,6 +1038,16 @@ nsHTMLScrollFrame::Reflow(nsPresContext*           aPresContext,
 
   ReflowContents(&state, aDesiredSize);
 
+  aDesiredSize.Width() = state.mInsideBorderSize.width +
+    state.mComputedBorder.LeftRight();
+  aDesiredSize.Height() = state.mInsideBorderSize.height +
+    state.mComputedBorder.TopBottom();
+
+  // Set the size of the frame now since computing the perspective-correct
+  // overflow (within PlaceScrollArea) can rely on it.
+  SetSize(aDesiredSize.GetWritingMode(),
+          aDesiredSize.Size(aDesiredSize.GetWritingMode()));
+
   // Restore the old scroll position, for now, even if that's not valid anymore
   // because we changed size. We'll fix it up in a post-reflow callback, because
   // our current size may only be temporary (e.g. we're compute XUL desired sizes).
@@ -931,11 +1086,6 @@ nsHTMLScrollFrame::Reflow(nsPresContext*           aPresContext,
       mHelper.mSkippedScrollbarLayout = true;
     }
   }
-
-  aDesiredSize.Width() = state.mInsideBorderSize.width +
-    state.mComputedBorder.LeftRight();
-  aDesiredSize.Height() = state.mInsideBorderSize.height +
-    state.mComputedBorder.TopBottom();
 
   aDesiredSize.SetOverflowAreasToDesiredBounds();
   if (mHelper.IsIgnoringViewportClipping()) {
@@ -1264,7 +1414,7 @@ ScrollFrameHelper::ThumbMoved(nsScrollbarFrame* aScrollbar,
   nsPoint current = GetScrollPosition();
   nsPoint dest = current;
   if (isHorizontal) {
-    dest.x = IsLTR() ? aNewPos : aNewPos - GetScrollRange().width;
+    dest.x = IsPhysicalLTR() ? aNewPos : aNewPos - GetScrollRange().width;
   } else {
     dest.y = aNewPos;
   }
@@ -1715,6 +1865,7 @@ public:
     }
 
     mCallee = aCallee;
+    APZCCallbackHelper::SuppressDisplayport(true, mCallee->mOuter->PresContext()->PresShell());
     return true;
   }
 
@@ -1739,6 +1890,7 @@ private:
   void RemoveObserver() {
     if (mCallee) {
       RefreshDriver(mCallee)->RemoveRefreshObserver(this, Flush_Style);
+      APZCCallbackHelper::SuppressDisplayport(false, mCallee->mOuter->PresContext()->PresShell());
     }
   }
 };
@@ -2124,7 +2276,7 @@ ScrollFrameHelper::ScrollToWithOrigin(nsPoint aScrollPosition,
 
   nsRect scrollRange = GetScrollRangeForClamping();
   mDestination = scrollRange.ClampPoint(aScrollPosition);
-  if (mDestination != aScrollPosition && aOrigin == nsGkAtoms::restore) {
+  if (mDestination != aScrollPosition && aOrigin == nsGkAtoms::restore && !PageIsStillLoading()) {
     // If we're doing a restore but the scroll position is clamped, promote
     // the origin from one that APZ can clobber to one that it can't clobber.
     aOrigin = nsGkAtoms::other;
@@ -2744,7 +2896,18 @@ ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange, nsIAtom* aOri
   if (mOuter->ChildrenHavePerspective()) {
     // The overflow areas of descendants may depend on the scroll position,
     // so ensure they get updated.
+
+    // First we recompute the overflow areas of the transformed children
+    // that use the perspective. FinishAndStoreOverflow only calls this
+    // if the size changes, so we need to do it manually.
     mOuter->RecomputePerspectiveChildrenOverflow(mOuter);
+
+    // Update the overflow for the scrolled frame to take any changes from the
+    // children into account.
+    mScrolledFrame->UpdateOverflow();
+
+    // Update the overflow for the outer so that we recompute scrollbars.
+    mOuter->UpdateOverflow();
   }
 
   ScheduleSyntheticMouseMove();
@@ -2877,7 +3040,7 @@ ScrollFrameHelper::AppendScrollPartsTo(nsDisplayListBuilder*   aBuilder,
   AutoTArray<nsIFrame*, 3> scrollParts;
   for (nsIFrame* kid : mOuter->PrincipalChildList()) {
     if (kid == mScrolledFrame ||
-        (kid->IsAbsPosContaininingBlock() || overlayScrollbars) != aPositioned)
+        (kid->IsAbsPosContainingBlock() || overlayScrollbars) != aPositioned)
       continue;
 
     scrollParts.AppendElement(kid);
@@ -3578,13 +3741,6 @@ ScrollFrameHelper::ComputeScrollMetadata(Layer* aLayer,
 
   bool isRootContent = mIsRoot && mOuter->PresContext()->IsRootContentDocument();
   bool thisScrollFrameUsesAsyncScrolling = nsLayoutUtils::UsesAsyncScrolling(mOuter);
-#if defined(MOZ_WIDGET_ANDROID) && !defined(MOZ_ANDROID_APZ)
-  // Android without apzc (aka the java pan zoom code) only uses async scrolling
-  // for the root scroll frame of the root content document.
-  if (!isRootContent) {
-    thisScrollFrameUsesAsyncScrolling = false;
-  }
-#endif
   if (!thisScrollFrameUsesAsyncScrolling) {
     if (parentLayerClip) {
       // If APZ is not enabled, we still need the displayport to be clipped
@@ -4060,17 +4216,18 @@ ScrollFrameHelper::ScrollToRestoredPosition()
     // and scroll many times.
     if (mRestorePos != mLastPos /* GetLogicalScrollPosition() */) {
       nsPoint scrollToPos = mRestorePos;
-      if (!IsLTR())
+      if (!IsPhysicalLTR()) {
         // convert from logical to physical scroll position
         scrollToPos.x = mScrollPort.x -
           (mScrollPort.XMost() - scrollToPos.x - mScrolledFrame->GetRect().width);
+      }
       nsWeakFrame weakFrame(mOuter);
       ScrollToWithOrigin(scrollToPos, nsIScrollableFrame::INSTANT,
                          nsGkAtoms::restore, nullptr);
       if (!weakFrame.IsAlive()) {
         return;
       }
-      if (PageIsStillLoading()) {
+      if (PageIsStillLoading() || NS_SUBTREE_DIRTY(mOuter)) {
         // If we're trying to do a history scroll restore, then we want to
         // keep trying this until we succeed, because the page can be loading
         // incrementally. So re-get the scroll position for the next iteration,
@@ -4708,6 +4865,10 @@ nsXULScrollFrame::LayoutScrollArea(nsBoxLayoutState& aState,
   if (minSize.width > childRect.width)
     childRect.width = minSize.width;
 
+  // TODO: Handle transformed children that inherit perspective
+  // from this frame. See AdjustForPerspective for how we handle
+  // this for HTML scroll frames.
+
   aState.SetLayoutFlags(flags);
   ClampAndSetBounds(aState, childRect, aScrollPosition);
   mHelper.mScrolledFrame->XULLayout(aState);
@@ -4757,11 +4918,9 @@ void ScrollFrameHelper::PostOverflowEvent()
   rpc->AddWillPaintObserver(mAsyncScrollPortEvent.get());
 }
 
-bool
-ScrollFrameHelper::IsLTR() const
+nsIFrame*
+ScrollFrameHelper::GetFrameForDir() const
 {
-  //TODO make bidi code set these from preferences
-
   nsIFrame *frame = mOuter;
   // XXX This is a bit on the slow side.
   if (mIsRoot) {
@@ -4785,8 +4944,7 @@ ScrollFrameHelper::IsLTR() const
     }
   }
 
-  WritingMode wm = frame->GetWritingMode();
-  return wm.IsVertical() ? wm.IsVerticalLR() : wm.IsBidiLTR();
+  return frame;
 }
 
 bool
@@ -4797,15 +4955,16 @@ ScrollFrameHelper::IsScrollbarOnRight() const
   // The position of the scrollbar in top-level windows depends on the pref
   // layout.scrollbar.side. For non-top-level elements, it depends only on the
   // directionaliy of the element (equivalent to a value of "1" for the pref).
-  if (!mIsRoot)
-    return IsLTR();
+  if (!mIsRoot) {
+    return IsPhysicalLTR();
+  }
   switch (presContext->GetCachedIntPref(kPresContext_ScrollbarSide)) {
     default:
     case 0: // UI directionality
       return presContext->GetCachedIntPref(kPresContext_BidiDirection)
              == IBMBIDI_TEXTDIRECTION_LTR;
     case 1: // Document / content directionality
-      return IsLTR();
+      return IsPhysicalLTR();
     case 2: // Always right
       return true;
     case 3: // Always left
@@ -5080,7 +5239,7 @@ ScrollFrameHelper::ReflowFinished()
   // do anything.
   nsPoint currentScrollPos = GetScrollPosition();
   ScrollToImpl(currentScrollPos, nsRect(currentScrollPos, nsSize(0, 0)));
-  if (!mAsyncScroll && !mAsyncSmoothMSDScroll) {
+  if (!mAsyncScroll && !mAsyncSmoothMSDScroll && !mApzSmoothScrollDestination) {
     // We need to have mDestination track the current scroll position,
     // in case it falls outside the new reflow area. mDestination is used
     // by ScrollBy as its starting position.
@@ -5660,7 +5819,7 @@ ScrollFrameHelper::GetScrolledFrameDir() const
     }
   }
 
-  return IsLTR() ? NS_STYLE_DIRECTION_LTR : NS_STYLE_DIRECTION_RTL;
+  return IsBidiLTR() ? NS_STYLE_DIRECTION_LTR : NS_STYLE_DIRECTION_RTL;
 }
 
 nsRect
@@ -5738,8 +5897,9 @@ ScrollFrameHelper::SaveState() const
   }
 
   // Don't store a scroll state if we never have been scrolled or restored
-  // a previous scroll state.
-  if (!mHasBeenScrolled && !mDidHistoryRestore) {
+  // a previous scroll state, and we're not in the middle of a smooth scroll.
+  bool isInSmoothScroll = IsProcessingAsyncScroll() || mLastSmoothScrollOrigin;
+  if (!mHasBeenScrolled && !mDidHistoryRestore && !isInSmoothScroll) {
     return nullptr;
   }
 
@@ -5748,8 +5908,15 @@ ScrollFrameHelper::SaveState() const
   // valid and we haven't moved since the last update of mLastPos (same check
   // that ScrollToRestoredPosition uses). This ensures if a reframe occurs
   // while we're in the process of loading content to scroll to a restored
-  // position, we'll keep trying after the reframe.
+  // position, we'll keep trying after the reframe. Similarly, if we're in the
+  // middle of a smooth scroll, store the destination so that when we restore
+  // we'll jump straight to the end of the scroll animation, rather than
+  // effectively dropping it. Note that the mRestorePos will override the
+  // smooth scroll destination if both are present.
   nsPoint pt = GetLogicalScrollPosition();
+  if (isInSmoothScroll) {
+    pt = mDestination;
+  }
   if (mRestorePos.y != -1 && pt == mLastPos) {
     pt = mRestorePos;
   }
@@ -5860,7 +6027,7 @@ CollectScrollSnapCoordinates(nsIFrame* aFrame, nsIFrame* aScrolledFrame,
         nsPoint offset = f->GetOffsetTo(aScrolledFrame);
         nsRect edgesRect = nsRect(offset, frameRect.Size());
         for (size_t coordNum = 0; coordNum < coordCount; coordNum++) {
-          const nsStyleImageLayers::Position &coordPosition =
+          const Position& coordPosition =
             f->StyleDisplay()->mScrollSnapCoordinate[coordNum];
           nsPoint coordPoint = edgesRect.TopLeft();
           coordPoint += nsPoint(coordPosition.mXPosition.mLength,

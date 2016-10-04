@@ -3,19 +3,16 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
+const TEST_URL = "data:text/html,test for dynamically registering and unregistering tools";
+
 var toolbox;
 
 function test()
 {
-  gBrowser.selectedTab = gBrowser.addTab();
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
-
-  gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
-    gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
+  addTab(TEST_URL).then(tab => {
+    let target = TargetFactory.forTab(tab);
     gDevTools.showToolbox(target).then(testRegister);
-  }, true);
-
-  content.location = "data:text/html,test for dynamically registering and unregistering tools";
+  });
 }
 
 function testRegister(aToolbox)
@@ -40,7 +37,7 @@ function toolRegistered(event, toolId)
   ok(gDevTools.getToolDefinitionMap().has(toolId), "tool added to map");
 
   // test that it appeared in the UI
-  let doc = toolbox.frame.contentDocument;
+  let doc = toolbox.doc;
   let tab = doc.getElementById("toolbox-tab-" + toolId);
   ok(tab, "new tool's tab exists in toolbox UI");
 
@@ -82,7 +79,7 @@ function toolUnregistered(event, toolDefinition)
   ok(!gDevTools.getToolDefinitionMap().has(toolId), "tool removed from map");
 
   // test that it disappeared from the UI
-  let doc = toolbox.frame.contentDocument;
+  let doc = toolbox.doc;
   let tab = doc.getElementById("toolbox-tab-" + toolId);
   ok(!tab, "tool's tab was removed from the toolbox UI");
 

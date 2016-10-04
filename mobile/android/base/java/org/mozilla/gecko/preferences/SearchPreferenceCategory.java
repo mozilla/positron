@@ -14,8 +14,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import org.mozilla.gecko.EventDispatcher;
+import org.mozilla.gecko.GeckoApp;
 import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.TelemetryContract.Method;
@@ -42,7 +42,7 @@ public class SearchPreferenceCategory extends CustomListCategory implements Geck
         super.onAttachedToActivity();
 
         // Register for SearchEngines messages and request list of search engines from Gecko.
-        EventDispatcher.getInstance().registerGeckoThreadListener(this, "SearchEngines:Data");
+        GeckoApp.getEventDispatcher().registerGeckoThreadListener(this, "SearchEngines:Data");
         GeckoAppShell.notifyObservers("SearchEngines:GetVisible", null);
     }
 
@@ -50,7 +50,7 @@ public class SearchPreferenceCategory extends CustomListCategory implements Geck
     protected void onPrepareForRemoval() {
         super.onPrepareForRemoval();
 
-        EventDispatcher.getInstance().unregisterGeckoThreadListener(this, "SearchEngines:Data");
+        GeckoApp.getEventDispatcher().unregisterGeckoThreadListener(this, "SearchEngines:Data");
     }
 
     @Override

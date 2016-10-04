@@ -35,11 +35,11 @@ loader.lazyRequireGetter(this, "gSequenceId", "devtools/client/webconsole/jsterm
 loader.lazyImporter(this, "VariablesView", "resource://devtools/client/shared/widgets/VariablesView.jsm");
 loader.lazyImporter(this, "VariablesViewController", "resource://devtools/client/shared/widgets/VariablesViewController.jsm");
 loader.lazyRequireGetter(this, "gDevTools", "devtools/client/framework/devtools", true);
-loader.lazyImporter(this, "PluralForm", "resource://gre/modules/PluralForm.jsm");
 loader.lazyRequireGetter(this, "KeyShortcuts", "devtools/client/shared/key-shortcuts", true);
 loader.lazyRequireGetter(this, "ZoomKeys", "devtools/client/shared/zoom-keys");
 
-const STRINGS_URI = "chrome://devtools/locale/webconsole.properties";
+const {PluralForm} = require("devtools/shared/plural-form");
+const STRINGS_URI = "devtools/locale/webconsole.properties";
 var l10n = new WebConsoleUtils.L10n(STRINGS_URI);
 
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
@@ -206,6 +206,8 @@ const PREF_NEW_FRONTEND_ENABLED = "devtools.webconsole.new-frontend-enabled";
 function WebConsoleFrame(webConsoleOwner) {
   this.owner = webConsoleOwner;
   this.hudId = this.owner.hudId;
+  this.isBrowserConsole = this.owner._browserConsole;
+
   this.window = this.owner.iframeWindow;
 
   this._repeatNodes = {};
@@ -387,6 +389,7 @@ WebConsoleFrame.prototype = {
   _destroyer: null,
 
   _saveRequestAndResponseBodies: true,
+  _throttleData: null,
 
   // Chevron width at the starting of Web Console's input box.
   _chevronWidth: 0,
@@ -425,6 +428,36 @@ WebConsoleFrame.prototype = {
   },
 
   /**
+   * Setter for throttling data.
+   *
+   * @param boolean value
+   *        The new value you want to set; @see NetworkThrottleManager.
+   */
+  setThrottleData: function(value) {
+    if (!this.webConsoleClient) {
+      // Don't continue if the webconsole disconnected.
+      return promise.resolve(null);
+    }
+
+    let deferred = promise.defer();
+    let toSet = {
+      "NetworkMonitor.throttleData": value,
+    };
+
+    // Make sure the web console client connection is established first.
+    this.webConsoleClient.setPreferences(toSet, response => {
+      if (!response.error) {
+        this._throttleData = value;
+        deferred.resolve(response);
+      } else {
+        deferred.reject(response.error);
+      }
+    });
+
+    return deferred.promise;
+  },
+
+  /**
    * Getter for the persistent logging preference.
    * @type boolean
    */
@@ -433,7 +466,7 @@ WebConsoleFrame.prototype = {
     // when the original top level window we attached to is closed,
     // but we don't want to reset console history and just switch to
     // the next available window.
-    return this.owner._browserConsole ||
+    return this.isBrowserConsole ||
            Services.prefs.getBoolPref(PREF_PERSISTLOG);
   },
 
@@ -460,6 +493,10 @@ WebConsoleFrame.prototype = {
       Services.obs.notifyObservers(id, "web-console-created", null);
     };
     allReady.then(notifyObservers, notifyObservers);
+
+    if (this.NEW_CONSOLE_OUTPUT_ENABLED) {
+      allReady.then(this.newConsoleOutput.init);
+    }
 
     return allReady;
   },
@@ -501,7 +538,7 @@ WebConsoleFrame.prototype = {
   _initUI: function () {
     this.document = this.window.document;
     this.rootElement = this.document.documentElement;
-    this.NEW_CONSOLE_OUTPUT_ENABLED = !this.owner._browserConsole
+    this.NEW_CONSOLE_OUTPUT_ENABLED = !this.isBrowserConsole
       && !this.owner.target.chrome
       && Services.prefs.getBoolPref(PREF_NEW_FRONTEND_ENABLED);
 
@@ -539,6 +576,8 @@ WebConsoleFrame.prototype = {
     this.jsterm = new JSTerm(this);
     this.jsterm.init();
 
+    let toolbox = gDevTools.getToolbox(this.owner.target);
+
     if (this.NEW_CONSOLE_OUTPUT_ENABLED) {
       // @TODO Remove this once JSTerm is handled with React/Redux.
       this.window.jsterm = this.jsterm;
@@ -547,11 +586,13 @@ WebConsoleFrame.prototype = {
       // XXX: We should actually stop output from happening on old output
       // panel, but for now let's just hide it.
       this.experimentalOutputNode = this.outputNode.cloneNode();
+      this.experimentalOutputNode.removeAttribute("tabindex");
       this.outputNode.hidden = true;
       this.outputNode.parentNode.appendChild(this.experimentalOutputNode);
       // @TODO Once the toolbox has been converted to React, see if passing
       // in JSTerm is still necessary.
-      this.newConsoleOutput = new this.window.NewConsoleOutput(this.experimentalOutputNode, this.jsterm);
+      this.newConsoleOutput = new this.window.NewConsoleOutput(
+        this.experimentalOutputNode, this.jsterm, toolbox, this.owner);
       console.log("Created newConsoleOutput", this.newConsoleOutput);
 
       let filterToolbar = doc.querySelector(".hud-console-filter-toolbar");
@@ -563,7 +604,6 @@ WebConsoleFrame.prototype = {
     this.jsterm.on("sidebar-opened", this.resize);
     this.jsterm.on("sidebar-closed", this.resize);
 
-    let toolbox = gDevTools.getToolbox(this.owner.target);
     if (toolbox) {
       toolbox.on("webconsole-selected", this._onPanelSelected);
     }
@@ -672,7 +712,7 @@ WebConsoleFrame.prototype = {
     shortcuts.on(clearShortcut,
                  () => this.jsterm.clearOutput(true));
 
-    if (this.owner._browserConsole) {
+    if (this.isBrowserConsole) {
       shortcuts.on(l10n.getStr("webconsole.close.key"),
                    this.window.close.bind(this.window));
 
@@ -784,7 +824,7 @@ WebConsoleFrame.prototype = {
       button.setAttribute("aria-pressed", someChecked);
     }, this);
 
-    if (!this.owner._browserConsole) {
+    if (!this.isBrowserConsole) {
       // The Browser Console displays nsIConsoleMessages which are messages that
       // end up in the JS category, but they are not errors or warnings, they
       // are just log messages. The Web Console does not show such messages.
@@ -1929,8 +1969,14 @@ WebConsoleFrame.prototype = {
   handleTabNavigated: function (event, packet) {
     if (event == "will-navigate") {
       if (this.persistLog) {
-        let marker = new Messages.NavigationMarker(packet, Date.now());
-        this.output.addMessage(marker);
+        if (this.NEW_CONSOLE_OUTPUT_ENABLED) {
+          // Add a _type to hit convertCachedPacket.
+          packet._type = true;
+          this.newConsoleOutput.dispatchMessageAdd(packet);
+        } else {
+          let marker = new Messages.NavigationMarker(packet, Date.now());
+          this.output.addMessage(marker);
+        }
       } else {
         this.jsterm.clearOutput();
       }
@@ -2159,7 +2205,8 @@ WebConsoleFrame.prototype = {
 
     // If a clear message is processed while the webconsole is opened, the UI
     // should be cleared.
-    if (message && message.level == "clear") {
+    // Do not clear the output if the current frame is owned by a Browser Console.
+    if (message && message.level == "clear" && !this.isBrowserConsole) {
       // Do not clear the consoleStorage here as it has been cleared already
       // by the clear method, only clear the UI.
       this.jsterm.clearOutput(false);
@@ -2525,21 +2572,15 @@ WebConsoleFrame.prototype = {
    * Creates the anchor that displays the textual location of an incoming
    * message.
    *
-   * @param {Object} aLocation
-   *        An object containing url, line and column number of the message
-   *        source (destructured).
+   * @param {Object} location
+   *        An object containing url, line and column number of the message source.
    * @return {Element}
    *         The new anchor element, ready to be added to the message node.
    */
-  createLocationNode: function ({url, line, column}) {
+  createLocationNode: function (location) {
     let locationNode = this.document.createElementNS(XHTML_NS, "div");
     locationNode.className = "message-location devtools-monospace";
 
-    if (!url) {
-      url = "";
-    }
-
-    let fullURL = url.split(" -> ").pop();
     // Make the location clickable.
     let onClick = ({ url, line }) => {
       let category = locationNode.closest(".message").category;
@@ -2578,12 +2619,11 @@ WebConsoleFrame.prototype = {
 
     const toolbox = gDevTools.getToolbox(this.owner.target);
 
+    let { url, line, column } = location;
+    let source = url ? url.split(" -> ").pop() : "";
+
     this.ReactDOM.render(this.FrameView({
-      frame: {
-        source: fullURL,
-        line,
-        column
-      },
+      frame: { source, line, column },
       showEmptyPathAsHost: true,
       onClick,
       sourceMapService: toolbox ? toolbox._sourceMapService : null,
@@ -3209,7 +3249,7 @@ WebConsoleConnectionProxy.prototype = {
 
     // There is no way to view response bodies from the Browser Console, so do
     // not waste the memory.
-    let saveBodies = !this.webConsoleFrame.owner._browserConsole;
+    let saveBodies = !this.webConsoleFrame.isBrowserConsole;
     this.webConsoleFrame.setSaveRequestAndResponseBodies(saveBodies);
 
     this.webConsoleClient.on("networkEvent", this._onNetworkEvent);
@@ -3219,6 +3259,24 @@ WebConsoleConnectionProxy.prototype = {
     this.webConsoleClient.getCachedMessages(msgs, this._onCachedMessages);
 
     this.webConsoleFrame._onUpdateListeners();
+  },
+
+  /**
+   * Dispatch a message add on the new frontend and emit an event for tests.
+   */
+  dispatchMessageAdd: function(packet) {
+    this.webConsoleFrame.newConsoleOutput.dispatchMessageAdd(packet);
+    this.webConsoleFrame.emit("new-messages", new Set([{
+      response: packet,
+      node: this.webConsoleFrame.newConsoleOutput.getLastMessage(),
+    }]));
+  },
+
+  /**
+   * Batched dispatch of messages.
+   */
+  dispatchMessagesAdd: function(packets) {
+    this.webConsoleFrame.newConsoleOutput.dispatchMessagesAdd(packets);
   },
 
   /**
@@ -3247,9 +3305,10 @@ WebConsoleConnectionProxy.prototype = {
     messages.sort((a, b) => a.timeStamp - b.timeStamp);
 
     if (this.webConsoleFrame.NEW_CONSOLE_OUTPUT_ENABLED) {
-      for (let packet of messages) {
-        this.webConsoleFrame.newConsoleOutput.dispatchMessageAdd(packet);
-      }
+      // Filter out CSS page errors.
+      messages = messages.filter(message => !(message._type == "PageError"
+          && Utils.categoryForScriptError(message) === CATEGORY_CSS));
+      this.dispatchMessagesAdd(messages);
     } else {
       this.webConsoleFrame.displayCachedMessages(messages);
       if (!this._hasNativeConsoleAPI) {
@@ -3274,7 +3333,10 @@ WebConsoleConnectionProxy.prototype = {
   _onPageError: function (type, packet) {
     if (this.webConsoleFrame && packet.from == this._consoleActor) {
       if (this.webConsoleFrame.NEW_CONSOLE_OUTPUT_ENABLED) {
-        this.webConsoleFrame.newConsoleOutput.dispatchMessageAdd(packet);
+        let category = Utils.categoryForScriptError(packet.pageError);
+        if (category !== CATEGORY_CSS) {
+          this.dispatchMessageAdd(packet);
+        }
         return;
       }
       this.webConsoleFrame.handlePageError(packet.pageError);
@@ -3310,7 +3372,7 @@ WebConsoleConnectionProxy.prototype = {
   _onConsoleAPICall: function (type, packet) {
     if (this.webConsoleFrame && packet.from == this._consoleActor) {
       if (this.webConsoleFrame.NEW_CONSOLE_OUTPUT_ENABLED) {
-        this.webConsoleFrame.newConsoleOutput.dispatchMessageAdd(packet);
+        this.dispatchMessageAdd(packet);
       } else {
         this.webConsoleFrame.handleConsoleAPICall(packet.message);
       }
@@ -3329,7 +3391,11 @@ WebConsoleConnectionProxy.prototype = {
    */
   _onNetworkEvent: function (type, networkInfo) {
     if (this.webConsoleFrame) {
-      this.webConsoleFrame.handleNetworkEvent(networkInfo);
+      if (this.webConsoleFrame.NEW_CONSOLE_OUTPUT_ENABLED) {
+        this.dispatchMessageAdd(networkInfo);
+      } else {
+        this.webConsoleFrame.handleNetworkEvent(networkInfo);
+      }
     }
   },
 

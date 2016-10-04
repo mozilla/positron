@@ -145,7 +145,8 @@ enum : uint32_t {
     /* Whether any objects have been iterated over. */
     OBJECT_FLAG_ITERATED              = 0x00080000,
 
-    /* 0x00100000 is not used. */
+    /* Whether any object this represents may be frozen. */
+    OBJECT_FLAG_FROZEN                = 0x00100000,
 
     /*
      * For the function on a run-once script, whether the function has actually
@@ -266,6 +267,8 @@ class TypeSet
         void ensureTrackedProperty(JSContext* cx, jsid id);
 
         ObjectGroup* maybeGroup();
+
+        JSCompartment* maybeCompartment();
     } JS_HAZ_GC_POINTER;
 
     // Information about a single concrete type. We pack this into one word,
@@ -349,9 +352,9 @@ class TypeSet
         inline ObjectGroup* group() const;
         inline ObjectGroup* groupNoBarrier() const;
 
-        void trace(JSTracer* trc) {
-            MarkTypeUnbarriered(trc, this, "TypeSet::Type");
-        }
+        inline void trace(JSTracer* trc);
+
+        JSCompartment* maybeCompartment();
 
         bool operator == (Type o) const { return data == o.data; }
         bool operator != (Type o) const { return data != o.data; }
@@ -379,13 +382,8 @@ class TypeSet
 
     static const char* NonObjectTypeString(Type type);
 
-#ifdef DEBUG
     static const char* TypeString(Type type);
     static const char* ObjectGroupString(ObjectGroup* group);
-#else
-    static const char* TypeString(Type type) { return nullptr; }
-    static const char* ObjectGroupString(ObjectGroup* group) { return nullptr; }
-#endif
 
   protected:
     /* Flags for this type set. */
@@ -508,6 +506,8 @@ class TypeSet
     TemporaryTypeSet* cloneObjectsOnly(LifoAlloc* alloc);
     TemporaryTypeSet* cloneWithoutObjects(LifoAlloc* alloc);
 
+    JSCompartment* maybeCompartment();
+
     // Trigger a read barrier on all the contents of a type set.
     static void readBarrier(const TypeSet* types);
 
@@ -529,8 +529,6 @@ class TypeSet
     // out of Ion, such as for argument and local types.
     static inline Type GetMaybeUntrackedValueType(const Value& val);
 
-    static void MarkTypeRoot(JSTracer* trc, Type* v, const char* name);
-    static void MarkTypeUnbarriered(JSTracer* trc, Type* v, const char* name);
     static bool IsTypeMarked(Type* v);
     static bool IsTypeAllocatedDuringIncremental(Type v);
     static bool IsTypeAboutToBeFinalized(Type* v);

@@ -12,37 +12,88 @@ const {
   DOM: dom,
   PropTypes
 } = require("devtools/client/shared/vendor/react");
+const FrameView = createFactory(require("devtools/client/shared/components/frame"));
+const StackTrace = createFactory(require("devtools/client/shared/components/stack-trace"));
+const CollapseButton = createFactory(require("devtools/client/webconsole/new-console-output/components/collapse-button").CollapseButton);
 const MessageRepeat = createFactory(require("devtools/client/webconsole/new-console-output/components/message-repeat").MessageRepeat);
 const MessageIcon = createFactory(require("devtools/client/webconsole/new-console-output/components/message-icon").MessageIcon);
+
+const actions = require("devtools/client/webconsole/new-console-output/actions/index");
 
 PageError.displayName = "PageError";
 
 PageError.propTypes = {
   message: PropTypes.object.isRequired,
+  open: PropTypes.bool,
+};
+
+PageError.defaultProps = {
+  open: false
 };
 
 function PageError(props) {
-  const { message } = props;
-  const repeat = MessageRepeat({repeat: message.repeat});
-  const icon = MessageIcon({severity: message.severity});
+  const { dispatch, message, open, sourceMapService, onViewSourceInDebugger } = props;
+  const { source, type, level, stacktrace, frame } = message;
 
-  // @TODO Use of "is" is a temporary hack to get the category and severity
-  // attributes to be applied. There are targeted in webconsole's CSS rules,
-  // so if we remove this hack, we have to modify the CSS rules accordingly.
+  const repeat = MessageRepeat({repeat: message.repeat});
+  const icon = MessageIcon({level});
+  const shouldRenderFrame = frame && frame.source !== "debugger eval code";
+  const location = dom.span({ className: "message-location devtools-monospace" },
+    shouldRenderFrame ? FrameView({
+      frame,
+      onClick: onViewSourceInDebugger,
+      showEmptyPathAsHost: true,
+      sourceMapService
+    }) : null
+  );
+
+  let collapse = "";
+  let attachment = "";
+  if (stacktrace) {
+    if (open) {
+      attachment = dom.div({ className: "stacktrace devtools-monospace" },
+        StackTrace({
+          stacktrace: stacktrace,
+          onViewSourceInDebugger: onViewSourceInDebugger
+        })
+      );
+    }
+
+    collapse = CollapseButton({
+      open,
+      onClick: function () {
+        if (open) {
+          dispatch(actions.messageClose(message.id));
+        } else {
+          dispatch(actions.messageOpen(message.id));
+        }
+      },
+    });
+  }
+
+  const classes = ["message"];
+  classes.push(source);
+  classes.push(type);
+  classes.push(level);
+  if (open === true) {
+    classes.push("open");
+  }
+
   return dom.div({
-    class: "message",
-    is: "fdt-message",
-    category: message.category,
-    severity: message.severity
+    className: classes.join(" ")
   },
     icon,
-    dom.span(
-      {className: "message-body-wrapper message-body devtools-monospace"},
-      dom.span({},
-        message.messageText
-      )
-    ),
-    repeat
+    collapse,
+    dom.span({ className: "message-body-wrapper" },
+      dom.span({ className: "message-flex-body" },
+        dom.span({ className: "message-body devtools-monospace" },
+          message.messageText
+        ),
+        repeat,
+        location
+      ),
+      attachment
+    )
   );
 }
 

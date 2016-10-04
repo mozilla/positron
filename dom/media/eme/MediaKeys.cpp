@@ -13,6 +13,7 @@
 #include "mozilla/dom/MediaKeySession.h"
 #include "mozilla/dom/DOMException.h"
 #include "mozilla/dom/UnionTypes.h"
+#include "mozilla/Telemetry.h"
 #include "GMPCDMProxy.h"
 #include "mozilla/EMEUtils.h"
 #include "nsContentUtils.h"
@@ -88,7 +89,7 @@ MediaKeys::Terminated()
 
   // Notify the element about that CDM has terminated.
   if (mElement) {
-    mElement->DecodeError();
+    mElement->DecodeError(NS_ERROR_DOM_MEDIA_CDM_ERR);
   }
 
   Shutdown();
@@ -283,7 +284,7 @@ MediaKeys::ResolvePromise(PromiseId aId)
     mKeySessions.Put(session->GetSessionId(), session);
     promise->MaybeResolve(session);
   } else {
-    promise->MaybeResolve(JS::UndefinedHandleValue);
+    promise->MaybeResolveWithUndefined();
   }
   MOZ_ASSERT(!mPromises.Contains(aId));
 }
@@ -418,6 +419,8 @@ MediaKeys::OnCDMCreated(PromiseId aId, const nsACString& aNodeId, const uint32_t
   MediaKeySystemAccess::NotifyObservers(mParent,
                                         mKeySystem,
                                         MediaKeySystemStatus::Cdm_created);
+
+  Telemetry::Accumulate(Telemetry::VIDEO_CDM_CREATED, ToCDMTypeTelemetryEnum(mKeySystem));
 }
 
 already_AddRefed<MediaKeySession>

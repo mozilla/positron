@@ -1007,7 +1007,8 @@ nsWebBrowserPersist::OnDataAvailable(
             if ((-1 == channelContentLength) ||
                 ((channelContentLength - (aOffset + aLength)) == 0))
             {
-                NS_WARN_IF_FALSE(channelContentLength != -1,
+                NS_WARNING_ASSERTION(
+                    channelContentLength != -1,
                     "nsWebBrowserPersist::OnDataAvailable() no content length "
                     "header, pushing what we have");
                 // we're done with this pass; see if we need to do upload
@@ -1165,6 +1166,7 @@ nsresult nsWebBrowserPersist::SendErrorStatusChange(
     nsCOMPtr<nsIFile> file;
     GetLocalFileFromURI(aURI, getter_AddRefs(file));
     nsAutoString path;
+    nsresult rv;
     if (file)
     {
         file->GetPath(path);
@@ -1172,7 +1174,8 @@ nsresult nsWebBrowserPersist::SendErrorStatusChange(
     else
     {
         nsAutoCString fileurl;
-        aURI->GetSpec(fileurl);
+        rv = aURI->GetSpec(fileurl);
+        NS_ENSURE_SUCCESS(rv, rv);
         AppendUTF8toUTF16(fileurl, path);
     }
 
@@ -1212,7 +1215,6 @@ nsresult nsWebBrowserPersist::SendErrorStatusChange(
         break;
     }
     // Get properties file bundle and extract status string.
-    nsresult rv;
     nsCOMPtr<nsIStringBundleService> s = do_GetService(NS_STRINGBUNDLE_CONTRACTID, &rv);
     NS_ENSURE_TRUE(NS_SUCCEEDED(rv) && s, NS_ERROR_FAILURE);
 
@@ -1528,7 +1530,6 @@ nsWebBrowserPersist::GetExtensionForContentType(const char16_t *aContentType, ch
         NS_ENSURE_TRUE(mMIMEService, NS_ERROR_FAILURE);
     }
 
-    nsCOMPtr<nsIMIMEInfo> mimeInfo;
     nsAutoCString contentType;
     contentType.AssignWithConversion(aContentType);
     nsAutoCString ext;

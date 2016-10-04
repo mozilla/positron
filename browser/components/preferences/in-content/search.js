@@ -3,20 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
-                                  "resource://gre/modules/AppConstants.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
                                   "resource://gre/modules/PlacesUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
 
 const ENGINE_FLAVOR = "text/x-moz-search-engine";
-
-document.addEventListener("Initialized", () => {
-  if (!AppConstants.isPlatformAndVersionAtLeast("win", "10")) {
-    document.getElementById("redirectSearchCheckbox").hidden = true;
-  }
-});
 
 var gEngineView = null;
 
@@ -35,6 +27,11 @@ var gSearchPane = {
     gEngineView = new EngineView(new EngineStore());
     document.getElementById("engineList").view = gEngineView;
     this.buildDefaultEngineDropDown();
+
+    let addEnginesLink = document.getElementById("addEngines");
+    let searchEnginesURL = Services.wm.getMostRecentWindow('navigator:browser')
+                                      .BrowserSearch.searchEnginesURL;
+    addEnginesLink.setAttribute("href", searchEnginesURL);
 
     window.addEventListener("click", this, false);
     window.addEventListener("command", this, false);
@@ -106,21 +103,22 @@ var gSearchPane = {
   handleEvent: function(aEvent) {
     switch (aEvent.type) {
       case "click":
-        if (aEvent.target.id != "engineChildren" && aEvent.target.id != "removeEngineButton") {
+        if (aEvent.target.id != "engineChildren" &&
+            !aEvent.target.classList.contains("searchEngineAction")) {
           let engineList = document.getElementById("engineList");
           // We don't want to toggle off selection while editing keyword
-          // so proceed only when the input field is hidden
-          if (engineList.inputField.hidden) {
+          // so proceed only when the input field is hidden.
+          // We need to check that engineList.view is defined here
+          // because the "click" event listener is on <window> and the
+          // view might have been destroyed if the pane has been navigated
+          // away from.
+          if (engineList.inputField.hidden && engineList.view) {
             let selection = engineList.view.selection;
             if (selection.count > 0) {
               selection.toggleSelect(selection.currentIndex);
             }
             engineList.blur();
           }
-        }
-        if (aEvent.target.id == "addEngines" && aEvent.button == 0) {
-          Services.wm.getMostRecentWindow('navigator:browser')
-                     .BrowserSearch.loadAddEngines();
         }
         break;
       case "command":
@@ -203,7 +201,7 @@ var gSearchPane = {
 
   onTreeSelect: function() {
     document.getElementById("removeEngineButton").disabled =
-      gEngineView.selectedIndex == -1 || gEngineView.lastIndex == 0;
+      !gEngineView.isEngineSelectedAndRemovable();
   },
 
   onTreeKeyPress: function(aEvent) {
@@ -217,6 +215,8 @@ var gSearchPane = {
       let newValue = !gEngineView._engineStore.engines[index].shown;
       gEngineView.setCellValue(index, tree.columns.getFirstColumn(),
                                newValue.toString());
+      // Prevent page from scrolling on the space key.
+      aEvent.preventDefault();
     }
     else {
       let isMac = Services.appinfo.OS == "Darwin";
@@ -224,7 +224,9 @@ var gSearchPane = {
           (!isMac && aEvent.keyCode == KeyEvent.DOM_VK_F2)) {
         tree.startEditing(index, tree.columns.getLastColumn());
       } else if (aEvent.keyCode == KeyEvent.DOM_VK_DELETE ||
-                 isMac && aEvent.shiftKey && aEvent.keyCode == KeyEvent.DOM_VK_BACK_SPACE) {
+                 (isMac && aEvent.shiftKey &&
+                  aEvent.keyCode == KeyEvent.DOM_VK_BACK_SPACE &&
+                  gEngineView.isEngineSelectedAndRemovable())) {
         // Delete and Shift+Backspace (Mac) removes selected engine.
         Services.search.removeEngine(gEngineView.selectedEngine.originalEngine);
      }
@@ -382,6 +384,10 @@ EngineStore.prototype = {
   },
 
   removeEngine: function ES_removeEngine(aEngine) {
+    if (this._engines.length == 1) {
+      throw new Error("Cannot remove last engine!");
+    }
+
     let engineName = aEngine.name;
     let index = this._engines.findIndex(element => element.name == engineName);
 
@@ -485,6 +491,10 @@ EngineView.prototype = {
     return column.id == "engineShown";
   },
 
+  isEngineSelectedAndRemovable: function() {
+    return this.selectedIndex != -1 && this.lastIndex != 0;
+  },
+
   // nsITreeView
   get rowCount() {
     return this._engineStore.engines.length;
@@ -530,9 +540,8 @@ EngineView.prototype = {
     if (dropIndex > sourceIndex) {
       if (orientation == nsITreeView.DROP_BEFORE)
         dropIndex--;
-    } else {
-      if (orientation == nsITreeView.DROP_AFTER)
-        dropIndex++;
+    } else if (orientation == nsITreeView.DROP_AFTER) {
+      dropIndex++;
     }
 
     this._engineStore.moveEngine(sourceEngine, dropIndex);

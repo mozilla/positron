@@ -168,6 +168,31 @@ int nr_ice_ctx_set_turn_servers(nr_ice_ctx *ctx,nr_ice_turn_server *servers,int 
     return(_status);
   }
 
+int nr_ice_ctx_copy_turn_servers(nr_ice_ctx *ctx, nr_ice_turn_server *servers, int ct)
+  {
+    int _status, i, r;
+
+    if (r = nr_ice_ctx_set_turn_servers(ctx, servers, ct)) {
+      ABORT(r);
+    }
+
+    // make copies of the username and password so they aren't freed twice
+    for (i = 0; i < ct; ++i) {
+      if (!(ctx->turn_servers[i].username = r_strdup(servers[i].username))) {
+        ABORT(R_NO_MEMORY);
+      }
+      if (r = r_data_create(&ctx->turn_servers[i].password,
+                            servers[i].password->data,
+                            servers[i].password->len)) {
+        ABORT(r);
+      }
+    }
+
+    _status=0;
+   abort:
+    return(_status);
+  }
+
 static int nr_ice_ctx_set_local_addrs(nr_ice_ctx *ctx,nr_local_addr *addrs,int ct)
   {
     int _status,i,r;
@@ -487,6 +512,16 @@ static void nr_ice_ctx_destroy_cb(NR_SOCKET s, int how, void *cb_arg)
     nr_socket_factory_destroy(&ctx->socket_factory);
 
     RFREE(ctx);
+  }
+
+void nr_ice_ctx_add_flags(nr_ice_ctx *ctx, UINT4 flags)
+  {
+    ctx->flags |= flags;
+  }
+
+void nr_ice_ctx_remove_flags(nr_ice_ctx *ctx, UINT4 flags)
+  {
+    ctx->flags &= ~flags;
   }
 
 int nr_ice_ctx_destroy(nr_ice_ctx **ctxp)
@@ -967,7 +1002,7 @@ int nr_ice_ctx_hide_candidate(nr_ice_ctx *ctx, nr_ice_candidate *cand)
       return 1;
     }
 
-    if (ctx->flags & NR_ICE_CTX_FLAGS_ONLY_DEFAULT_ADDRS) {
+    if (ctx->flags & NR_ICE_CTX_FLAGS_HIDE_HOST_CANDIDATES) {
       if (cand->type == HOST)
         return 1;
     }

@@ -26,7 +26,6 @@ DIRS += [
     'downloads',
     'extensions',
     'exthelper',
-    'filepicker',
     'filewatcher',
     'finalizationwitness',
     'formautofill',
@@ -60,11 +59,15 @@ DIRS += [
     'tooltiptext',
     'typeaheadfind',
     'utils',
+    'url-classifier',
     'urlformatter',
     'viewconfig',
     'workerloader',
     'xulstore'
 ]
+
+if CONFIG['ENABLE_INTL_API']:
+    DIRS += ['mozintl']
 
 if CONFIG['MOZ_BUILD_APP'] != 'mobile/android':
     DIRS += ['narrate', 'viewsource'];
@@ -75,9 +78,6 @@ if CONFIG['MOZ_BUILD_APP'] != 'mobile/android':
 if CONFIG['MOZ_CRASHREPORTER']:
     DIRS += ['crashes']
 
-if CONFIG['MOZ_SOCIAL']:
-    DIRS += ['social']
-
 if CONFIG['BUILD_CTYPES']:
     DIRS += ['ctypes']
 
@@ -87,11 +87,11 @@ if CONFIG['MOZ_FEEDS']:
 if CONFIG['MOZ_XUL']:
     DIRS += ['autocomplete', 'satchel']
 
+if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
+    DIRS += ['filepicker']
+
 if CONFIG['MOZ_TOOLKIT_SEARCH']:
     DIRS += ['search']
-
-if CONFIG['MOZ_URL_CLASSIFIER']:
-    DIRS += ['url-classifier']
 
 DIRS += ['captivedetect']
 

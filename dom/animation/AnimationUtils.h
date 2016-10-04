@@ -60,6 +60,13 @@ public:
    */
   static bool
   IsOffscreenThrottlingEnabled();
+
+  /**
+   * Returns true if the preference to enable the core Web Animations API is
+   * true or the caller is chrome.
+   */
+  static bool
+  IsCoreAPIEnabledForCaller();
 };
 
 } // namespace mozilla

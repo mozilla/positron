@@ -652,7 +652,7 @@ gfxDownloadedFcFontEntry::GetFontTable(uint32_t aTableTag)
     // so we can just return a blob that "wraps" the appropriate chunk of it.
     // The blob should not attempt to free its data, as the entire sfnt data
     // will be freed when the font entry is deleted.
-    return GetTableFromFontData(mFontData, aTableTag);
+    return gfxFontUtils::GetTableFromFontData(mFontData, aTableTag);
 }
 
 /*
@@ -1470,10 +1470,8 @@ gfxPangoFontGroup::UpdateUserFonts()
 
     mFonts[0] = FamilyFace();
     mFontSets.Clear();
-    mCachedEllipsisTextRun = nullptr;
-    mUnderlineOffset = UNDERLINE_OFFSET_NOT_SET;
+    ClearCachedData();
     mCurrGeneration = newGeneration;
-    mSkipDrawing = false;
 }
 
 already_AddRefed<gfxFcFontSet>
@@ -1688,7 +1686,8 @@ already_AddRefed<gfxFont>
 gfxFcFont::MakeScaledFont(gfxFontStyle *aFontStyle, gfxFloat aScaleFactor)
 {
     gfxFcFontEntry* fe = static_cast<gfxFcFontEntry*>(GetFontEntry());
-    RefPtr<gfxFont> font = gfxFontCache::GetCache()->Lookup(fe, aFontStyle);
+    RefPtr<gfxFont> font =
+        gfxFontCache::GetCache()->Lookup(fe, aFontStyle, nullptr);
     if (font) {
         return font.forget();
     }
@@ -1948,7 +1947,8 @@ gfxFcFont::GetOrMakeFont(FcPattern *aRequestedPattern, FcPattern *aFontPattern,
     style.style = gfxFontconfigUtils::GetThebesStyle(renderPattern);
     style.weight = gfxFontconfigUtils::GetThebesWeight(renderPattern);
 
-    RefPtr<gfxFont> font = gfxFontCache::GetCache()->Lookup(fe, &style);
+    RefPtr<gfxFont> font =
+        gfxFontCache::GetCache()->Lookup(fe, &style, nullptr);
     if (!font) {
         // Note that a file/index pair (or FT_Face) and the gfxFontStyle are
         // not necessarily enough to provide a key that will describe a unique

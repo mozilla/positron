@@ -33,7 +33,7 @@ void CSP_LogLocalizedStr(const char16_t* aName,
                          uint32_t aColumnNumber,
                          uint32_t aFlags,
                          const char* aCategory,
-                         uint32_t aInnerWindowID);
+                         uint64_t aInnerWindowID);
 
 void CSP_GetLocalizedStr(const char16_t* aName,
                          const char16_t** aParams,
@@ -49,7 +49,7 @@ void CSP_LogMessage(const nsAString& aMessage,
                     uint32_t aColumnNumber,
                     uint32_t aFlags,
                     const char* aCategory,
-                    uint32_t aInnerWindowID);
+                    uint64_t aInnerWindowID);
 
 
 /* =============== Constant and Type Definitions ================== */
@@ -192,6 +192,8 @@ bool CSP_IsQuotelessKeyword(const nsAString& aKey);
 CSPDirective CSP_ContentTypeToDirective(nsContentPolicyType aType);
 
 class nsCSPSrcVisitor;
+
+void CSP_PercentDecodeStr(const nsAString& aEncStr, nsAString& outDecStr);
 
 /* =============== nsCSPSrc ================== */
 
@@ -564,7 +566,10 @@ class nsCSPPolicy {
       { return mReportOnly; }
 
     inline void setReferrerPolicy(const nsAString* aValue)
-      { mReferrerPolicy = *aValue; }
+      {
+        mReferrerPolicy = *aValue;
+        ToLowerCase(mReferrerPolicy);
+      }
 
     inline void getReferrerPolicy(nsAString& outPolicy) const
       { outPolicy.Assign(mReferrerPolicy); }

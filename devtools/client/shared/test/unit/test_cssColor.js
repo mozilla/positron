@@ -10,7 +10,7 @@ var Ci = Components.interfaces;
 var Cc = Components.classes;
 
 var {require, loader} = Cu.import("resource://devtools/shared/Loader.jsm", {});
-const {colorUtils} = require("devtools/shared/css-color");
+const {colorUtils} = require("devtools/shared/css/color");
 
 loader.lazyGetter(this, "DOMUtils", function () {
   return Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils);
@@ -62,4 +62,15 @@ function run_test() {
     compareWithDomutils("mumble" + test.input, false);
     compareWithDomutils(test.input + "trailingstuff", false);
   }
+
+  // Regression test for bug 1303826.
+  let black = new colorUtils.CssColor("#000");
+  black.colorUnit = "name";
+  equal(black.toString(), "black", "test non-upper-case color cycling");
+
+  let upper = new colorUtils.CssColor("BLACK");
+  upper.colorUnit = "hex";
+  equal(upper.toString(), "#000", "test upper-case color cycling");
+  upper.colorUnit = "name";
+  equal(upper.toString(), "BLACK", "test upper-case color preservation");
 }

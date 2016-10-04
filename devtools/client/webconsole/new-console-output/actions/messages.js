@@ -9,21 +9,36 @@
 const {
   prepareMessage
 } = require("devtools/client/webconsole/new-console-output/utils/messages");
-
+const { IdGenerator } = require("devtools/client/webconsole/new-console-output/utils/id-generator");
+const { batchActions } = require("devtools/client/webconsole/new-console-output/actions/enhancers");
 const {
   MESSAGE_ADD,
   MESSAGES_CLEAR,
-  SEVERITY_FILTER,
-  MESSAGES_SEARCH,
-  FILTERS_CLEAR,
+  MESSAGE_OPEN,
+  MESSAGE_CLOSE,
+  MESSAGE_TYPE,
+  MESSAGE_TABLE_RECEIVE,
 } = require("../constants");
 
-function messageAdd(packet) {
-  let message = prepareMessage(packet);
-  return {
+const defaultIdGenerator = new IdGenerator();
+
+function messageAdd(packet, idGenerator = null) {
+  if (idGenerator == null) {
+    idGenerator = defaultIdGenerator;
+  }
+  let message = prepareMessage(packet, idGenerator);
+  const addMessageAction = {
     type: MESSAGE_ADD,
     message
   };
+
+  if (message.type === MESSAGE_TYPE.CLEAR) {
+    return batchActions([
+      messagesClear(),
+      addMessageAction,
+    ]);
+  }
+  return addMessageAction;
 }
 
 function messagesClear() {
@@ -32,29 +47,53 @@ function messagesClear() {
   };
 }
 
-function severityFilter(filter, toggled) {
+function messageOpen(id) {
   return {
-    type: SEVERITY_FILTER,
-    filter,
-    toggled
+    type: MESSAGE_OPEN,
+    id
   };
 }
 
-function filtersClear() {
+function messageClose(id) {
   return {
-    type: FILTERS_CLEAR
+    type: MESSAGE_CLOSE,
+    id
   };
 }
 
-function messagesSearch(searchText) {
-  return {
-    type: MESSAGES_SEARCH,
-    searchText
+function messageTableDataGet(id, client, dataType) {
+  return (dispatch) => {
+    let fetchObjectActorData;
+    if (["Map", "WeakMap", "Set", "WeakSet"].includes(dataType)) {
+      fetchObjectActorData = (cb) => client.enumEntries(cb);
+    } else {
+      fetchObjectActorData = (cb) => client.enumProperties({
+        ignoreNonIndexedProperties: dataType === "Array"
+      }, cb);
+    }
+
+    fetchObjectActorData(enumResponse => {
+      const {iterator} = enumResponse;
+      iterator.slice(0, iterator.count, sliceResponse => {
+        let {ownProperties} = sliceResponse;
+        dispatch(messageTableDataReceive(id, ownProperties));
+      });
+    });
   };
 }
 
-exports.messageAdd = messageAdd;
-exports.messagesClear = messagesClear;
-exports.severityFilter = severityFilter;
-exports.filtersClear = filtersClear;
-exports.messagesSearch = messagesSearch;
+function messageTableDataReceive(id, data) {
+  return {
+    type: MESSAGE_TABLE_RECEIVE,
+    id,
+    data
+  };
+}
+
+module.exports = {
+  messageAdd,
+  messagesClear,
+  messageOpen,
+  messageClose,
+  messageTableDataGet,
+};

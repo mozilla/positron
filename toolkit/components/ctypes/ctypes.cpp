@@ -30,7 +30,7 @@ UnicodeToNative(JSContext *cx, const char16_t *source, size_t slen)
   nsDependentString unicode(reinterpret_cast<const char16_t*>(source), slen);
   nsresult rv = NS_CopyUnicodeToNative(unicode, native);
   if (NS_FAILED(rv)) {
-    JS_ReportError(cx, "could not convert string to native charset");
+    JS_ReportErrorASCII(cx, "could not convert string to native charset");
     return nullptr;
   }
 
@@ -107,9 +107,7 @@ InitAndSealCTypesClass(JSContext* cx, JS::Handle<JSObject*> global)
       !SealObjectAndPrototype(cx, global, "Error"))
     return false;
 
-  // Finally, seal the global object, for good measure. (But not recursively;
-  // this breaks things.)
-  return JS_FreezeObject(cx, global);
+  return true;
 }
 
 NS_IMETHODIMP

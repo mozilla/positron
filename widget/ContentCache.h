@@ -44,6 +44,12 @@ protected:
   // Start offset of the composition string.
   uint32_t mCompositionStart;
 
+  enum
+  {
+    ePrevCharRect = 1,
+    eNextCharRect = 0
+  };
+
   struct Selection final
   {
     // Following values are offset in "flat text".
@@ -52,9 +58,13 @@ protected:
 
     WritingMode mWritingMode;
 
-    // Character rects at next character of mAnchor and mFocus.
-    LayoutDeviceIntRect mAnchorCharRect;
-    LayoutDeviceIntRect mFocusCharRect;
+    // Character rects at previous and next character of mAnchor and mFocus.
+    // The reason why ContentCache needs to store each previous character of
+    // them is IME may query character rect of the last character of a line
+    // when caret is at the end of the line.
+    // Note that use ePrevCharRect and eNextCharRect for accessing each item.
+    LayoutDeviceIntRect mAnchorCharRects[2];
+    LayoutDeviceIntRect mFocusCharRects[2];
 
     // Whole rect of selected text. This is empty if the selection is collapsed.
     LayoutDeviceIntRect mRect;
@@ -69,9 +79,22 @@ protected:
     {
       mAnchor = mFocus = UINT32_MAX;
       mWritingMode = WritingMode();
-      mAnchorCharRect.SetEmpty();
-      mFocusCharRect.SetEmpty();
+      ClearAnchorCharRects();
+      ClearFocusCharRects();
       mRect.SetEmpty();
+    }
+
+    void ClearAnchorCharRects()
+    {
+      for (size_t i = 0; i < ArrayLength(mAnchorCharRects); i++) {
+        mAnchorCharRects[i].SetEmpty();
+      }
+    }
+    void ClearFocusCharRects()
+    {
+      for (size_t i = 0; i < ArrayLength(mFocusCharRects); i++) {
+        mFocusCharRects[i].SetEmpty();
+      }
     }
 
     bool IsValid() const
@@ -112,13 +135,15 @@ protected:
     {
       NS_ASSERTION(IsValid(),
                    "The caller should check if the selection is valid");
-      return Reversed() ? mFocusCharRect : mAnchorCharRect;
+      return Reversed() ? mFocusCharRects[eNextCharRect] :
+                          mAnchorCharRects[eNextCharRect];
     }
     LayoutDeviceIntRect EndCharRect() const
     {
       NS_ASSERTION(IsValid(),
                    "The caller should check if the selection is valid");
-      return Reversed() ? mAnchorCharRect : mFocusCharRect;
+      return Reversed() ? mAnchorCharRects[eNextCharRect] :
+                          mFocusCharRects[eNextCharRect];
     }
   } mSelection;
 
@@ -217,7 +242,7 @@ protected:
     }
     bool IsOverlappingWith(uint32_t aOffset, uint32_t aLength) const
     {
-      if (!IsValid() || aOffset == UINT32_MAX) {
+      if (!HasRects() || aOffset == UINT32_MAX || !aLength) {
         return false;
       }
       CheckedInt<uint32_t> endOffset =
@@ -225,7 +250,7 @@ protected:
       if (NS_WARN_IF(!endOffset.isValid())) {
         return false;
       }
-      return aOffset <= EndOffset() && endOffset.value() >= mStart;
+      return aOffset < EndOffset() && endOffset.value() > mStart;
     }
     LayoutDeviceIntRect GetRect(uint32_t aOffset) const;
     LayoutDeviceIntRect GetUnionRect(uint32_t aOffset, uint32_t aLength) const;
@@ -280,6 +305,10 @@ private:
   bool QueryCharRect(nsIWidget* aWidget,
                      uint32_t aOffset,
                      LayoutDeviceIntRect& aCharRect) const;
+  bool QueryCharRectArray(nsIWidget* aWidget,
+                          uint32_t aOffset,
+                          uint32_t aLength,
+                          RectArray& aCharRectArray) const;
   bool CacheCaret(nsIWidget* aWidget,
                   const IMENotification* aNotification = nullptr);
   bool CacheTextRects(nsIWidget* aWidget,

@@ -20,12 +20,15 @@ public:
   GPUParent();
   ~GPUParent();
 
+  static GPUParent* GetSingleton();
+
   bool Init(base::ProcessId aParentPid,
             MessageLoop* aIOLoop,
             IPC::Channel* aChannel);
 
   bool RecvInit(nsTArray<GfxPrefSetting>&& prefs,
-                nsTArray<GfxVarUpdate>&& vars) override;
+                nsTArray<GfxVarUpdate>&& vars,
+                const DevicePrefs& devicePrefs) override;
   bool RecvInitVsyncBridge(Endpoint<PVsyncBridgeParent>&& aVsyncEndpoint) override;
   bool RecvInitImageBridge(Endpoint<PImageBridgeParent>&& aEndpoint) override;
   bool RecvInitVRManager(Endpoint<PVRManagerParent>&& aEndpoint) override;
@@ -40,6 +43,10 @@ public:
   bool RecvNewContentCompositorBridge(Endpoint<PCompositorBridgeParent>&& aEndpoint) override;
   bool RecvNewContentImageBridge(Endpoint<PImageBridgeParent>&& aEndpoint) override;
   bool RecvNewContentVRManager(Endpoint<PVRManagerParent>&& aEndpoint) override;
+  bool RecvNewContentVideoDecoderManager(Endpoint<PVideoDecoderManagerParent>&& aEndpoint) override;
+  bool RecvDeallocateLayerTreeId(const uint64_t& aLayersId) override;
+  bool RecvGetDeviceStatus(GPUDeviceData* aOutStatus) override;
+  bool RecvAddLayerTreeIdMapping(const uint64_t& aLayersId, const ProcessId& aOwnerId) override;
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
 

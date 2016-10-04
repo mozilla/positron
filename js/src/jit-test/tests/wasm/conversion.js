@@ -6,41 +6,36 @@ function testConversion(resultType, opcode, paramType, op, expect) {
     // i64 cannot be imported, so we use a wrapper function.
     assertEq(wasmEvalText(`(module
                             (func (param i64) (result ${resultType}) (${resultType}.${opcode}/i64 (get_local 0)))
-                            (export "" 0))`)(createI64(op)), expect);
+                            (export "" 0))`).exports[""](createI64(op)), expect);
     // The same, but now the input is a constant.
     assertEq(wasmEvalText(`(module
                             (func (result ${resultType}) (${resultType}.${opcode}/i64 (i64.const ${op})))
-                            (export "" 0))`)(), expect);
+                            (export "" 0))`).exports[""](), expect);
   } else if (resultType === 'i64') {
     assertEqI64(wasmEvalText(`(module
                             (func (param ${paramType}) (result i64) (i64.${opcode}/${paramType} (get_local 0)))
-                            (export "" 0))`)(op), createI64(expect));
+                            (export "" 0))`).exports[""](op), createI64(expect));
     // The same, but now the input is a constant.
     assertEqI64(wasmEvalText(`(module
                             (func (result i64) (i64.${opcode}/${paramType} (${paramType}.const ${op})))
-                            (export "" 0))`)(), createI64(expect));
+                            (export "" 0))`).exports[""](), createI64(expect));
   } else {
-    assertEq(wasmEvalText('(module (func (param ' + paramType + ') (result ' + resultType + ') (' + resultType + '.' + opcode + '/' + paramType + ' (get_local 0))) (export "" 0))')(op), expect);
+    assertEq(wasmEvalText('(module (func (param ' + paramType + ') (result ' + resultType + ') (' + resultType + '.' + opcode + '/' + paramType + ' (get_local 0))) (export "" 0))').exports[""](op), expect);
   }
 
   let formerTestMode = getJitCompilerOptions()['wasm.test-mode'];
   setJitCompilerOption('wasm.test-mode', 1);
   for (var bad of ['i32', 'f32', 'f64', 'i64']) {
-      if (bad === 'i64' && !hasI64())
-          continue;
-
       if (bad != resultType) {
-          assertErrorMessage(
-              () => wasmEvalText(`(module (func (param ${paramType}) (result ${bad}) (${resultType}.${opcode}/${paramType} (get_local 0))))`),
-              TypeError,
+          wasmFailValidateText(
+              `(module (func (param ${paramType}) (result ${bad}) (${resultType}.${opcode}/${paramType} (get_local 0))))`,
               mismatchError(resultType, bad)
           );
       }
 
       if (bad != paramType) {
-          assertErrorMessage(
-              () => wasmEvalText(`(module (func (param ${bad}) (result ${resultType}) (${resultType}.${opcode}/${paramType} (get_local 0))))`),
-              TypeError,
+          wasmFailValidateText(
+              `(module (func (param ${bad}) (result ${resultType}) (${resultType}.${opcode}/${paramType} (get_local 0))))`,
               mismatchError(bad, paramType)
           );
       }
@@ -49,9 +44,6 @@ function testConversion(resultType, opcode, paramType, op, expect) {
 }
 
 function testTrap(resultType, opcode, paramType, op, expect) {
-    if (resultType === 'i64' && !hasI64())
-        return;
-
     let func = wasmEvalText(`(module
         (func
             (param ${paramType})
@@ -59,14 +51,14 @@ function testTrap(resultType, opcode, paramType, op, expect) {
             (${resultType}.${opcode}/${paramType} (get_local 0))
         )
         (export "" 0)
-    )`);
+    )`).exports[""];
 
     let expectedError = op === 'nan' ? /invalid conversion to integer/ : /integer overflow/;
 
     assertErrorMessage(() => func(jsify(op)), Error, expectedError);
 }
 
-if (hasI64()) {
+{
     setJitCompilerOption('wasm.test-mode', 1);
 
     testConversion('i32', 'wrap', 'i64', '0x100000028', 40);
@@ -213,14 +205,6 @@ if (hasI64()) {
     testConversion('f64', 'reinterpret', 'i64', "0x40440ccccccccca0", 40.09999999999968);
 
     setJitCompilerOption('wasm.test-mode', 0);
-} else {
-    // Sleeper test: once i64 works on more platforms, remove this if-else.
-    try {
-        testConversion('i32', 'wrap', 'i64', 4294967336, 40);
-        throw new Error('hasI64() in wasm.js needs an update!');
-    } catch(e) {
-        assertEq(e.toString().indexOf("NYI on this platform") >= 0, true);
-    }
 }
 
 // i32.trunc_s* : all values in ] -2**31 - 1; 2**31 [ are acceptable.
@@ -283,3 +267,7 @@ testConversion('f64', 'convert_u', 'i32', 40, 40);
 
 testConversion('f32', 'demote', 'f64', 40.1, 40.099998474121094);
 testConversion('f64', 'promote', 'f32', 40.1, 40.099998474121094);
+
+// Non-canonical NaNs.
+assertEq(wasmEvalText('(module (func (result i32) (i32.reinterpret/f32 (f32.demote/f64 (f64.const -nan:0x4444444444444)))) (export "" 0))').exports[""](), -0x1dddde);
+assertEq(wasmEvalText('(module (func (result i32) (local i64) (set_local 0 (i64.reinterpret/f64 (f64.promote/f32 (f32.const -nan:0x222222)))) (i32.xor (i32.wrap/i64 (get_local 0)) (i32.wrap/i64 (i64.shr_u (get_local 0) (i64.const 32))))) (export "" 0))').exports[""](), -0x4003bbbc);

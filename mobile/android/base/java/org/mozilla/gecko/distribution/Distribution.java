@@ -39,10 +39,9 @@ import org.json.JSONObject;
 import org.mozilla.gecko.annotation.RobocopTarget;
 import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.GeckoSharedPrefs;
 import org.mozilla.gecko.Telemetry;
-import org.mozilla.gecko.annotation.WrapForJNI;
+import org.mozilla.gecko.annotation.JNITarget;
 import org.mozilla.gecko.util.FileUtils;
 import org.mozilla.gecko.util.HardwareUtils;
 import org.mozilla.gecko.util.ThreadUtils;
@@ -224,7 +223,14 @@ public class Distribution {
             public void run() {
                 boolean distributionSet = distribution.doInit();
                 if (distributionSet) {
-                    GeckoAppShell.notifyObservers("Distribution:Set", "");
+                    String preferencesJSON = "";
+                    try {
+                        final File descFile = distribution.getDistributionFile("preferences.json");
+                        preferencesJSON = FileUtils.readStringFromFile(descFile);
+                    } catch (IOException e) {
+                        Log.e(LOGTAG, "Error getting distribution descriptor file.", e);
+                    }
+                    GeckoAppShell.notifyObservers("Distribution:Set", preferencesJSON);
                 }
             }
         });
@@ -867,7 +873,7 @@ public class Distribution {
         return context.getApplicationInfo().dataDir;
     }
 
-    @WrapForJNI
+    @JNITarget
     public static String[] getDistributionDirectories() {
         final Context context = GeckoAppShell.getApplicationContext();
 

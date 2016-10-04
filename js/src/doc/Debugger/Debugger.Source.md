@@ -46,7 +46,7 @@ instance to represent each presentation, or it may use a single
 For a `Debugger.Source` instance representing the serialized text of a block
 of WebAssembly code, its properties provide the serialized text as a string.
 
-Currently only entire modules evaluated via `Wasm.instantiateModule` are
+Currently only entire modules evaluated via `new WebAssembly.Module` are
 represented. SpiderMonkey constructs exactly one `Debugger.Source` for each
 underlying WebAssembly module per [`Debugger`][debugger-object] instance.
 
@@ -66,21 +66,6 @@ differ, no such emphasized headings will appear.
 
 A `Debugger.Source` instance inherits the following accessor properties
 from its prototype:
-
-`canonicalId`
-:   **If the instance refers to JavaScript source**, a stable, unique
-    identifier for the source referent. This identifier is suitable for
-    checking if two `Debugger.Source` instances originating from different
-    `Debugger` instances refer to the same source that was compiled by
-    SpiderMonkey. The `canonicalId` is reliable even when the source does not
-    have a URL, or shares the same URL as another source but has different
-    source text. It is more efficient to compare `canonicalId`s than to
-    compare source text character-by-character. The `canonicalId` is not
-    suitable for ordering comparisons such as "greater than" or "less
-    than". It is not suitable for checking the equality of sources across
-    worker threads.
-
-    **If the instance refers to WebAssembly code**, throw a `TypeError`.
 
 `text`
 :   **If the instance refers to JavaScript source**, the JavaScript source
@@ -122,7 +107,7 @@ from its prototype:
     return `undefined`.)
 
     **If the instance refers to WebAssembly code**, the URL of the script that
-    called `Wasm.instantiateModule` with the string `"> wasm"` appended.
+    called `new WebAssembly.Module` with the string `"> wasm"` appended.
 
 `sourceMapURL`
 :   **If the instance refers to JavaScript source**, if this source was

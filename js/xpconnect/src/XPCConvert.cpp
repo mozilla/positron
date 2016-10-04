@@ -640,7 +640,6 @@ XPCConvert::JSData2Native(void* d, HandleValue s,
     {
         if (s.isNull() || s.isUndefined()) {
             nsACString* rs = *((nsACString**)d);
-            rs->Truncate();
             rs->SetIsVoid(true);
             return true;
         }
@@ -820,9 +819,8 @@ XPCConvert::NativeInterface2JSObject(MutableHandleValue d,
     }
 
     // Go ahead and create an XPCWrappedNative for this object.
-    AutoMarkingNativeInterfacePtr iface(cx);
-
-    iface = XPCNativeInterface::GetNewOrUsed(iid);
+    RefPtr<XPCNativeInterface> iface =
+        XPCNativeInterface::GetNewOrUsed(iid);
     if (!iface)
         return false;
 

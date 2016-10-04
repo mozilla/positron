@@ -601,6 +601,9 @@ public:
   float GetFullZoom() { return mFullZoom; }
   void SetFullZoom(float aZoom);
 
+  float GetOverrideDPPX() { return mOverrideDPPX; }
+  void SetOverrideDPPX(float aDPPX);
+
   nscoord GetAutoQualityMinFontSize() {
     return DevPixelsToAppUnits(mAutoQualityMinFontSizePixelsPref);
   }
@@ -895,8 +898,8 @@ public:
   void UpdateIsChrome();
 
   // Public API for native theme code to get style internals.
-  virtual bool HasAuthorSpecifiedRules(const nsIFrame *aFrame,
-                                       uint32_t ruleTypeMask) const;
+  bool HasAuthorSpecifiedRules(const nsIFrame *aFrame,
+                               uint32_t ruleTypeMask) const;
 
   // Is it OK to let the page specify colors and backgrounds?
   bool UseDocumentColors() const {
@@ -1024,6 +1027,12 @@ public:
    * ReflowStarted call. Cannot itself trigger an interrupt check.
    */
   bool HasPendingInterrupt() { return mHasPendingInterrupt; }
+  /**
+   * Sets a flag that will trip a reflow interrupt. This only bypasses the
+   * interrupt timeout and the pending event check; other checks such as whether
+   * interrupts are enabled and the interrupt check skipping still take effect.
+   */
+  void SetPendingInterruptFromTest() { mPendingInterruptFromTest = true; }
 
   /**
    * If we have a presshell, and if the given content's current
@@ -1248,7 +1257,7 @@ protected:
   int32_t               mBaseMinFontSize;
   float                 mTextZoom;      // Text zoom, defaults to 1.0
   float                 mFullZoom;      // Page zoom, defaults to 1.0
-
+  float                 mOverrideDPPX;   // DPPX overrided, defaults to 0.0
   gfxSize               mLastFontInflationScreenSize;
 
   int32_t               mCurAppUnitsPerDevPixel;
@@ -1317,6 +1326,7 @@ protected:
   mozilla::TimeStamp    mLastStyleUpdateForAllAnimations;
 
   unsigned              mHasPendingInterrupt : 1;
+  unsigned              mPendingInterruptFromTest : 1;
   unsigned              mInterruptsEnabled : 1;
   unsigned              mUseDocumentFonts : 1;
   unsigned              mUseDocumentColors : 1;

@@ -51,9 +51,10 @@ CreatePinchGestureInput(PinchGestureInput::PinchGestureType aType,
                         const ScreenIntPoint& aFocus,
                         float aCurrentSpan, float aPreviousSpan)
 {
-  PinchGestureInput result(aType, 0, TimeStamp(), aFocus,
+  ParentLayerPoint localFocus(aFocus.x, aFocus.y);
+  PinchGestureInput result(aType, 0, TimeStamp(), localFocus,
                            aCurrentSpan, aPreviousSpan, 0);
-  result.mLocalFocusPoint = ParentLayerPoint(aFocus.x, aFocus.y);
+  result.mFocusPoint = aFocus;
   return result;
 }
 
@@ -261,5 +262,36 @@ SmoothWheel(const RefPtr<InputReceiver>& aTarget, const ScreenIntPoint& aPoint,
       aPoint, aDelta.x, aDelta.y, false);
   return aTarget->ReceiveInputEvent(input, nullptr, aOutInputBlockId);
 }
+
+template<class InputReceiver>
+nsEventStatus
+MouseDown(const RefPtr<InputReceiver>& aTarget, const ScreenIntPoint& aPoint,
+          TimeStamp aTime, uint64_t* aOutInputBlockId = nullptr)
+{
+  MouseInput input(MouseInput::MOUSE_DOWN, MouseInput::ButtonType::LEFT_BUTTON,
+        0, 0, aPoint, MillisecondsSinceStartup(aTime), aTime, 0);
+  return aTarget->ReceiveInputEvent(input, nullptr, aOutInputBlockId);
+}
+
+template<class InputReceiver>
+nsEventStatus
+MouseMove(const RefPtr<InputReceiver>& aTarget, const ScreenIntPoint& aPoint,
+          TimeStamp aTime, uint64_t* aOutInputBlockId = nullptr)
+{
+  MouseInput input(MouseInput::MOUSE_MOVE, MouseInput::ButtonType::LEFT_BUTTON,
+        0, 0, aPoint, MillisecondsSinceStartup(aTime), aTime, 0);
+  return aTarget->ReceiveInputEvent(input, nullptr, aOutInputBlockId);
+}
+
+template<class InputReceiver>
+nsEventStatus
+MouseUp(const RefPtr<InputReceiver>& aTarget, const ScreenIntPoint& aPoint,
+        TimeStamp aTime, uint64_t* aOutInputBlockId = nullptr)
+{
+  MouseInput input(MouseInput::MOUSE_UP, MouseInput::ButtonType::LEFT_BUTTON,
+        0, 0, aPoint, MillisecondsSinceStartup(aTime), aTime, 0);
+  return aTarget->ReceiveInputEvent(input, nullptr, aOutInputBlockId);
+}
+
 
 #endif // mozilla_layers_InputUtils_h

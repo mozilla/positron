@@ -100,6 +100,8 @@ static const char* kObservedPrefs[] = {
     nullptr
 };
 
+static const char kFontSystemWhitelistPref[] = "font.system.whitelist";
+
 // xxx - this can probably be eliminated by reworking pref font handling code
 static const char *gPrefLangNames[] = {
     #define FONT_PREF_LANG(enum_id_, str_, atom_id_) str_
@@ -140,7 +142,7 @@ NS_IMPL_ISUPPORTS(gfxPlatformFontList::MemoryReporter, nsIMemoryReporter)
 
 NS_IMETHODIMP
 gfxPlatformFontList::MemoryReporter::CollectReports(
-    nsIMemoryReporterCallback* aCb, nsISupports* aClosure, bool aAnonymize)
+    nsIHandleReportCallback* aHandleReport, nsISupports* aData, bool aAnonymize)
 {
     FontListSizes sizes;
     sizes.mFontListSize = 0;
@@ -150,27 +152,21 @@ gfxPlatformFontList::MemoryReporter::CollectReports(
     gfxPlatformFontList::PlatformFontList()->AddSizeOfIncludingThis(&FontListMallocSizeOf,
                                                                     &sizes);
 
-    nsresult rv;
-    rv = aCb->Callback(EmptyCString(),
-                       NS_LITERAL_CSTRING("explicit/gfx/font-list"),
-                       KIND_HEAP, UNITS_BYTES, sizes.mFontListSize,
-                       NS_LITERAL_CSTRING("Memory used to manage the list of font families and faces."),
-                       aClosure);
-    NS_ENSURE_SUCCESS(rv, rv);
+    MOZ_COLLECT_REPORT(
+        "explicit/gfx/font-list", KIND_HEAP, UNITS_BYTES,
+        sizes.mFontListSize,
+        "Memory used to manage the list of font families and faces.");
 
-    rv = aCb->Callback(EmptyCString(),
-                       NS_LITERAL_CSTRING("explicit/gfx/font-charmaps"),
-                       KIND_HEAP, UNITS_BYTES, sizes.mCharMapsSize,
-                       NS_LITERAL_CSTRING("Memory used to record the character coverage of individual fonts."),
-                       aClosure);
-    NS_ENSURE_SUCCESS(rv, rv);
+    MOZ_COLLECT_REPORT(
+        "explicit/gfx/font-charmaps", KIND_HEAP, UNITS_BYTES,
+        sizes.mCharMapsSize,
+        "Memory used to record the character coverage of individual fonts.");
 
     if (sizes.mFontTableCacheSize) {
-        aCb->Callback(EmptyCString(),
-                      NS_LITERAL_CSTRING("explicit/gfx/font-tables"),
-                      KIND_HEAP, UNITS_BYTES, sizes.mFontTableCacheSize,
-                      NS_LITERAL_CSTRING("Memory used for cached font metrics and layout tables."),
-                      aClosure);
+        MOZ_COLLECT_REPORT(
+            "explicit/gfx/font-tables", KIND_HEAP, UNITS_BYTES,
+            sizes.mFontTableCacheSize,
+            "Memory used for cached font metrics and layout tables.");
     }
 
     return NS_OK;
@@ -179,7 +175,8 @@ gfxPlatformFontList::MemoryReporter::CollectReports(
 gfxPlatformFontList::gfxPlatformFontList(bool aNeedFullnamePostscriptNames)
     : mFontFamilies(64), mOtherFamilyNames(16),
       mBadUnderlineFamilyNames(8), mSharedCmaps(8),
-      mStartIndex(0), mIncrement(1), mNumFamilies(0), mFontlistInitCount(0)
+      mStartIndex(0), mIncrement(1), mNumFamilies(0), mFontlistInitCount(0),
+      mFontFamilyWhitelistActive(false)
 {
     mOtherFamilyNamesInitialized = false;
 
@@ -197,6 +194,9 @@ gfxPlatformFontList::gfxPlatformFontList(bool aNeedFullnamePostscriptNames)
     NS_ADDREF(gFontListPrefObserver);
     Preferences::AddStrongObservers(gFontListPrefObserver, kObservedPrefs);
 
+    Preferences::RegisterCallback(FontWhitelistPrefChanged,
+                                  kFontSystemWhitelistPref);
+
     RegisterStrongMemoryReporter(new MemoryReporter());
 }
 
@@ -206,11 +206,42 @@ gfxPlatformFontList::~gfxPlatformFontList()
     ClearLangGroupPrefFonts();
     NS_ASSERTION(gFontListPrefObserver, "There is no font list pref observer");
     Preferences::RemoveObservers(gFontListPrefObserver, kObservedPrefs);
+    Preferences::UnregisterCallback(FontWhitelistPrefChanged,
+                                    kFontSystemWhitelistPref);
     NS_RELEASE(gFontListPrefObserver);
 }
 
 // number of CSS generic font families
 const uint32_t kNumGenerics = 5;
+
+void
+gfxPlatformFontList::ApplyWhitelist()
+{
+    nsTArray<nsString> list;
+    gfxFontUtils::GetPrefsFontList(kFontSystemWhitelistPref, list);
+    uint32_t numFonts = list.Length();
+    mFontFamilyWhitelistActive = (numFonts > 0);
+    if (!mFontFamilyWhitelistActive) {
+        return;
+    }
+    nsTHashtable<nsStringHashKey> familyNamesWhitelist;
+    for (uint32_t i = 0; i < numFonts; i++) {
+        nsString key;
+        ToLowerCase(list[i], key);
+        familyNamesWhitelist.PutEntry(key);
+    }
+    for (auto iter = mFontFamilies.Iter(); !iter.Done(); iter.Next()) {
+        // Don't continue if we only have one font left.
+        if (mFontFamilies.Count() == 1) {
+            break;
+        }
+        nsString fontFamilyName(iter.Key());
+        ToLowerCase(fontFamilyName);
+        if (!familyNamesWhitelist.Contains(fontFamilyName)) {
+            iter.Remove();
+        }
+    }
+}
 
 nsresult
 gfxPlatformFontList::InitFontList()
@@ -249,6 +280,12 @@ gfxPlatformFontList::InitFontList()
 
     sPlatformFontList = this;
 
+    nsresult rv = InitFontListForPlatform();
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
+
+    ApplyWhitelist();
     return NS_OK;
 }
 
@@ -1153,6 +1190,21 @@ gfxPlatformFontList::GetDefaultGeneric(eFontPrefLang aLang)
     return eFamily_serif;
 }
 
+
+gfxFontFamily*
+gfxPlatformFontList::GetDefaultFont(const gfxFontStyle* aStyle)
+{
+    gfxFontFamily* family = GetDefaultFontForPlatform(aStyle);
+    if (family) {
+        return family;
+    }
+    // Something has gone wrong and we were unable to retrieve a default font
+    // from the platform. (Likely the whitelist has blocked all potential
+    // default fonts.) As a last resort, we return the first font listed in
+    // mFontFamilies.
+    return mFontFamilies.Iter().Data();
+}
+
 void
 gfxPlatformFontList::GetFontFamilyNames(nsTArray<nsString>& aFontFamilyNames)
 {
@@ -1602,6 +1654,12 @@ gfxPlatformFontList::AddSizeOfIncludingThis(MallocSizeOf aMallocSizeOf,
 {
     aSizes->mFontListSize += aMallocSizeOf(this);
     AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
+}
+
+bool
+gfxPlatformFontList::IsFontFamilyWhitelistActive()
+{
+    return mFontFamilyWhitelistActive;
 }
 
 #undef LOG

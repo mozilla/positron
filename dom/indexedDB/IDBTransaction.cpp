@@ -240,7 +240,7 @@ IDBTransaction::Create(JSContext* aCx, IDBDatabase* aDatabase,
     workerPrivate->AssertIsOnWorkerThread();
 
     transaction->mWorkerHolder = new WorkerHolder(workerPrivate, transaction);
-    MOZ_ALWAYS_TRUE(transaction->mWorkerHolder->HoldWorker(workerPrivate));
+    MOZ_ALWAYS_TRUE(transaction->mWorkerHolder->HoldWorker(workerPrivate, Canceling));
   }
 
   return transaction.forget();
@@ -652,6 +652,12 @@ IDBTransaction::AbortInternal(nsresult aAbortCode,
     if (!isInvalidated) {
       mDatabase->RevertToPreviousState();
     }
+
+    // We do the reversion only for the mObjectStores/mDeletedObjectStores but
+    // not for the mIndexes/mDeletedIndexes of each IDBObjectStore because it's
+    // time-consuming(O(m*n)) and mIndexes/mDeletedIndexes won't be used anymore
+    // in IDBObjectStore::(Create|Delete)Index() and IDBObjectStore::Index() in
+    // which all the executions are returned earlier by !transaction->IsOpen().
 
     const nsTArray<ObjectStoreSpec>& specArray =
       mDatabase->Spec()->objectStores();

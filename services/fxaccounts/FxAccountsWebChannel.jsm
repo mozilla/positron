@@ -333,7 +333,9 @@ this.FxAccountsWebChannelHelpers.prototype = {
     // features (ie, new fields) - forcing the server to track a map of
     // versions to supported field names doesn't buy us much.
     // So we just remove field names we know aren't handled.
-    let newCredentials = {};
+    let newCredentials = {
+      deviceId: null
+    };
     for (let name of Object.keys(credentials)) {
       if (name == "email" || name == "uid" || FxAccountsStorageManagerCanStoreField(name)) {
         newCredentials[name] = credentials[name];
@@ -341,7 +343,8 @@ this.FxAccountsWebChannelHelpers.prototype = {
         log.info("changePassword ignoring unsupported field", name);
       }
     }
-    return this._fxAccounts.updateUserAccountData(newCredentials);
+    return this._fxAccounts.updateUserAccountData(newCredentials)
+      .then(() => this._fxAccounts.updateDeviceRegistration());
   },
 
   /**
@@ -447,9 +450,13 @@ var singleton;
 // things) and allowing multiple channels would cause such notifications to be
 // sent multiple times.
 this.EnsureFxAccountsWebChannel = function() {
+  let contentUri = Services.urlFormatter.formatURLPref("identity.fxaccounts.remote.webchannel.uri");
+  if (singleton && singleton._contentUri !== contentUri) {
+    singleton.tearDown();
+    singleton = null;
+  }
   if (!singleton) {
     try {
-      let contentUri = Services.urlFormatter.formatURLPref("identity.fxaccounts.remote.webchannel.uri");
       if (contentUri) {
         // The FxAccountsWebChannel listens for events and updates
         // the state machine accordingly.

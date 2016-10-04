@@ -4,6 +4,8 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import re
+import pprint
 import voluptuous
 
 
@@ -68,7 +70,7 @@ def validate_schema(schema, obj, msg_prefix):
         msg = [msg_prefix]
         for error in exc.errors:
             msg.append(str(error))
-        raise Exception('\n'.join(msg))
+        raise Exception('\n'.join(msg) + '\n' + pprint.pformat(obj))
 
 
 def get_keyed_by(item, field, item_name, subfield=None):
@@ -77,8 +79,9 @@ def get_keyed_by(item, field, item_name, subfield=None):
     other attribute of the item, perform that lookup.  For example, this supports
 
         chunks:
-            by-item-platform:
+            by-test-platform:
                 macosx-10.11/debug: 13
+                win.*: 6
                 default: 12
 
     The `item_name` parameter is used to generate useful error messages.
@@ -87,7 +90,7 @@ def get_keyed_by(item, field, item_name, subfield=None):
 
         mozharness:
             config:
-                by-item-platform:
+                by-test-platform:
                     default: ...
     """
     value = item[field]
@@ -103,6 +106,13 @@ def get_keyed_by(item, field, item_name, subfield=None):
     values = value[keyed_by]
     if keyed_by.startswith('by-'):
         keyed_by = keyed_by[3:]  # extract just the keyed-by field name
+        if item[keyed_by] in values:
+            return values[item[keyed_by]]
+        for k in values.keys():
+            if re.match(k, item[keyed_by]):
+                return values[k]
+        if 'default' in values:
+            return values['default']
         for k in item[keyed_by], 'default':
             if k in values:
                 return values[k]

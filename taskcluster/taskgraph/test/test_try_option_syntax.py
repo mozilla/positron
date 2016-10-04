@@ -137,7 +137,11 @@ class TestTryOptionSyntax(unittest.TestCase):
     def test_p_expands_ridealongs(self):
         "-p linux,linux64 includes the RIDEALONG_BUILDS"
         tos = TryOptionSyntax('try: -p linux,linux64', empty_graph)
-        ridealongs = list(itertools.chain.from_iterable(RIDEALONG_BUILDS.itervalues()))
+        ridealongs = list(task
+                          for task in itertools.chain.from_iterable(
+                                RIDEALONG_BUILDS.itervalues()
+                          )
+                          if 'android' not in task)  # Don't include android-l10n
         self.assertEqual(sorted(tos.platforms), sorted(['linux', 'linux64'] + ridealongs))
 
     def test_u_none(self):
@@ -224,14 +228,6 @@ class TestTryOptionSyntax(unittest.TestCase):
             {'test': 'gtest', 'platforms': ['linux', 'win32'], 'only_chunks': set('1')},
         ]))
 
-    def test_u_chunks_platform_alias(self):
-        "-u e10s-1[linux] selects the first chunk of every e10s test on linux"
-        tos = TryOptionSyntax('try: -u e10s-1[linux]', graph_with_jobs)
-        self.assertEqual(sorted(tos.unittests), sorted([
-            {'test': t, 'platforms': ['linux'], 'only_chunks': set('1')}
-            for t in unittest_tasks if 'e10s' in t
-        ]))
-
     def test_t_none(self):
         "-t none sets talos=[]"
         tos = TryOptionSyntax('try: -t none', graph_with_jobs)
@@ -258,6 +254,21 @@ class TestTryOptionSyntax(unittest.TestCase):
         "--interactive sets interactive"
         tos = TryOptionSyntax('try: --interactive', empty_graph)
         self.assertEqual(tos.interactive, True)
+
+    def test_all_email(self):
+        "--all-emails sets notifications"
+        tos = TryOptionSyntax('try: --all-emails', empty_graph)
+        self.assertEqual(tos.notifications, 'all')
+
+    def test_fail_email(self):
+        "--failure-emails sets notifications"
+        tos = TryOptionSyntax('try: --failure-emails', empty_graph)
+        self.assertEqual(tos.notifications, 'failure')
+
+    def test_no_email(self):
+        "no email settings don't set notifications"
+        tos = TryOptionSyntax('try:', empty_graph)
+        self.assertEqual(tos.notifications, None)
 
 if __name__ == '__main__':
     main()

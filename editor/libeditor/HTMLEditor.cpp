@@ -42,7 +42,7 @@
 
 #include "nsIContent.h"
 #include "nsIContentIterator.h"
-#include "nsISupportsArray.h"
+#include "nsIMutableArray.h"
 #include "nsContentUtils.h"
 #include "nsIDocumentEncoder.h"
 #include "nsIPresShell.h"
@@ -72,8 +72,8 @@
 #include "mozilla/dom/HTMLBodyElement.h"
 #include "nsTextFragment.h"
 #include "nsContentList.h"
-#include "mozilla/StyleSheetHandle.h"
-#include "mozilla/StyleSheetHandleInlines.h"
+#include "mozilla/StyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 
 namespace mozilla {
 
@@ -953,16 +953,14 @@ HTMLEditor::IsVisBreak(nsINode* aNode)
     return false;
   }
   // Check if there is a later node in block after br
-  nsCOMPtr<nsINode> priorNode = GetPriorHTMLNode(aNode, true);
-  if (priorNode && TextEditUtils::IsBreak(priorNode)) {
-    return true;
-  }
   nsCOMPtr<nsINode> nextNode = GetNextHTMLNode(aNode, true);
   if (nextNode && TextEditUtils::IsBreak(nextNode)) {
     return true;
   }
 
-  // If we are right before block boundary, then br not visible
+  // A single line break before a block boundary is not displayed, so e.g.
+  // foo<p>bar<br></p> and foo<br><p>bar</p> display the same as foo<p>bar</p>.
+  // But if there are multiple <br>s in a row, all but the last are visible.
   if (!nextNode) {
     // This break is trailer in block, it's not visible
     return false;
@@ -970,6 +968,13 @@ HTMLEditor::IsVisBreak(nsINode* aNode)
   if (IsBlockNode(nextNode)) {
     // Break is right before a block, it's not visible
     return false;
+  }
+
+  // If there's an inline node after this one that's not a break, and also a
+  // prior break, this break must be visible.
+  nsCOMPtr<nsINode> priorNode = GetPriorHTMLNode(aNode, true);
+  if (priorNode && TextEditUtils::IsBreak(priorNode)) {
+    return true;
   }
 
   // Sigh.  We have to use expensive whitespace calculation code to
@@ -1487,7 +1492,7 @@ HTMLEditor::InsertElementAtSelection(nsIDOMElement* aElement,
                                      bool aDeleteSelection)
 {
   // Protect the edit rules object from dying
-  nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
+  nsCOMPtr<nsIEditRules> rules(mRules);
 
   nsresult res = NS_ERROR_NOT_INITIALIZED;
 
@@ -1510,7 +1515,7 @@ HTMLEditor::InsertElementAtSelection(nsIDOMElement* aElement,
   bool cancel, handled;
   TextRulesInfo ruleInfo(EditAction::insertElement);
   ruleInfo.insertElement = aElement;
-  res = mRules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+  res = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
   if (cancel || (NS_FAILED(res))) return res;
 
   if (!handled)
@@ -1578,7 +1583,7 @@ HTMLEditor::InsertElementAtSelection(nsIDOMElement* aElement,
       }
     }
   }
-  res = mRules->DidDoAction(selection, &ruleInfo, res);
+  res = rules->DidDoAction(selection, &ruleInfo, res);
   return res;
 }
 
@@ -1952,7 +1957,7 @@ HTMLEditor::MakeOrChangeList(const nsAString& aListType,
   if (!mRules) { return NS_ERROR_NOT_INITIALIZED; }
 
   // Protect the edit rules object from dying
-  nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
+  nsCOMPtr<nsIEditRules> rules(mRules);
 
   bool cancel, handled;
 
@@ -1967,7 +1972,7 @@ HTMLEditor::MakeOrChangeList(const nsAString& aListType,
   ruleInfo.blockType = &aListType;
   ruleInfo.entireList = entireList;
   ruleInfo.bulletType = &aBulletType;
-  res = mRules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+  res = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
   if (cancel || (NS_FAILED(res))) return res;
 
   if (!handled)
@@ -2013,7 +2018,7 @@ HTMLEditor::MakeOrChangeList(const nsAString& aListType,
     }
   }
 
-  res = mRules->DidDoAction(selection, &ruleInfo, res);
+  res = rules->DidDoAction(selection, &ruleInfo, res);
   return res;
 }
 
@@ -2024,7 +2029,7 @@ HTMLEditor::RemoveList(const nsAString& aListType)
   if (!mRules) { return NS_ERROR_NOT_INITIALIZED; }
 
   // Protect the edit rules object from dying
-  nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
+  nsCOMPtr<nsIEditRules> rules(mRules);
 
   bool cancel, handled;
 
@@ -2039,12 +2044,12 @@ HTMLEditor::RemoveList(const nsAString& aListType)
   if (aListType.LowerCaseEqualsLiteral("ol"))
     ruleInfo.bOrdered = true;
   else  ruleInfo.bOrdered = false;
-  res = mRules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+  res = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
   if (cancel || (NS_FAILED(res))) return res;
 
   // no default behavior for this yet.  what would it mean?
 
-  res = mRules->DidDoAction(selection, &ruleInfo, res);
+  res = rules->DidDoAction(selection, &ruleInfo, res);
   return res;
 }
 
@@ -2055,7 +2060,7 @@ HTMLEditor::MakeDefinitionItem(const nsAString& aItemType)
   if (!mRules) { return NS_ERROR_NOT_INITIALIZED; }
 
   // Protect the edit rules object from dying
-  nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
+  nsCOMPtr<nsIEditRules> rules(mRules);
 
   bool cancel, handled;
 
@@ -2068,7 +2073,7 @@ HTMLEditor::MakeDefinitionItem(const nsAString& aItemType)
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
   TextRulesInfo ruleInfo(EditAction::makeDefListItem);
   ruleInfo.blockType = &aItemType;
-  res = mRules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+  res = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
   if (cancel || (NS_FAILED(res))) return res;
 
   if (!handled)
@@ -2076,7 +2081,7 @@ HTMLEditor::MakeDefinitionItem(const nsAString& aItemType)
     // todo: no default for now.  we count on rules to handle it.
   }
 
-  res = mRules->DidDoAction(selection, &ruleInfo, res);
+  res = rules->DidDoAction(selection, &ruleInfo, res);
   return res;
 }
 
@@ -2087,7 +2092,7 @@ HTMLEditor::InsertBasicBlock(const nsAString& aBlockType)
   if (!mRules) { return NS_ERROR_NOT_INITIALIZED; }
 
   // Protect the edit rules object from dying
-  nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
+  nsCOMPtr<nsIEditRules> rules(mRules);
 
   bool cancel, handled;
 
@@ -2100,7 +2105,7 @@ HTMLEditor::InsertBasicBlock(const nsAString& aBlockType)
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
   TextRulesInfo ruleInfo(EditAction::makeBasicBlock);
   ruleInfo.blockType = &aBlockType;
-  res = mRules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+  res = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
   if (cancel || (NS_FAILED(res))) return res;
 
   if (!handled)
@@ -2146,7 +2151,7 @@ HTMLEditor::InsertBasicBlock(const nsAString& aBlockType)
     }
   }
 
-  res = mRules->DidDoAction(selection, &ruleInfo, res);
+  res = rules->DidDoAction(selection, &ruleInfo, res);
   return res;
 }
 
@@ -2157,7 +2162,7 @@ HTMLEditor::Indent(const nsAString& aIndent)
   if (!mRules) { return NS_ERROR_NOT_INITIALIZED; }
 
   // Protect the edit rules object from dying
-  nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
+  nsCOMPtr<nsIEditRules> rules(mRules);
 
   bool cancel, handled;
   EditAction opID = EditAction::indent;
@@ -2173,7 +2178,7 @@ HTMLEditor::Indent(const nsAString& aIndent)
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
 
   TextRulesInfo ruleInfo(opID);
-  res = mRules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+  res = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
   if (cancel || (NS_FAILED(res))) return res;
 
   if (!handled)
@@ -2225,7 +2230,7 @@ HTMLEditor::Indent(const nsAString& aIndent)
       }
     }
   }
-  res = mRules->DidDoAction(selection, &ruleInfo, res);
+  res = rules->DidDoAction(selection, &ruleInfo, res);
   return res;
 }
 
@@ -2235,12 +2240,11 @@ NS_IMETHODIMP
 HTMLEditor::Align(const nsAString& aAlignType)
 {
   // Protect the edit rules object from dying
-  nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
+  nsCOMPtr<nsIEditRules> rules(mRules);
 
   AutoEditBatch beginBatching(this);
   AutoRules beginRulesSniffing(this, EditAction::align, nsIEditor::eNext);
 
-  nsCOMPtr<nsIDOMNode> node;
   bool cancel, handled;
 
   // Find out if the selection is collapsed:
@@ -2248,11 +2252,11 @@ HTMLEditor::Align(const nsAString& aAlignType)
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
   TextRulesInfo ruleInfo(EditAction::align);
   ruleInfo.alignType = &aAlignType;
-  nsresult res = mRules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+  nsresult res = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
   if (cancel || NS_FAILED(res))
     return res;
 
-  res = mRules->DidDoAction(selection, &ruleInfo, res);
+  res = rules->DidDoAction(selection, &ruleInfo, res);
   return res;
 }
 
@@ -2765,21 +2769,20 @@ HTMLEditor::SetBodyAttribute(const nsAString& aAttribute,
 }
 
 NS_IMETHODIMP
-HTMLEditor::GetLinkedObjects(nsISupportsArray** aNodeList)
+HTMLEditor::GetLinkedObjects(nsIArray** aNodeList)
 {
   NS_ENSURE_TRUE(aNodeList, NS_ERROR_NULL_POINTER);
 
-  nsresult res;
-
-  res = NS_NewISupportsArray(aNodeList);
-  NS_ENSURE_SUCCESS(res, res);
-  NS_ENSURE_TRUE(*aNodeList, NS_ERROR_NULL_POINTER);
+  nsresult rv;
+  nsCOMPtr<nsIMutableArray> nodes = do_CreateInstance(NS_ARRAY_CONTRACTID, &rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   nsCOMPtr<nsIContentIterator> iter =
-       do_CreateInstance("@mozilla.org/content/post-content-iterator;1", &res);
+    do_CreateInstance("@mozilla.org/content/post-content-iterator;1", &rv);
   NS_ENSURE_TRUE(iter, NS_ERROR_NULL_POINTER);
-  if ((NS_SUCCEEDED(res)))
-  {
+  if (NS_SUCCEEDED(rv)) {
     nsCOMPtr<nsIDocument> doc = GetDocument();
     NS_ENSURE_TRUE(doc, NS_ERROR_UNEXPECTED);
 
@@ -2793,18 +2796,16 @@ HTMLEditor::GetLinkedObjects(nsISupportsArray** aNodeList)
       {
         // Let nsURIRefObject make the hard decisions:
         nsCOMPtr<nsIURIRefObject> refObject;
-        res = NS_NewHTMLURIRefObject(getter_AddRefs(refObject), node);
-        if (NS_SUCCEEDED(res))
-        {
-          nsCOMPtr<nsISupports> isupp (do_QueryInterface(refObject));
-
-          (*aNodeList)->AppendElement(isupp);
+        rv = NS_NewHTMLURIRefObject(getter_AddRefs(refObject), node);
+        if (NS_SUCCEEDED(rv)) {
+          nodes->AppendElement(refObject, false);
         }
       }
       iter->Next();
     }
   }
 
+  nodes.forget(aNodeList);
   return NS_OK;
 }
 
@@ -2853,7 +2854,7 @@ HTMLEditor::ReplaceStyleSheet(const nsAString& aURL)
 NS_IMETHODIMP
 HTMLEditor::RemoveStyleSheet(const nsAString& aURL)
 {
-  StyleSheetHandle::RefPtr sheet = GetStyleSheetForURL(aURL);
+  RefPtr<StyleSheet> sheet = GetStyleSheetForURL(aURL);
   NS_ENSURE_TRUE(sheet, NS_ERROR_UNEXPECTED);
 
   RefPtr<RemoveStyleSheetTransaction> transaction;
@@ -2893,7 +2894,7 @@ HTMLEditor::AddOverrideStyleSheet(const nsAString& aURL)
   // We MUST ONLY load synchronous local files (no @import)
   // XXXbz Except this will actually try to load remote files
   // synchronously, of course..
-  StyleSheetHandle::RefPtr sheet;
+  RefPtr<StyleSheet> sheet;
   // Editor override style sheets may want to style Gecko anonymous boxes
   rv = ps->GetDocument()->CSSLoader()->
     LoadSheetSync(uaURI, mozilla::css::eAgentSheetFeatures, true,
@@ -2938,7 +2939,7 @@ HTMLEditor::ReplaceOverrideStyleSheet(const nsAString& aURL)
 NS_IMETHODIMP
 HTMLEditor::RemoveOverrideStyleSheet(const nsAString& aURL)
 {
-  StyleSheetHandle::RefPtr sheet = GetStyleSheetForURL(aURL);
+  RefPtr<StyleSheet> sheet = GetStyleSheetForURL(aURL);
 
   // Make sure we remove the stylesheet from our internal list in all
   // cases.
@@ -2961,7 +2962,7 @@ NS_IMETHODIMP
 HTMLEditor::EnableStyleSheet(const nsAString& aURL,
                              bool aEnable)
 {
-  StyleSheetHandle::RefPtr sheet = GetStyleSheetForURL(aURL);
+  RefPtr<StyleSheet> sheet = GetStyleSheetForURL(aURL);
   NS_ENSURE_TRUE(sheet, NS_OK); // Don't fail if sheet not found
 
   // Ensure the style sheet is owned by our document.
@@ -2979,7 +2980,7 @@ HTMLEditor::EnableStyleSheet(const nsAString& aURL,
 bool
 HTMLEditor::EnableExistingStyleSheet(const nsAString& aURL)
 {
-  StyleSheetHandle::RefPtr sheet = GetStyleSheetForURL(aURL);
+  RefPtr<StyleSheet> sheet = GetStyleSheetForURL(aURL);
 
   // Enable sheet if already loaded.
   if (sheet)
@@ -3001,7 +3002,7 @@ HTMLEditor::EnableExistingStyleSheet(const nsAString& aURL)
 
 nsresult
 HTMLEditor::AddNewStyleSheetToList(const nsAString& aURL,
-                                   StyleSheetHandle aStyleSheet)
+                                   StyleSheet* aStyleSheet)
 {
   uint32_t countSS = mStyleSheets.Length();
   uint32_t countU = mStyleSheetURLs.Length();
@@ -3031,7 +3032,7 @@ HTMLEditor::RemoveStyleSheetFromList(const nsAString& aURL)
   return NS_OK;
 }
 
-StyleSheetHandle
+StyleSheet*
 HTMLEditor::GetStyleSheetForURL(const nsAString& aURL)
 {
   // is it already in the list?
@@ -3046,7 +3047,7 @@ HTMLEditor::GetStyleSheetForURL(const nsAString& aURL)
 }
 
 void
-HTMLEditor::GetURLForStyleSheet(StyleSheetHandle aStyleSheet,
+HTMLEditor::GetURLForStyleSheet(StyleSheet* aStyleSheet,
                                 nsAString& aURL)
 {
   // is it already in the list?
@@ -3061,13 +3062,13 @@ HTMLEditor::GetURLForStyleSheet(StyleSheetHandle aStyleSheet,
 }
 
 NS_IMETHODIMP
-HTMLEditor::GetEmbeddedObjects(nsISupportsArray** aNodeList)
+HTMLEditor::GetEmbeddedObjects(nsIArray** aNodeList)
 {
   NS_ENSURE_TRUE(aNodeList, NS_ERROR_NULL_POINTER);
 
-  nsresult rv = NS_NewISupportsArray(aNodeList);
+  nsresult rv;
+  nsCOMPtr<nsIMutableArray> nodes = do_CreateInstance(NS_ARRAY_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
-  NS_ENSURE_TRUE(*aNodeList, NS_ERROR_NULL_POINTER);
 
   nsCOMPtr<nsIContentIterator> iter =
       do_CreateInstance("@mozilla.org/content/post-content-iterator;1", &rv);
@@ -3092,12 +3093,13 @@ HTMLEditor::GetEmbeddedObjects(nsISupportsArray** aNodeList)
           (element->IsHTMLElement(nsGkAtoms::body) &&
            element->HasAttr(kNameSpaceID_None, nsGkAtoms::background))) {
         nsCOMPtr<nsIDOMNode> domNode = do_QueryInterface(node);
-        (*aNodeList)->AppendElement(domNode);
-      }
-    }
-    iter->Next();
-  }
+        nodes->AppendElement(domNode, false);
+       }
+     }
+     iter->Next();
+   }
 
+  nodes.forget(aNodeList);
   return rv;
 }
 
@@ -3247,8 +3249,8 @@ HTMLEditor::DoContentInserted(nsIDocument* aDocument,
       return;
     }
     // Protect the edit rules object from dying
-    nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
-    mRules->DocumentModified();
+    nsCOMPtr<nsIEditRules> rules(mRules);
+    rules->DocumentModified();
 
     // Update spellcheck for only the newly-inserted node (bug 743819)
     if (mInlineSpellChecker) {
@@ -3291,8 +3293,8 @@ HTMLEditor::ContentRemoved(nsIDocument* aDocument,
       return;
     }
     // Protect the edit rules object from dying
-    nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
-    mRules->DocumentModified();
+    nsCOMPtr<nsIEditRules> rules(mRules);
+    rules->DocumentModified();
   }
 }
 
@@ -3424,7 +3426,7 @@ HTMLEditor::DebugUnitTests(int32_t* outNumTests,
 }
 
 NS_IMETHODIMP
-HTMLEditor::StyleSheetLoaded(StyleSheetHandle aSheet,
+HTMLEditor::StyleSheetLoaded(StyleSheet* aSheet,
                              bool aWasAlternate,
                              nsresult aStatus)
 {
@@ -3468,10 +3470,12 @@ HTMLEditor::StartOperation(EditAction opID,
                            nsIEditor::EDirection aDirection)
 {
   // Protect the edit rules object from dying
-  nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
+  nsCOMPtr<nsIEditRules> rules(mRules);
 
   EditorBase::StartOperation(opID, aDirection);  // will set mAction, mDirection
-  if (mRules) return mRules->BeforeEdit(mAction, mDirection);
+  if (rules) {
+    return rules->BeforeEdit(mAction, mDirection);
+  }
   return NS_OK;
 }
 
@@ -3483,11 +3487,13 @@ NS_IMETHODIMP
 HTMLEditor::EndOperation()
 {
   // Protect the edit rules object from dying
-  nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
+  nsCOMPtr<nsIEditRules> rules(mRules);
 
   // post processing
   nsresult res = NS_OK;
-  if (mRules) res = mRules->AfterEdit(mAction, mDirection);
+  if (rules) {
+    res = rules->AfterEdit(mAction, mDirection);
+  }
   EditorBase::EndOperation();  // will clear mAction, mDirection
   return res;
 }
@@ -3544,14 +3550,14 @@ HTMLEditor::SelectEntireDocument(Selection* aSelection)
   if (!aSelection || !mRules) { return NS_ERROR_NULL_POINTER; }
 
   // Protect the edit rules object from dying
-  nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
+  nsCOMPtr<nsIEditRules> rules(mRules);
 
   // get editor root node
   nsCOMPtr<nsIDOMElement> rootElement = do_QueryInterface(GetRoot());
 
   // is doc empty?
   bool bDocIsEmpty;
-  nsresult res = mRules->DocumentIsEmpty(&bDocIsEmpty);
+  nsresult res = rules->DocumentIsEmpty(&bDocIsEmpty);
   NS_ENSURE_SUCCESS(res, res);
 
   if (bDocIsEmpty)
@@ -4554,7 +4560,7 @@ HTMLEditor::SetCSSBackgroundColor(const nsAString& aColor)
   ForceCompositionEnd();
 
   // Protect the edit rules object from dying
-  nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
+  nsCOMPtr<nsIEditRules> rules(mRules);
 
   RefPtr<Selection> selection = GetSelection();
   NS_ENSURE_STATE(selection);
@@ -4569,7 +4575,7 @@ HTMLEditor::SetCSSBackgroundColor(const nsAString& aColor)
 
   bool cancel, handled;
   TextRulesInfo ruleInfo(EditAction::setTextProperty);
-  nsresult res = mRules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+  nsresult res = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
   NS_ENSURE_SUCCESS(res, res);
   if (!cancel && !handled) {
     // Loop through the ranges in the selection
@@ -4686,7 +4692,7 @@ HTMLEditor::SetCSSBackgroundColor(const nsAString& aColor)
   }
   if (!cancel) {
     // Post-process
-    res = mRules->DidDoAction(selection, &ruleInfo, res);
+    res = rules->DidDoAction(selection, &ruleInfo, res);
     NS_ENSURE_SUCCESS(res, res);
   }
   return NS_OK;

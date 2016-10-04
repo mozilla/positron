@@ -174,6 +174,7 @@ UNIFIED_SOURCES += [
     'asmjs/WasmStubs.cpp',
     'asmjs/WasmTable.cpp',
     'asmjs/WasmTextToBinary.cpp',
+    'asmjs/WasmTextUtils.cpp',
     'asmjs/WasmTypes.cpp',
     'builtin/AtomicsObject.cpp',
     'builtin/Eval.cpp',
@@ -197,7 +198,6 @@ UNIFIED_SOURCES += [
     'frontend/BytecodeEmitter.cpp',
     'frontend/FoldConstants.cpp',
     'frontend/NameFunctions.cpp',
-    'frontend/ParseMaps.cpp',
     'frontend/ParseNode.cpp',
     'frontend/TokenStream.cpp',
     'gc/Allocator.cpp',
@@ -328,6 +328,7 @@ UNIFIED_SOURCES += [
     'vm/DateTime.cpp',
     'vm/Debugger.cpp',
     'vm/DebuggerMemory.cpp',
+    'vm/EnvironmentObject.cpp',
     'vm/ErrorObject.cpp',
     'vm/ForOfIterator.cpp',
     'vm/GeneratorObject.cpp',
@@ -349,7 +350,7 @@ UNIFIED_SOURCES += [
     'vm/RegExpStatics.cpp',
     'vm/Runtime.cpp',
     'vm/SavedStacks.cpp',
-    'vm/ScopeObject.cpp',
+    'vm/Scope.cpp',
     'vm/SelfHosting.cpp',
     'vm/Shape.cpp',
     'vm/SharedArrayObject.cpp',
@@ -482,6 +483,9 @@ elif CONFIG['JS_CODEGEN_ARM']:
         UNIFIED_SOURCES += [
             'jit/arm/Simulator-arm.cpp'
         ]
+        # Configuration used only for testing.
+        if CONFIG['OS_ARCH'] == 'Linux' or CONFIG['OS_ARCH'] == 'Darwin':
+            CXXFLAGS += [ '-msse2', '-mfpmath=sse' ]
     elif CONFIG['OS_ARCH'] == 'Darwin':
         SOURCES += [
             'jit/arm/llvm-compiler-rt/arm/aeabi_idivmod.S',
@@ -591,6 +595,7 @@ if CONFIG['JS_HAS_CTYPES']:
     if not CONFIG['MOZ_SYSTEM_FFI']:
         LOCAL_INCLUDES += [
             '!ctypes/libffi/include',
+            'ctypes/libffi/src/%s' % CONFIG['FFI_TARGET_DIR'],
         ]
 
 if CONFIG['MOZ_VTUNE']:
@@ -602,21 +607,18 @@ if CONFIG['HAVE_LINUX_PERF_EVENT_H']:
     SOURCES += [
         'perf/pm_linux.cpp'
     ]
-    SOURCES['perf/pm_linux.cpp'].flags += [CONFIG['LINUX_HEADERS_INCLUDES']]
+    if CONFIG['LINUX_HEADERS_INCLUDES']:
+        SOURCES['perf/pm_linux.cpp'].flags += [CONFIG['LINUX_HEADERS_INCLUDES']]
 else:
     SOURCES += [
         'perf/pm_stub.cpp'
     ]
 
-HostSimplePrograms([
-    'host_jskwgen',
-])
-
 GENERATED_FILES += ['jsautokw.h']
 jsautokw = GENERATED_FILES['jsautokw.h']
 jsautokw.script = 'jsautokw.py'
 jsautokw.inputs += [
-    '!host_jskwgen%s' % CONFIG['HOST_BIN_SUFFIX'],
+    'vm/Keywords.h'
 ]
 
 # JavaScript must be built shared, even for static builds, as it is used by
@@ -636,11 +638,6 @@ else:
 
 FORCE_STATIC_LIB = True
 STATIC_LIBRARY_NAME = 'js_static'
-
-if CONFIG['JS_HAS_CTYPES']:
-    USE_LIBS += [
-        'ffi',
-    ]
 
 if CONFIG['ENABLE_INTL_API']:
     if not CONFIG['MOZ_ICU_DATA_ARCHIVE']:
@@ -739,8 +736,8 @@ NO_EXPAND_LIBS = True
 DIST_INSTALL = True
 
 # Prepare self-hosted JS code for embedding
-GENERATED_FILES += ['selfhosted.out.h']
-selfhosted = GENERATED_FILES['selfhosted.out.h']
+GENERATED_FILES += [('selfhosted.out.h', 'selfhosted.js')]
+selfhosted = GENERATED_FILES[('selfhosted.out.h', 'selfhosted.js')]
 selfhosted.script = 'builtin/embedjs.py:generate_selfhosted'
 selfhosted.inputs = [
     'js.msg',

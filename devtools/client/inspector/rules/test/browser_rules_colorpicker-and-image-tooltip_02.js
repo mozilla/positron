@@ -32,9 +32,9 @@ function* testColorChangeIsntRevertedWhenOtherTooltipIsShown(ruleView) {
 
   info("Open the color picker tooltip and change the color");
   let picker = ruleView.tooltips.colorPicker;
-  let onShown = picker.tooltip.once("shown");
+  let onColorPickerReady = picker.once("ready");
   swatch.click();
-  yield onShown;
+  yield onColorPickerReady;
 
   yield simulateColorPickerChange(ruleView, picker, [0, 0, 0, 1], {
     selector: "body",
@@ -46,14 +46,14 @@ function* testColorChangeIsntRevertedWhenOtherTooltipIsShown(ruleView) {
 
   let onModifications = waitForNEvents(ruleView, "ruleview-changed", 2);
   let onHidden = picker.tooltip.once("hidden");
-  EventUtils.sendKey("RETURN", spectrum.element.ownerDocument.defaultView);
+  focusAndSendKey(spectrum.element.ownerDocument.defaultView, "RETURN");
   yield onHidden;
   yield onModifications;
 
   info("Open the image preview tooltip");
   let value = getRuleViewProperty(ruleView, "body", "background").valueSpan;
   let url = value.querySelector(".theme-link");
-  onShown = ruleView.tooltips.previewTooltip.once("shown");
+  let onShown = ruleView.tooltips.previewTooltip.once("shown");
   let anchor = yield isHoverTooltipTarget(ruleView.tooltips.previewTooltip, url);
   ruleView.tooltips.previewTooltip.show(anchor);
   yield onShown;

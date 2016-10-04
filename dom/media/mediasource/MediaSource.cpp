@@ -10,6 +10,7 @@
 #include "DecoderTraits.h"
 #include "Benchmark.h"
 #include "DecoderDoctorDiagnostics.h"
+#include "MediaResult.h"
 #include "MediaSourceUtils.h"
 #include "SourceBuffer.h"
 #include "SourceBufferList.h"
@@ -29,8 +30,8 @@
 #include "nsThreadUtils.h"
 #include "mozilla/Logging.h"
 #include "nsServiceManagerUtils.h"
-#include "gfxPlatform.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/gfx/gfxVars.h"
+#include "mozilla/Sprintf.h"
 
 struct JSContext;
 class JSObject;
@@ -77,7 +78,7 @@ IsWebMForced(DecoderDoctorDiagnostics* aDiagnostics)
   bool mp4supported =
     DecoderTraits::IsMP4TypeAndEnabled(NS_LITERAL_CSTRING("video/mp4"),
                                        aDiagnostics);
-  bool hwsupported = gfxPlatform::GetPlatform()->CanUseHardwareVideoDecoding();
+  bool hwsupported = gfx::gfxVars::CanUseHardwareVideoDecoding();
   return !mp4supported || !hwsupported || VP9Benchmark::IsVP9DecodeFast();
 }
 
@@ -330,11 +331,22 @@ MediaSource::EndOfStream(const Optional<MediaSourceEndOfStreamError>& aError, Er
     mDecoder->NetworkError();
     break;
   case MediaSourceEndOfStreamError::Decode:
-    mDecoder->DecodeError();
+    mDecoder->DecodeError(NS_ERROR_DOM_MEDIA_FATAL_ERR);
     break;
   default:
     aRv.Throw(NS_ERROR_DOM_TYPE_ERR);
   }
+}
+
+void
+MediaSource::EndOfStream(const MediaResult& aError)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MSE_API("EndOfStream(aError=%d)", aError.Code());
+
+  SetReadyState(MediaSourceReadyState::Ended);
+  mSourceBuffers->Ended();
+  mDecoder->DecodeError(aError);
 }
 
 /* static */ bool
@@ -536,16 +548,13 @@ MediaSource::DurationChange(double aNewDuration, ErrorResult& aRv)
     return;
   }
 
-  // 3. Update duration to new duration.
-  // 4. If a user agent is unable to partially render audio frames or text cues
-  // that start before and end after the duration, then run the following steps:
-  // Update new duration to the highest end time reported by the buffered
-  // attribute across all SourceBuffer objects in sourceBuffers.
-  //   1. Update new duration to the highest end time reported by the buffered
-  //      attribute across all SourceBuffer objects in sourceBuffers.
-  //   2. Update duration to new duration.
+  // 3. Let highest end time be the largest track buffer ranges end time across
+  // all the track buffers across all SourceBuffer objects in sourceBuffers.
+  double highestEndTime = mSourceBuffers->HighestEndTime();
+  // 4. If new duration is less than highest end time, then
+  //    4.1 Update new duration to equal highest end time.
   aNewDuration =
-    std::max(aNewDuration, mSourceBuffers->GetHighestBufferedEndTime());
+    std::max(aNewDuration, highestEndTime);
 
   // 5. Update the media duration to new duration and run the HTMLMediaElement
   // duration change algorithm.

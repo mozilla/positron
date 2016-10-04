@@ -412,7 +412,8 @@ static const js::ClassOps FileObjectClassOps = {
 
 const js::Class FileObject::class_ = {
     "File",
-    JSCLASS_HAS_RESERVED_SLOTS(FileObject::NUM_SLOTS),
+    JSCLASS_HAS_RESERVED_SLOTS(FileObject::NUM_SLOTS) |
+    JSCLASS_FOREGROUND_FINALIZE,
     &FileObjectClassOps
 };
 
@@ -603,7 +604,7 @@ ospath_join(JSContext* cx, unsigned argc, Value* vp)
 
     for (unsigned i = 0; i < args.length(); i++) {
         if (!args[i].isString()) {
-            JS_ReportError(cx, "join expects string arguments only");
+            JS_ReportErrorASCII(cx, "join expects string arguments only");
             return false;
         }
 
@@ -647,7 +648,7 @@ os_getenv(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     if (args.length() < 1) {
-        JS_ReportError(cx, "os.getenv requires 1 argument");
+        JS_ReportErrorASCII(cx, "os.getenv requires 1 argument");
         return false;
     }
     RootedString key(cx, ToString(cx, args[0]));
@@ -673,7 +674,7 @@ os_getpid(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     if (args.length() != 0) {
-        JS_ReportError(cx, "os.getpid takes no arguments");
+        JS_ReportErrorASCII(cx, "os.getpid takes no arguments");
         return false;
     }
     args.rval().setInt32(getpid());
@@ -734,7 +735,7 @@ os_system(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     if (args.length() == 0) {
-        JS_ReportError(cx, "os.system requires 1 argument");
+        JS_ReportErrorASCII(cx, "os.system requires 1 argument");
         return false;
     }
 
@@ -763,7 +764,7 @@ os_spawn(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     if (args.length() == 0) {
-        JS_ReportError(cx, "os.spawn requires 1 argument");
+        JS_ReportErrorASCII(cx, "os.spawn requires 1 argument");
         return false;
     }
 
@@ -801,7 +802,7 @@ os_kill(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
     int32_t pid;
     if (args.length() < 1) {
-        JS_ReportError(cx, "os.kill requires 1 argument");
+        JS_ReportErrorASCII(cx, "os.kill requires 1 argument");
         return false;
     }
     if (!JS::ToInt32(cx, args[0], &pid))
@@ -809,7 +810,7 @@ os_kill(JSContext* cx, unsigned argc, Value* vp)
 
     // It is too easy to kill yourself accidentally with os.kill("goose").
     if (pid == 0 && !args[0].isInt32()) {
-        JS_ReportError(cx, "os.kill requires numeric pid");
+        JS_ReportErrorASCII(cx, "os.kill requires numeric pid");
         return false;
     }
 

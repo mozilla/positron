@@ -221,8 +221,11 @@ _ContextualIdentityService.prototype = {
                        FileUtils.MODE_RDONLY, FileUtils.PERMS_FILE, 0);
       try {
         let json = Cc["@mozilla.org/dom/json;1"].createInstance(Ci.nsIJSON);
-        this._identities = json.decodeFromStream(inputStream,
-                                                 inputStream.available());
+        let data = json.decodeFromStream(inputStream,
+                                         inputStream.available());
+        this._identities = data.identities;
+        this._lastUserContextId = data.lastUserContextId;
+
         this._dataReady = true;
       } finally {
         inputStream.close();
@@ -282,6 +285,37 @@ _ContextualIdentityService.prototype = {
     tab.style.backgroundRepeat = "no-repeat";
   },
 
+  countContainerTabs() {
+    let count = 0;
+    this._forEachContainerTab(function() { ++count; });
+    return count;
+  },
+
+  closeAllContainerTabs() {
+    this._forEachContainerTab(function(tab, tabbrowser) {
+      tabbrowser.removeTab(tab);
+    });
+  },
+
+  _forEachContainerTab(callback) {
+    let windowList = Services.wm.getEnumerator("navigator:browser");
+    while (windowList.hasMoreElements()) {
+      let win = windowList.getNext();
+
+      if (win.closed || !win.gBrowser) {
+	continue;
+      }
+
+      let tabbrowser = win.gBrowser;
+      for (let i = tabbrowser.tabContainer.childNodes.length - 1; i >= 0; --i) {
+        let tab = tabbrowser.tabContainer.childNodes[i];
+	if (tab.hasAttribute("usercontextid")) {
+	  callback(tab, tabbrowser);
+	}
+      }
+    }
+  },
+
   telemetry(userContextId) {
     let identity = this.getIdentityFromId(userContextId);
 
@@ -290,7 +324,7 @@ _ContextualIdentityService.prototype = {
       return;
     }
 
-    if (this._openedIdentities.has(userContextId)) {
+    if (!this._openedIdentities.has(userContextId)) {
       this._openedIdentities.add(userContextId);
       Services.telemetry.getHistogramById("UNIQUE_CONTAINERS_OPENED").add(1);
     }

@@ -213,8 +213,7 @@ template <size_t Size>
 static bool
 GetStatusFileContents(nsIFile *statusFile, char (&buf)[Size])
 {
-  // The buffer needs to be large enough to hold the known status codes
-  PR_STATIC_ASSERT(Size > 16);
+  static_assert(Size > 16, "Buffer needs to be large enough to hold the known status codes");
 
   PRFileDesc *fd = nullptr;
   nsresult rv = statusFile->OpenNSPRFileDesc(PR_RDONLY, 0660, &fd);
@@ -448,7 +447,11 @@ SwitchToUpdatedApp(nsIFile *greDir, nsIFile *updateDir,
   // in MozUpdater in case a previous attempt locked the directory or files.
   mozUpdaterDir->Append(NS_LITERAL_STRING("MozUpdater"));
   mozUpdaterDir->Append(NS_LITERAL_STRING("bgupdate"));
-  mozUpdaterDir->CreateUnique(nsIFile::DIRECTORY_TYPE, 0755);
+  rv = mozUpdaterDir->CreateUnique(nsIFile::DIRECTORY_TYPE, 0755);
+  if (NS_FAILED(rv)) {
+    LOG(("failed creating unique dir\n"));
+    return;
+  }
 
   nsCOMPtr<nsIFile> updater;
   if (!CopyUpdaterIntoUpdateDir(greDir, appDir, mozUpdaterDir, updater)) {
@@ -636,9 +639,6 @@ SwitchToUpdatedApp(nsIFile *greDir, nsIFile *updateDir,
   _exit(0);
 #elif defined(XP_MACOSX)
   CommandLineServiceMac::SetupMacCommandLine(argc, argv, true);
-  // LaunchChildMac uses posix_spawnp and prefers the current
-  // architecture when launching. It doesn't require a
-  // null-terminated string but it doesn't matter if we pass one.
   LaunchChildMac(argc, argv);
   exit(0);
 #else
@@ -961,16 +961,17 @@ ApplyUpdate(nsIFile *greDir, nsIFile *updateDir, nsIFile *statusFile,
   // occur when an admin user installs the application, but another admin
   // user attempts to update (see bug 394984).
   if (restart && !IsRecursivelyWritable(installDirPath.get())) {
-    if (!LaunchElevatedUpdate(argc, argv, 0, outpid)) {
+    if (!LaunchElevatedUpdate(argc, argv, outpid)) {
       LOG(("Failed to launch elevated update!"));
       exit(1);
     }
     exit(0);
   } else {
-    LaunchChildMac(argc, argv, 0, outpid);
     if (restart) {
+      LaunchChildMac(argc, argv);
       exit(0);
     }
+    LaunchChildMac(argc, argv, outpid);
   }
 #else
   *outpid = PR_CreateProcess(updaterPath.get(), argv, nullptr, nullptr);
@@ -992,15 +993,28 @@ ProcessHasTerminated(ProcessType pt)
   }
   CloseHandle(pt);
   return true;
+#elif defined(XP_MACOSX)
+  // We're waiting for the process to terminate in LaunchChildMac.
+  return true;
 #elif defined(XP_UNIX)
   int exitStatus;
-  bool exited = waitpid(pt, &exitStatus, WNOHANG) > 0;
-  if (!exited) {
+  pid_t exited = waitpid(pt, &exitStatus, WNOHANG);
+  if (exited == 0) {
+    // Process is still running.
     sleep(1);
-  } else if (WIFEXITED(exitStatus) && (WEXITSTATUS(exitStatus) != 0)) {
+    return false;
+  }
+  if (exited == -1) {
+    LOG(("Error while checking if the updater process is finished"));
+    // This shouldn't happen, but if it does, the updater process is lost to us,
+    // so the best we can do is pretend that it's exited.
+    return true;
+  }
+  // If we get here, the process has exited; make sure it exited normally.
+  if (WIFEXITED(exitStatus) && (WEXITSTATUS(exitStatus) != 0)) {
     LOG(("Error while running the updater process, check update.log"));
   }
-  return exited;
+  return true;
 #else
   // No way to have a non-blocking implementation on these platforms,
   // because we're using NSPR and it only provides a blocking wait.

@@ -1,12 +1,13 @@
 #include "Utils.h"
 #include "Types.h"
 
+#include <android/log.h>
 #include <pthread.h>
 
 #include "mozilla/Assertions.h"
 
-#include "AndroidBridge.h"
 #include "GeneratedJNIWrappers.h"
+#include "nsAppShell.h"
 
 #ifdef MOZ_CRASHREPORTER
 #include "nsExceptionHandler.h"
@@ -69,6 +70,10 @@ namespace {
 
 JavaVM* sJavaVM;
 pthread_key_t sThreadEnvKey;
+jclass sOOMErrorClass;
+jobject sClassLoader;
+jmethodID sClassLoaderLoadClass;
+bool sIsFennec;
 
 void UnregisterThreadEnv(void* env)
 {
@@ -100,6 +105,21 @@ void SetGeckoThreadEnv(JNIEnv* aEnv)
 
     MOZ_ALWAYS_TRUE(!aEnv->GetJavaVM(&sJavaVM));
     MOZ_ASSERT(sJavaVM);
+
+    sOOMErrorClass = Class::GlobalRef(Class::LocalRef::Adopt(
+            aEnv->FindClass("java/lang/OutOfMemoryError"))).Forget();
+    aEnv->ExceptionClear();
+
+    sClassLoader = Object::GlobalRef(java::GeckoThread::ClsLoader()).Forget();
+    sClassLoaderLoadClass = aEnv->GetMethodID(
+            Class::LocalRef::Adopt(aEnv->GetObjectClass(sClassLoader)).Get(),
+            "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+    MOZ_ASSERT(sClassLoader && sClassLoaderLoadClass);
+
+    auto geckoAppClass = Class::LocalRef::Adopt(
+            aEnv->FindClass("org/mozilla/gecko/GeckoApp"));
+    aEnv->ExceptionClear();
+    sIsFennec = !!geckoAppClass;
 }
 
 JNIEnv* GetEnvForThread()
@@ -143,26 +163,45 @@ bool HandleUncaughtException(JNIEnv* aEnv)
         return false;
     }
 
-#ifdef DEBUG
+#ifdef MOZ_CHECK_JNI
     aEnv->ExceptionDescribe();
 #endif
 
     Throwable::LocalRef e =
-            Throwable::LocalRef::Adopt(aEnv->ExceptionOccurred());
+            Throwable::LocalRef::Adopt(aEnv, aEnv->ExceptionOccurred());
     MOZ_ASSERT(e);
+    aEnv->ExceptionClear();
+
+    String::LocalRef stack = java::GeckoAppShell::GetExceptionStackTrace(e);
+    if (stack && ReportException(aEnv, e.Get(), stack.Get())) {
+        return true;
+    }
 
     aEnv->ExceptionClear();
-    String::LocalRef stack = java::GeckoAppShell::HandleUncaughtException(e);
+    java::GeckoAppShell::HandleUncaughtException(e);
 
-#ifdef MOZ_CRASHREPORTER
-    if (stack) {
-        // GeckoAppShell wants us to annotate and trigger the crash reporter.
-        CrashReporter::AnnotateCrashReport(
-                NS_LITERAL_CSTRING("AuxiliaryJavaStack"), stack->ToCString());
+    if (NS_WARN_IF(aEnv->ExceptionCheck())) {
+        aEnv->ExceptionDescribe();
+        aEnv->ExceptionClear();
     }
-#endif // MOZ_CRASHREPORTER
 
     return true;
+}
+
+bool ReportException(JNIEnv* aEnv, jthrowable aExc, jstring aStack)
+{
+    bool result = true;
+
+#ifdef MOZ_CRASHREPORTER
+    result &= NS_SUCCEEDED(CrashReporter::AnnotateCrashReport(
+            NS_LITERAL_CSTRING("JavaStackTrace"),
+            String::Ref::From(aStack)->ToCString()));
+#endif // MOZ_CRASHREPORTER
+
+    if (sOOMErrorClass && aEnv->IsInstanceOf(aExc, sOOMErrorClass)) {
+        NS_ABORT_OOM(0); // Unknown OOM size
+    }
+    return result;
 }
 
 namespace {
@@ -172,11 +211,11 @@ jfieldID sJNIObjectHandleField;
 
 bool EnsureJNIObject(JNIEnv* env, jobject instance) {
     if (!sJNIObjectClass) {
-        sJNIObjectClass = AndroidBridge::GetClassGlobalRef(
-                env, "org/mozilla/gecko/mozglue/JNIObject");
+        sJNIObjectClass = Class::GlobalRef(Class::LocalRef::Adopt(GetClassRef(
+                env, "org/mozilla/gecko/mozglue/JNIObject"))).Forget();
 
-        sJNIObjectHandleField = AndroidBridge::GetFieldID(
-                env, sJNIObjectClass, "mHandle", "J");
+        sJNIObjectHandleField = env->GetFieldID(
+                sJNIObjectClass, "mHandle", "J");
     }
 
     MOZ_ASSERT(env->IsInstanceOf(instance, sJNIObjectClass));
@@ -205,9 +244,57 @@ void SetNativeHandle(JNIEnv* env, jobject instance, uintptr_t handle)
                       static_cast<jlong>(handle));
 }
 
-jclass GetClassGlobalRef(JNIEnv* aEnv, const char* aClassName)
+jclass GetClassRef(JNIEnv* aEnv, const char* aClassName)
 {
-    return AndroidBridge::GetClassGlobalRef(aEnv, aClassName);
+    // First try the default class loader.
+    auto classRef = Class::LocalRef::Adopt(aEnv, aEnv->FindClass(aClassName));
+
+    if (!classRef && sClassLoader) {
+        // If the default class loader failed but we have an app class loader, try that.
+        // Clear the pending exception from failed FindClass call above.
+        aEnv->ExceptionClear();
+        classRef = Class::LocalRef::Adopt(aEnv, jclass(
+                aEnv->CallObjectMethod(sClassLoader, sClassLoaderLoadClass,
+                                       StringParam(aClassName, aEnv).Get())));
+    }
+
+    if (classRef) {
+        return classRef.Forget();
+    }
+
+    __android_log_print(
+            ANDROID_LOG_ERROR, "Gecko",
+            ">>> FATAL JNI ERROR! FindClass(className=\"%s\") failed. "
+            "Did ProGuard optimize away something it shouldn't have?",
+            aClassName);
+    aEnv->ExceptionDescribe();
+    MOZ_CRASH("Cannot find JNI class");
+    return nullptr;
+}
+
+void DispatchToGeckoThread(UniquePtr<AbstractCall>&& aCall)
+{
+    class AbstractCallEvent : public nsAppShell::Event
+    {
+        UniquePtr<AbstractCall> mCall;
+
+    public:
+        AbstractCallEvent(UniquePtr<AbstractCall>&& aCall)
+            : mCall(Move(aCall))
+        {}
+
+        void Run() override
+        {
+            (*mCall)();
+        }
+    };
+
+    nsAppShell::PostEvent(MakeUnique<AbstractCallEvent>(Move(aCall)));
+}
+
+bool IsFennec()
+{
+    return sIsFennec;
 }
 
 } // jni

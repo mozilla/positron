@@ -64,6 +64,7 @@
 
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/Sprintf.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/gfx/2D.h"
 
@@ -228,8 +229,8 @@ MacOSFontEntry::ReadCMAP(FontInfoData *aFontInfoData)
                   charmap->mHash, mCharacterMap == charmap ? " new" : ""));
     if (LOG_CMAPDATA_ENABLED()) {
         char prefix[256];
-        sprintf(prefix, "(cmapdata) name: %.220s",
-                NS_ConvertUTF16toUTF8(mName).get());
+        SprintfLiteral(prefix, "(cmapdata) name: %.220s",
+                       NS_ConvertUTF16toUTF8(mName).get());
         charmap->Dump(prefix, eGfxLog_cmapdata);
     }
 
@@ -702,7 +703,7 @@ gfxMacPlatformFontList::AddFamily(CFStringRef aFamily)
     nsAutoString key;
     ToLowerCase(familyName, key);
 
-    gfxFontFamily* familyEntry = new gfxMacFontFamily(familyName, sizeHint);
+    RefPtr<gfxFontFamily> familyEntry = new gfxMacFontFamily(familyName, sizeHint);
     table.Put(key, familyEntry);
 
     // check the bad underline blacklist
@@ -712,14 +713,13 @@ gfxMacPlatformFontList::AddFamily(CFStringRef aFamily)
 }
 
 nsresult
-gfxMacPlatformFontList::InitFontList()
+gfxMacPlatformFontList::InitFontListForPlatform()
 {
     nsAutoreleasePool localPool;
 
     Telemetry::AutoTimer<Telemetry::MAC_INITFONTLIST_TOTAL> timer;
 
-    // reset font lists
-    gfxPlatformFontList::InitFontList();
+    // reset system font list
     mSystemFontFamilies.Clear();
     
     // iterate over available families
@@ -779,7 +779,7 @@ gfxMacPlatformFontList::InitSingleFaceList()
 
             // add only if doesn't exist already
             if (!mFontFamilies.GetWeak(key)) {
-                gfxFontFamily *familyEntry =
+                RefPtr<gfxFontFamily> familyEntry =
                     new gfxSingleFaceMacFontFamily(familyName);
                 // LookupLocalFont sets this, need to clear
                 fontEntry->mIsLocalUserFont = false;
@@ -926,7 +926,8 @@ gfxMacPlatformFontList::GlobalFontFallback(const uint32_t aCh,
                                            uint32_t& aCmapCount,
                                            gfxFontFamily** aMatchedFamily)
 {
-    bool useCmaps = gfxPlatform::GetPlatform()->UseCmapsDuringSystemFallback();
+    bool useCmaps = IsFontFamilyWhitelistActive() ||
+                    gfxPlatform::GetPlatform()->UseCmapsDuringSystemFallback();
 
     if (useCmaps) {
         return gfxPlatformFontList::GlobalFontFallback(aCh,
@@ -1016,7 +1017,7 @@ gfxMacPlatformFontList::GlobalFontFallback(const uint32_t aCh,
 }
 
 gfxFontFamily*
-gfxMacPlatformFontList::GetDefaultFont(const gfxFontStyle* aStyle)
+gfxMacPlatformFontList::GetDefaultFontForPlatform(const gfxFontStyle* aStyle)
 {
     nsAutoreleasePool localPool;
 

@@ -135,6 +135,8 @@ CacheStorageService::~CacheStorageService()
 
 void CacheStorageService::Shutdown()
 {
+  mozilla::MutexAutoLock lock(mLock);
+
   if (mShutdown)
     return;
 
@@ -146,25 +148,29 @@ void CacheStorageService::Shutdown()
     NewRunnableMethod(this, &CacheStorageService::ShutdownBackground);
   Dispatch(event);
 
-  {
-    mozilla::MutexAutoLock lock(mLock);
 #ifdef NS_FREE_PERMANENT_DATA
-    sGlobalEntryTables->Clear();
-    delete sGlobalEntryTables;
+  sGlobalEntryTables->Clear();
+  delete sGlobalEntryTables;
 #endif
-    sGlobalEntryTables = nullptr;
-  }
+  sGlobalEntryTables = nullptr;
 
   LOG(("CacheStorageService::Shutdown - done"));
 }
 
 void CacheStorageService::ShutdownBackground()
 {
+  LOG(("CacheStorageService::ShutdownBackground - start"));
+
   MOZ_ASSERT(IsOnManagementThread());
 
-  // Cancel purge timer to avoid leaking.
-  if (mPurgeTimer) {
-    mPurgeTimer->Cancel();
+  {
+    mozilla::MutexAutoLock lock(mLock);
+
+    // Cancel purge timer to avoid leaking.
+    if (mPurgeTimer) {
+      LOG(("  freeing the timer"));
+      mPurgeTimer->Cancel();
+    }
   }
 
 #ifdef NS_FREE_PERMANENT_DATA
@@ -173,6 +179,8 @@ void CacheStorageService::ShutdownBackground()
   Pool(true).mFrecencyArray.Clear();
   Pool(true).mExpirationArray.Clear();
 #endif
+
+  LOG(("CacheStorageService::ShutdownBackground - done"));
 }
 
 // Internal management methods
@@ -236,7 +244,7 @@ public:
   }
 
 private:
-  NS_IMETHODIMP Run()
+  NS_IMETHOD Run() override
   {
     if (CacheStorageService::IsOnManagementThread()) {
       LOG(("WalkMemoryCacheRunnable::Run - collecting [this=%p]", this));
@@ -317,7 +325,7 @@ private:
   virtual void OnEntryInfo(const nsACString & aURISpec, const nsACString & aIdEnhance,
                            int64_t aDataSize, int32_t aFetchCount,
                            uint32_t aLastModifiedTime, uint32_t aExpirationTime,
-                           bool aPinned)
+                           bool aPinned) override
   {
     nsresult rv;
 
@@ -381,7 +389,7 @@ private:
     {
     }
 
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       MOZ_ASSERT(NS_IsMainThread());
 
@@ -414,7 +422,7 @@ private:
     bool mPinned;
   };
 
-  NS_IMETHODIMP Run()
+  NS_IMETHOD Run() override
   {
     // The main loop
     nsresult rv;
@@ -464,7 +472,7 @@ private:
           if (NS_FAILED(rv))
             break; // done (or error?)
 
-          // This synchronously invokes onCacheEntryInfo on this class where we
+          // This synchronously invokes OnEntryInfo on this class where we
           // redispatch to the main thread for the consumer callback.
           CacheFileIOManager::GetEntryInfo(&hash, this);
         }
@@ -492,7 +500,7 @@ private:
   virtual void OnEntryInfo(const nsACString & aURISpec, const nsACString & aIdEnhance,
                            int64_t aDataSize, int32_t aFetchCount,
                            uint32_t aLastModifiedTime, uint32_t aExpirationTime,
-                           bool aPinned)
+                           bool aPinned) override
   {
     // Called directly from CacheFileIOManager::GetEntryInfo.
 
@@ -1258,19 +1266,35 @@ CacheStorageService::MemoryPool::OnMemoryConsumptionChange(uint32_t aSavedMemory
 void
 CacheStorageService::SchedulePurgeOverMemoryLimit()
 {
+  LOG(("CacheStorageService::SchedulePurgeOverMemoryLimit"));
+
   mozilla::MutexAutoLock lock(mLock);
 
-  if (mPurgeTimer)
+  if (mShutdown) {
+    LOG(("  past shutdown"));
     return;
+  }
+
+  if (mPurgeTimer) {
+    LOG(("  timer already up"));
+    return;
+  }
 
   mPurgeTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
-  if (mPurgeTimer)
-    mPurgeTimer->InitWithCallback(this, 1000, nsITimer::TYPE_ONE_SHOT);
+  if (mPurgeTimer) {
+    nsresult rv;
+    rv = mPurgeTimer->InitWithCallback(this, 1000, nsITimer::TYPE_ONE_SHOT);
+    LOG(("  timer init rv=0x%08x", rv));
+  }
 }
 
 NS_IMETHODIMP
 CacheStorageService::Notify(nsITimer* aTimer)
 {
+  LOG(("CacheStorageService::Notify"));
+
+  mozilla::MutexAutoLock lock(mLock);
+
   if (aTimer == mPurgeTimer) {
     mPurgeTimer = nullptr;
 
@@ -1724,7 +1748,7 @@ CacheStorageService::DoomStorageEntry(CacheStorage const* aStorage,
   {
   public:
     explicit Callback(nsICacheEntryDoomCallback* aCallback) : mCallback(aCallback) { }
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       mCallback->OnCacheEntryDoomed(NS_ERROR_NOT_AVAILABLE);
       return NS_OK;
@@ -1848,7 +1872,7 @@ CacheStorageService::DoomStorageEntries(nsCSubstring const& aContextKey,
   {
   public:
     explicit Callback(nsICacheEntryDoomCallback* aCallback) : mCallback(aCallback) { }
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       mCallback->OnCacheEntryDoomed(NS_OK);
       return NS_OK;
@@ -2113,34 +2137,26 @@ CacheStorageService::SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) con
 }
 
 NS_IMETHODIMP
-CacheStorageService::CollectReports(nsIMemoryReporterCallback* aHandleReport,
+CacheStorageService::CollectReports(nsIHandleReportCallback* aHandleReport,
                                     nsISupports* aData, bool aAnonymize)
 {
-  nsresult rv;
-
-  rv = MOZ_COLLECT_REPORT(
+  MOZ_COLLECT_REPORT(
     "explicit/network/cache2/io", KIND_HEAP, UNITS_BYTES,
     CacheFileIOManager::SizeOfIncludingThis(MallocSizeOf),
     "Memory used by the cache IO manager.");
-  if (NS_WARN_IF(NS_FAILED(rv)))
-    return rv;
 
-  rv = MOZ_COLLECT_REPORT(
+  MOZ_COLLECT_REPORT(
     "explicit/network/cache2/index", KIND_HEAP, UNITS_BYTES,
     CacheIndex::SizeOfIncludingThis(MallocSizeOf),
     "Memory used by the cache index.");
-  if (NS_WARN_IF(NS_FAILED(rv)))
-    return rv;
 
   MutexAutoLock lock(mLock);
 
   // Report the service instance, this doesn't report entries, done lower
-  rv = MOZ_COLLECT_REPORT(
+  MOZ_COLLECT_REPORT(
     "explicit/network/cache2/service", KIND_HEAP, UNITS_BYTES,
     SizeOfIncludingThis(MallocSizeOf),
     "Memory used by the cache storage service.");
-  if (NS_WARN_IF(NS_FAILED(rv)))
-    return rv;
 
   // Report all entries, each storage separately (by the context key)
   //
@@ -2182,9 +2198,7 @@ CacheStorageService::CollectReports(nsIMemoryReporterCallback* aHandleReport,
         nsPrintfCString("explicit/network/cache2/%s-storage(%s)",
           table->Type() == CacheEntryTable::MEMORY_ONLY ? "memory" : "disk",
           iter1.Key().BeginReading()),
-        nsIMemoryReporter::KIND_HEAP,
-        nsIMemoryReporter::UNITS_BYTES,
-        size,
+        nsIMemoryReporter::KIND_HEAP, nsIMemoryReporter::UNITS_BYTES, size,
         NS_LITERAL_CSTRING("Memory used by the cache storage."),
         aData);
     }
@@ -2235,6 +2249,33 @@ CacheStorageService::ResumeCacheIOThread()
   suspender.swap(mActiveIOSuspender);
   suspender->Notify();
   return NS_OK;
+}
+
+NS_IMETHODIMP
+CacheStorageService::Flush(nsIObserver* aObserver)
+{
+  RefPtr<CacheIOThread> thread = CacheFileIOManager::IOThread();
+  if (!thread) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  nsCOMPtr<nsIObserverService> observerService =
+    mozilla::services::GetObserverService();
+  if (!observerService) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  // Adding as weak, the consumer is responsible to keep the reference
+  // until notified.
+  observerService->AddObserver(aObserver, "cacheservice:purge-memory-pools", false);
+
+  // This runnable will do the purging and when done, notifies the above observer.
+  // We dispatch it to the CLOSE level, so all data writes scheduled up to this time
+  // will be done before this purging happens.
+  RefPtr<CacheStorageService::PurgeFromMemoryRunnable> r =
+    new CacheStorageService::PurgeFromMemoryRunnable(this, CacheEntry::PURGE_WHOLE);
+
+  return thread->Dispatch(r, CacheIOThread::CLOSE);
 }
 
 } // namespace net

@@ -37,12 +37,13 @@ public:
   virtual HRESULT Output(int64_t aStreamOffset,
                          RefPtr<MediaData>& aOutput) = 0;
 
-  void Flush() {
+  virtual void Flush()
+  {
     mDecoder->Flush();
     mSeekTargetThreshold.reset();
   }
 
-  void Drain()
+  virtual void Drain()
   {
     if (FAILED(mDecoder->SendMFTMessage(MFT_MESSAGE_COMMAND_DRAIN, 0))) {
       NS_WARNING("Failed to send DRAIN command to MFT");
@@ -55,8 +56,6 @@ public:
   virtual bool IsHardwareAccelerated(nsACString& aFailureReason) const { return false; }
 
   virtual TrackInfo::TrackType GetType() = 0;
-
-  virtual void ConfigurationChanged(const TrackInfo& aConfig) {}
 
   virtual const char* GetDescriptionName() const = 0;
 
@@ -85,17 +84,15 @@ public:
 
   RefPtr<MediaDataDecoder::InitPromise> Init() override;
 
-  nsresult Input(MediaRawData* aSample);
+  void Input(MediaRawData* aSample);
 
-  nsresult Flush() override;
+  void Flush() override;
 
-  nsresult Drain() override;
+  void Drain() override;
 
-  nsresult Shutdown() override;
+  void Shutdown() override;
 
   bool IsHardwareAccelerated(nsACString& aFailureReason) const override;
-
-  nsresult ConfigurationChanged(const TrackInfo& aConfig) override;
 
   const char* GetDescriptionName() const override
   {
@@ -123,10 +120,6 @@ private:
   void ProcessDrain();
 
   void ProcessShutdown();
-
-  // Called on the task queue. Tell the MFT that the next Input will have a
-  // different configuration (typically resolution change).
-  void ProcessConfigurationChanged(UniquePtr<TrackInfo>&& aConfig);
 
   const RefPtr<TaskQueue> mTaskQueue;
   MediaDataDecoderCallback* mCallback;

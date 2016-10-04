@@ -26,18 +26,6 @@
 namespace js {
 namespace wasm {
 
-// Creates a JS object containing two fields (low: low 32 bits; high: high 32
-// bits) of a given Int64 value. For testing purposes only.
-
-JSObject*
-CreateI64Object(JSContext* cx, int64_t i64);
-
-// Reads an int64 from a JS object with the same shape as described in the
-// comment above. For testing purposes only.
-
-bool
-ReadI64Object(JSContext* cx, HandleValue v, int64_t* i64);
-
 // LinkData contains all the metadata necessary to patch all the locations
 // that depend on the absolute address of a CodeSegment.
 //
@@ -51,7 +39,6 @@ struct LinkDataCacheablePod
     uint32_t interruptOffset;
     uint32_t outOfBoundsOffset;
     uint32_t unalignedAccessOffset;
-    uint32_t badIndirectCallOffset;
 
     LinkDataCacheablePod() { mozilla::PodZero(this); }
 };
@@ -113,7 +100,7 @@ typedef Vector<Import, 0, SystemAllocPolicy> ImportVector;
 
 // Export describes the export of a definition in a Module to a field in the
 // export object. For functions, Export stores an index into the
-// FuncExportVector in Metadata. For memory and table exports, there is
+// FuncDefExportVector in Metadata. For memory and table exports, there is
 // at most one (default) memory/table so no index is needed. Note: a single
 // definition can be exported by multiple Exports in the ExportVector.
 //
@@ -149,25 +136,26 @@ typedef Vector<Export, 0, SystemAllocPolicy> ExportVector;
 
 struct DataSegment
 {
-    uint32_t memoryOffset;
+    InitExpr offset;
     uint32_t bytecodeOffset;
     uint32_t length;
 };
 
 typedef Vector<DataSegment, 0, SystemAllocPolicy> DataSegmentVector;
 
-// ElemSegment represents an element segment in the module where each element's
-// function index has been translated to its offset in the code section.
+// ElemSegment represents an element segment in the module where each element
+// describes both its function index and its code range.
 
 struct ElemSegment
 {
     uint32_t tableIndex;
     InitExpr offset;
-    Uint32Vector elems;
+    Uint32Vector elemFuncIndices;
+    Uint32Vector elemCodeRangeIndices;
 
     ElemSegment() = default;
-    ElemSegment(uint32_t tableIndex, InitExpr offset, Uint32Vector&& elems)
-      : tableIndex(tableIndex), offset(offset), elems(Move(elems))
+    ElemSegment(uint32_t tableIndex, InitExpr offset, Uint32Vector&& elemFuncIndices)
+      : tableIndex(tableIndex), offset(offset), elemFuncIndices(Move(elemFuncIndices))
     {}
 
     WASM_DECLARE_SERIALIZABLE(ElemSegment)
@@ -200,10 +188,14 @@ class Module : public RefCounted<Module>
 
     bool instantiateFunctions(JSContext* cx, Handle<FunctionVector> funcImports) const;
     bool instantiateMemory(JSContext* cx, MutableHandleWasmMemoryObject memory) const;
-    bool instantiateTable(JSContext* cx, MutableHandleWasmTableObject table,
+    bool instantiateTable(JSContext* cx,
+                          MutableHandleWasmTableObject table,
                           SharedTableVector* tables) const;
-    bool initElems(JSContext* cx, HandleWasmInstanceObject instanceObj,
-                   const ValVector& globalImports, HandleWasmTableObject tableObj) const;
+    bool initSegments(JSContext* cx,
+                      HandleWasmInstanceObject instance,
+                      Handle<FunctionVector> funcImports,
+                      HandleWasmMemoryObject memory,
+                      const ValVector& globalImports) const;
 
   public:
     Module(Bytes&& code,

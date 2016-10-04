@@ -6,9 +6,9 @@
 package org.mozilla.gecko;
 
 import android.app.Activity;
-import android.content.ContentResolver;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.os.Bundle;
 import android.support.annotation.WorkerThread;
 import android.text.TextUtils;
 import android.util.Log;
@@ -19,12 +19,6 @@ import org.json.JSONObject;
 import org.mozilla.gecko.GeckoProfileDirectories.NoMozillaDirectoryException;
 import org.mozilla.gecko.GeckoProfileDirectories.NoSuchProfileException;
 import org.mozilla.gecko.annotation.RobocopTarget;
-import org.mozilla.gecko.db.BrowserDB;
-import org.mozilla.gecko.db.LocalBrowserDB;
-import org.mozilla.gecko.db.StubBrowserDB;
-import org.mozilla.gecko.distribution.Distribution;
-import org.mozilla.gecko.firstrun.FirstrunAnimationContainer;
-import org.mozilla.gecko.preferences.DistroSharedPrefsImport;
 import org.mozilla.gecko.util.FileUtils;
 import org.mozilla.gecko.util.INIParser;
 import org.mozilla.gecko.util.INISection;
@@ -70,13 +64,15 @@ public final class GeckoProfile {
     public static final String DEFAULT_PROFILE = "default";
     // Profile is using a custom directory outside of the Mozilla directory.
     public static final String CUSTOM_PROFILE = "";
+
     public static final String GUEST_PROFILE_DIR = "guest";
+    public static final String GUEST_MODE_PREF = "guestMode";
 
     // Session store
     private static final String SESSION_FILE = "sessionstore.js";
     private static final String SESSION_FILE_BACKUP = "sessionstore.bak";
-    private static final long MAX_BACKUP_FILE_AGE = 1000 * 3600 * 24; // 24 hours
-    private static final int SESSION_STORE_EMPTY_JSON_LENGTH = 14; // length of {"windows":[]}
+    private static final String SESSION_FILE_PREVIOUS = "sessionstore.old";
+    private static final long MAX_PREVIOUS_FILE_AGE = 1000 * 3600 * 24; // 24 hours
 
     private boolean mOldSessionDataProcessed = false;
 
@@ -89,7 +85,7 @@ public final class GeckoProfile {
     private final File mMozillaDir;
     private final Context mApplicationContext;
 
-    private final BrowserDB mDB;
+    private Object mData;
 
     /**
      * Access to this member should be synchronized to avoid
@@ -101,14 +97,26 @@ public final class GeckoProfile {
 
     private Boolean mInGuestMode;
 
+    public static boolean shouldUseGuestMode(final Context context) {
+        return GeckoSharedPrefs.forApp(context).getBoolean(GUEST_MODE_PREF, false);
+    }
+
+    public static void enterGuestMode(final Context context) {
+        GeckoSharedPrefs.forApp(context).edit().putBoolean(GUEST_MODE_PREF, true).commit();
+    }
+
+    public static void leaveGuestMode(final Context context) {
+        GeckoSharedPrefs.forApp(context).edit().putBoolean(GUEST_MODE_PREF, false).commit();
+    }
+
     public static GeckoProfile initFromArgs(final Context context, final String args) {
-        if (GuestSession.shouldUse(context)) {
+        if (shouldUseGuestMode(context)) {
             final GeckoProfile guestProfile = getGuestProfile(context);
             if (guestProfile != null) {
                 return guestProfile;
             }
             // Failed to create guest profile; leave guest mode.
-            GuestSession.leave(context);
+            leaveGuestMode(context);
         }
 
         // We never want to use the guest mode profile concurrently with a normal profile
@@ -161,7 +169,7 @@ public final class GeckoProfile {
     }
 
     public static GeckoProfile get(Context context) {
-        return get(context, null, null, null);
+        return get(context, null, (File) null);
     }
 
     public static GeckoProfile get(Context context, String profileName) {
@@ -185,31 +193,10 @@ public final class GeckoProfile {
         return get(context, profileName, dir);
     }
 
-    // Extension hook.
-    private static volatile BrowserDB.Factory sDBFactory;
-    public static void setBrowserDBFactory(BrowserDB.Factory factory) {
-        sDBFactory = factory;
-    }
-
-    @RobocopTarget
-    public static GeckoProfile get(Context context, String profileName, File profileDir) {
-        if (sDBFactory == null) {
-            // We do this so that GeckoView consumers don't need to know anything about BrowserDB.
-            // It's a bit of a broken abstraction, but very tightly coupled, so we work around it
-            // for now. We can't just have GeckoView set this, because then it would collide in
-            // Fennec's use of GeckoView.
-            // We should never see this in Fennec itself, because GeckoApplication sets the factory
-            // in onCreate.
-            Log.d(LOGTAG, "Defaulting to StubBrowserDB.");
-            sDBFactory = StubBrowserDB.getFactory();
-        }
-        return GeckoProfile.get(context, profileName, profileDir, sDBFactory);
-    }
-
     // Note that the profile cache respects only the profile name!
     // If the directory changes, the returned GeckoProfile instance will be mutated.
-    // If the factory differs, it will be *ignored*.
-    public static GeckoProfile get(Context context, String profileName, File profileDir, BrowserDB.Factory dbFactory) {
+    @RobocopTarget
+    public static GeckoProfile get(Context context, String profileName, File profileDir) {
         if (context == null) {
             throw new IllegalArgumentException("context must be non-null");
         }
@@ -254,7 +241,7 @@ public final class GeckoProfile {
 
         if (profile == null) {
             try {
-                newProfile = new GeckoProfile(context, profileName, profileDir, dbFactory);
+                newProfile = new GeckoProfile(context, profileName, profileDir);
             } catch (NoMozillaDirectoryException e) {
                 // We're unable to do anything sane here.
                 throw new RuntimeException(e);
@@ -334,7 +321,7 @@ public final class GeckoProfile {
         }
     }
 
-    private GeckoProfile(Context context, String profileName, File profileDir, BrowserDB.Factory dbFactory) throws NoMozillaDirectoryException {
+    private GeckoProfile(Context context, String profileName, File profileDir) throws NoMozillaDirectoryException {
         if (profileName == null) {
             throw new IllegalArgumentException("Unable to create GeckoProfile for empty profile name.");
         } else if (CUSTOM_PROFILE.equals(profileName) && profileDir == null) {
@@ -349,14 +336,34 @@ public final class GeckoProfile {
         if (profileDir != null && !profileDir.isDirectory()) {
             throw new IllegalArgumentException("Profile directory must exist if specified.");
         }
-
-        // N.B., mProfileDir can be null at this point.
-        mDB = dbFactory.get(profileName, mProfileDir);
     }
 
-    @RobocopTarget
-    public BrowserDB getDB() {
-        return mDB;
+    /**
+     * Return the custom data object associated with this profile, which was set by the
+     * previous {@link #setData(Object)} call. This association is valid for the duration
+     * of the process lifetime. The caller must ensure proper synchronization, typically
+     * by synchronizing on the object returned by {@link #getLock()}.
+     *
+     * The data object is usually a database object that stores per-profile data such as
+     * page history. However, it can be any other object that needs to maintain
+     * profile-specific state.
+     *
+     * @return Associated data object
+     */
+    public Object getData() {
+        return mData;
+    }
+
+    /**
+     * Associate this profile with a custom data object, which can be retrieved by
+     * subsequent {@link #getData()} calls. The caller must ensure proper
+     * synchronization, typically by synchronizing on the object returned by {@link
+     * #getLock()}.
+     *
+     * @param data Custom data object
+     */
+    public void setData(final Object data) {
+        mData = data;
     }
 
     private void setDir(File dir) {
@@ -387,12 +394,20 @@ public final class GeckoProfile {
     }
 
     /**
+     * Return an Object that can be used with a synchronized statement to allow
+     * exclusive access to the profile.
+     */
+    public Object getLock() {
+        return this;
+    }
+
+    /**
      * Retrieves the directory backing the profile. This method acts
      * as a lazy initializer for the GeckoProfile instance.
      */
     @RobocopTarget
     public synchronized File getDir() {
-        forceCreate();
+        forceCreateLocked();
         return mProfileDir;
     }
 
@@ -400,9 +415,9 @@ public final class GeckoProfile {
      * Forces profile creation. Consider using {@link #getDir()} to initialize the profile instead - it is the
      * lazy initializer and, for our code reasoning abilities, we should initialize the profile in one place.
      */
-    private synchronized GeckoProfile forceCreate() {
+    private void forceCreateLocked() {
         if (mProfileDir != null) {
-            return this;
+            return;
         }
 
         try {
@@ -417,7 +432,6 @@ public final class GeckoProfile {
         } catch (IOException ioe) {
             Log.e(LOGTAG, "Error getting profile dir", ioe);
         }
-        return this;
     }
 
     public File getFile(String aFile) {
@@ -442,7 +456,7 @@ public final class GeckoProfile {
      * this code to fail. There are tests in TestGeckoProfile to verify the file format but be
      * warned: THIS IS NOT FOOLPROOF.
      *
-     * [1]: https://mxr.mozilla.org/mozilla-central/source/toolkit/modules/ClientID.jsm
+     * [1]: https://dxr.mozilla.org/mozilla-central/source/toolkit/modules/ClientID.jsm
      *
      * @throws IOException if the client ID could not be retrieved.
      */
@@ -589,26 +603,26 @@ public final class GeckoProfile {
     /**
      * Updates the state of the old session data file.
      *
-     * sessionstore.js should hold the current session, and sessionstore.bak should
+     * sessionstore.js should hold the current session, and sessionstore.old should
      * hold the previous session (where it is used to read the "tabs from last time").
      * If we're not restoring tabs automatically, sessionstore.js needs to be moved to
-     * sessionstore.bak, so we can display the correct "tabs from last time".
-     * If we *are* restoring tabs, we need to delete outdated copies of sessionstore.bak,
+     * sessionstore.old, so we can display the correct "tabs from last time".
+     * If we *are* restoring tabs, we need to delete outdated copies of sessionstore.old,
      * so we don't continue showing stale "tabs from last time" indefinitely.
      *
      * @param shouldRestore Pass true if we are automatically restoring last session's tabs.
      */
     public void updateSessionFile(boolean shouldRestore) {
-        File sessionFileBackup = getFile(SESSION_FILE_BACKUP);
+        File sessionFilePrevious = getFile(SESSION_FILE_PREVIOUS);
         if (!shouldRestore) {
             File sessionFile = getFile(SESSION_FILE);
             if (sessionFile != null && sessionFile.exists()) {
-                sessionFile.renameTo(sessionFileBackup);
+                sessionFile.renameTo(sessionFilePrevious);
             }
         } else {
-            if (sessionFileBackup != null && sessionFileBackup.exists() &&
-                    System.currentTimeMillis() - sessionFileBackup.lastModified() > MAX_BACKUP_FILE_AGE) {
-                sessionFileBackup.delete();
+            if (sessionFilePrevious != null && sessionFilePrevious.exists() &&
+                    System.currentTimeMillis() - sessionFilePrevious.lastModified() > MAX_PREVIOUS_FILE_AGE) {
+                sessionFilePrevious.delete();
             }
         }
         synchronized (this) {
@@ -634,7 +648,7 @@ public final class GeckoProfile {
      *
      * The session can either be read from sessionstore.js or sessionstore.bak.
      * In general, sessionstore.js holds the current session, and
-     * sessionstore.bak holds the previous session.
+     * sessionstore.bak holds a backup copy in case of interrupted writes.
      *
      * @param readBackup if true, the session is read from sessionstore.bak;
      *                   otherwise, the session is read from sessionstore.js
@@ -642,7 +656,23 @@ public final class GeckoProfile {
      * @return the session string
      */
     public String readSessionFile(boolean readBackup) {
-        File sessionFile = getFile(readBackup ? SESSION_FILE_BACKUP : SESSION_FILE);
+        return readSessionFile(readBackup ? SESSION_FILE_BACKUP : SESSION_FILE);
+    }
+
+    /**
+     * Get the string from last session's session file.
+     *
+     * If we are not restoring tabs automatically, sessionstore.old will contain
+     * the previous session.
+     *
+     * @return the session string
+     */
+    public String readPreviousSessionFile() {
+        return readSessionFile(SESSION_FILE_PREVIOUS);
+    }
+
+    private String readSessionFile(String fileName) {
+        File sessionFile = getFile(fileName);
 
         try {
             if (sessionFile != null && sessionFile.exists()) {
@@ -655,16 +685,12 @@ public final class GeckoProfile {
     }
 
     /**
-     * Checks whether the session store file exists and that its length
-     * doesn't match the known length of a session store file containing
-     * only an empty window.
+     * Checks whether the session store file exists.
      */
-    public boolean sessionFileExistsAndNotEmptyWindow() {
+    public boolean sessionFileExists() {
         File sessionFile = getFile(SESSION_FILE);
 
-        return sessionFile != null &&
-               sessionFile.exists() &&
-               sessionFile.length() != SESSION_STORE_EMPTY_JSON_LENGTH;
+        return sessionFile != null && sessionFile.exists();
     }
 
     /**
@@ -886,12 +912,12 @@ public final class GeckoProfile {
         INIParser parser = GeckoProfileDirectories.getProfilesINI(mMozillaDir);
 
         // Salt the name of our requested profile
-        String saltedName = GeckoProfileDirectories.saltProfileName(mName);
-        File profileDir = new File(mMozillaDir, saltedName);
-        while (profileDir.exists()) {
+        String saltedName;
+        File profileDir;
+        do {
             saltedName = GeckoProfileDirectories.saltProfileName(mName);
             profileDir = new File(mMozillaDir, saltedName);
-        }
+        } while (profileDir.exists());
 
         // Attempt to create the salted profile dir
         if (!profileDir.mkdirs()) {
@@ -926,11 +952,6 @@ public final class GeckoProfile {
         if (!isDefaultSet) {
             // only set as default if this is the first profile we're creating
             profileSection.setProperty("Default", 1);
-
-            // We have no intention of stopping this session. The FIRSTRUN session
-            // ends when the browsing session/activity has ended. All events
-            // during firstrun will be tagged as FIRSTRUN.
-            Telemetry.startUISession(TelemetryContract.Session.FIRSTRUN);
         }
 
         parser.addSection(profileSection);
@@ -957,10 +978,6 @@ public final class GeckoProfile {
         // code may try to write to the file at the same time Java does.
         persistClientId(generateNewClientId());
 
-        // Initialize pref flag for displaying the start pane for a new profile.
-        final SharedPreferences prefs = GeckoSharedPrefs.forProfile(mApplicationContext);
-        prefs.edit().putBoolean(FirstrunAnimationContainer.PREF_FIRSTRUN_ENABLED, true).apply();
-
         return profileDir;
     }
 
@@ -976,66 +993,10 @@ public final class GeckoProfile {
     @RobocopTarget
     public void enqueueInitialization(final File profileDir) {
         Log.i(LOGTAG, "Enqueuing profile init.");
-        final Context context = mApplicationContext;
 
-        // Add everything when we're done loading the distribution.
-        final Distribution distribution = Distribution.getInstance(context);
-        distribution.addOnDistributionReadyCallback(new Distribution.ReadyCallback() {
-            @Override
-            public void distributionNotFound() {
-                this.distributionFound(null);
-            }
-
-            @Override
-            public void distributionFound(Distribution distribution) {
-                Log.d(LOGTAG, "Running post-distribution task: bookmarks.");
-
-                final ContentResolver cr = context.getContentResolver();
-
-                // Because we are running in the background, we want to synchronize on the
-                // GeckoProfile instance so that we don't race with main thread operations
-                // such as locking/unlocking/removing the profile.
-                synchronized (GeckoProfile.this) {
-                    // Skip initialization if the profile directory has been removed.
-                    if (!profileDir.exists()) {
-                        return;
-                    }
-
-                    // We pass the number of added bookmarks to ensure that the
-                    // indices of the distribution and default bookmarks are
-                    // contiguous. Because there are always at least as many
-                    // bookmarks as there are favicons, we can also guarantee that
-                    // the favicon IDs won't overlap.
-                    final LocalBrowserDB db = new LocalBrowserDB(getName());
-                    final int offset = distribution == null ? 0 : db.addDistributionBookmarks(cr, distribution, 0);
-                    db.addDefaultBookmarks(context, cr, offset);
-
-                    Log.d(LOGTAG, "Running post-distribution task: android preferences.");
-                    DistroSharedPrefsImport.importPreferences(context, distribution);
-                }
-            }
-
-            @Override
-            public void distributionArrivedLate(Distribution distribution) {
-                Log.d(LOGTAG, "Running late distribution task: bookmarks.");
-                // Recover as best we can.
-                synchronized (GeckoProfile.this) {
-                    // Skip initialization if the profile directory has been removed.
-                    if (!profileDir.exists()) {
-                        return;
-                    }
-
-                    final LocalBrowserDB db = new LocalBrowserDB(getName());
-                    // We assume we've been called very soon after startup, and so our offset
-                    // into "Mobile Bookmarks" is the number of bookmarks in the DB.
-                    final ContentResolver cr = context.getContentResolver();
-                    final int offset = db.getCount(cr, "bookmarks");
-                    db.addDistributionBookmarks(cr, distribution, offset);
-
-                    Log.d(LOGTAG, "Running late distribution task: android preferences.");
-                    DistroSharedPrefsImport.importPreferences(context, distribution);
-                }
-            }
-        });
+        final Bundle message = new Bundle(2);
+        message.putCharSequence("name", getName());
+        message.putCharSequence("path", profileDir.getAbsolutePath());
+        EventDispatcher.getInstance().dispatch("Profile:Create", message);
     }
 }

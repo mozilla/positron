@@ -304,7 +304,6 @@ nsJSUtils::ModuleDeclarationInstantiation(JSContext* aCx, JS::Handle<JSObject*> 
 
   MOZ_ASSERT(aCx == nsContentUtils::GetCurrentJSContext());
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(nsContentUtils::IsInMicroTask());
 
   NS_ENSURE_TRUE(xpc::Scriptability::Get(aModule).Allowed(), NS_OK);
 
@@ -367,7 +366,10 @@ nsJSUtils::ResetTimeZone()
 
 bool nsAutoJSString::init(const JS::Value &v)
 {
-  JSContext* cx = nsContentUtils::RootingCx();
+  // Note: it's okay to use danger::GetJSContext here instead of AutoJSAPI,
+  // because the init() call below is careful not to run script (for instance,
+  // it only calls JS::ToString for non-object values).
+  JSContext* cx = danger::GetJSContext();
   if (!init(cx, v)) {
     JS_ClearPendingException(cx);
     return false;

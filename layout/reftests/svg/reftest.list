@@ -48,7 +48,6 @@ fuzzy-if(/^Windows\x20NT\x2010\.0/.test(http.oscpu)||/^Windows\x20NT\x206\.[12]/
 == conditions-03.svg pass.svg
 == conditions-04.svg pass.svg
 random-if(Mulet) == conditions-05.svg about:blank # bug 1178062
-== conditions-06.svg pass.svg
 == conditions-07.svg pass.svg
 fuzzy-if(skiaContent,1,320) == conditions-08.svg conditions-08-ref.svg
 == conditions-09.svg conditions-09-ref.svg
@@ -443,3 +442,5 @@ skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-differenc
 == use-localRef-fill-01.svg use-localRef-fill-01-ref.svg
 == use-localRef-stroke-01.svg use-localRef-stroke-01-ref.svg
 == use-localRef-mask-01.svg use-localRef-mask-01-ref.svg
+
+fuzzy(1,5000) == mask-opacity-01.svg mask-opacity-01-ref.svg

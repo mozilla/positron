@@ -8,11 +8,11 @@
 #define mozilla_layers_GeckoContentController_h
 
 #include "FrameMetrics.h"               // for FrameMetrics, etc
+#include "InputData.h"                  // for PinchGestureInput
 #include "Units.h"                      // for CSSPoint, CSSRect, etc
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2
 #include "mozilla/EventForwards.h"      // for Modifiers
 #include "nsISupportsImpl.h"
-#include "ThreadSafeRefcountingWithMainThreadDestruction.h"
 
 namespace mozilla {
 
@@ -23,17 +23,16 @@ namespace layers {
 class GeckoContentController
 {
 public:
-  /**
-   * At least one class deriving from GeckoContentController needs to do
-   * synchronous cleanup on the main thread, so we use
-   * NS_INLINE_DECL_THREADSAFE_REFCOUNTING_WITH_MAIN_THREAD_DESTRUCTION.
-   */
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING_WITH_MAIN_THREAD_DESTRUCTION(GeckoContentController)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(GeckoContentController)
 
   /**
    * Requests a paint of the given FrameMetrics |aFrameMetrics| from Gecko.
    * Implementations per-platform are responsible for actually handling this.
-   * This method will always be called on the Gecko main thread.
+   *
+   * This method must always be called on the repaint thread, which depends
+   * on the GeckoContentController. For ChromeProcessController it is the
+   * Gecko main thread, while for RemoteContentController it is the compositor
+   * thread where it can send IPDL messages.
    */
   virtual void RequestContentRepaint(const FrameMetrics& aFrameMetrics) = 0;
 
@@ -65,11 +64,42 @@ public:
                          uint64_t aInputBlockId) = 0;
 
   /**
+   * When the apz.allow_zooming pref is set to false, the APZ will not
+   * translate pinch gestures to actual zooming. Instead, it will call this
+   * method to notify gecko of the pinch gesture, and allow it to deal with it
+   * however it wishes. Note that this function is not called if the pinch is
+   * prevented by content calling preventDefault() on the touch events, or via
+   * use of the touch-action property.
+   * @param aType One of PINCHGESTURE_START, PINCHGESTURE_SCALE, or
+   *        PINCHGESTURE_END, indicating the phase of the pinch.
+   * @param aGuid The guid of the APZ that is detecting the pinch. This is
+   *        generally the root APZC for the layers id.
+   * @param aSpanChange For the START or END event, this is always 0.
+   *        For a SCALE event, this is the difference in span between the
+   *        previous state and the new state.
+   * @param aModifiers The keyboard modifiers depressed during the pinch.
+   */
+  virtual void NotifyPinchGesture(PinchGestureInput::PinchGestureType aType,
+                                  const ScrollableLayerGuid& aGuid,
+                                  LayoutDeviceCoord aSpanChange,
+                                  Modifiers aModifiers) = 0;
+
+  /**
    * Schedules a runnable to run on the controller/UI thread at some time
    * in the future.
    * This method must always be called on the controller thread.
    */
   virtual void PostDelayedTask(already_AddRefed<Runnable> aRunnable, int aDelayMs) = 0;
+
+  /**
+   * Returns true if we are currently on the thread that can send repaint requests.
+   */
+  virtual bool IsRepaintThread() = 0;
+
+  /**
+   * Runs the given task on the "repaint" thread.
+   */
+  virtual void DispatchToRepaintThread(already_AddRefed<Runnable> aTask) = 0;
 
   /**
    * APZ uses |FrameMetrics::mCompositionBounds| for hit testing. Sometimes,
@@ -138,12 +168,12 @@ public:
    */
   virtual void NotifyFlushComplete() = 0;
 
-  virtual void UpdateOverscrollVelocity(const float aX, const float aY) {}
-  virtual void UpdateOverscrollOffset(const float aX, const float aY) {}
-  virtual void SetScrollingRootContent(const bool isRootContent) {}
+  virtual void UpdateOverscrollVelocity(float aX, float aY, bool aIsRootContent) {}
+  virtual void UpdateOverscrollOffset(float aX, float aY, bool aIsRootContent) {}
+  virtual void SetScrollingRootContent(bool isRootContent) {}
 
   GeckoContentController() {}
-  virtual void ChildAdopted() {}
+
   /**
    * Needs to be called on the main thread.
    */

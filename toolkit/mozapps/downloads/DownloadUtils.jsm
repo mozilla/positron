@@ -409,7 +409,12 @@ this.DownloadUtils = {
                      getService(Ci.nsIIDNService);
 
     // Get a URI that knows about its components
-    let uri = ioService.newURI(aURIString, null, null);
+    let uri;
+    try {
+      uri = ioService.newURI(aURIString, null, null);
+    } catch (ex) {
+      return ["", ""];
+    }
 
     // Get the inner-most uri for schemes like jar:
     if (uri instanceof Ci.nsINestedURI)
@@ -482,16 +487,14 @@ this.DownloadUtils = {
     // Don't try to format Infinity values using NumberFormat.
     if (aBytes === Infinity) {
       aBytes = "Infinity";
+    } else if (typeof Intl != "undefined") {
+      aBytes = getLocaleNumberFormat(fractionDigits)
+                 .format(aBytes);
     } else {
-      if (typeof Intl != "undefined") {
-        aBytes = getLocaleNumberFormat(fractionDigits)
-                   .format(aBytes);
-      } else {
-        // FIXME: Fall back to the old hack, will be fixed in bug 1200494.
-        aBytes = aBytes.toFixed(fractionDigits);
-        if (gDecimalSymbol != ".") {
-          aBytes = aBytes.replace(".", gDecimalSymbol);
-        }
+      // FIXME: Fall back to the old hack, will be fixed in bug 1200494.
+      aBytes = aBytes.toFixed(fractionDigits);
+      if (gDecimalSymbol != ".") {
+        aBytes = aBytes.replace(".", gDecimalSymbol);
       }
     }
 

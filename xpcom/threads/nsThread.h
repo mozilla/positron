@@ -20,7 +20,7 @@
 #include "mozilla/AlreadyAddRefed.h"
 
 namespace mozilla {
-class CycleCollectedJSRuntime;
+class CycleCollectedJSContext;
 }
 
 using mozilla::NotNull;
@@ -72,7 +72,7 @@ public:
   }
 
   void
-  SetScriptObserver(mozilla::CycleCollectedJSRuntime* aScriptObserver);
+  SetScriptObserver(mozilla::CycleCollectedJSContext* aScriptObserver);
 
   uint32_t
   RecursionDepth() const;
@@ -200,7 +200,7 @@ protected:
   mozilla::Mutex mLock;
 
   nsCOMPtr<nsIThreadObserver> mObserver;
-  mozilla::CycleCollectedJSRuntime* mScriptObserver;
+  mozilla::CycleCollectedJSContext* mScriptObserver;
 
   // Only accessed on the target thread.
   nsAutoTObserverArray<NotNull<nsCOMPtr<nsIThreadObserver>>, 2> mEventObservers;
@@ -222,6 +222,9 @@ protected:
   // Set to true when events posted to this thread will never run.
   bool mEventsAreDoomed;
   MainThreadFlag mIsMainThread;
+
+  // Set to true if this thread creates a JSRuntime.
+  bool mCanInvokeJS;
 };
 
 #if defined(XP_UNIX) && !defined(ANDROID) && !defined(DEBUG) && HAVE_UALARM \

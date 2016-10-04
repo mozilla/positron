@@ -50,6 +50,7 @@ DEFAULT_NO_CONNECTIONS_PREFS = {
     'media.gmp-manager.cert.requireBuiltIn' : False,
     'media.gmp-manager.url' : 'http://localhost/media-dummy/gmpmanager',
     'media.gmp-manager.url.override': 'http://localhost/dummy-gmp-manager.xml',
+    'media.gmp-manager.updateEnabled': False,
     'browser.aboutHomeSnippets.updateUrl': 'https://localhost/snippet-dummy',
     'browser.newtab.url' : 'about:blank',
     'browser.search.update': False,
@@ -124,7 +125,7 @@ DEFAULT_FIREFOX_PREFS = {
 
 # When launching a temporary new Thunderbird profile, use these preferences.
 # Note that these were taken from:
-# http://mxr.mozilla.org/comm-central/source/mail/test/mozmill/runtest.py
+# http://dxr.mozilla.org/comm-central/source/mail/test/mozmill/runtest.py
 DEFAULT_THUNDERBIRD_PREFS = {
     # say no to slow script warnings
     'dom.max_chrome_script_run_time': 200,

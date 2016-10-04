@@ -68,8 +68,6 @@ SharedRGBImage::~SharedRGBImage()
     ADDREF_MANUALLY(mTextureClient);
     ImageBridgeChild::DispatchReleaseTextureClient(mTextureClient);
     mTextureClient = nullptr;
-
-    ImageBridgeChild::DispatchReleaseImageClient(mCompositable.forget().take());
   }
 }
 
@@ -100,7 +98,7 @@ SharedRGBImage::GetSize()
 }
 
 TextureClient*
-SharedRGBImage::GetTextureClient(CompositableClient* aClient)
+SharedRGBImage::GetTextureClient(KnowsCompositor* aForwarder)
 {
   return mTextureClient.get();
 }
