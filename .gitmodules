@@ -1,6 +1,7 @@
 [submodule "positron/electron"]
 	path = positron/electron
 	url = https://github.com/mozilla/positron-electron.git
+	branch = master
 [submodule "positron/spidernode"]
 	path = positron/spidernode
 	url = https://github.com/mozilla/positron-spidernode.git
