@@ -1,5 +1,5 @@
 
-configure_cmd="./configure --engine=spidermonkey --enable-static"
+configure_cmd="./configure --engine=spidermonkey --enable-static --external-spidermonkey-has-nspr"
 
 # Determine whether or not to also generate a configuration for a debug build.
 # Regardless of the value of this arg, Node's configuration script will always
