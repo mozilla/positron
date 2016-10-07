@@ -35,6 +35,24 @@ const WebContentsPrototype = {
   getId() {
     return this._id;
   },
+
+  // We need to implement loadURL and getURL because we've disabled the wrapping
+  // of WebContents by NavigationController in web-contents.js.
+
+  // The equivalent of NavigationController.prototype.loadURL.
+  loadURL(url, options) {
+    if (options == null) {
+      options = {};
+    }
+    this._loadURL(url, options);
+    return this.emit('load-url', url, options);
+  },
+
+  // The equivalent of NavigationController.prototype.getURL.
+  getURL() {
+    return this._getURL();
+  },
+
 };
 
 const BrowserWindowWebContentsPrototype = {
@@ -133,15 +151,47 @@ const BrowserWindowWebContentsPrototype = {
 const GuestWebContentsPrototype = {
   _webView: null,
   _url: null,
+  _canGoBack: false,
+  _canGoForward: false,
+
   attachWebViewToGuest(webView) {
     this._webView = webView;
+
+    // Determine the current value of the canGoBack and canGoForward properties.
+    // The asynchronous calls to getCanGoBack and getCanGoForward can race
+    // a mozbrowserlocationchange event, which itself updates those properties.
+    // So we listen for that event while awaiting the results and only update
+    // the properties if there hasn't already been a location change.
+    let locationChanged = false;
+    this._webView.browserPluginNode.getCanGoBack()
+    .then(canGoBack => {
+      if (!locationChanged) {
+        this._canGoBack = !!canGoBack;
+      }
+    });
+    this._webView.browserPluginNode.getCanGoForward()
+    .then(canGoForward => {
+      if (!locationChanged) {
+        this._canGoForward = !!canGoForward;
+      }
+    });
+
+    // Listen for the first location change so we can ignore the results
+    // of the asynchronous calls to getCanGoBack and getCanGoForward above.
+    // The second mozbrowserlocationchange listener below handles ongoing
+    // state changes.
+    this._webView.browserPluginNode.addEventListener("mozbrowserlocationchange", function() {
+      locationChanged = true;
+    }, { once: true });
 
     let onBrowserLocationChange = (e) => {
       // TODO: Use an event that give us more information so we can fill in
       // inPage and replaceEntry arguments.
       // https://github.com/mozilla/positron/issues/98
-      this.emit('navigation-entry-commited', e, e.detail, /*inPage*/ false, /*replaceEntry*/ false);
-      this._url = e.detail;
+      this.emit('navigation-entry-commited', e, e.detail.url, /*inPage*/ false, /*replaceEntry*/ false);
+      this._url = e.detail.url;
+      this._canGoBack = e.detail.canGoBack;
+      this._canGoForward = e.detail.canGoForward;
     };
     this._webView.browserPluginNode.addEventListener("mozbrowserlocationchange", onBrowserLocationChange);
   },
@@ -163,36 +213,13 @@ const GuestWebContentsPrototype = {
   // in atom_api_web_contents.cc.
   setSize: positronUtil.makeStub('WebContents.setSize'),
 
-  // canGoBack and canGoForward are synchronous, but the mozbrowser equivalents
-  // are async, so we spin the event loop while waiting for the mozbrowser calls
-  // to return.
-  //
-  // TODO: figure out a better solution that doesn't require spinning the loop.
-  // https://github.com/mozilla/positron/issues/73
-
   canGoBack() {
     if (!this._webView) {
       console.warn('WebContents.canGoBack not yet available for guest WebContents');
       return false;
     }
 
-    let returnValue = null;
-
-    this._webView.browserPluginNode.getCanGoBack()
-    .then(function(canGoBack) {
-      returnValue = !!canGoBack;
-    })
-    .catch(function(error) {
-      returnValue = false;
-      throw error;
-    });
-
-    const thread = Cc['@mozilla.org/thread-manager;1'].getService(Ci.nsIThreadManager).currentThread;
-    while (returnValue === null) {
-      thread.processNextEvent(true);
-    }
-
-    return returnValue;
+    return this._canGoBack;
   },
 
   goBack() {
@@ -209,23 +236,7 @@ const GuestWebContentsPrototype = {
       return false;
     }
 
-    let returnValue = null;
-
-    this._webView.browserPluginNode.getCanGoForward()
-    .then(function(canGoForward) {
-      returnValue = !!canGoForward;
-    })
-    .catch(function(error) {
-      returnValue = false;
-      throw error;
-    });
-
-    const thread = Cc['@mozilla.org/thread-manager;1'].getService(Ci.nsIThreadManager).currentThread;
-    while (returnValue === null) {
-      thread.processNextEvent(true);
-    }
-
-    return returnValue;
+    return this._canGoForward;
   },
 
   goForward() {
