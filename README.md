@@ -18,7 +18,7 @@ Before building please make sure you have the prerequisites for building Firefox
 
 Build Command:
 ```bash
-./mach build
+MOZCONFIG=positron/config/mozconfig ./mach build
 ```
 
 ### How to run

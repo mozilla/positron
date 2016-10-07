@@ -38,12 +38,11 @@ app.on('ready', function() {
     });
 });
 
-// Load the http module to create an http server.
+// Load the http module to create an HTTP server.
 var http = require('http');
 
 // Configure our HTTP server to respond with Hello World to all requests.
 var server = http.createServer(function (request, response) {
-console.log('respond to request');
   response.writeHead(200, {"Content-Type": "text/plain"});
   response.end("Hello World from node " + process.versions.node + "\n");
 });
