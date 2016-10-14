@@ -246,6 +246,7 @@ void NodeBindings::UvRunOnce() {
   MOZ_ASSERT(cx);
   JSObject* globalObject = JS::CurrentGlobalOrNull(cx);
   MOZ_ASSERT(globalObject);
+  dom::AutoEntryScript aes(globalObject, "NodeBindings::UvRunOnce");
 
   // Deal with uv events.
   int r = uv_run(uv_loop_, UV_RUN_NOWAIT);
