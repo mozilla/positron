@@ -21,7 +21,12 @@ transforms = TransformSequence()
 @transforms.add
 def set_defaults(config, tests):
     for test in tests:
-        test['mozharness']['build-artifact-name'] = 'public/build/target.tar.bz2'
+        build_platform = test['build-platform']
+        if build_platform.startswith('macosx'):
+            target = 'target.dmg'
+        else:
+            target = 'target.tar.bz2'
+        test['mozharness']['build-artifact-name'] = 'public/build/' + target
         # all desktop tests want to run the bits that require node
         test['mozharness']['set-moz-node-path'] = True
         yield test
@@ -36,10 +41,13 @@ def set_treeherder_machine_platform(config, tests):
     translation = {
         'linux64-asan/opt': 'linux64/asan',
         'linux64-pgo/opt': 'linux64/pgo',
+        'macosx64/debug': 'osx-10-10/debug',
+        'macosx64/opt': 'osx-10-10/opt',
     }
     for test in tests:
         build_platform = test['build-platform']
-        test['treeherder-machine-platform'] = translation.get(build_platform, build_platform)
+        test_platform = test['test-platform']
+        test['treeherder-machine-platform'] = translation.get(build_platform, test_platform)
         yield test
 
 
@@ -65,8 +73,7 @@ def split_e10s(config, tests):
         test['attributes']['e10s'] = False
 
         if e10s == 'both':
-            yield test
-            test = copy.deepcopy(test)
+            yield copy.deepcopy(test)
             e10s = True
         if e10s:
             test['test-name'] += '-e10s'
@@ -76,14 +83,22 @@ def split_e10s(config, tests):
             if group != '?':
                 group += '-e10s'
             test['treeherder-symbol'] = join_symbol(group, symbol)
-            test['mozharness'].setdefault('extra-options', []).append('--e10s')
+            test['mozharness']['extra-options'] = get_keyed_by(item=test,
+                                                               field='mozharness',
+                                                               subfield='extra-options',
+                                                               item_name=test['test-name'])
+            test['mozharness']['extra-options'].append('--e10s')
         yield test
 
 
 @transforms.add
 def allow_software_gl_layers(config, tests):
     for test in tests:
-        allow = get_keyed_by(item=test, field='allow-software-gl-layers',
+
+        # since this value defaults to true, but is not applicable on non-linux,
+        # it's overriden for that platform here.
+        allow = test['test-platform'].startswith('linux') \
+            and get_keyed_by(item=test, field='allow-software-gl-layers',
                              item_name=test['test-name'])
         if allow:
             assert test['instance-size'] != 'legacy',\
@@ -93,4 +108,14 @@ def allow_software_gl_layers(config, tests):
             test['mozharness'].setdefault('extra-options', [])\
                               .append("--allow-software-gl-layers")
 
+        yield test
+
+
+@transforms.add
+def add_os_groups(config, tests):
+    for test in tests:
+        if test['test-platform'].startswith('win'):
+            groups = get_keyed_by(item=test, field='os-groups', item_name=test['test-name'])
+            if groups:
+                test['os-groups'] = groups
         yield test

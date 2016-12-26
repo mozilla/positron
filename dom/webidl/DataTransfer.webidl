@@ -14,26 +14,27 @@ interface DataTransfer {
 
   readonly attribute DataTransferItemList items;
 
-  [Throws]
   void setDragImage(Element image, long x, long y);
 
-  [Throws]
-  readonly attribute DOMStringList types;
-  [Throws]
+  // ReturnValueNeedsContainsHack on .types because lots of extension
+  // code was expecting .contains() back when it was a DOMStringList.
+  [Pure, Cached, Frozen, NeedsCallerType, ReturnValueNeedsContainsHack]
+  readonly attribute sequence<DOMString> types;
+  [Throws, NeedsSubjectPrincipal]
   DOMString getData(DOMString format);
-  [Throws]
+  [Throws, NeedsSubjectPrincipal]
   void setData(DOMString format, DOMString data);
   [Throws, NeedsSubjectPrincipal]
   void clearData(optional DOMString format);
-  [Throws]
+  [Throws, NeedsSubjectPrincipal]
   readonly attribute FileList? files;
 };
 
 partial interface DataTransfer {
-  [Throws, Pref="dom.input.dirpicker"]
+  [Throws, Pref="dom.input.dirpicker", NeedsSubjectPrincipal]
   Promise<sequence<(File or Directory)>> getFilesAndDirectories();
 
-  [Throws, Pref="dom.input.dirpicker"]
+  [Throws, Pref="dom.input.dirpicker", NeedsSubjectPrincipal]
   Promise<sequence<File>>                getFiles(optional boolean recursiveFlag = false);
 };
 
@@ -74,7 +75,7 @@ partial interface DataTransfer {
    * at the specified index. If the index is not in the range from 0 to
    * itemCount - 1, an empty string list is returned.
    */
-  [Throws]
+  [Throws, NeedsCallerType]
   DOMStringList mozTypesAt(unsigned long index);
 
   /**
@@ -115,7 +116,7 @@ partial interface DataTransfer {
    * @throws NS_ERROR_DOM_INDEX_SIZE_ERR if index is greater than itemCount
    * @throws NO_MODIFICATION_ALLOWED_ERR if the item cannot be modified
    */
-  [Throws]
+  [Throws, NeedsSubjectPrincipal]
   void mozSetDataAt(DOMString format, any data, unsigned long index);
 
   /**
@@ -127,8 +128,15 @@ partial interface DataTransfer {
    * @returns the data of the given format, or null if it doesn't exist.
    * @throws NS_ERROR_DOM_INDEX_SIZE_ERR if index is greater or equal than itemCount
    */
-  [Throws]
+  [Throws, NeedsSubjectPrincipal]
   any mozGetDataAt(DOMString format, unsigned long index);
+
+  /**
+   * Update the drag image. Arguments are the same as setDragImage. This is only
+   * valid within the parent chrome process.
+   */
+  [ChromeOnly]
+  void updateDragImage(Element image, long x, long y);
 
   /**
    * Will be true when the user has cancelled the drag (typically by pressing

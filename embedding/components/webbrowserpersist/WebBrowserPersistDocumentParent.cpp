@@ -7,6 +7,7 @@
 #include "WebBrowserPersistDocumentParent.h"
 
 #include "mozilla/ipc/InputStreamUtils.h"
+#include "mozilla/dom/PContentParent.h"
 #include "nsIInputStream.h"
 #include "nsThreadUtils.h"
 #include "WebBrowserPersistResourcesParent.h"
@@ -57,7 +58,7 @@ WebBrowserPersistDocumentParent::~WebBrowserPersistDocumentParent()
     MOZ_ASSERT(!mOnReady);
 }
 
-bool
+mozilla::ipc::IPCResult
 WebBrowserPersistDocumentParent::RecvAttributes(const Attrs& aAttrs,
                                                 const OptionalInputStreamParams& aPostData,
                                                 nsTArray<FileDescriptor>&& aPostFiles)
@@ -66,25 +67,29 @@ WebBrowserPersistDocumentParent::RecvAttributes(const Attrs& aAttrs,
     nsCOMPtr<nsIInputStream> postData =
         ipc::DeserializeInputStream(aPostData, aPostFiles);
     if (!mOnReady || mReflection) {
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
     mReflection = new WebBrowserPersistRemoteDocument(this, aAttrs, postData);
     RefPtr<WebBrowserPersistRemoteDocument> reflection = mReflection;
     mOnReady->OnDocumentReady(reflection);
     mOnReady = nullptr;
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 WebBrowserPersistDocumentParent::RecvInitFailure(const nsresult& aFailure)
 {
     if (!mOnReady || mReflection) {
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
     mOnReady->OnError(aFailure);
     mOnReady = nullptr;
     // Warning: Send__delete__ deallocates this object.
-    return Send__delete__(this);
+    IProtocol* mgr = Manager();
+    if (!Send__delete__(this)) {
+        return IPC_FAIL_NO_REASON(mgr);
+    }
+    return IPC_OK();
 }
 
 PWebBrowserPersistResourcesParent*

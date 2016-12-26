@@ -122,49 +122,6 @@ WebGLContext::ValidateBlendFuncEnumsCompatibility(GLenum sfactor,
     return true;
 }
 
-/**
- * Check data ranges [readOffset, readOffset + size] and [writeOffset,
- * writeOffset + size] for overlap.
- *
- * It is assumed that offset and size have already been validated.
- */
-bool
-WebGLContext::ValidateDataRanges(WebGLintptr readOffset, WebGLintptr writeOffset, WebGLsizeiptr size, const char* info)
-{
-    MOZ_ASSERT((CheckedInt<WebGLsizeiptr>(readOffset) + size).isValid());
-    MOZ_ASSERT((CheckedInt<WebGLsizeiptr>(writeOffset) + size).isValid());
-
-    bool separate = (readOffset + size < writeOffset || writeOffset + size < readOffset);
-    if (!separate) {
-        ErrorInvalidValue("%s: ranges [readOffset, readOffset + size) and [writeOffset, "
-                          "writeOffset + size) overlap", info);
-    }
-
-    return separate;
-}
-
-bool
-WebGLContext::ValidateTextureTargetEnum(GLenum target, const char* info)
-{
-    switch (target) {
-    case LOCAL_GL_TEXTURE_2D:
-    case LOCAL_GL_TEXTURE_CUBE_MAP:
-        return true;
-
-    case LOCAL_GL_TEXTURE_3D:
-        if (IsWebGL2())
-            return true;
-
-        break;
-
-    default:
-        break;
-    }
-
-    ErrorInvalidEnumInfo(info, target);
-    return false;
-}
-
 bool
 WebGLContext::ValidateComparisonEnum(GLenum target, const char* info)
 {
@@ -240,161 +197,6 @@ WebGLContext::ValidateDrawModeEnum(GLenum mode, const char* info)
 }
 
 bool
-WebGLContext::ValidateFramebufferAttachment(const WebGLFramebuffer* fb, GLenum attachment,
-                                            const char* funcName,
-                                            bool badColorAttachmentIsInvalidOp)
-{
-    if (!fb) {
-        switch (attachment) {
-        case LOCAL_GL_COLOR:
-        case LOCAL_GL_DEPTH:
-        case LOCAL_GL_STENCIL:
-            return true;
-
-        default:
-            ErrorInvalidEnum("%s: attachment: invalid enum value 0x%x.",
-                             funcName, attachment);
-            return false;
-        }
-    }
-
-    if (attachment == LOCAL_GL_DEPTH_ATTACHMENT ||
-        attachment == LOCAL_GL_STENCIL_ATTACHMENT ||
-        attachment == LOCAL_GL_DEPTH_STENCIL_ATTACHMENT)
-    {
-        return true;
-    }
-
-    if (attachment >= LOCAL_GL_COLOR_ATTACHMENT0 &&
-        attachment <= LastColorAttachmentEnum())
-    {
-        return true;
-    }
-
-    if (badColorAttachmentIsInvalidOp &&
-        attachment >= LOCAL_GL_COLOR_ATTACHMENT0)
-    {
-        const uint32_t offset = attachment - LOCAL_GL_COLOR_ATTACHMENT0;
-        ErrorInvalidOperation("%s: Bad color attachment: COLOR_ATTACHMENT%u. (0x%04x)",
-                              funcName, offset, attachment);
-    } else {
-        ErrorInvalidEnum("%s: attachment: Bad attachment 0x%x.", funcName, attachment);
-    }
-    return false;
-}
-
-/**
- * Return true if pname is valid for GetSamplerParameter calls.
- */
-bool
-WebGLContext::ValidateSamplerParameterName(GLenum pname, const char* info)
-{
-    switch (pname) {
-    case LOCAL_GL_TEXTURE_MIN_FILTER:
-    case LOCAL_GL_TEXTURE_MAG_FILTER:
-    case LOCAL_GL_TEXTURE_WRAP_S:
-    case LOCAL_GL_TEXTURE_WRAP_T:
-    case LOCAL_GL_TEXTURE_WRAP_R:
-    case LOCAL_GL_TEXTURE_MIN_LOD:
-    case LOCAL_GL_TEXTURE_MAX_LOD:
-    case LOCAL_GL_TEXTURE_COMPARE_MODE:
-    case LOCAL_GL_TEXTURE_COMPARE_FUNC:
-        return true;
-
-    default:
-        ErrorInvalidEnum("%s: invalid pname: %s", info, EnumName(pname));
-        return false;
-    }
-}
-
-/**
- * Return true if pname and param are valid combination for SamplerParameter calls.
- */
-bool
-WebGLContext::ValidateSamplerParameterParams(GLenum pname, const WebGLIntOrFloat& param, const char* info)
-{
-    const GLenum p = param.AsInt();
-
-    switch (pname) {
-    case LOCAL_GL_TEXTURE_MIN_FILTER:
-        switch (p) {
-        case LOCAL_GL_NEAREST:
-        case LOCAL_GL_LINEAR:
-        case LOCAL_GL_NEAREST_MIPMAP_NEAREST:
-        case LOCAL_GL_NEAREST_MIPMAP_LINEAR:
-        case LOCAL_GL_LINEAR_MIPMAP_NEAREST:
-        case LOCAL_GL_LINEAR_MIPMAP_LINEAR:
-            return true;
-
-        default:
-            ErrorInvalidEnum("%s: invalid param: %s", info, EnumName(p));
-            return false;
-        }
-
-    case LOCAL_GL_TEXTURE_MAG_FILTER:
-        switch (p) {
-        case LOCAL_GL_NEAREST:
-        case LOCAL_GL_LINEAR:
-            return true;
-
-        default:
-            ErrorInvalidEnum("%s: invalid param: %s", info, EnumName(p));
-            return false;
-        }
-
-    case LOCAL_GL_TEXTURE_WRAP_S:
-    case LOCAL_GL_TEXTURE_WRAP_T:
-    case LOCAL_GL_TEXTURE_WRAP_R:
-        switch (p) {
-        case LOCAL_GL_CLAMP_TO_EDGE:
-        case LOCAL_GL_REPEAT:
-        case LOCAL_GL_MIRRORED_REPEAT:
-            return true;
-
-        default:
-            ErrorInvalidEnum("%s: invalid param: %s", info, EnumName(p));
-            return false;
-        }
-
-    case LOCAL_GL_TEXTURE_MIN_LOD:
-    case LOCAL_GL_TEXTURE_MAX_LOD:
-        return true;
-
-    case LOCAL_GL_TEXTURE_COMPARE_MODE:
-        switch (param.AsInt()) {
-        case LOCAL_GL_NONE:
-        case LOCAL_GL_COMPARE_REF_TO_TEXTURE:
-            return true;
-
-        default:
-            ErrorInvalidEnum("%s: invalid param: %s", info, EnumName(p));
-            return false;
-        }
-
-    case LOCAL_GL_TEXTURE_COMPARE_FUNC:
-        switch (p) {
-        case LOCAL_GL_LEQUAL:
-        case LOCAL_GL_GEQUAL:
-        case LOCAL_GL_LESS:
-        case LOCAL_GL_GREATER:
-        case LOCAL_GL_EQUAL:
-        case LOCAL_GL_NOTEQUAL:
-        case LOCAL_GL_ALWAYS:
-        case LOCAL_GL_NEVER:
-            return true;
-
-        default:
-            ErrorInvalidEnum("%s: invalid param: %s", info, EnumName(p));
-            return false;
-        }
-
-    default:
-        ErrorInvalidEnum("%s: invalid pname: %s", info, EnumName(pname));
-        return false;
-    }
-}
-
-bool
 WebGLContext::ValidateUniformLocation(WebGLUniformLocation* loc, const char* funcName)
 {
     /* GLES 2.0.25, p38:
@@ -405,7 +207,7 @@ WebGLContext::ValidateUniformLocation(WebGLUniformLocation* loc, const char* fun
     if (!loc)
         return false;
 
-    if (!ValidateObject(funcName, loc))
+    if (!ValidateObjectAllowDeleted(funcName, *loc))
         return false;
 
     if (!mCurrentProgram) {
@@ -672,6 +474,8 @@ WebGLContext::InitAndValidateGL(FailureReason* const out_failReason)
     mStencilRefFront = 0;
     mStencilRefBack = 0;
 
+    mLineWidth = 1.0;
+
     /*
     // Technically, we should be setting mStencil[...] values to
     // `allOnes`, but either ANGLE breaks or the SGX540s on Try break.
@@ -697,6 +501,7 @@ WebGLContext::InitAndValidateGL(FailureReason* const out_failReason)
     mDitherEnabled = true;
     mRasterizerDiscardEnabled = false;
     mScissorTestEnabled = false;
+    mGenerateMipmapHint = LOCAL_GL_DONT_CARE;
 
     // Bindings, etc.
     mActiveTexture = 0;
@@ -868,19 +673,11 @@ WebGLContext::InitAndValidateGL(FailureReason* const out_failReason)
     }
 
     if (gl->IsCompatibilityProfile()) {
-        // gl_PointSize is always available in ES2 GLSL, but has to be
-        // specifically enabled on desktop GLSL.
-        gl->fEnable(LOCAL_GL_VERTEX_PROGRAM_POINT_SIZE);
-
-        /* gl_PointCoord is always available in ES2 GLSL and in newer desktop
-         * GLSL versions, but apparently not in OpenGL 2 and apparently not (due
-         * to a driver bug) on certain NVIDIA setups. See:
-         *   http://www.opengl.org/discussion_boards/ubbthreads.php?ubb=showflat&Number=261472
-         *
-         * Note that this used to cause crashes on old ATI drivers... Hopefully
-         * not a significant anymore. See bug 602183.
-         */
         gl->fEnable(LOCAL_GL_POINT_SPRITE);
+    }
+
+    if (!gl->IsGLES()) {
+        gl->fEnable(LOCAL_GL_PROGRAM_POINT_SIZE);
     }
 
 #ifdef XP_MACOSX

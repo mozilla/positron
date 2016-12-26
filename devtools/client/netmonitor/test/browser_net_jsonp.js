@@ -8,10 +8,12 @@
  */
 
 add_task(function* () {
+  let { L10N } = require("devtools/client/netmonitor/l10n");
+
   let { tab, monitor } = yield initNetMonitor(JSONP_URL);
   info("Starting test... ");
 
-  let { document, EVENTS, L10N, NetMonitorView } = monitor.panelWin;
+  let { document, EVENTS, NetMonitorView } = monitor.panelWin;
   let { RequestsMenu, NetworkDetails } = NetMonitorView;
 
   RequestsMenu.lazyUpdate = false;
@@ -23,7 +25,7 @@ add_task(function* () {
   });
   yield wait;
 
-  verifyRequestItemTarget(RequestsMenu.getItemAtIndex(0),
+  verifyRequestItemTarget(RequestsMenu, RequestsMenu.getItemAtIndex(0),
     "GET", CONTENT_TYPE_SJS + "?fmt=jsonp&jsonp=$_0123Fun", {
       status: 200,
       statusText: "OK",
@@ -32,7 +34,7 @@ add_task(function* () {
       size: L10N.getFormatStrWithNumbers("networkMenu.sizeB", 41),
       time: true
     });
-  verifyRequestItemTarget(RequestsMenu.getItemAtIndex(1),
+  verifyRequestItemTarget(RequestsMenu, RequestsMenu.getItemAtIndex(1),
     "GET", CONTENT_TYPE_SJS + "?fmt=jsonp2&jsonp=$_4567Sad", {
       status: 200,
       statusText: "OK",

@@ -739,7 +739,7 @@ function PerformanceDiff(current, old = null) {
 
   // Handle the parent, if any.
   if (current._parent) {
-    this._parent = old?current._parent.subtract(old._parent):current._parent;
+    this._parent = old ? current._parent.subtract(old._parent) : current._parent;
     this._all.push(this._parent);
     this._parent.owner = this;
   } else {
@@ -915,7 +915,7 @@ var Process = {
       return this._loader;
     }
     Services.ppmm.loadProcessScript("resource://gre/modules/PerformanceStats-content.js",
-      true/*including future processes*/);
+      true/* including future processes*/);
     return this._loader = Services.ppmm;
   },
 

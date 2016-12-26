@@ -39,7 +39,7 @@ var gSyncUI = {
   _syncStartTime: 0,
   _syncAnimationTimer: 0,
 
-  init: function () {
+  init: function() {
     Cu.import("resource://services-common/stringbundle.js");
 
     // Proceed to set up the UI if Sync has already started up.
@@ -137,7 +137,7 @@ var gSyncUI = {
   // Note that we don't show login errors in a notification bar here, but do
   // still need to track a login-failed state so the "Tools" menu updates
   // with the correct state.
-  _loginFailed: function () {
+  _loginFailed: function() {
     // If Sync isn't already ready, we don't want to force it to initialize
     // by referencing Weave.Status - and it isn't going to be accurate before
     // Sync is ready anyway.
@@ -242,7 +242,7 @@ var gSyncUI = {
     this.updateUI();
   },
 
-  _getAppName: function () {
+  _getAppName: function() {
     let brand = new StringBundle("chrome://branding/locale/brand.properties");
     return brand.get("brandShortName");
   },
@@ -304,7 +304,7 @@ var gSyncUI = {
   },
 
   // Open the legacy-sync device pairing UI. Note used for FxA Sync.
-  openAddDevice: function () {
+  openAddDevice: function() {
     if (!Weave.Utils.ensureMPUnlocked())
       return;
 
@@ -316,11 +316,11 @@ var gSyncUI = {
                         "syncAddDevice", "centerscreen,chrome,resizable=no");
   },
 
-  openPrefs: function (entryPoint) {
+  openPrefs: function(entryPoint) {
     openPreferences("paneSync", { urlParams: { entrypoint: entryPoint } });
   },
 
-  openSignInAgainPage: function (entryPoint = "syncbutton") {
+  openSignInAgainPage: function(entryPoint = "syncbutton") {
     gFxAccounts.openSignInAgainPage(entryPoint);
   },
 
@@ -426,10 +426,10 @@ var gSyncUI = {
   formatLastSyncDate: function(date) {
     let dateFormat;
     let sixDaysAgo = (() => {
-      let date = new Date();
-      date.setDate(date.getDate() - 6);
-      date.setHours(0, 0, 0, 0);
-      return date;
+      let tempDate = new Date();
+      tempDate.setDate(tempDate.getDate() - 6);
+      tempDate.setHours(0, 0, 0, 0);
+      return tempDate;
     })();
     // It may be confusing for the user to see "Last Sync: Monday" when the last sync was a indeed a Monday but 3 weeks ago
     if (date < sixDaysAgo) {
@@ -439,10 +439,6 @@ var gSyncUI = {
     }
     let lastSyncDateString = date.toLocaleDateString(undefined, dateFormat);
     return this._stringBundle.formatStringFromName("lastSync2.label", [lastSyncDateString], 1);
-  },
-
-  onSyncFinish: function SUI_onSyncFinish() {
-    let title = this._stringBundle.GetStringFromName("error.sync.title");
   },
 
   onClientsSynced: function() {
@@ -484,7 +480,7 @@ var gSyncUI = {
     // Note that sync uses the ":ui:" notifications for errors because sync.
     switch (topic) {
       case "weave:ui:sync:finish":
-        this.onSyncFinish();
+        // Do nothing.
         break;
       case "weave:ui:sync:error":
       case "weave:service:setup-complete":
@@ -530,7 +526,7 @@ var gSyncUI = {
 };
 
 XPCOMUtils.defineLazyGetter(gSyncUI, "_stringBundle", function() {
-  //XXXzpao these strings should probably be moved from /services to /browser... (bug 583381)
+  // XXXzpao these strings should probably be moved from /services to /browser... (bug 583381)
   //        but for now just make it work
   return Cc["@mozilla.org/intl/stringbundle;1"].
          getService(Ci.nsIStringBundleService).

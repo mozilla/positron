@@ -15,7 +15,6 @@
 #include "mozilla/ReentrantMonitor.h"   // for ReentrantMonitorAutoEnter, etc
 #include "mozilla/TimeStamp.h"          // for TimeStamp
 #include "mozilla/gfx/Point.h"          // For IntSize
-#include "mozilla/layers/GonkNativeHandle.h"
 #include "mozilla/layers/LayersTypes.h"  // for LayersBackend, etc
 #include "mozilla/layers/CompositorTypes.h"
 #include "mozilla/mozalloc.h"           // for operator delete, etc
@@ -152,7 +151,6 @@ class SharedPlanarYCbCrImage;
 class PlanarYCbCrImage;
 class TextureClient;
 class KnowsCompositor;
-class GrallocImage;
 class NVImage;
 
 struct ImageBackendData
@@ -171,8 +169,6 @@ class SharedRGBImage;
 class SurfaceTextureImage;
 #elif defined(XP_MACOSX)
 class MacIOSurfaceImage;
-#elif defined(MOZ_WIDGET_GONK)
-class OverlayImage;
 #endif
 
 /**
@@ -214,11 +210,6 @@ public:
   int32_t GetSerial() { return mSerial; }
 
   virtual already_AddRefed<gfx::SourceSurface> GetAsSourceSurface() = 0;
-
-  virtual GrallocImage* AsGrallocImage()
-  {
-    return nullptr;
-  }
 
   virtual bool IsValid() { return true; }
 
@@ -385,10 +376,6 @@ public:
   // Factory methods for shared image types.
   RefPtr<SharedRGBImage> CreateSharedRGBImage();
 
-#ifdef MOZ_WIDGET_GONK
-  RefPtr<OverlayImage> CreateOverlayImage();
-#endif
-
   struct NonOwningImage {
     explicit NonOwningImage(Image* aImage = nullptr,
                             TimeStamp aTimeStamp = TimeStamp(),
@@ -480,7 +467,7 @@ public:
    *
    * Can be called from any thread.
    */
-  uint64_t GetAsyncContainerID() const;
+  uint64_t GetAsyncContainerID();
 
   /**
    * Returns if the container currently has an image.
@@ -596,6 +583,8 @@ private:
   // calling this function!
   void EnsureActiveImage();
 
+  void EnsureImageClient(bool aCreate);
+
   void NotifyCompositeInternal(const ImageCompositeNotification& aNotification);
 
   // ReentrantMonitor to protect thread safe access to the "current
@@ -686,6 +675,7 @@ struct PlanarYCbCrData {
   uint32_t mPicY;
   gfx::IntSize mPicSize;
   StereoMode mStereoMode;
+  YUVColorSpace mYUVColorSpace;
 
   gfx::IntRect GetPictureRect() const {
     return gfx::IntRect(mPicX, mPicY,
@@ -698,6 +688,7 @@ struct PlanarYCbCrData {
     , mCbChannel(nullptr), mCrChannel(nullptr)
     , mCbCrStride(0), mCbCrSize(0, 0) , mCbSkip(0), mCrSkip(0)
     , mPicX(0), mPicY(0), mPicSize(0, 0), mStereoMode(StereoMode::MONO)
+    , mYUVColorSpace(YUVColorSpace::BT601)
   {}
 };
 
@@ -904,54 +895,6 @@ private:
   nsDataHashtable<nsUint32HashKey, RefPtr<TextureClient> >  mTextureClients;
   TextureFlags mTextureFlags;
 };
-
-#ifdef MOZ_WIDGET_GONK
-class OverlayImage : public Image {
-  /**
-   * OverlayImage is a special Image type that does not hold any buffer.
-   * It only hold an Id as identifier to the real content of the Image.
-   * Therefore, OverlayImage must be handled by some specialized hardware(e.g. HWC) 
-   * to show its content.
-   */
-public:
-  struct Data {
-    int32_t mOverlayId;
-    gfx::IntSize mSize;
-  };
-
-  struct SidebandStreamData {
-    GonkNativeHandle mStream;
-    gfx::IntSize mSize;
-  };
-
-  OverlayImage() : Image(nullptr, ImageFormat::OVERLAY_IMAGE) { mOverlayId = INVALID_OVERLAY; }
-
-  void SetData(const Data& aData)
-  {
-    mOverlayId = aData.mOverlayId;
-    mSize = aData.mSize;
-    mSidebandStream = GonkNativeHandle();
-  }
-
-  void SetData(const SidebandStreamData& aData)
-  {
-    mSidebandStream = aData.mStream;
-    mSize = aData.mSize;
-    mOverlayId = INVALID_OVERLAY;
-  }
-
-  already_AddRefed<gfx::SourceSurface> GetAsSourceSurface() { return nullptr; } ;
-  int32_t GetOverlayId() { return mOverlayId; }
-  GonkNativeHandle& GetSidebandStream() { return mSidebandStream; }
-
-  gfx::IntSize GetSize() { return mSize; }
-
-private:
-  int32_t mOverlayId;
-  GonkNativeHandle mSidebandStream;
-  gfx::IntSize mSize;
-};
-#endif
 
 } // namespace layers
 } // namespace mozilla

@@ -5,11 +5,14 @@
 package org.mozilla.gecko.menu;
 
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.util.ResourceDrawableUtils;
 
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.support.v4.graphics.drawable.DrawableCompat;
+import android.support.v4.widget.TextViewCompat;
 import android.util.AttributeSet;
 import android.widget.TextView;
 
@@ -50,13 +53,15 @@ public class MenuItemDefault extends TextView
 
         mState = res.getDrawable(R.drawable.menu_item_state).mutate();
         mState.setBounds(stateIconBounds);
+        //  Support RTL
+        DrawableCompat.setAutoMirrored(mState, true);
 
         if (sIconBounds == null) {
             int iconSize = res.getDimensionPixelSize(R.dimen.menu_item_icon);
             sIconBounds = new Rect(0, 0, iconSize, iconSize);
         }
 
-        setCompoundDrawables(mIcon, null, mState, null);
+        TextViewCompat.setCompoundDrawablesRelative(this, mIcon, null, mState, null);
     }
 
     @Override
@@ -87,7 +92,7 @@ public class MenuItemDefault extends TextView
     }
 
     private void refreshIcon() {
-        setCompoundDrawables(mShowIcon ? mIcon : null, null, mState, null);
+        TextViewCompat.setCompoundDrawablesRelative(this, mShowIcon ? mIcon : null, null, mState, null);
     }
 
     void setIcon(Drawable icon) {
@@ -102,7 +107,7 @@ public class MenuItemDefault extends TextView
     }
 
     void setIcon(int icon) {
-        setIcon((icon == 0) ? null : getResources().getDrawable(icon));
+        setIcon((icon == 0) ? null : ResourceDrawableUtils.getDrawable(getContext(), icon));
     }
 
     void setTitle(CharSequence title) {
@@ -113,8 +118,9 @@ public class MenuItemDefault extends TextView
     public void setEnabled(boolean enabled) {
         super.setEnabled(enabled);
 
-        if (mIcon != null)
+        if (mIcon != null) {
             mIcon.setAlpha(enabled ? 255 : 99);
+        }
 
         if (mState != null)
             mState.setAlpha(enabled ? 255 : 99);

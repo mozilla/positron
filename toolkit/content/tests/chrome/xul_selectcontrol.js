@@ -319,7 +319,7 @@ function test_nsIDOMXULSelectControlElement_UI(element, testprefix)
   var thirditem = element.appendItem("Third Item", "third");
   var fourthitem = element.appendItem("Fourth Item", "fourth");
   if (behaviourContains(element.localName, "select-extended-keynav")) {
-    var fifthitem = element.appendItem("Fifth Item", "fifth");
+    element.appendItem("Fifth Item", "fifth");
     var sixthitem = element.appendItem("Sixth Item", "sixth");
 
     synthesizeKeyExpectEvent("VK_END", {}, element, "select", testid + "key end");
@@ -353,7 +353,7 @@ function test_nsIDOMXULSelectControlElement_UI(element, testprefix)
                              dontSelectDisabled ? "!select" : "select",
                              testid + "mouse select disabled");
   test_nsIDOMXULSelectControlElement_States(element, testid + "mouse select disabled", 4,
-    dontSelectDisabled ? firstitem: seconditem, dontSelectDisabled ? 0 : 1,
+    dontSelectDisabled ? firstitem : seconditem, dontSelectDisabled ? 0 : 1,
     dontSelectDisabled ? "first" : "second");
 
   if (dontSelectDisabled) {

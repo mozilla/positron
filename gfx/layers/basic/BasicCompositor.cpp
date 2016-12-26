@@ -200,7 +200,6 @@ public:
 
 BasicCompositor::BasicCompositor(CompositorBridgeParent* aParent, widget::CompositorWidget* aWidget)
   : Compositor(aWidget, aParent)
-  , mDidExternalComposition(false)
   , mIsPendingEndRemoteDrawing(false)
 {
   MOZ_COUNT_CTOR(BasicCompositor);
@@ -571,7 +570,7 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
     newTransform = aTransform.As2D();
   } else {
     // Create a temporary surface for the transform.
-    dest = gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(RoundedOut(aRect).Size(), SurfaceFormat::B8G8R8A8);
+    dest = Factory::CreateDrawTarget(gfxVars::ContentBackend(), RoundedOut(aRect).Size(), SurfaceFormat::B8G8R8A8);
     if (!dest) {
       return;
     }
@@ -646,6 +645,9 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
                                         dest, buffer)) {
           // we succeeded in convert and scaling
         } else if (source->mFromYCBCR &&
+                   !source->GetSurface(dest)) {
+          gfxWarning() << "Failed to get YCbCr to rgb surface.";
+        } else if (source->mFromYCBCR &&
             AttemptVideoScale(source, sourceMask, aOpacity, blendMode,
                               texturedEffect,
                               newTransform, aRect, transformedClipRect,
@@ -682,7 +684,7 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
       break;
     }
     case EffectTypes::YCBCR: {
-      NS_RUNTIMEABORT("Can't (easily) support component alpha with BasicCompositor!");
+      MOZ_CRASH("Can't (easily) support component alpha with BasicCompositor!");
       break;
     }
     case EffectTypes::RENDER_TARGET: {
@@ -701,11 +703,11 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
       break;
     }
     case EffectTypes::COMPONENT_ALPHA: {
-      NS_RUNTIMEABORT("Can't (easily) support component alpha with BasicCompositor!");
+      MOZ_CRASH("Can't (easily) support component alpha with BasicCompositor!");
       break;
     }
     default: {
-      NS_RUNTIMEABORT("Invalid effect type!");
+      MOZ_CRASH("Invalid effect type!");
       break;
     }
   }
@@ -781,16 +783,9 @@ BasicCompositor::BeginFrame(const nsIntRegion& aInvalidRegion,
   IntRect rect = IntRect(0, 0, intRect.width, intRect.height);
 
   LayoutDeviceIntRegion invalidRegionSafe;
-  if (mDidExternalComposition) {
-    // We do not know rendered region during external composition, just redraw
-    // whole widget.
-    invalidRegionSafe = intRect;
-    mDidExternalComposition = false;
-  } else {
-    // Sometimes the invalid region is larger than we want to draw.
-    invalidRegionSafe.And(
+  // Sometimes the invalid region is larger than we want to draw.
+  invalidRegionSafe.And(
       LayoutDeviceIntRegion::FromUnknownRegion(aInvalidRegion), intRect);
-  }
 
   mInvalidRegion = invalidRegionSafe;
   mInvalidRect = mInvalidRegion.GetBounds();
@@ -968,16 +963,6 @@ void
 BasicCompositor::FinishPendingComposite()
 {
   TryToEndRemoteDrawing(/* aForceToEnd */ true);
-}
-
-void
-BasicCompositor::EndFrameForExternalComposition(const gfx::Matrix& aTransform)
-{
-  MOZ_ASSERT(!mTarget);
-  MOZ_ASSERT(!mDrawTarget);
-  MOZ_ASSERT(!mRenderTarget);
-
-  mDidExternalComposition = true;
 }
 
 BasicCompositor*

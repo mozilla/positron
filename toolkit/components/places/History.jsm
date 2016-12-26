@@ -90,6 +90,9 @@ Cu.importGlobalProperties(["URL"]);
 const NOTIFICATION_CHUNK_SIZE = 300;
 const ONRESULT_CHUNK_SIZE = 300;
 
+// Timers resolution is not always good, it can have a 16ms precision on Win.
+const TIMERS_RESOLUTION_SKEW_MS = 16;
+
 /**
  * Sends a bookmarks notification through the given observers.
  *
@@ -127,7 +130,7 @@ this.History = Object.freeze({
    *      If `guidOrURI` does not have the expected type or if it is a string
    *      that may be parsed neither as a valid URL nor as a valid GUID.
    */
-  fetch: function (guidOrURI) {
+  fetch: function(guidOrURI) {
     throw new Error("Method not implemented");
   },
 
@@ -172,7 +175,7 @@ this.History = Object.freeze({
    * @throws (Error)
    *      If an element of `visits` has an invalid `transition`.
    */
-  insert: function (pageInfo) {
+  insert: function(pageInfo) {
     if (typeof pageInfo != "object" || !pageInfo) {
       throw new TypeError("pageInfo must be an object");
     }
@@ -228,7 +231,7 @@ this.History = Object.freeze({
    * @throws (Error)
    *      If an element of `visits` has an invalid `transition`.
    */
-  insertMany: function (pageInfos, onResult, onError) {
+  insertMany: function(pageInfos, onResult, onError) {
     let infos = [];
 
     if (!Array.isArray(pageInfos)) {
@@ -278,7 +281,7 @@ this.History = Object.freeze({
    *       is neither a valid GUID nor a valid URI or if `pages`
    *       is an empty array.
    */
-  remove: function (pages, onResult = null) {
+  remove: function(pages, onResult = null) {
     // Normalize and type-check arguments
     if (Array.isArray(pages)) {
       if (pages.length == 0) {
@@ -325,6 +328,9 @@ this.History = Object.freeze({
    *                been added since this date (inclusive).
    *          - endDate: (Date) Remove visits that have
    *                been added before this date (inclusive).
+   *          - limit: (Number) Limit the number of visits
+   *                we remove to this number
+   *          - url: (URL) Only remove visits to this URL
    *      If both `beginDate` and `endDate` are specified,
    *      visits between `beginDate` (inclusive) and `end`
    *      (inclusive) are removed.
@@ -349,6 +355,8 @@ this.History = Object.freeze({
 
     let hasBeginDate = "beginDate" in filter;
     let hasEndDate = "endDate" in filter;
+    let hasURL = "url" in filter;
+    let hasLimit = "limit" in filter;
     if (hasBeginDate) {
       ensureDate(filter.beginDate);
     }
@@ -358,8 +366,20 @@ this.History = Object.freeze({
     if (hasBeginDate && hasEndDate && filter.beginDate > filter.endDate) {
       throw new TypeError("`beginDate` should be at least as old as `endDate`");
     }
-    if (!hasBeginDate && !hasEndDate) {
+    if (!hasBeginDate && !hasEndDate && !hasURL && !hasLimit) {
       throw new TypeError("Expected a non-empty filter");
+    }
+
+    if (hasURL && !(filter.url instanceof URL) && typeof filter.url != "string" &&
+        !(filter.url instanceof Ci.nsIURI)) {
+      throw new TypeError("Expected a valid URL for `url`");
+    }
+
+    if (hasLimit &&
+        (typeof filter.limit != "number" ||
+         filter.limit <= 0 ||
+         !Number.isInteger(filter.limit))) {
+      throw new TypeError("Expected a non-zero positive integer as a limit");
     }
 
     if (onResult && typeof onResult != "function") {
@@ -500,7 +520,7 @@ function validatePageInfo(pageInfo) {
 
     if (inVisit.date) {
       ensureDate(inVisit.date);
-      if (inVisit.date > Date.now()) {
+      if (inVisit.date > (Date.now() + TIMERS_RESOLUTION_SKEW_MS)) {
         throw new TypeError(`date: ${inVisit.date} cannot be a future date`);
       }
       visit.date = inVisit.date;
@@ -728,7 +748,7 @@ var notifyCleanup = Task.async(function*(db, pages) {
       // We have removed all visits, but the page is still alive, e.g.
       // because of a bookmark.
       notify(observers, "onDeleteVisits",
-        [uri, /*last visit*/0, guid, reason, -1]);
+        [uri, /* last visit*/0, guid, reason, -1]);
     } else {
       // The page has been entirely removed.
       notify(observers, "onDeleteURI",
@@ -777,27 +797,43 @@ var removeVisitsByFilter = Task.async(function*(db, filter, onResult = null) {
   // 1. Determine visits that took place during the interval.  Note
   // that the database uses microseconds, while JS uses milliseconds,
   // so we need to *1000 one way and /1000 the other way.
-  let dates = {
-    conditions: [],
-    args: {},
-  };
+  let conditions = [];
+  let args = {};
   if ("beginDate" in filter) {
-    dates.conditions.push("visit_date >= :begin * 1000");
-    dates.args.begin = Number(filter.beginDate);
+    conditions.push("v.visit_date >= :begin * 1000");
+    args.begin = Number(filter.beginDate);
   }
   if ("endDate" in filter) {
-    dates.conditions.push("visit_date <= :end * 1000");
-    dates.args.end = Number(filter.endDate);
+    conditions.push("v.visit_date <= :end * 1000");
+    args.end = Number(filter.endDate);
   }
+  if ("limit" in filter) {
+    args.limit = Number(filter.limit);
+  }
+
+  let optionalJoin = "";
+  if ("url" in filter) {
+    let url = filter.url;
+    if (url instanceof Ci.nsIURI) {
+      url = filter.url.spec;
+    } else {
+      url = new URL(url).href;
+    }
+    optionalJoin = `JOIN moz_places h ON h.id = v.place_id`;
+    conditions.push("h.url_hash = hash(:url)", "h.url = :url");
+    args.url = url;
+  }
+
 
   let visitsToRemove = [];
   let pagesToInspect = new Set();
   let onResultData = onResult ? [] : null;
 
   yield db.executeCached(
-    `SELECT id, place_id, visit_date / 1000 AS date, visit_type FROM moz_historyvisits
-     WHERE ${ dates.conditions.join(" AND ") }`,
-     dates.args,
+     `SELECT v.id, place_id, visit_date / 1000 AS date, visit_type FROM moz_historyvisits v
+             ${optionalJoin}
+             WHERE ${ conditions.join(" AND ") }${ args.limit ? " LIMIT :limit" : "" }`,
+     args,
      row => {
        let id = row.getResultByName("id");
        let place_id = row.getResultByName("place_id");
@@ -872,13 +908,10 @@ var remove = Task.async(function*(db, {guids, urls}, onResult = null) {
 
   let onResultData = onResult ? [] : null;
   let pages = [];
-  let hasPagesToKeep = false;
   let hasPagesToRemove = false;
   yield db.execute(query, null, Task.async(function*(row) {
     let hasForeign = row.getResultByName("foreign_count") != 0;
-    if (hasForeign) {
-      hasPagesToKeep = true;
-    } else {
+    if (!hasForeign) {
       hasPagesToRemove = true;
     }
     let id = row.getResultByName("id");
@@ -943,7 +976,7 @@ var remove = Task.async(function*(db, {guids, urls}, onResult = null) {
  * @return (PageInfo)
  *      A PageInfo object populated with data from updateInfo.
  */
-function mergeUpdateInfoIntoPageInfo(updateInfo, pageInfo={}) {
+function mergeUpdateInfoIntoPageInfo(updateInfo, pageInfo = {}) {
   pageInfo.guid = updateInfo.guid;
   if (!pageInfo.url) {
     pageInfo.url = new URL(updateInfo.uri.spec);

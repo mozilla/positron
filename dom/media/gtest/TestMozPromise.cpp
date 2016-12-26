@@ -151,9 +151,7 @@ TEST(MozPromise, CompletionPromises)
     ->Then(queue, __func__,
       [] (int aVal) -> RefPtr<TestPromise> { return TestPromise::CreateAndResolve(aVal + 10, __func__); },
       DO_FAIL)
-    ->CompletionPromise()
     ->Then(queue, __func__, [&invokedPass] () -> void { invokedPass = true; }, DO_FAIL)
-    ->CompletionPromise()
     ->Then(queue, __func__,
       [queue] (int aVal) -> RefPtr<TestPromise> {
         RefPtr<TestPromise::Private> p = new TestPromise::Private(__func__);
@@ -162,11 +160,9 @@ TEST(MozPromise, CompletionPromises)
         return RefPtr<TestPromise>(p);
       },
       DO_FAIL)
-    ->CompletionPromise()
     ->Then(queue, __func__,
       [queue] (int aVal) -> RefPtr<TestPromise> { return TestPromise::CreateAndReject(double(aVal - 42) + 42.0, __func__); },
       DO_FAIL)
-    ->CompletionPromise()
     ->Then(queue, __func__,
       DO_FAIL,
       [queue, &invokedPass] (double aVal) -> void { EXPECT_EQ(aVal, 42.0); EXPECT_TRUE(invokedPass); queue->BeginShutdown(); });
@@ -237,7 +233,7 @@ TEST(MozPromise, Chaining)
           EXPECT_EQ(aVal, 42);
         },
         [] () {}
-      )->CompletionPromise();
+      );
 
       if (i == kIterations / 2) {
         p->Then(queue, __func__,

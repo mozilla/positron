@@ -37,8 +37,6 @@ function getLocalizedPref(aPrefName, aDefault) {
   } catch (ex) {
     return aDefault;
   }
-
-  return aDefault;
 }
 
 function promiseEvent(aTarget, aEventName, aPreventDefault) {
@@ -55,7 +53,7 @@ function promiseEvent(aTarget, aEventName, aPreventDefault) {
 
 function promiseNewEngine(basename, options = {}) {
   return new Promise((resolve, reject) => {
-    //Default the setAsCurrent option to true.
+    // Default the setAsCurrent option to true.
     let setAsCurrent =
       options.setAsCurrent == undefined ? true : options.setAsCurrent;
     info("Waiting for engine to be added: " + basename);
@@ -64,7 +62,7 @@ function promiseNewEngine(basename, options = {}) {
         let url = getRootDirectory(gTestPath) + basename;
         let current = Services.search.currentEngine;
         Services.search.addEngine(url, null, options.iconURL || "", false, {
-          onSuccess: function (engine) {
+          onSuccess: function(engine) {
             info("Search engine added: " + basename);
             if (setAsCurrent) {
               Services.search.currentEngine = engine;
@@ -78,7 +76,7 @@ function promiseNewEngine(basename, options = {}) {
             });
             resolve(engine);
           },
-          onError: function (errCode) {
+          onError: function(errCode) {
             ok(false, "addEngine failed with error code " + errCode);
             reject();
           }
@@ -102,7 +100,6 @@ function promiseNewEngine(basename, options = {}) {
  */
 function promiseTabLoadEvent(tab, url)
 {
-  let deferred = Promise.defer();
   info("Wait tab event: load");
 
   function handle(loadedUrl) {
@@ -115,26 +112,12 @@ function promiseTabLoadEvent(tab, url)
     return true;
   }
 
-  // Create two promises: one resolved from the content process when the page
-  // loads and one that is rejected if we take too long to load the url.
   let loaded = BrowserTestUtils.browserLoaded(tab.linkedBrowser, false, handle);
-
-  let timeout = setTimeout(() => {
-    deferred.reject(new Error("Timed out while waiting for a 'load' event"));
-  }, 30000);
-
-  loaded.then(() => {
-    clearTimeout(timeout);
-    deferred.resolve()
-  });
 
   if (url)
     BrowserTestUtils.loadURI(tab.linkedBrowser, url);
 
-  // Promise.all rejects if either promise rejects (i.e. if we time out) and
-  // if our loaded promise resolves before the timeout, then we resolve the
-  // timeout promise as well, causing the all promise to resolve.
-  return Promise.all([deferred.promise, loaded]);
+  return loaded;
 }
 
 // Get an array of the one-off buttons.

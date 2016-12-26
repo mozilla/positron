@@ -24,8 +24,8 @@ add_task(function* () {
   RequestsMenu.selectedItem = requestItem;
 
   yield waitForClipboardPromise(function setup() {
-    RequestsMenu.copyUrl();
-  }, requestItem.attachment.url);
+    RequestsMenu.contextMenu.copyUrl();
+  }, requestItem.url);
 
   yield teardown(monitor);
 });

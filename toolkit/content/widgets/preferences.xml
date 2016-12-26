@@ -437,8 +437,8 @@
             try {
               var event = document.createEvent("Events");
               event.initEvent("syncfrompreference", true, true);
-              var f = new Function ("event",
-                                    aElement.getAttribute("onsyncfrompreference"));
+              var f = new Function("event",
+                                   aElement.getAttribute("onsyncfrompreference"));
               rv = f.call(aElement, event);
             }
             catch (e) {
@@ -492,8 +492,8 @@
             try {
               var event = document.createEvent("Events");
               event.initEvent("synctopreference", true, true);
-              var f = new Function ("event",
-                                    aElement.getAttribute("onsynctopreference"));
+              var f = new Function("event",
+                                   aElement.getAttribute("onsynctopreference"));
               var rv = f.call(aElement, event);
               if (rv !== undefined)
                 return rv;
@@ -644,7 +644,7 @@
               acceptButton.disabled = true;
             } else {
               // morph the Cancel button into the Close button
-              cancelButton.setAttribute ("icon", "close");
+              cancelButton.setAttribute("icon", "close");
               cancelButton.label = docElt.getAttribute("closebuttonlabel");
               cancelButton.accesskey = docElt.getAttribute("closebuttonaccesskey");
             }
@@ -769,7 +769,7 @@
             }
             OverlayLoadObserver.prototype = {
               _outer: this,
-              observe: function (aSubject, aTopic, aData)
+              observe: function(aSubject, aTopic, aData)
               {
                 this._pane.loaded = true;
                 this._outer._fireEvent("paneload", this._pane);
@@ -797,7 +797,7 @@
             event.initEvent(aEventName, true, true);
             var cancel = !aTarget.dispatchEvent(event);
             if (aTarget.hasAttribute("on" + aEventName)) {
-              var fn = new Function ("event", aTarget.getAttribute("on" + aEventName));
+              var fn = new Function("event", aTarget.getAttribute("on" + aEventName));
               var rv = fn.call(aTarget, event);
               if (rv == false)
                 cancel = true;
@@ -1068,8 +1068,6 @@
                     .getService(Components.interfaces.nsIScriptSecurityManager);
         if (this.type == "child" && window.opener &&
             secMan.isSystemPrincipal(window.opener.document.nodePrincipal)) {
-          let psvc = Components.classes["@mozilla.org/preferences-service;1"]
-                               .getService(Components.interfaces.nsIPrefBranch);
           var pdocEl = window.opener.document.documentElement;
           if (pdocEl.instantApply) {
             let panes = this.preferencePanes;
@@ -1263,11 +1261,19 @@
         </body>
       </method>
 
-      <field name="DeferredTask" readonly="true">
-        let targetObj = {};
-        Components.utils.import("resource://gre/modules/DeferredTask.jsm", targetObj);
-        targetObj.DeferredTask;
-      </field>
+      <property name="DeferredTask" readonly="true">
+        <getter><![CDATA[
+          let module = {};
+          Components.utils.import("resource://gre/modules/DeferredTask.jsm", module);
+          Object.defineProperty(this, "DeferredTask", {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: module.DeferredTask
+          });
+          return module.DeferredTask;
+        ]]></getter>
+      </property>
       <method name="_deferredValueUpdate">
         <parameter name="aElement"/>
         <body>

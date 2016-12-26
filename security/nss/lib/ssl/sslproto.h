@@ -21,9 +21,9 @@
 #define SSL_LIBRARY_VERSION_TLS_1_3             0x0304
 
 /* Note: this is the internal format, not the wire format */
-#define SSL_LIBRARY_VERSION_DTLS_1_0            0x0302
-#define SSL_LIBRARY_VERSION_DTLS_1_2            0x0303
-#define SSL_LIBRARY_VERSION_DTLS_1_3            0x0304
+#define SSL_LIBRARY_VERSION_DTLS_1_0            SSL_LIBRARY_VERSION_TLS_1_1
+#define SSL_LIBRARY_VERSION_DTLS_1_2            SSL_LIBRARY_VERSION_TLS_1_2
+#define SSL_LIBRARY_VERSION_DTLS_1_3            SSL_LIBRARY_VERSION_TLS_1_3
 
 /* deprecated old name */
 #define SSL_LIBRARY_VERSION_3_1_TLS SSL_LIBRARY_VERSION_TLS_1_0
@@ -31,7 +31,7 @@
 /* The DTLS versions used in the spec */
 #define SSL_LIBRARY_VERSION_DTLS_1_0_WIRE       ((~0x0100) & 0xffff)
 #define SSL_LIBRARY_VERSION_DTLS_1_2_WIRE       ((~0x0102) & 0xffff)
-#define SSL_LIBRARY_VERSION_DTLS_1_3_WIRE       ((~0x0103) & 0xffff)
+#define SSL_LIBRARY_VERSION_DTLS_1_3_WIRE       SSL_LIBRARY_VERSION_DTLS_1_3
 
 /* Certificate types */
 #define SSL_CT_X509_CERTIFICATE                 0x01
@@ -208,6 +208,16 @@
 #define TLS_AES_128_GCM_SHA256                0x1301
 #define TLS_AES_256_GCM_SHA384                0x1302
 #define TLS_CHACHA20_POLY1305_SHA256          0x1303
+
+/* PSK cipher suites. NSS doesn't actually support these, but we
+ * exposed them when TLS 1.3 used them so we need to keep them
+ * in the API. */
+#define TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256   0xCCAC
+#define TLS_DHE_PSK_WITH_CHACHA20_POLY1305_SHA256     0xCCAD
+#define TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256   0xD001
+#define TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384   0xD002
+#define TLS_DHE_PSK_WITH_AES_128_GCM_SHA256     0x00AA /* RFC 5487 */
+#define TLS_DHE_PSK_WITH_AES_256_GCM_SHA384     0x00AB /* RFC 5487 */
 
 /* DTLS-SRTP cipher suites from RFC 5764 */
 /* If you modify this, also modify MAX_DTLS_SRTP_CIPHER_SUITES in sslimpl.h */

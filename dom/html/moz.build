@@ -18,8 +18,8 @@ MOCHITEST_CHROME_MANIFESTS += [
 BROWSER_CHROME_MANIFESTS += ['test/browser.ini']
 
 XPIDL_SOURCES += [
+    'nsIDateTimeInputArea.idl',
     'nsIFormSubmitObserver.idl',
-    'nsIHTMLMenu.idl',
     'nsIImageDocument.idl',
     'nsIMenuBuilder.idl',
     'nsIPhonetic.idl',
@@ -117,7 +117,6 @@ EXPORTS.mozilla.dom += [
     'RadioNodeList.h',
     'TextTrackManager.h',
     'TimeRanges.h',
-    'UndoManager.h',
     'ValidityState.h',
 ]
 
@@ -207,7 +206,6 @@ UNIFIED_SOURCES += [
     'RadioNodeList.cpp',
     'TextTrackManager.cpp',
     'TimeRanges.cpp',
-    'UndoManager.cpp',
     'ValidityState.cpp',
     'VideoDocument.cpp',
 ]

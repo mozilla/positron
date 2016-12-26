@@ -340,7 +340,7 @@ public:
     // KTableEntry objects can be initialized either with an int16_t value
     // or a value of an enumeration type that can fit within an int16_t.
 
-    KTableEntry(nsCSSKeyword aKeyword, int16_t aValue)
+    constexpr KTableEntry(nsCSSKeyword aKeyword, int16_t aValue)
       : mKeyword(aKeyword)
       , mValue(aValue)
     {
@@ -348,7 +348,7 @@ public:
 
     template<typename T,
              typename = typename std::enable_if<std::is_enum<T>::value>::type>
-    KTableEntry(nsCSSKeyword aKeyword, T aValue)
+    constexpr KTableEntry(nsCSSKeyword aKeyword, T aValue)
       : mKeyword(aKeyword)
       , mValue(static_cast<int16_t>(aValue))
     {
@@ -692,7 +692,8 @@ public:
   static const KTableEntry kBackfaceVisibilityKTable[];
   static const KTableEntry kTransformStyleKTable[];
   static const KTableEntry kImageLayerAttachmentKTable[];
-  static const KTableEntry kImageLayerOriginKTable[];
+  static const KTableEntry kBackgroundOriginKTable[];
+  static const KTableEntry kMaskOriginKTable[];
   static const KTableEntry kImageLayerPositionKTable[];
   static const KTableEntry kImageLayerRepeatKTable[];
   static const KTableEntry kImageLayerRepeatPartKTable[];
@@ -702,9 +703,9 @@ public:
   // Not const because we modify its entries when the pref
   // "layout.css.background-clip.text" changes:
   static KTableEntry kBackgroundClipKTable[];
+  static const KTableEntry kMaskClipKTable[];
   static const KTableEntry kBlendModeKTable[];
   static const KTableEntry kBorderCollapseKTable[];
-  static const KTableEntry kBorderColorKTable[];
   static const KTableEntry kBorderImageRepeatKTable[];
   static const KTableEntry kBorderImageSliceKTable[];
   static const KTableEntry kBorderStyleKTable[];
@@ -758,9 +759,9 @@ public:
   static const KTableEntry kAlignSelfPosition[];     // <self-position>
   static const KTableEntry kAlignLegacy[];           // 'legacy'
   static const KTableEntry kAlignLegacyPosition[];   // 'left/right/center'
-  static const KTableEntry kAlignAutoNormalStretchBaseline[]; // 'auto/normal/stretch/baseline/last-baseline'
-  static const KTableEntry kAlignNormalStretchBaseline[]; // 'normal/stretch/baseline/last-baseline'
-  static const KTableEntry kAlignNormalBaseline[]; // 'normal/baseline/last-baseline'
+  static const KTableEntry kAlignAutoNormalStretchBaseline[]; // 'auto/normal/stretch/baseline'
+  static const KTableEntry kAlignNormalStretchBaseline[]; // 'normal/stretch/baseline'
+  static const KTableEntry kAlignNormalBaseline[]; // 'normal/baseline'
   static const KTableEntry kAlignContentDistribution[]; // <content-distribution>
   static const KTableEntry kAlignContentPosition[]; // <content-position>
   // -- tables for auto-completion of the {align,justify}-{content,items,self} properties --
@@ -810,7 +811,6 @@ public:
   static const KTableEntry kObjectFitKTable[];
   static const KTableEntry kOrientKTable[];
   static const KTableEntry kOutlineStyleKTable[];
-  static const KTableEntry kOutlineColorKTable[];
   static const KTableEntry kOverflowKTable[];
   static const KTableEntry kOverflowSubKTable[];
   static const KTableEntry kOverflowClipBoxKTable[];

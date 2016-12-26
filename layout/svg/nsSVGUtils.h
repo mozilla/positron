@@ -33,21 +33,21 @@ class nsIDocument;
 class nsIFrame;
 class nsPresContext;
 class nsStyleContext;
+class nsStyleSVGPaint;
 class nsSVGDisplayContainerFrame;
 class nsSVGElement;
 class nsSVGEnum;
 class nsSVGLength2;
 class nsSVGOuterSVGFrame;
-class nsSVGPathGeometryFrame;
 class nsTextFrame;
 
 struct nsStyleSVG;
-struct nsStyleSVGPaint;
 struct nsRect;
 
 namespace mozilla {
 class SVGContextPaint;
 struct SVGContextPaintImpl;
+class SVGGeometryFrame;
 namespace dom {
 class Element;
 class UserSpaceMetrics;
@@ -186,6 +186,7 @@ public:
   typedef mozilla::gfx::Size Size;
   typedef mozilla::SVGContextPaint SVGContextPaint;
   typedef mozilla::SVGContextPaintImpl SVGContextPaintImpl;
+  typedef mozilla::SVGGeometryFrame SVGGeometryFrame;
   typedef mozilla::image::DrawResult DrawResult;
 
   static void Init();
@@ -482,7 +483,7 @@ public:
                                                nsTextFrame* aFrame,
                                                const gfxMatrix& aMatrix);
   static gfxRect PathExtentsToMaxStrokeExtents(const gfxRect& aPathExtents,
-                                               nsSVGPathGeometryFrame* aFrame,
+                                               SVGGeometryFrame* aFrame,
                                                const gfxMatrix& aMatrix);
 
   /**
@@ -576,6 +577,25 @@ public:
   ToCanvasBounds(const gfxRect &aUserspaceRect,
                  const gfxMatrix &aToCanvas,
                  const nsPresContext *presContext);
+
+  struct MaskUsage {
+    bool shouldGenerateMaskLayer;
+    bool shouldGenerateClipMaskLayer;
+    bool shouldApplyClipPath;
+    bool shouldApplyBasicShape;
+    float opacity;
+
+    MaskUsage()
+      : shouldGenerateMaskLayer(false), shouldGenerateClipMaskLayer(false),
+        shouldApplyClipPath(false), shouldApplyBasicShape(false), opacity(0.0)
+    { }
+  };
+
+  static void
+  DetermineMaskUsage(nsIFrame* aFrame, bool aHandleOpacity, MaskUsage& aUsage);
+
+  static float
+  ComputeOpacity(nsIFrame* aFrame, bool aHandleOpacity);
 };
 
 #endif

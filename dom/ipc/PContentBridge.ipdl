@@ -32,7 +32,7 @@ namespace dom {
  * allocate the PContentBridgeChild.  This protocol allows these processes to
  * share PBrowsers and send messages to each other.
  */
-prio(normal upto urgent) sync protocol PContentBridge
+nested(upto inside_cpow) sync protocol PContentBridge
 {
     bridges PContent, PContent;
 
@@ -55,7 +55,7 @@ both:
     // Both the parent and the child can construct the PBrowser.
     // See the comment in PContent::PBrowser().
     async PBrowser(TabId tabId, IPCTabContext context, uint32_t chromeFlags,
-                   ContentParentId cpId, bool isForApp, bool isForBrowser);
+                   ContentParentId cpId, bool isForBrowser);
 
     async PBlob(BlobConstructorParams params);
 

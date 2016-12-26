@@ -3,6 +3,7 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 /* import-globals-from ../../../../framework/test/shared-head.js */
+/* exported WCUL10n, openNewTabAndConsole, waitForMessages, waitFor, findMessage */
 
 "use strict";
 
@@ -11,6 +12,10 @@
 Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/devtools/client/framework/test/shared-head.js",
   this);
+
+var {Utils: WebConsoleUtils} = require("devtools/client/webconsole/utils");
+const WEBCONSOLE_STRINGS_URI = "devtools/client/locales/webconsole.properties";
+var WCUL10n = new WebConsoleUtils.L10n(WEBCONSOLE_STRINGS_URI);
 
 Services.prefs.setBoolPref("devtools.webconsole.new-frontend-enabled", true);
 registerCleanupFunction(function* () {
@@ -46,34 +51,38 @@ var openNewTabAndConsole = Task.async(function* (url) {
  *
  * @param object options
  *        - hud: the webconsole
- *        - messages: Array[Object]. An array of messages to match. Current supported options:
+ *        - messages: Array[Object]. An array of messages to match.
+            Current supported options:
  *            - text: Exact text match in .message-body
  */
 function waitForMessages({ hud, messages }) {
   return new Promise(resolve => {
     let numMatched = 0;
-    let receivedLog = hud.ui.on("new-messages", function messagesReceieved(e, newMessages) {
-      for (let message of messages) {
-        if (message.matched) {
-          continue;
-        }
+    let receivedLog = hud.ui.on("new-messages",
+      function messagesReceieved(e, newMessages) {
+        for (let message of messages) {
+          if (message.matched) {
+            continue;
+          }
 
-        for (let newMessage of newMessages) {
-          if (newMessage.node.querySelector(".message-body").textContent == message.text) {
-            numMatched++;
-            message.matched = true;
-            info("Matched a message with text: " + message.text + ", still waiting for " + (messages.length - numMatched) + " messages");
-            break;
+          for (let newMessage of newMessages) {
+            let messageBody = newMessage.node.querySelector(".message-body");
+            if (messageBody.textContent == message.text) {
+              numMatched++;
+              message.matched = true;
+              info("Matched a message with text: " + message.text +
+                ", still waiting for " + (messages.length - numMatched) + " messages");
+              break;
+            }
+          }
+
+          if (numMatched === messages.length) {
+            hud.ui.off("new-messages", messagesReceieved);
+            resolve(receivedLog);
+            return;
           }
         }
-
-        if (numMatched === messages.length) {
-          hud.ui.off("new-messages", messagesReceieved);
-          resolve(receivedLog);
-          return;
-        }
-      }
-    });
+      });
   });
 }
 
@@ -91,7 +100,7 @@ function waitForMessages({ hud, messages }) {
  * @return object
  *         A promise that is resolved with the result of the condition.
  */
-function* waitFor(condition, message = "waitFor", interval = 100, maxTries = 50) {
+function* waitFor(condition, message = "waitFor", interval = 10, maxTries = 500) {
   return new Promise(resolve => {
     BrowserTestUtils.waitForCondition(condition, message, interval, maxTries)
       .then(() => resolve(condition()));
@@ -109,9 +118,25 @@ function* waitFor(condition, message = "waitFor", interval = 100, maxTries = 50)
  *        The selector to use in finding the message.
  */
 function findMessage(hud, text, selector = ".message") {
+  const elements = findMessages(hud, text, selector);
+  return elements.pop();
+}
+
+/**
+ * Find multiple messages in the output.
+ *
+ * @param object hud
+ *        The web console.
+ * @param string text
+ *        A substring that can be found in the message.
+ * @param selector [optional]
+ *        The selector to use in finding the message.
+ */
+function findMessages(hud, text, selector = ".message") {
+  const messages = hud.ui.experimentalOutputNode.querySelectorAll(selector);
   const elements = Array.prototype.filter.call(
-    hud.ui.experimentalOutputNode.querySelectorAll(selector),
+    messages,
     (el) => el.textContent.includes(text)
   );
-  return elements.length > 0 ? elements.pop() : false;
+  return elements;
 }

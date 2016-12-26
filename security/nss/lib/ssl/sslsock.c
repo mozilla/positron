@@ -78,7 +78,12 @@ static sslOptions ssl_defaults = {
     PR_FALSE,              /* enableExtendedMS    */
     PR_FALSE,              /* enableSignedCertTimestamps */
     PR_FALSE,              /* requireDHENamedGroups */
-    PR_FALSE               /* enable0RttData */
+    PR_FALSE,              /* enable0RttData */
+#ifdef NSS_ENABLE_TLS13_SHORT_HEADERS
+    PR_TRUE /* enableShortHeaders */
+#else
+    PR_FALSE /* enableShortHeaders */
+#endif
 };
 
 /*
@@ -1442,7 +1447,7 @@ SSL_DHEGroupPrefSet(PRFileDesc *fd, const SSLDHEGroupType *groups,
     sslSocket *ss;
     const SSLDHEGroupType *list;
     unsigned int count;
-    int i, k;
+    int i, k, j;
     const sslNamedGroupDef *enabled[SSL_NAMED_GROUP_COUNT] = { 0 };
     static const SSLDHEGroupType default_dhe_groups[] = {
         ssl_ff_dhe_2048_group
@@ -1509,9 +1514,9 @@ SSL_DHEGroupPrefSet(PRFileDesc *fd, const SSLDHEGroupType *groups,
             ss->ssl3.dhePreferredGroup = groupDef;
         }
         PORT_Assert(k < SSL_NAMED_GROUP_COUNT);
-        for (i = 0; i < k; ++i) {
+        for (j = 0; j < k; ++j) {
             /* skip duplicates */
-            if (enabled[i] == groupDef) {
+            if (enabled[j] == groupDef) {
                 duplicate = PR_TRUE;
                 break;
             }
@@ -1668,6 +1673,9 @@ ssl_IsValidDHEShare(const SECItem *dh_p, const SECItem *dh_Ys)
     unsigned int commonPart;
     int cmp;
 
+    if (dh_p->len == 0 || dh_Ys->len == 0) {
+        return PR_FALSE;
+    }
     /* Check that the prime is at least odd. */
     if ((dh_p->data[dh_p->len - 1] & 0x01) == 0) {
         return PR_FALSE;
@@ -1760,7 +1768,7 @@ ssl_SelectDHEGroup(sslSocket *ss, const sslNamedGroupDef **groupDef)
      * indicated that it supports an FFDHE named group. */
     if (ss->ssl3.dheWeakGroupEnabled &&
         ss->version < SSL_LIBRARY_VERSION_TLS_1_3 &&
-        !ss->ssl3.hs.peerSupportsFfdheGroups) {
+        !ss->xtnData.peerSupportsFfdheGroups) {
         *groupDef = &weak_group_def;
         return SECSuccess;
     }
@@ -1889,7 +1897,7 @@ ssl_NextProtoNegoCallback(void *arg, PRFileDesc *fd,
                 PORT_Memcmp(&protos[i + 1], &ss->opt.nextProtoNego.data[j + 1],
                             protos[i]) == 0) {
                 /* We found a match. */
-                ss->ssl3.nextProtoState = SSL_NEXT_PROTO_NEGOTIATED;
+                ss->xtnData.nextProtoState = SSL_NEXT_PROTO_NEGOTIATED;
                 result = &protos[i];
                 goto found;
             }
@@ -1902,7 +1910,7 @@ ssl_NextProtoNegoCallback(void *arg, PRFileDesc *fd,
      * protocols configured, or none of its options match ours. In this case we
      * request our favoured protocol. */
     /* This will be treated as a failure for ALPN. */
-    ss->ssl3.nextProtoState = SSL_NEXT_PROTO_NO_OVERLAP;
+    ss->xtnData.nextProtoState = SSL_NEXT_PROTO_NO_OVERLAP;
     result = ss->opt.nextProtoNego.data;
 
 found:
@@ -1961,16 +1969,16 @@ SSL_GetNextProto(PRFileDesc *fd, SSLNextProtoState *state, unsigned char *buf,
         return SECFailure;
     }
 
-    *state = ss->ssl3.nextProtoState;
+    *state = ss->xtnData.nextProtoState;
 
-    if (ss->ssl3.nextProtoState != SSL_NEXT_PROTO_NO_SUPPORT &&
-        ss->ssl3.nextProto.data) {
-        if (ss->ssl3.nextProto.len > bufLenMax) {
+    if (ss->xtnData.nextProtoState != SSL_NEXT_PROTO_NO_SUPPORT &&
+        ss->xtnData.nextProto.data) {
+        if (ss->xtnData.nextProto.len > bufLenMax) {
             PORT_SetError(SEC_ERROR_OUTPUT_LEN);
             return SECFailure;
         }
-        PORT_Memcpy(buf, ss->ssl3.nextProto.data, ss->ssl3.nextProto.len);
-        *bufLen = ss->ssl3.nextProto.len;
+        PORT_Memcpy(buf, ss->xtnData.nextProto.data, ss->xtnData.nextProto.len);
+        *bufLen = ss->xtnData.nextProto.len;
     } else {
         *bufLen = 0;
     }
@@ -2040,12 +2048,12 @@ SSL_GetSRTPCipher(PRFileDesc *fd, PRUint16 *cipher)
         return SECFailure;
     }
 
-    if (!ss->ssl3.dtlsSRTPCipherSuite) {
+    if (!ss->xtnData.dtlsSRTPCipherSuite) {
         PORT_SetError(SEC_ERROR_INVALID_ARGS);
         return SECFailure;
     }
 
-    *cipher = ss->ssl3.dtlsSRTPCipherSuite;
+    *cipher = ss->xtnData.dtlsSRTPCipherSuite;
     return SECSuccess;
 }
 
@@ -3496,15 +3504,8 @@ PRBool
 ssl_NamedGroupEnabled(const sslSocket *ss, const sslNamedGroupDef *groupDef)
 {
     unsigned int i;
-    SECStatus rv;
-    PRUint32 policy;
 
     if (!groupDef) {
-        return PR_FALSE;
-    }
-
-    rv = NSS_GetAlgorithmPolicy(groupDef->oidTag, &policy);
-    if (rv == SECSuccess && !(policy & NSS_USE_ALG_IN_SSL_KX)) {
         return PR_FALSE;
     }
 
@@ -3613,6 +3614,12 @@ ssl_FreeEphemeralKeyPair(sslEphemeralKeyPair *keyPair)
     PORT_Free(keyPair);
 }
 
+PRBool
+ssl_HaveEphemeralKeyPair(const sslSocket *ss, const sslNamedGroupDef *groupDef)
+{
+    return ssl_LookupEphemeralKeyPair((sslSocket *)ss, groupDef) != NULL;
+}
+
 sslEphemeralKeyPair *
 ssl_LookupEphemeralKeyPair(sslSocket *ss, const sslNamedGroupDef *groupDef)
 {
@@ -3646,17 +3653,6 @@ ssl_NewSocket(PRBool makeLocks, SSLProtocolVariant protocolVariant)
     SECStatus rv;
     sslSocket *ss;
     int i;
-    /* TODO: remove this when 25519 and p256 have equal priority */
-    const SSLNamedGroup preferredGroups[] = {
-        ssl_grp_ec_secp256r1,
-        ssl_grp_ec_secp384r1,
-        ssl_grp_ec_secp521r1,
-        ssl_grp_ffdhe_2048,
-        ssl_grp_ffdhe_3072,
-        ssl_grp_ffdhe_4096,
-        ssl_grp_ffdhe_6144,
-        ssl_grp_ffdhe_8192
-    };
 
     ssl_SetDefaultsFromEnvironment();
 
@@ -3700,14 +3696,12 @@ ssl_NewSocket(PRBool makeLocks, SSLProtocolVariant protocolVariant)
 
     ssl_ChooseOps(ss);
     ssl3_InitSocketPolicy(ss);
-    memset((void *)ss->namedGroupPreferences, 0, sizeof(ss->namedGroupPreferences));
-    PORT_Assert(PR_ARRAY_SIZE(preferredGroups) < SSL_NAMED_GROUP_COUNT);
-    for (i = 0; i < PR_ARRAY_SIZE(preferredGroups); ++i) {
-        ss->namedGroupPreferences[i] = ssl_LookupNamedGroup(preferredGroups[i]);
+    for (i = 0; i < SSL_NAMED_GROUP_COUNT; ++i) {
+        ss->namedGroupPreferences[i] = &ssl_named_groups[i];
     }
     ss->additionalShares = 0;
+    PR_INIT_CLIST(&ss->ssl3.hs.remoteExtensions);
     PR_INIT_CLIST(&ss->ssl3.hs.lastMessageFlight);
-    PR_INIT_CLIST(&ss->ssl3.hs.remoteKeyShares);
     PR_INIT_CLIST(&ss->ssl3.hs.cipherSpecs);
     PR_INIT_CLIST(&ss->ssl3.hs.bufferedEarlyData);
     if (makeLocks) {
@@ -3721,7 +3715,7 @@ ssl_NewSocket(PRBool makeLocks, SSLProtocolVariant protocolVariant)
     rv = ssl3_InitGather(&ss->gs);
     if (rv != SECSuccess)
         goto loser;
-
+    ssl3_InitExtensionData(&ss->xtnData);
     return ss;
 
 loser:

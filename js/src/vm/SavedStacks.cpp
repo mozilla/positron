@@ -534,8 +534,8 @@ SavedFrame::isSelfHosted(JSContext* cx)
 /* static */ bool
 SavedFrame::construct(JSContext* cx, unsigned argc, Value* vp)
 {
-    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NO_CONSTRUCTOR,
-                         "SavedFrame");
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_NO_CONSTRUCTOR,
+                              "SavedFrame");
     return false;
 }
 
@@ -601,31 +601,32 @@ GetFirstSubsumedSavedFrame(JSContext* cx, HandleObject savedFrame,
     return GetFirstSubsumedFrame(cx, frame, selfHosted, skippedAsync);
 }
 
-/* static */ bool
-SavedFrame::checkThis(JSContext* cx, CallArgs& args, const char* fnName,
-                      MutableHandleObject frame)
+static MOZ_MUST_USE bool
+SavedFrame_checkThis(JSContext* cx, CallArgs& args, const char* fnName,
+                     MutableHandleObject frame)
 {
     const Value& thisValue = args.thisv();
 
     if (!thisValue.isObject()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT, InformalValueTypeName(thisValue));
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT,
+                                  InformalValueTypeName(thisValue));
         return false;
     }
 
     JSObject* thisObject = CheckedUnwrap(&thisValue.toObject());
     if (!thisObject || !thisObject->is<SavedFrame>()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
-                             SavedFrame::class_.name, fnName,
-                             thisObject ? thisObject->getClass()->name : "object");
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
+                                  SavedFrame::class_.name, fnName,
+                                  thisObject ? thisObject->getClass()->name : "object");
         return false;
     }
 
     // Check for SavedFrame.prototype, which has the same class as SavedFrame
     // instances, however doesn't actually represent a captured stack frame. It
     // is the only object that is<SavedFrame>() but doesn't have a source.
-    if (thisObject->as<SavedFrame>().getReservedSlot(JSSLOT_SOURCE).isNull()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
-                             SavedFrame::class_.name, fnName, "prototype object");
+    if (!SavedFrame::isSavedFrameAndNotProto(*thisObject)) {
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
+                                  SavedFrame::class_.name, fnName, "prototype object");
         return false;
     }
 
@@ -650,7 +651,7 @@ SavedFrame::checkThis(JSContext* cx, CallArgs& args, const char* fnName,
 #define THIS_SAVEDFRAME(cx, argc, vp, fnName, args, frame)             \
     CallArgs args = CallArgsFromVp(argc, vp);                          \
     RootedObject frame(cx);                                            \
-    if (!checkThis(cx, args, fnName, &frame))                          \
+    if (!SavedFrame_checkThis(cx, args, fnName, &frame))               \
         return false;
 
 } /* namespace js */
@@ -893,7 +894,7 @@ GetSavedFrameParent(JSContext* cx, HandleObject savedFrame, MutableHandleObject 
 
 static bool
 FormatSpiderMonkeyStackFrame(JSContext* cx, js::StringBuffer& sb,
-                             HandleSavedFrame frame, size_t indent,
+                             js::HandleSavedFrame frame, size_t indent,
                              bool skippedAsync)
 {
     RootedString asyncCause(cx, frame->getAsyncCause());
@@ -915,7 +916,7 @@ FormatSpiderMonkeyStackFrame(JSContext* cx, js::StringBuffer& sb,
 
 static bool
 FormatV8StackFrame(JSContext* cx, js::StringBuffer& sb,
-                   HandleSavedFrame frame, size_t indent, bool lastFrame)
+                   js::HandleSavedFrame frame, size_t indent, bool lastFrame)
 {
     js::RootedAtom name(cx, frame->getFunctionDisplayName());
     return sb.appendN(' ', indent + 4)
@@ -944,9 +945,8 @@ BuildStackString(JSContext* cx, HandleObject stack, MutableHandleString stringp,
 
     js::StringBuffer sb(cx);
 
-    if (format == js::StackFormat::Default) {
+    if (format == js::StackFormat::Default)
         format = cx->stackFormat();
-    }
     MOZ_ASSERT(format != js::StackFormat::Default);
 
     // Enter a new block to constrain the scope of possibly entering the stack's
@@ -969,19 +969,18 @@ BuildStackString(JSContext* cx, HandleObject stack, MutableHandleString stringp,
             MOZ_ASSERT(!frame->isSelfHosted(cx));
 
             parent = frame->getParent();
+            bool skippedNextAsync;
             js::RootedSavedFrame nextFrame(cx, js::GetFirstSubsumedFrame(cx, parent,
-                                                                         SavedFrameSelfHosted::Exclude, skippedAsync));
+                                                                         SavedFrameSelfHosted::Exclude, skippedNextAsync));
 
             switch (format) {
                 case js::StackFormat::SpiderMonkey:
-                    if (!FormatSpiderMonkeyStackFrame(cx, sb, frame, indent, skippedAsync)) {
+                    if (!FormatSpiderMonkeyStackFrame(cx, sb, frame, indent, skippedAsync))
                         return false;
-                    }
                     break;
                 case js::StackFormat::V8:
-                    if (!FormatV8StackFrame(cx, sb, frame, indent, !nextFrame)) {
+                    if (!FormatV8StackFrame(cx, sb, frame, indent, !nextFrame))
                         return false;
-                    }
                     break;
                 case js::StackFormat::Default:
                     MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE("Unexpected value");
@@ -989,6 +988,7 @@ BuildStackString(JSContext* cx, HandleObject stack, MutableHandleString stringp,
             }
 
             frame = nextFrame;
+            skippedAsync = skippedNextAsync;
         } while (frame);
     }
 
@@ -1512,7 +1512,7 @@ SavedStacks::getLocation(JSContext* cx, const FrameIter& iter,
 
     // When we have a |JSScript| for this frame, use a potentially memoized
     // location from our PCLocationMap and copy it into |locationp|. When we do
-    // not have a |JSScript| for this frame (asm.js frames), we take a slow path
+    // not have a |JSScript| for this frame (wasm frames), we take a slow path
     // that doesn't employ memoization, and update |locationp|'s slots directly.
 
     if (!iter.hasScript()) {

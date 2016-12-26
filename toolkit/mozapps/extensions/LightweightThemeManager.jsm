@@ -11,7 +11,7 @@ const Ci = Components.interfaces;
 
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 Components.utils.import("resource://gre/modules/AddonManager.jsm");
-/*globals AddonManagerPrivate*/
+/* globals AddonManagerPrivate*/
 Components.utils.import("resource://gre/modules/Services.jsm");
 
 const ID_SUFFIX              = "@personas.mozilla.org";
@@ -42,6 +42,9 @@ const PERSIST_FILES = {
 
 XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeImageOptimizer",
   "resource://gre/modules/addons/LightweightThemeImageOptimizer.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "ServiceRequest",
+  "resource://gre/modules/ServiceRequest.jsm");
+
 
 XPCOMUtils.defineLazyGetter(this, "_prefs", () => {
   return Services.prefs.getBranch("lightweightThemes.");
@@ -104,7 +107,7 @@ this.LightweightThemeManager = {
   // will always show up at the top of the list.
   _builtInThemes: new Map(),
 
-  get usedThemes () {
+  get usedThemes() {
     let themes = [];
     try {
       themes = JSON.parse(_prefs.getComplexValue("usedThemes",
@@ -115,7 +118,7 @@ this.LightweightThemeManager = {
     return themes;
   },
 
-  get currentTheme () {
+  get currentTheme() {
     let selectedThemeID = null;
     try {
       selectedThemeID = _prefs.getCharPref("selectedThemeID");
@@ -128,7 +131,7 @@ this.LightweightThemeManager = {
     return data;
   },
 
-  get currentThemeForDisplay () {
+  get currentThemeForDisplay() {
     var data = this.currentTheme;
 
     if (data && PERSIST_ENABLED) {
@@ -144,7 +147,7 @@ this.LightweightThemeManager = {
     return data;
   },
 
-  set currentTheme (aData) {
+  set currentTheme(aData) {
     return _setCurrentTheme(aData, false);
   },
 
@@ -185,6 +188,10 @@ this.LightweightThemeManager = {
     }
 
     this._builtInThemes.set(theme.id, theme);
+
+    if (_prefs.getCharPref("selectedThemeID") == theme.id) {
+      this.currentTheme = theme;
+    }
   },
 
   forgetBuiltInTheme: function(id) {
@@ -250,8 +257,7 @@ this.LightweightThemeManager = {
     if (!theme || !theme.updateURL)
       return;
 
-    var req = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"]
-                .createInstance(Ci.nsIXMLHttpRequest);
+    var req = new ServiceRequest();
 
     req.mozBackgroundRequest = true;
     req.overrideMimeType("text/plain");
@@ -696,7 +702,7 @@ function _setCurrentTheme(aData, aLocal) {
     _updateUsedThemes(usedThemes);
 
     if (isInstall)
-       AddonManagerPrivate.callAddonListeners("onInstalled", wrapper);
+      AddonManagerPrivate.callAddonListeners("onInstalled", wrapper);
   }
 
   if (cancel.data)
@@ -824,7 +830,7 @@ function _prefObserver(aSubject, aTopic, aData) {
 
 function _persistImages(aData, aCallback) {
   function onSuccess(key) {
-    return function () {
+    return function() {
       let current = LightweightThemeManager.currentTheme;
       if (current && current.id == aData.id) {
         _prefs.setBoolPref("persisted." + key, true);

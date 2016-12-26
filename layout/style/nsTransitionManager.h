@@ -8,6 +8,7 @@
 #ifndef nsTransitionManager_h_
 #define nsTransitionManager_h_
 
+#include "mozilla/ComputedTiming.h"
 #include "mozilla/ContentEvents.h"
 #include "mozilla/EffectCompositor.h" // For EffectCompositor::CascadeLevel
 #include "mozilla/MemoryReporting.h"
@@ -119,7 +120,7 @@ class CSSTransition final : public Animation
 public:
  explicit CSSTransition(nsIGlobalObject* aGlobal)
     : dom::Animation(aGlobal)
-    , mWasFinishedOnLastTick(false)
+    , mPreviousTransitionPhase(TransitionPhase::Idle)
     , mNeedsNewAnimationIndexWhenRun(false)
     , mTransitionProperty(eCSSProperty_UNKNOWN)
   {
@@ -160,6 +161,18 @@ public:
     mNeedsNewAnimationIndexWhenRun = true;
 
     Animation::CancelFromStyle();
+
+    // The above call to Animation::CancelFromStyle may cause a transitioncancel
+    // event to be queued. However, it will also remove the transition from its
+    // timeline. If this transition was the last animation attached to
+    // the timeline, the timeline will stop observing the refresh driver and
+    // there may be no subsequent tick fro dispatching animation events.
+    //
+    // To ensure the cancel event is dispatched we tell the timeline it needs to
+    // observe the refresh driver for at least one more tick.
+    if (mTimeline) {
+      mTimeline->NotifyAnimationUpdated(*this);
+    }
 
     // It is important we do this *after* calling CancelFromStyle().
     // This is because CancelFromStyle() will end up posting a restyle and
@@ -213,6 +226,10 @@ public:
       const TimeDuration& aStartTime,
       double aPlaybackRate);
 
+  void MaybeQueueCancelEvent(StickyTimeDuration aActiveTime) override {
+    QueueEvents(aActiveTime);
+  }
+
 protected:
   virtual ~CSSTransition()
   {
@@ -224,7 +241,13 @@ protected:
   void UpdateTiming(SeekFlag aSeekFlag,
                     SyncNotifyFlag aSyncNotifyFlag) override;
 
-  void QueueEvents();
+  void QueueEvents(StickyTimeDuration activeTime = StickyTimeDuration());
+
+
+  enum class TransitionPhase;
+  // Return the TransitionPhase to use when the transition doesn't have a target
+  // effect.
+  TransitionPhase GetTransitionPhaseWithoutEffect() const;
 
   // The (pseudo-)element whose computed transition-property refers to this
   // transition (if any).
@@ -245,7 +268,17 @@ protected:
   // For (b) and (c) the owning element will return !IsSet().
   OwningElementRef mOwningElement;
 
-  bool mWasFinishedOnLastTick;
+  // The 'transition phase' used to determine which transition events need
+  // to be queued on this tick.
+  // See: https://drafts.csswg.org/css-transitions-2/#transition-phase
+  enum class TransitionPhase {
+    Idle   = static_cast<int>(ComputedTiming::AnimationPhase::Null),
+    Before = static_cast<int>(ComputedTiming::AnimationPhase::Before),
+    Active = static_cast<int>(ComputedTiming::AnimationPhase::Active),
+    After  = static_cast<int>(ComputedTiming::AnimationPhase::After),
+    Pending
+  };
+  TransitionPhase mPreviousTransitionPhase;
 
   // When true, indicates that when this transition next leaves the idle state,
   // its animation index should be updated.
@@ -287,13 +320,14 @@ struct TransitionEventInfo {
 
   TransitionEventInfo(dom::Element* aElement,
                       CSSPseudoElementType aPseudoType,
+                      EventMessage aMessage,
                       nsCSSPropertyID aProperty,
                       StickyTimeDuration aDuration,
                       const TimeStamp& aTimeStamp,
                       dom::Animation* aAnimation)
     : mElement(aElement)
     , mAnimation(aAnimation)
-    , mEvent(true, eTransitionEnd)
+    , mEvent(true, aMessage)
     , mTimeStamp(aTimeStamp)
   {
     // XXX Looks like nobody initialize WidgetEvent::time
@@ -309,7 +343,7 @@ struct TransitionEventInfo {
   TransitionEventInfo(const TransitionEventInfo& aOther)
     : mElement(aOther.mElement)
     , mAnimation(aOther.mAnimation)
-    , mEvent(true, eTransitionEnd)
+    , mEvent(aOther.mEvent)
     , mTimeStamp(aOther.mTimeStamp)
   {
     mEvent.AssignTransitionEventData(aOther.mEvent, false);
@@ -337,7 +371,7 @@ public:
   /**
    * StyleContextChanged
    *
-   * To be called from RestyleManager::TryStartingTransition when the
+   * To be called from RestyleManager::TryInitiatingTransition when the
    * style of an element has changed, to initiate transitions from
    * that style change.  For style contexts with :before and :after
    * pseudos, aElement is expected to be the generated before/after
@@ -410,14 +444,14 @@ protected:
                     nsStyleContext* aNewStyleContext);
 
   void
-  ConsiderStartingTransition(nsCSSPropertyID aProperty,
-                             const mozilla::StyleTransition& aTransition,
-                             mozilla::dom::Element* aElement,
-                             CSSTransitionCollection*& aElementTransitions,
-                             nsStyleContext* aOldStyleContext,
-                             nsStyleContext* aNewStyleContext,
-                             bool* aStartedAny,
-                             nsCSSPropertyIDSet* aWhichStarted);
+  ConsiderInitiatingTransition(nsCSSPropertyID aProperty,
+                               const mozilla::StyleTransition& aTransition,
+                               mozilla::dom::Element* aElement,
+                               CSSTransitionCollection*& aElementTransitions,
+                               nsStyleContext* aOldStyleContext,
+                               nsStyleContext* aNewStyleContext,
+                               bool* aStartedAny,
+                               nsCSSPropertyIDSet* aWhichStarted);
 
   nsTArray<mozilla::Keyframe> GetTransitionKeyframes(
     nsStyleContext* aStyleContext,

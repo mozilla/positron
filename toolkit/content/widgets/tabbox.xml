@@ -31,7 +31,7 @@
         ]]>
         </getter>
       </property>
-      
+
       <property name="handleCtrlPageUpDown">
         <setter>
         <![CDATA[
@@ -74,7 +74,7 @@
         ]]>
         </getter>
       </property>
-      
+
       <property name="selectedIndex">
         <getter>
         <![CDATA[
@@ -244,7 +244,7 @@
       <children/>
       <xul:spacer class="tabs-right" flex="1"/>
     </content>
-    
+
     <implementation implements="nsIDOMXULSelectControlElement, nsIDOMXULRelatedElement">
       <constructor>
       <![CDATA[
@@ -299,8 +299,6 @@
 
           // Get linked tab panel by 'linkedpanel' attribute on the given tab
           // element.
-          let linkedPanelElm = null;
-
           let linkedPanelId = aTabElm.linkedPanel;
           if (linkedPanelId) {
             let ownerDoc = this.ownerDocument;
@@ -349,15 +347,26 @@
         </setter>
       </property>
 
-      <field name="tabbox" readonly="true"><![CDATA[
-        var parent = this.parentNode;
-        while (parent) {
-          if (parent.localName == "tabbox")
-            break;
-          parent = parent.parentNode;
-        }
-        parent;
-      ]]></field>
+      <field name="_tabbox">null</field>
+      <property name="tabbox" readonly="true">
+        <getter><![CDATA[
+          // Memoize the result in a field rather than replacing this property,
+          // so that it can be reset along with the binding.
+          if (this._tabbox) {
+            return this._tabbox;
+          }
+
+          let parent = this.parentNode;
+          while (parent) {
+            if (parent.localName == "tabbox") {
+              break;
+            }
+            parent = parent.parentNode;
+          }
+
+          return this._tabbox = parent;
+        ]]></getter>
+      </property>
 
       <!-- _tabbox is deprecated, it exists only for backwards compatibility. -->
       <field name="_tabbox" readonly="true"><![CDATA[
@@ -375,14 +384,14 @@
           return -1;
         ]]>
         </getter>
-        
+
         <setter>
         <![CDATA[
           var tab = this.getItemAtIndex(val);
           if (tab) {
             var alreadySelected = tab.selected;
 
-            Array.forEach(this.childNodes, function (aTab) {
+            Array.forEach(this.childNodes, function(aTab) {
               if (aTab.selected && aTab != tab)
                 aTab._selected = false;
             });
@@ -540,7 +549,7 @@
         ]]>
         </body>
       </method>
-      
+
       <method name="insertItemAt">
         <parameter name="index"/>
         <parameter name="label"/>
@@ -633,15 +642,26 @@
       </method>
 
       <!-- public -->
-      <field name="tabbox" readonly="true"><![CDATA[
-        var parent = this.parentNode;
-        while (parent) {
-          if (parent.localName == "tabbox")
-            break;
-          parent = parent.parentNode;
-        }
-        parent;
-      ]]></field>
+      <field name="_tabbox">null</field>
+      <property name="tabbox" readonly="true">
+        <getter><![CDATA[
+          // Memoize the result in a field rather than replacing this property,
+          // so that it can be reset along with the binding.
+          if (this._tabbox) {
+            return this._tabbox;
+          }
+
+          let parent = this.parentNode;
+          while (parent) {
+            if (parent.localName == "tabbox") {
+              break;
+            }
+            parent = parent.parentNode;
+          }
+
+          return this._tabbox = parent;
+        ]]></getter>
+      </property>
 
       <field name="_selectedPanel">this.childNodes.item(this.selectedIndex)</field>
 
@@ -770,13 +790,19 @@
       <field name="arrowKeysShouldWrap" readonly="true">
         /Mac/.test(navigator.platform)
       </field>
-      <field name="TelemetryStopwatch" readonly="true">
-        {
-          let tmp = {};
-          Cu.import("resource://gre/modules/TelemetryStopwatch.jsm", tmp);
-          tmp.TelemetryStopwatch;
-        }
-      </field>
+      <property name="TelemetryStopwatch" readonly="true">
+        <getter><![CDATA[
+          let module = {};
+          Cu.import("resource://gre/modules/TelemetryStopwatch.jsm", module);
+          Object.defineProperty(this, "TelemetryStopwatch", {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: module.TelemetryStopwatch
+          });
+          return module.TelemetryStopwatch;
+        ]]></getter>
+      </property>
     </implementation>
 
     <handlers>
@@ -861,4 +887,3 @@
   </binding>
 
 </bindings>
-

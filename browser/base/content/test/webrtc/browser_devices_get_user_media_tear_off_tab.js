@@ -23,8 +23,8 @@ var gTests = [
     });
     yield expectObserverCalled("getUserMedia:response:allow");
     yield expectObserverCalled("recording-device-events");
-    is((yield getMediaCaptureState()), "CameraAndMicrophone",
-       "expected camera and microphone to be shared");
+    Assert.deepEqual((yield getMediaCaptureState()), {audio: true, video: true},
+                     "expected camera and microphone to be shared");
 
     yield indicator;
     yield checkSharingUI({video: true, audio: true});
@@ -49,13 +49,12 @@ var gTests = [
     // We need to load the content script in the first window so that we can
     // catch the notifications fired globally when closing the second window.
     gBrowser.selectedBrowser.messageManager.loadFrameScript(CONTENT_SCRIPT_HELPER, true);
+
+    let promises = [promiseObserverCalled("recording-device-events"),
+                    promiseObserverCalled("recording-window-ended")];
     yield BrowserTestUtils.closeWindow(win);
+    yield Promise.all(promises);
 
-    if ((yield promiseTodoObserverNotCalled("recording-device-events")) == 1) {
-      todo(false, "Got the 'recording-device-events' notification twice, likely because of bug 962719");
-    }
-
-    yield expectObserverCalled("recording-window-ended");
     yield expectNoObserverCalled();
     yield checkNotSharing();
   }
@@ -65,7 +64,10 @@ var gTests = [
 
 function test() {
   waitForExplicitFinish();
+  SpecialPowers.pushPrefEnv({"set": [["dom.ipc.processCount", 1]]}, runTest);
+}
 
+function runTest() {
   // An empty tab where we can load the content script without leaving it
   // behind at the end of the test.
   gBrowser.addTab();
@@ -87,9 +89,9 @@ function test() {
     Task.spawn(function* () {
       yield SpecialPowers.pushPrefEnv({"set": [[PREF_PERMISSION_FAKE, true]]});
 
-      for (let test of gTests) {
-        info(test.desc);
-        yield test.run();
+      for (let testCase of gTests) {
+        info(testCase.desc);
+        yield testCase.run();
 
         // Cleanup before the next test
         yield expectNoObserverCalled();

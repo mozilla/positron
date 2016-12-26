@@ -13,6 +13,7 @@ define(function (require, exports, module) {
   const { createFactories, isGrip } = require("./rep-utils");
   const { Caption } = createFactories(require("./caption"));
   const { PropRep } = createFactories(require("./prop-rep"));
+  const { MODE } = require("./constants");
   // Shortcuts
   const { span } = React.DOM;
 
@@ -26,17 +27,20 @@ define(function (require, exports, module) {
 
     propTypes: {
       object: React.PropTypes.object.isRequired,
-      mode: React.PropTypes.string,
-      isInterestingProp: React.PropTypes.func
+      // @TODO Change this to Object.values once it's supported in Node's version of V8
+      mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+      isInterestingProp: React.PropTypes.func,
+      title: React.PropTypes.string,
     },
 
     getTitle: function (object) {
+      let title = this.props.title || object.class || "Object";
       if (this.props.objectLink) {
         return this.props.objectLink({
           object: object
-        }, object.class);
+        }, title);
       }
-      return object.class || "Object";
+      return title;
     },
 
     safePropIterator: function (object, max) {
@@ -50,6 +54,16 @@ define(function (require, exports, module) {
     },
 
     propIterator: function (object, max) {
+      if (object.preview && Object.keys(object.preview).includes("wrappedValue")) {
+        const { Rep } = createFactories(require("./rep"));
+
+        return [Rep({
+          object: object.preview.wrappedValue,
+          mode: this.props.mode || MODE.TINY,
+          defaultRep: Grip,
+        })];
+      }
+
       // Property filter. Show only interesting properties to the user.
       let isInterestingProp = this.props.isInterestingProp || ((type, value) => {
         return (
@@ -59,36 +73,39 @@ define(function (require, exports, module) {
         );
       });
 
-      let ownProperties = object.preview ? object.preview.ownProperties : [];
-      let indexes = this.getPropIndexes(ownProperties, max, isInterestingProp);
-      if (indexes.length < max && indexes.length < object.ownPropertyLength) {
+      let properties = object.preview
+        ? object.preview.ownProperties
+        : {};
+      let propertiesLength = object.preview && object.preview.ownPropertiesLength
+        ? object.preview.ownPropertiesLength
+        : object.ownPropertyLength;
+
+      if (object.preview && object.preview.safeGetterValues) {
+        properties = Object.assign({}, properties, object.preview.safeGetterValues);
+        propertiesLength += Object.keys(object.preview.safeGetterValues).length;
+      }
+
+      let indexes = this.getPropIndexes(properties, max, isInterestingProp);
+      if (indexes.length < max && indexes.length < propertiesLength) {
         // There are not enough props yet. Then add uninteresting props to display them.
         indexes = indexes.concat(
-          this.getPropIndexes(ownProperties, max - indexes.length, (t, value, name) => {
+          this.getPropIndexes(properties, max - indexes.length, (t, value, name) => {
             return !isInterestingProp(t, value, name);
           })
         );
       }
 
-      let props = this.getProps(ownProperties, indexes);
-      if (props.length < object.ownPropertyLength) {
+      const truncate = Object.keys(properties).length > max;
+      let props = this.getProps(properties, indexes, truncate);
+      if (truncate) {
         // There are some undisplayed props. Then display "more...".
         let objectLink = this.props.objectLink || span;
 
         props.push(Caption({
-          key: "more",
           object: objectLink({
             object: object
-          }, ((object ? object.ownPropertyLength : 0) - max) + " more…")
+          }, `${propertiesLength - max} more…`)
         }));
-      } else if (props.length > 0) {
-        // Remove the last comma.
-        // NOTE: do not change comp._store.props directly to update a property,
-        // it should be re-rendered or cloned with changed props
-        let last = props.length - 1;
-        props[last] = React.cloneElement(props[last], {
-          delim: ""
-        });
       }
 
       return props;
@@ -97,11 +114,12 @@ define(function (require, exports, module) {
     /**
      * Get props ordered by index.
      *
-     * @param {Object} ownProperties Props object.
+     * @param {Object} properties Props object.
      * @param {Array} indexes Indexes of props.
+     * @param {Boolean} truncate true if the grip will be truncated.
      * @return {Array} Props.
      */
-    getProps: function (ownProperties, indexes) {
+    getProps: function (properties, indexes, truncate) {
       let props = [];
 
       // Make indexes ordered by ascending.
@@ -110,16 +128,15 @@ define(function (require, exports, module) {
       });
 
       indexes.forEach((i) => {
-        let name = Object.keys(ownProperties)[i];
-        let prop = ownProperties[name];
-        let value = prop.value !== undefined ? prop.value : prop;
+        let name = Object.keys(properties)[i];
+        let value = this.getPropValue(properties[name]);
+
         props.push(PropRep(Object.assign({}, this.props, {
-          key: name,
-          mode: "tiny",
+          mode: MODE.TINY,
           name: name,
           object: value,
           equal: ": ",
-          delim: ", ",
+          delim: i !== indexes.length - 1 || truncate ? ", " : "",
           defaultRep: Grip
         })));
       });
@@ -130,26 +147,24 @@ define(function (require, exports, module) {
     /**
      * Get the indexes of props in the object.
      *
-     * @param {Object} ownProperties Props object.
+     * @param {Object} properties Props object.
      * @param {Number} max The maximum length of indexes array.
      * @param {Function} filter Filter the props you want.
      * @return {Array} Indexes of interesting props in the object.
      */
-    getPropIndexes: function (ownProperties, max, filter) {
+    getPropIndexes: function (properties, max, filter) {
       let indexes = [];
 
       try {
         let i = 0;
-        for (let name in ownProperties) {
+        for (let name in properties) {
           if (indexes.length >= max) {
             return indexes;
           }
 
-          let prop = ownProperties[name];
-          let value = prop.value !== undefined ? prop.value : prop;
-
           // Type is specified in grip's "class" field and for primitive
           // values use typeof.
+          let value = this.getPropValue(properties[name]);
           let type = (value.class || typeof value);
           type = type.toLowerCase();
 
@@ -161,17 +176,35 @@ define(function (require, exports, module) {
       } catch (err) {
         console.error(err);
       }
-
       return indexes;
+    },
+
+    /**
+     * Get the actual value of a property.
+     *
+     * @param {Object} property
+     * @return {Object} Value of the property.
+     */
+    getPropValue: function (property) {
+      let value = property;
+      if (typeof property === "object") {
+        let keys = Object.keys(property);
+        if (keys.includes("value")) {
+          value = property.value;
+        } else if (keys.includes("getterValue")) {
+          value = property.getterValue;
+        }
+      }
+      return value;
     },
 
     render: function () {
       let object = this.props.object;
       let props = this.safePropIterator(object,
-        (this.props.mode == "long") ? 100 : 3);
+        (this.props.mode === MODE.LONG) ? 10 : 3);
 
       let objectLink = this.props.objectLink || span;
-      if (this.props.mode == "tiny" || !props.length) {
+      if (this.props.mode === MODE.TINY) {
         return (
           span({className: "objectBox objectBox-object"},
             this.getTitle(object),
@@ -190,7 +223,7 @@ define(function (require, exports, module) {
             className: "objectLeftBrace",
             object: object
           }, " { "),
-          props,
+          ...props,
           objectLink({
             className: "objectRightBrace",
             object: object

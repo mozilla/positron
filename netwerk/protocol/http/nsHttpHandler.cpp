@@ -34,7 +34,6 @@
 #include "nsSocketTransportService2.h"
 #include "nsAlgorithm.h"
 #include "ASpdySession.h"
-#include "mozIApplicationClearPrivateDataParams.h"
 #include "EventTokenBucket.h"
 #include "Tickler.h"
 #include "nsIXULAppInfo.h"
@@ -62,6 +61,8 @@
 #include "mozilla/Unused.h"
 #include "mozilla/BasePrincipal.h"
 
+#include "mozilla/dom/ContentParent.h"
+
 #if defined(XP_UNIX)
 #include <sys/utsname.h>
 #endif
@@ -73,6 +74,10 @@
 #if defined(XP_MACOSX)
 #include <CoreServices/CoreServices.h>
 #include "nsCocoaFeatures.h"
+#endif
+
+#ifdef MOZ_TASK_TRACER
+#include "GeckoTaskTracer.h"
 #endif
 
 //-----------------------------------------------------------------------------
@@ -164,6 +169,7 @@ nsHttpHandler::nsHttpHandler()
     , mReferrerLevel(0xff) // by default we always send a referrer
     , mSpoofReferrerSource(false)
     , mReferrerTrimmingPolicy(0)
+    , mReferrerXOriginTrimmingPolicy(0)
     , mReferrerXOriginPolicy(0)
     , mFastFallbackToIPv4(false)
     , mProxyPipelining(true)
@@ -200,7 +206,6 @@ nsHttpHandler::nsHttpHandler()
     , mCompatFirefoxEnabled(false)
     , mUserAgentIsDirty(true)
     , mPromptTempRedirect(true)
-    , mSendSecureXSiteReferrer(true)
     , mEnablePersistentHttpsCaching(false)
     , mDoNotTrackEnabled(false)
     , mSafeHintEnabled(false)
@@ -240,6 +245,7 @@ nsHttpHandler::nsHttpHandler()
     , mEnforceH1Framing(FRAMECHECK_BARELY)
     , mKeepEmptyResponseHeadersAsEmtpyString(false)
     , mDefaultHpackBuffer(4096)
+    , mMaxHttpResponseHeaderSize(393216)
 {
     LOG(("Creating nsHttpHandler [this=%p].\n", this));
 
@@ -311,12 +317,6 @@ nsHttpHandler::Init()
         PrefsChanged(prefBranch, nullptr);
     }
 
-    rv = Preferences::AddBoolVarCache(&mPackagedAppsEnabled,
-        "network.http.enable-packaged-apps", false);
-    if (NS_FAILED(rv)) {
-        mPackagedAppsEnabled = false;
-    }
-
     nsHttpChannelAuthProvider::InitializePrefs();
 
     mMisc.AssignLiteral("rv:" MOZILLA_UAVERSION);
@@ -334,7 +334,7 @@ nsHttpHandler::Init()
           appInfo->GetName(mAppName);
         }
         appInfo->GetVersion(mAppVersion);
-        mAppName.StripChars(" ()<>@,;:\\\"/[]?={}");
+        mAppName.StripChars(R"( ()<>@,;:\"/[]?={})");
     } else {
         mAppVersion.AssignLiteral(MOZ_APP_UA_VERSION);
     }
@@ -394,7 +394,6 @@ nsHttpHandler::Init()
         obsService->AddObserver(this, "net:prune-all-connections", true);
         obsService->AddObserver(this, "net:failed-to-process-uri-content", true);
         obsService->AddObserver(this, "last-pb-context-exited", true);
-        obsService->AddObserver(this, "webapps-clear-data", true);
         obsService->AddObserver(this, "browser:purge-session-history", true);
         obsService->AddObserver(this, NS_NETWORK_LINK_TOPIC, true);
         obsService->AddObserver(this, "application-background", true);
@@ -1083,6 +1082,12 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
             mReferrerTrimmingPolicy = (uint8_t) clamped(val, 0, 2);
     }
 
+    if (PREF_CHANGED(HTTP_PREF("referer.XOriginTrimmingPolicy"))) {
+        rv = prefs->GetIntPref(HTTP_PREF("referer.XOriginTrimmingPolicy"), &val);
+        if (NS_SUCCEEDED(rv))
+            mReferrerXOriginTrimmingPolicy = (uint8_t) clamped(val, 0, 2);
+    }
+
     if (PREF_CHANGED(HTTP_PREF("referer.XOriginPolicy"))) {
         rv = prefs->GetIntPref(HTTP_PREF("referer.XOriginPolicy"), &val);
         if (NS_SUCCEEDED(rv))
@@ -1226,12 +1231,6 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         rv = prefs->GetIntPref(HTTP_PREF("qos"), &val);
         if (NS_SUCCEEDED(rv))
             mQoSBits = (uint8_t) clamped(val, 0, 0xff);
-    }
-
-    if (PREF_CHANGED(HTTP_PREF("sendSecureXSiteReferrer"))) {
-        rv = prefs->GetBoolPref(HTTP_PREF("sendSecureXSiteReferrer"), &cVar);
-        if (NS_SUCCEEDED(rv))
-            mSendSecureXSiteReferrer = cVar;
     }
 
     if (PREF_CHANGED(HTTP_PREF("accept.default"))) {
@@ -1466,6 +1465,13 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         if (NS_SUCCEEDED(rv) && cVar) {
             if (mConnMgr)
                 mConnMgr->PrintDiagnostics();
+        }
+    }
+
+    if (PREF_CHANGED(HTTP_PREF("max_response_header_size"))) {
+        rv = prefs->GetIntPref(HTTP_PREF("max_response_header_size"), &val);
+        if (NS_SUCCEEDED(rv)) {
+            mMaxHttpResponseHeaderSize = val;
         }
     }
     //
@@ -1995,6 +2001,14 @@ nsHttpHandler::NewProxiedChannel2(nsIURI *uri,
     LOG(("nsHttpHandler::NewProxiedChannel [proxyInfo=%p]\n",
         givenProxyInfo));
 
+#ifdef MOZ_TASK_TRACER
+    {
+        nsAutoCString urispec;
+        uri->GetSpec(urispec);
+        tasktracer::AddLabel("nsHttpHandler::NewProxiedChannel2 %s", urispec.get());
+    }
+#endif
+
     nsCOMPtr<nsProxyInfo> proxyInfo;
     if (givenProxyInfo) {
         proxyInfo = do_QueryInterface(givenProxyInfo);
@@ -2167,10 +2181,6 @@ nsHttpHandler::Observe(nsISupports *subject,
         if (mConnMgr) {
             mConnMgr->ClearAltServiceMappings();
         }
-    } else if (!strcmp(topic, "webapps-clear-data")) {
-        if (mConnMgr) {
-            mConnMgr->ClearAltServiceMappings();
-        }
     } else if (!strcmp(topic, "browser:purge-session-history")) {
         if (mConnMgr) {
             if (gSocketTransportService) {
@@ -2204,13 +2214,16 @@ nsHttpHandler::Observe(nsISupports *subject,
 
 nsresult
 nsHttpHandler::SpeculativeConnectInternal(nsIURI *aURI,
+                                          nsIPrincipal *aPrincipal,
                                           nsIInterfaceRequestor *aCallbacks,
                                           bool anonymous)
 {
     if (IsNeckoChild()) {
         ipc::URIParams params;
         SerializeURI(aURI, params);
-        gNeckoChild->SendSpeculativeConnect(params, anonymous);
+        gNeckoChild->SendSpeculativeConnect(params,
+                                            IPC::Principal(aPrincipal),
+                                            anonymous);
         return NS_OK;
     }
 
@@ -2224,8 +2237,14 @@ nsHttpHandler::SpeculativeConnectInternal(nsIURI *aURI,
         // feature
         obsService->NotifyObservers(nullptr, "speculative-connect-request",
                                     nullptr);
-        if (!IsNeckoChild() && gNeckoParent) {
-            Unused << gNeckoParent->SendSpeculativeConnectRequest();
+        if (!IsNeckoChild()) {
+            for (auto* cp : dom::ContentParent::AllProcesses(dom::ContentParent::eLive)) {
+                PNeckoParent* neckoParent = SingleManagedOrNull(cp->ManagedPNeckoParent());
+                if (!neckoParent) {
+                    continue;
+                }
+                Unused << neckoParent->SendSpeculativeConnectRequest();
+            }
         }
     }
 
@@ -2287,13 +2306,19 @@ nsHttpHandler::SpeculativeConnectInternal(nsIURI *aURI,
     aURI->GetUsername(username);
 
     NeckoOriginAttributes neckoOriginAttributes;
-    if (loadContext) {
-      DocShellOriginAttributes docshellOriginAttributes;
-      loadContext->GetOriginAttributes(docshellOriginAttributes);
-      neckoOriginAttributes.InheritFromDocShellToNecko(docshellOriginAttributes);
+    // If the principal is given, we use the originAttributes from this
+    // principal. Otherwise, we use the originAttributes from the
+    // loadContext.
+    if (aPrincipal) {
+        neckoOriginAttributes.InheritFromDocToNecko(
+            aPrincipal->OriginAttributesRef());
+    } else if (loadContext) {
+        DocShellOriginAttributes docshellOriginAttributes;
+        loadContext->GetOriginAttributes(docshellOriginAttributes);
+        neckoOriginAttributes.InheritFromDocShellToNecko(docshellOriginAttributes);
     }
 
-    nsHttpConnectionInfo *ci =
+    auto *ci =
         new nsHttpConnectionInfo(host, port, EmptyCString(), username, nullptr,
                                  neckoOriginAttributes, usingSSL);
     ci->SetAnonymous(anonymous);
@@ -2305,14 +2330,30 @@ NS_IMETHODIMP
 nsHttpHandler::SpeculativeConnect(nsIURI *aURI,
                                   nsIInterfaceRequestor *aCallbacks)
 {
-    return SpeculativeConnectInternal(aURI, aCallbacks, false);
+    return SpeculativeConnectInternal(aURI, nullptr, aCallbacks, false);
+}
+
+NS_IMETHODIMP
+nsHttpHandler::SpeculativeConnect2(nsIURI *aURI,
+                                   nsIPrincipal *aPrincipal,
+                                   nsIInterfaceRequestor *aCallbacks)
+{
+    return SpeculativeConnectInternal(aURI, aPrincipal, aCallbacks, false);
 }
 
 NS_IMETHODIMP
 nsHttpHandler::SpeculativeAnonymousConnect(nsIURI *aURI,
                                            nsIInterfaceRequestor *aCallbacks)
 {
-    return SpeculativeConnectInternal(aURI, aCallbacks, true);
+    return SpeculativeConnectInternal(aURI, nullptr, aCallbacks, true);
+}
+
+NS_IMETHODIMP
+nsHttpHandler::SpeculativeAnonymousConnect2(nsIURI *aURI,
+                                            nsIPrincipal *aPrincipal,
+                                            nsIInterfaceRequestor *aCallbacks)
+{
+    return SpeculativeConnectInternal(aURI, aPrincipal, aCallbacks, true);
 }
 
 void

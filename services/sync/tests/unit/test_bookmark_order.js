@@ -3,13 +3,12 @@
 
 _("Making sure after processing incoming bookmarks, they show up in the right order");
 Cu.import("resource://gre/modules/PlacesUtils.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://services-sync/engines/bookmarks.js");
 Cu.import("resource://services-sync/service.js");
 Cu.import("resource://services-sync/util.js");
 
-var check = Task.async(function* (expected, message) {
-  let root = yield PlacesUtils.promiseBookmarksTree();
+var check = async function(expected, message) {
+  let root = await PlacesUtils.promiseBookmarksTree();
 
   let bookmarks = (function mapTree(children) {
     return children.map(child => {
@@ -34,15 +33,15 @@ var check = Task.async(function* (expected, message) {
   _("Checking if the bookmark structure is", JSON.stringify(expected));
   _("Got bookmarks:", JSON.stringify(bookmarks));
   deepEqual(bookmarks, expected);
-});
+};
 
-add_task(function* test_bookmark_order() {
+add_task(async function test_bookmark_order() {
   let store = new BookmarksEngine(Service)._store;
   initTestLogging("Trace");
 
   _("Starting with a clean slate of no bookmarks");
   store.wipe();
-  yield check([{
+  await check([{
     guid: PlacesUtils.bookmarks.menuGuid,
     index: 0,
   }, {
@@ -53,6 +52,9 @@ add_task(function* test_bookmark_order() {
     // `CreateRoot` calls in `Database::CreateBookmarkRoots`).
     guid: PlacesUtils.bookmarks.unfiledGuid,
     index: 3,
+  }, {
+    guid: PlacesUtils.bookmarks.mobileGuid,
+    index: 4,
   }], "clean slate");
 
   function bookmark(name, parent) {
@@ -83,7 +85,7 @@ add_task(function* test_bookmark_order() {
   let id10 = "10_aaaaaaaaa";
   _("basic add first bookmark");
   apply(bookmark(id10, ""));
-  yield check([{
+  await check([{
     guid: PlacesUtils.bookmarks.menuGuid,
     index: 0,
   }, {
@@ -96,11 +98,14 @@ add_task(function* test_bookmark_order() {
       guid: id10,
       index: 0,
     }],
+  }, {
+    guid: PlacesUtils.bookmarks.mobileGuid,
+    index: 4,
   }], "basic add first bookmark");
   let id20 = "20_aaaaaaaaa";
   _("basic append behind 10");
   apply(bookmark(id20, ""));
-  yield check([{
+  await check([{
     guid: PlacesUtils.bookmarks.menuGuid,
     index: 0,
   }, {
@@ -116,6 +121,9 @@ add_task(function* test_bookmark_order() {
       guid: id20,
       index: 1,
     }],
+  }, {
+    guid: PlacesUtils.bookmarks.mobileGuid,
+    index: 4,
   }], "basic append behind 10");
 
   let id31 = "31_aaaaaaaaa";
@@ -124,7 +132,7 @@ add_task(function* test_bookmark_order() {
   apply(bookmark(id31, id30));
   let f30 = folder(id30, "", [id31]);
   apply(f30);
-  yield check([{
+  await check([{
     guid: PlacesUtils.bookmarks.menuGuid,
     index: 0,
   }, {
@@ -147,13 +155,16 @@ add_task(function* test_bookmark_order() {
         index: 0,
       }],
     }],
+  }, {
+    guid: PlacesUtils.bookmarks.mobileGuid,
+    index: 4,
   }], "basic create in folder");
 
   let id41 = "41_aaaaaaaaa";
   let id40 = "f40_aaaaaaaa";
   _("insert missing parent -> append to unfiled");
   apply(bookmark(id41, id40));
-  yield check([{
+  await check([{
     guid: PlacesUtils.bookmarks.menuGuid,
     index: 0,
   }, {
@@ -180,13 +191,16 @@ add_task(function* test_bookmark_order() {
       index: 3,
       requestedParent: id40,
     }],
+  }, {
+    guid: PlacesUtils.bookmarks.mobileGuid,
+    index: 4,
   }], "insert missing parent -> append to unfiled");
 
   let id42 = "42_aaaaaaaaa";
 
   _("insert another missing parent -> append");
   apply(bookmark(id42, id40));
-  yield check([{
+  await check([{
     guid: PlacesUtils.bookmarks.menuGuid,
     index: 0,
   }, {
@@ -217,12 +231,15 @@ add_task(function* test_bookmark_order() {
       index: 4,
       requestedParent: id40,
     }],
+  }, {
+    guid: PlacesUtils.bookmarks.mobileGuid,
+    index: 4,
   }], "insert another missing parent -> append");
 
   _("insert folder -> move children and followers");
   let f40 = folder(id40, "", [id41, id42]);
   apply(f40);
-  yield check([{
+  await check([{
     guid: PlacesUtils.bookmarks.menuGuid,
     index: 0,
   }, {
@@ -255,12 +272,15 @@ add_task(function* test_bookmark_order() {
         index: 1,
       }]
     }],
+  }, {
+    guid: PlacesUtils.bookmarks.mobileGuid,
+    index: 4,
   }], "insert folder -> move children and followers");
 
   _("Moving 41 behind 42 -> update f40");
   f40.children = [id42, id41];
   apply(f40);
-  yield check([{
+  await check([{
     guid: PlacesUtils.bookmarks.menuGuid,
     index: 0,
   }, {
@@ -293,12 +313,15 @@ add_task(function* test_bookmark_order() {
         index: 1,
       }]
     }],
+  }, {
+    guid: PlacesUtils.bookmarks.mobileGuid,
+    index: 4,
   }], "Moving 41 behind 42 -> update f40");
 
   _("Moving 10 back to front -> update 10, 20");
   f40.children = [id41, id42];
   apply(f40);
-  yield check([{
+  await check([{
     guid: PlacesUtils.bookmarks.menuGuid,
     index: 0,
   }, {
@@ -331,11 +354,14 @@ add_task(function* test_bookmark_order() {
         index: 1,
       }]
     }],
+  }, {
+    guid: PlacesUtils.bookmarks.mobileGuid,
+    index: 4,
   }], "Moving 10 back to front -> update 10, 20");
 
   _("Moving 20 behind 42 in f40 -> update 50");
   apply(bookmark(id20, id40));
-  yield check([{
+  await check([{
     guid: PlacesUtils.bookmarks.menuGuid,
     index: 0,
   }, {
@@ -368,13 +394,16 @@ add_task(function* test_bookmark_order() {
         index: 2,
       }]
     }],
+  }, {
+    guid: PlacesUtils.bookmarks.mobileGuid,
+    index: 4,
   }], "Moving 20 behind 42 in f40 -> update 50");
 
   _("Moving 10 in front of 31 in f30 -> update 10, f30");
   apply(bookmark(id10, id30));
   f30.children = [id10, id31];
   apply(f30);
-  yield check([{
+  await check([{
     guid: PlacesUtils.bookmarks.menuGuid,
     index: 0,
   }, {
@@ -407,13 +436,16 @@ add_task(function* test_bookmark_order() {
         index: 2,
       }]
     }],
+  }, {
+    guid: PlacesUtils.bookmarks.mobileGuid,
+    index: 4,
   }], "Moving 10 in front of 31 in f30 -> update 10, f30");
 
   _("Moving 20 from f40 to f30 -> update 20, f30");
   apply(bookmark(id20, id30));
   f30.children = [id10, id20, id31];
   apply(f30);
-  yield check([{
+  await check([{
     guid: PlacesUtils.bookmarks.menuGuid,
     index: 0,
   }, {
@@ -446,13 +478,16 @@ add_task(function* test_bookmark_order() {
         index: 1,
       }]
     }],
+  }, {
+    guid: PlacesUtils.bookmarks.mobileGuid,
+    index: 4,
   }], "Moving 20 from f40 to f30 -> update 20, f30");
 
   _("Move 20 back to front -> update 20, f30");
   apply(bookmark(id20, ""));
   f30.children = [id10, id31];
   apply(f30);
-  yield check([{
+  await check([{
     guid: PlacesUtils.bookmarks.menuGuid,
     index: 0,
   }, {
@@ -485,6 +520,9 @@ add_task(function* test_bookmark_order() {
       guid: id20,
       index: 2,
     }],
+  }, {
+    guid: PlacesUtils.bookmarks.mobileGuid,
+    index: 4,
   }], "Move 20 back to front -> update 20, f30");
 
 });

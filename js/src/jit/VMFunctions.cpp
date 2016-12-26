@@ -57,6 +57,9 @@ bool
 InvokeFunction(JSContext* cx, HandleObject obj, bool constructing, uint32_t argc, Value* argv,
                MutableHandleValue rval)
 {
+    TraceLoggerThread* logger = TraceLoggerForMainThread(cx->runtime());
+    TraceLogStartEvent(logger, TraceLogger_Call);
+
     AutoArrayRooter argvRoot(cx, argc + 1 + constructing, argv);
 
     // Data in the argument vector is arranged for a JIT -> JIT call.
@@ -71,7 +74,7 @@ InvokeFunction(JSContext* cx, HandleObject obj, bool constructing, uint32_t argc
         }
 
         ConstructArgs cargs(cx);
-        if (!cargs.init(argc))
+        if (!cargs.init(cx, argc))
             return false;
 
         for (uint32_t i = 0; i < argc; i++)
@@ -102,7 +105,7 @@ InvokeFunction(JSContext* cx, HandleObject obj, bool constructing, uint32_t argc
     }
 
     InvokeArgs args(cx);
-    if (!args.init(argc))
+    if (!args.init(cx, argc))
         return false;
 
     for (size_t i = 0; i < argc; i++)
@@ -412,6 +415,16 @@ StringFromCharCode(JSContext* cx, int32_t code)
     return NewStringCopyN<CanGC>(cx, &c, 1);
 }
 
+JSString*
+StringFromCodePoint(JSContext* cx, int32_t codePoint)
+{
+    RootedValue rval(cx, Int32Value(codePoint));
+    if (!str_fromCodePoint_one_arg(cx, rval, &rval))
+        return nullptr;
+
+    return rval.toString();
+}
+
 bool
 SetProperty(JSContext* cx, HandleObject obj, HandlePropertyName name, HandleValue value,
             bool strict, jsbytecode* pc)
@@ -547,7 +560,7 @@ CreateThis(JSContext* cx, HandleObject callee, HandleObject newTarget, MutableHa
     if (callee->is<JSFunction>()) {
         RootedFunction fun(cx, &callee->as<JSFunction>());
         if (fun->isInterpreted() && fun->isConstructor()) {
-            JSScript* script = fun->getOrCreateScript(cx);
+            JSScript* script = JSFunction::getOrCreateScript(cx, fun);
             if (!script || !script->ensureHasTypes(cx))
                 return false;
             if (fun->isBoundFunction() || script->isDerivedClassConstructor()) {
@@ -1112,14 +1125,13 @@ RecompileImpl(JSContext* cx, bool force)
     MOZ_ASSERT(iter.type() == JitFrame_Exit);
     ++iter;
 
-    bool isConstructing = iter.isConstructing();
     RootedScript script(cx, iter.script());
     MOZ_ASSERT(script->hasIonScript());
 
     if (!IsIonEnabled(cx))
         return true;
 
-    MethodStatus status = Recompile(cx, script, nullptr, nullptr, isConstructing, force);
+    MethodStatus status = Recompile(cx, script, nullptr, nullptr, force);
     if (status == Method_Error)
         return false;
 
@@ -1209,14 +1221,18 @@ AssertValidStringPtr(JSContext* cx, JSString* str)
     MOZ_ASSERT(str->length() <= JSString::MAX_LENGTH);
 
     gc::AllocKind kind = str->getAllocKind();
-    if (str->isFatInline())
-        MOZ_ASSERT(kind == gc::AllocKind::FAT_INLINE_STRING);
-    else if (str->isExternal())
+    if (str->isFatInline()) {
+        MOZ_ASSERT(kind == gc::AllocKind::FAT_INLINE_STRING ||
+                   kind == gc::AllocKind::FAT_INLINE_ATOM);
+    } else if (str->isExternal()) {
         MOZ_ASSERT(kind == gc::AllocKind::EXTERNAL_STRING);
-    else if (str->isAtom() || str->isFlat())
+    } else if (str->isAtom()) {
+        MOZ_ASSERT(kind == gc::AllocKind::ATOM);
+    } else if (str->isFlat()) {
         MOZ_ASSERT(kind == gc::AllocKind::STRING || kind == gc::AllocKind::FAT_INLINE_STRING);
-    else
+    } else {
         MOZ_ASSERT(kind == gc::AllocKind::STRING);
+    }
 #endif
 }
 
@@ -1304,10 +1320,9 @@ ThrowRuntimeLexicalError(JSContext* cx, unsigned errorNumber)
 }
 
 bool
-ThrowReadOnlyError(JSContext* cx, HandleObject handle)
+ThrowReadOnlyError(JSContext* cx, int32_t index)
 {
-    HandleNativeObject obj = handle.as<NativeObject>();
-    RootedValue val(cx, ObjectValue(*obj));
+    RootedValue val(cx, Int32Value(index));
     ReportValueError(cx, JSMSG_READ_ONLY, JSDVG_IGNORE_STACK, val, nullptr);
     return false;
 }
@@ -1338,6 +1353,39 @@ bool
 BaselineGetFunctionThis(JSContext* cx, BaselineFrame* frame, MutableHandleValue res)
 {
     return GetFunctionThis(cx, frame, res);
+}
+
+bool
+ProxyGetProperty(JSContext* cx, HandleObject proxy, HandleId id, MutableHandleValue vp)
+{
+    RootedValue receiver(cx, ObjectValue(*proxy));
+    return Proxy::get(cx, proxy, receiver, id, vp);
+}
+
+bool
+ProxyGetPropertyByValue(JSContext* cx, HandleObject proxy, HandleValue idVal,
+                        MutableHandleValue vp)
+{
+    RootedId id(cx);
+    if (!ValueToId<CanGC>(cx, idVal, &id))
+        return false;
+
+    RootedValue receiver(cx, ObjectValue(*proxy));
+    return Proxy::get(cx, proxy, receiver, id, vp);
+}
+
+bool
+EqualStringsHelper(JSString* str1, JSString* str2)
+{
+    MOZ_ASSERT(str1->isAtom());
+    MOZ_ASSERT(!str2->isAtom());
+    MOZ_ASSERT(str1->length() == str2->length());
+
+    JSLinearString* str2Linear = str2->ensureLinear(nullptr);
+    if (!str2Linear)
+        return false;
+
+    return EqualChars(&str1->asLinear(), str2Linear);
 }
 
 } // namespace jit

@@ -14,7 +14,6 @@ include protocol PBrowser;
 include protocol PCompositable;
 include protocol PCompositorWidget;
 include protocol PImageContainer;
-include protocol PLayer;
 include protocol PLayerTransaction;
 include protocol PTexture;
 include "mozilla/GfxMessageUtils.h";
@@ -62,8 +61,12 @@ child:
 
   // The compositor type or device has changed, and a new texture factory
   // identifier is available. Layers must be invalidated and the new identifier
-  // must be propagated.
-  async CompositorUpdated(uint64_t layersId, TextureFactoryIdentifier newIdentifier);
+  // must be propagated. The sequence number is a generation count for the
+  // compositor.
+  async CompositorUpdated(
+    uint64_t layersId,
+    TextureFactoryIdentifier newIdentifier,
+    uint64_t seqNo);
 
   // The compositor completed a layers transaction. id is the layers id
   // of the child layer tree that was composited (or 0 when notifying
@@ -123,6 +126,8 @@ parent:
 
   // When out-of-process, this must be called to finish initialization.
   sync Initialize(uint64_t rootLayerTreeId);
+  sync Reset(LayersBackend[] aBackendHints, uint64_t aSeqNo)
+    returns (bool aResult, TextureFactoryIdentifier aOutIdentifier);
 
   // Returns whether this Compositor has APZ enabled or not.
   sync AsyncPanZoomEnabled(uint64_t layersId) returns (bool aHasAPZ);
@@ -154,7 +159,10 @@ parent:
   sync Pause();
   sync Resume();
 
-  async NotifyChildCreated(uint64_t id);
+  // See bug 1316632 comment #33 for why this has to be sync. Otherwise,
+  // there are ordering issues with SendPLayerTransactionConstructor.
+  sync NotifyChildCreated(uint64_t id);
+
   async AdoptChild(uint64_t id);
 
   // Same as NotifyChildCreated, but used when child processes need to

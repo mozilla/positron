@@ -12,7 +12,8 @@ const {
 const { ObjectClient } = require("devtools/shared/client/main");
 const actions = require("devtools/client/webconsole/new-console-output/actions/messages");
 const {l10n} = require("devtools/client/webconsole/new-console-output/utils/messages");
-const GripMessageBody = createFactory(require("devtools/client/webconsole/new-console-output/components/grip-message-body").GripMessageBody);
+const { MODE } = require("devtools/client/shared/components/reps/constants");
+const GripMessageBody = createFactory(require("devtools/client/webconsole/new-console-output/components/grip-message-body"));
 
 const TABLE_ROW_MAX_ITEMS = 1000;
 const TABLE_COLUMN_MAX_ITEMS = 10;
@@ -24,18 +25,20 @@ const ConsoleTable = createClass({
   propTypes: {
     dispatch: PropTypes.func.isRequired,
     parameters: PropTypes.array.isRequired,
-    hudProxyClient: PropTypes.object.isRequired,
+    serviceContainer: PropTypes.shape({
+      hudProxyClient: PropTypes.object.isRequired,
+    }),
     id: PropTypes.string.isRequired,
   },
 
   componentWillMount: function () {
-    const {id, dispatch, hudProxyClient, parameters} = this.props;
+    const {id, dispatch, serviceContainer, parameters} = this.props;
 
     if (!Array.isArray(parameters) || parameters.length === 0) {
       return;
     }
 
-    const client = new ObjectClient(hudProxyClient, parameters[0]);
+    const client = new ObjectClient(serviceContainer.hudProxyClient, parameters[0]);
     let dataType = getParametersDataType(parameters);
 
     // Get all the object properties.
@@ -56,7 +59,8 @@ const ConsoleTable = createClass({
           dom.td(
             {},
             GripMessageBody({
-              grip: item[key]
+              grip: item[key],
+              mode: MODE.SHORT,
             })
           )
         );
@@ -197,4 +201,4 @@ function getTableItems(data = {}, type, headers = null) {
   };
 }
 
-exports.ConsoleTable = ConsoleTable;
+module.exports = ConsoleTable;

@@ -113,6 +113,37 @@ InitCompressedFormatInfo()
     AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGBA_S3TC_DXT3_EXT, 128, 4, 4, CompressionFamily::S3TC);
     AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGBA_S3TC_DXT5_EXT, 128, 4, 4, CompressionFamily::S3TC);
 
+    // KHR_texture_compression_astc_ldr
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGBA_ASTC_4x4_KHR          , 128,  4,  4, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGBA_ASTC_5x4_KHR          , 128,  5,  4, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGBA_ASTC_5x5_KHR          , 128,  5,  5, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGBA_ASTC_6x5_KHR          , 128,  6,  5, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGBA_ASTC_6x6_KHR          , 128,  6,  6, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGBA_ASTC_8x5_KHR          , 128,  8,  5, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGBA_ASTC_8x6_KHR          , 128,  8,  6, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGBA_ASTC_8x8_KHR          , 128,  8,  8, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGBA_ASTC_10x5_KHR         , 128, 10,  5, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGBA_ASTC_10x6_KHR         , 128, 10,  6, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGBA_ASTC_10x8_KHR         , 128, 10,  8, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGBA_ASTC_10x10_KHR        , 128, 10, 10, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGBA_ASTC_12x10_KHR        , 128, 12, 10, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGBA_ASTC_12x12_KHR        , 128, 12, 12, CompressionFamily::ASTC);
+
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR  , 128,  4,  4, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_SRGB8_ALPHA8_ASTC_5x4_KHR  , 128,  5,  4, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR  , 128,  5,  5, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_SRGB8_ALPHA8_ASTC_6x5_KHR  , 128,  6,  5, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR  , 128,  6,  6, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_SRGB8_ALPHA8_ASTC_8x5_KHR  , 128,  8,  5, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_SRGB8_ALPHA8_ASTC_8x6_KHR  , 128,  8,  6, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR  , 128,  8,  8, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_SRGB8_ALPHA8_ASTC_10x5_KHR , 128, 10,  5, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_SRGB8_ALPHA8_ASTC_10x6_KHR , 128, 10,  6, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_SRGB8_ALPHA8_ASTC_10x8_KHR , 128, 10,  8, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR, 128, 10, 10, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_SRGB8_ALPHA8_ASTC_12x10_KHR, 128, 12, 10, CompressionFamily::ASTC);
+    AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR, 128, 12, 12, CompressionFamily::ASTC);
+
     // IMG_texture_compression_pvrtc
     AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGB_PVRTC_4BPPV1 , 256,  8, 8, CompressionFamily::PVRTC);
     AddCompressedFormatInfo(EffectiveFormat::COMPRESSED_RGBA_PVRTC_4BPPV1, 256,  8, 8, CompressionFamily::PVRTC);
@@ -168,7 +199,7 @@ AddFormatInfo(EffectiveFormat format, const char* name, GLenum sizedFormat,
         MOZ_ASSERT(!r && !g && !b && !a && !d && s);
         break;
 
-    case UnsizedFormat::DS:
+    case UnsizedFormat::DEPTH_STENCIL:
         MOZ_ASSERT(!r && !g && !b && !a && d && s);
         break;
     }
@@ -262,8 +293,8 @@ InitFormatInfo()
     AddFormatInfo(FOO(DEPTH_COMPONENT16 ), 2, 0,0,0,0, 16,0, UnsizedFormat::D , false, ComponentType::NormUInt);
     AddFormatInfo(FOO(DEPTH_COMPONENT24 ), 3, 0,0,0,0, 24,0, UnsizedFormat::D , false, ComponentType::NormUInt);
     AddFormatInfo(FOO(DEPTH_COMPONENT32F), 4, 0,0,0,0, 32,0, UnsizedFormat::D , false, ComponentType::Float);
-    AddFormatInfo(FOO(DEPTH24_STENCIL8  ), 4, 0,0,0,0, 24,8, UnsizedFormat::DS, false, ComponentType::Special);
-    AddFormatInfo(FOO(DEPTH32F_STENCIL8 ), 5, 0,0,0,0, 32,8, UnsizedFormat::DS, false, ComponentType::Special);
+    AddFormatInfo(FOO(DEPTH24_STENCIL8  ), 4, 0,0,0,0, 24,8, UnsizedFormat::DEPTH_STENCIL, false, ComponentType::Special);
+    AddFormatInfo(FOO(DEPTH32F_STENCIL8 ), 5, 0,0,0,0, 32,8, UnsizedFormat::DEPTH_STENCIL, false, ComponentType::Special);
 
     // GLES 3.0.4, p205-206, "Required Renderbuffer Formats"
     AddFormatInfo(FOO(STENCIL_INDEX8), 1, 0,0,0,0, 0,8, UnsizedFormat::S, false, ComponentType::UInt);
@@ -291,6 +322,37 @@ InitFormatInfo()
     AddFormatInfo(FOO(COMPRESSED_RGBA_S3TC_DXT1_EXT), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, false, ComponentType::NormUInt);
     AddFormatInfo(FOO(COMPRESSED_RGBA_S3TC_DXT3_EXT), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, false, ComponentType::NormUInt);
     AddFormatInfo(FOO(COMPRESSED_RGBA_S3TC_DXT5_EXT), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, false, ComponentType::NormUInt);
+
+    // KHR_texture_compression_astc_ldr
+    AddFormatInfo(FOO(COMPRESSED_RGBA_ASTC_4x4_KHR          ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, false, ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_RGBA_ASTC_5x4_KHR          ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, false, ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_RGBA_ASTC_5x5_KHR          ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, false, ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_RGBA_ASTC_6x5_KHR          ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, false, ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_RGBA_ASTC_6x6_KHR          ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, false, ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_RGBA_ASTC_8x5_KHR          ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, false, ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_RGBA_ASTC_8x6_KHR          ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, false, ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_RGBA_ASTC_8x8_KHR          ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, false, ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_RGBA_ASTC_10x5_KHR         ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, false, ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_RGBA_ASTC_10x6_KHR         ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, false, ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_RGBA_ASTC_10x8_KHR         ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, false, ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_RGBA_ASTC_10x10_KHR        ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, false, ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_RGBA_ASTC_12x10_KHR        ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, false, ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_RGBA_ASTC_12x12_KHR        ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, false, ComponentType::NormUInt);
+
+    AddFormatInfo(FOO(COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR  ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, true , ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_SRGB8_ALPHA8_ASTC_5x4_KHR  ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, true , ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR  ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, true , ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_SRGB8_ALPHA8_ASTC_6x5_KHR  ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, true , ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR  ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, true , ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_SRGB8_ALPHA8_ASTC_8x5_KHR  ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, true , ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_SRGB8_ALPHA8_ASTC_8x6_KHR  ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, true , ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR  ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, true , ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_SRGB8_ALPHA8_ASTC_10x5_KHR ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, true , ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_SRGB8_ALPHA8_ASTC_10x6_KHR ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, true , ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_SRGB8_ALPHA8_ASTC_10x8_KHR ), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, true , ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, true , ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_SRGB8_ALPHA8_ASTC_12x10_KHR), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, true , ComponentType::NormUInt);
+    AddFormatInfo(FOO(COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR), 0, 1,1,1,1, 0,0, UnsizedFormat::RGBA, true , ComponentType::NormUInt);
 
     // IMG_texture_compression_pvrtc
     AddFormatInfo(FOO(COMPRESSED_RGB_PVRTC_4BPPV1 ), 0, 1,1,1,0, 0,0, UnsizedFormat::RGB , false, ComponentType::NormUInt);
@@ -958,28 +1020,6 @@ FormatUsageAuthority::CreateForWebGL2(gl::GLContext* gl)
     fnAllowES3TexFormat(FOO(DEPTH_COMPONENT32F), true, false);
     fnAllowES3TexFormat(FOO(DEPTH24_STENCIL8  ), true, false);
     fnAllowES3TexFormat(FOO(DEPTH32F_STENCIL8 ), true, false);
-
-    // GLES 3.0.4, p147, table 3.19
-    // GLES 3.0.4, p286+, $C.1 "ETC Compressed Texture Image Formats"
-    // Note that all compressed texture formats are filterable:
-    // GLES 3.0.4 p161:
-    // "[A] texture is complete unless any of the following conditions hold true:
-    //  [...]
-    //  * The effective internal format specified for the texture arrays is a sized
-    //    internal color format that is not texture-filterable (see table 3.13) and [the
-    //    mag filter requires filtering]."
-    // Compressed formats are not sized internal color formats, and indeed they are not
-    // listed in table 3.13.
-    fnAllowES3TexFormat(FOO(COMPRESSED_RGB8_ETC2                     ), false, true);
-    fnAllowES3TexFormat(FOO(COMPRESSED_SRGB8_ETC2                    ), false, true);
-    fnAllowES3TexFormat(FOO(COMPRESSED_RGBA8_ETC2_EAC                ), false, true);
-    fnAllowES3TexFormat(FOO(COMPRESSED_SRGB8_ALPHA8_ETC2_EAC         ), false, true);
-    fnAllowES3TexFormat(FOO(COMPRESSED_R11_EAC                       ), false, true);
-    fnAllowES3TexFormat(FOO(COMPRESSED_RG11_EAC                      ), false, true);
-    fnAllowES3TexFormat(FOO(COMPRESSED_SIGNED_R11_EAC                ), false, true);
-    fnAllowES3TexFormat(FOO(COMPRESSED_SIGNED_RG11_EAC               ), false, true);
-    fnAllowES3TexFormat(FOO(COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2 ), false, true);
-    fnAllowES3TexFormat(FOO(COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2), false, true);
 
 #undef FOO
 

@@ -27,6 +27,7 @@
 class nsAsyncInstantiateEvent;
 class nsStopPluginRunnable;
 class AutoSetInstantiatingToFalse;
+class nsIPrincipal;
 class nsFrameLoader;
 class nsPluginFrame;
 class nsXULElement;
@@ -179,7 +180,7 @@ class nsObjectLoadingContent : public nsImageLoadingContent
                              mozilla::ErrorResult& aRv);
 
     // WebIDL API
-    nsIDocument* GetContentDocument();
+    nsIDocument* GetContentDocument(nsIPrincipal& aSubjectPrincipal);
     void GetActualType(nsAString& aType) const
     {
       CopyUTF8toUTF16(mContentType, aType);
@@ -255,6 +256,8 @@ class nsObjectLoadingContent : public nsImageLoadingContent
       return mRewrittenYoutubeEmbed;
     }
 
+    void PresetOpenerWindow(mozIDOMWindowProxy* aOpenerWindow, mozilla::ErrorResult& aRv);
+
   protected:
     /**
      * Begins loading the object when called
@@ -328,8 +331,7 @@ class nsObjectLoadingContent : public nsImageLoadingContent
 
     void CreateStaticClone(nsObjectLoadingContent* aDest) const;
 
-    void DoStopPlugin(nsPluginInstanceOwner* aInstanceOwner, bool aDelayedStop,
-                      bool aForcedReentry = false);
+    void DoStopPlugin(nsPluginInstanceOwner* aInstanceOwner);
 
     nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                         nsIContent* aBindingParent,
@@ -562,7 +564,7 @@ class nsObjectLoadingContent : public nsImageLoadingContent
     // Helper class for SetupProtoChain
     class SetupProtoChainRunner final : public nsIRunnable
     {
-      ~SetupProtoChainRunner();
+      ~SetupProtoChainRunner() = default;
     public:
       NS_DECL_ISUPPORTS
 

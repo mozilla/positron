@@ -188,8 +188,8 @@ function registerRunTests() {
       SpecialPowers.removeObserver(observer, "passwordmgr-processed-form");
       formLikeRoot.remove();
       SimpleTest.executeSoon(() => {
-        var event = new Event("runTests");
-        window.dispatchEvent(event);
+        var runTestEvent = new Event("runTests");
+        window.dispatchEvent(runTestEvent);
       });
     });
     SpecialPowers.addObserver(observer, "passwordmgr-processed-form", false);
@@ -401,14 +401,13 @@ if (this.addMessageListener) {
     sendAsyncMessage("doneSetup");
   });
 
-  addMessageListener("loadRecipes", Task.async(function* loadRecipes(recipes) {
-
+  addMessageListener("loadRecipes", Task.async(function*(recipes) {
     var recipeParent = yield LoginManagerParent.recipeParentPromise;
     yield recipeParent.load(recipes);
     sendAsyncMessage("loadedRecipes", recipes);
   }));
 
-  addMessageListener("resetRecipes", Task.async(function* resetRecipes() {
+  addMessageListener("resetRecipes", Task.async(function*() {
     let recipeParent = yield LoginManagerParent.recipeParentPromise;
     yield recipeParent.reset();
     sendAsyncMessage("recipesReset");
@@ -424,7 +423,11 @@ if (this.addMessageListener) {
       return arg;
     });
 
-    return Services.logins[msg.methodName](...recreatedArgs);
+    let rv = Services.logins[msg.methodName](...recreatedArgs);
+    if (rv instanceof Ci.nsILoginInfo) {
+      rv = LoginHelper.loginToVanillaObject(rv);
+    }
+    return rv;
   });
 
   var globalMM = Cc["@mozilla.org/globalmessagemanager;1"].getService(Ci.nsIMessageListenerManager);
@@ -433,7 +436,9 @@ if (this.addMessageListener) {
   });
 } else {
   // Code to only run in the mochitest pages (not in the chrome script).
+  SpecialPowers.pushPrefEnv({"set": [["signon.rememberSignons", true]]});
   SimpleTest.registerCleanupFunction(() => {
+    SpecialPowers.popPrefEnv();
     runInParent(function cleanupParent() {
       const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
       Cu.import("resource://gre/modules/Services.jsm");

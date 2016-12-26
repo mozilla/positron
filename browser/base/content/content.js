@@ -24,7 +24,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "ContentLinkHandler",
   "resource:///modules/ContentLinkHandler.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "LoginManagerContent",
   "resource://gre/modules/LoginManagerContent.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "FormLikeFactory",
+XPCOMUtils.defineLazyModuleGetter(this, "LoginFormFactory",
   "resource://gre/modules/LoginManagerContent.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "InsecurePasswordUtils",
   "resource://gre/modules/InsecurePasswordUtils.jsm");
@@ -65,13 +65,13 @@ addMessageListener("RemoteLogins:fillForm", function(message) {
 });
 addEventListener("DOMFormHasPassword", function(event) {
   LoginManagerContent.onDOMFormHasPassword(event, content);
-  let formLike = FormLikeFactory.createFromForm(event.target);
-  InsecurePasswordUtils.checkForInsecurePasswords(formLike);
+  let formLike = LoginFormFactory.createFromForm(event.target);
+  InsecurePasswordUtils.reportInsecurePasswords(formLike);
 });
 addEventListener("DOMInputPasswordAdded", function(event) {
   LoginManagerContent.onDOMInputPasswordAdded(event, content);
-  let formLike = FormLikeFactory.createFromField(event.target);
-  InsecurePasswordUtils.checkForInsecurePasswords(formLike);
+  let formLike = LoginFormFactory.createFromField(event.target);
+  InsecurePasswordUtils.reportInsecurePasswords(formLike);
 });
 addEventListener("pageshow", function(event) {
   LoginManagerContent.onPageShow(event, content);
@@ -83,7 +83,7 @@ addEventListener("blur", function(event) {
   LoginManagerContent.onUsernameInput(event);
 });
 
-var handleContentContextMenu = function (event) {
+var handleContentContextMenu = function(event) {
   let defaultPrevented = event.defaultPrevented;
   if (!Services.prefs.getBoolPref("dom.event.contextmenu.enabled")) {
     let plugin = null;
@@ -264,7 +264,9 @@ function getSerializedSecurityInfo(docShell) {
 var AboutNetAndCertErrorListener = {
   init: function(chromeGlobal) {
     addMessageListener("CertErrorDetails", this);
+    addMessageListener("Browser:CaptivePortalFreed", this);
     chromeGlobal.addEventListener('AboutNetErrorLoad', this, false, true);
+    chromeGlobal.addEventListener('AboutNetErrorOpenCaptivePortal', this, false, true);
     chromeGlobal.addEventListener('AboutNetErrorSetAutomatic', this, false, true);
     chromeGlobal.addEventListener('AboutNetErrorOverride', this, false, true);
     chromeGlobal.addEventListener('AboutNetErrorResetPreferences', this, false, true);
@@ -286,6 +288,9 @@ var AboutNetAndCertErrorListener = {
     switch (msg.name) {
       case "CertErrorDetails":
         this.onCertErrorDetails(msg);
+        break;
+      case "Browser:CaptivePortalFreed":
+        this.onCaptivePortalFreed(msg);
         break;
     }
   },
@@ -339,6 +344,10 @@ var AboutNetAndCertErrorListener = {
     }
   },
 
+  onCaptivePortalFreed(msg) {
+    content.dispatchEvent(new content.CustomEvent("AboutNetErrorCaptivePortalFreed"));
+  },
+
   handleEvent: function(aEvent) {
     if (!this.isAboutNetError && !this.isAboutCertError) {
       return;
@@ -347,6 +356,9 @@ var AboutNetAndCertErrorListener = {
     switch (aEvent.type) {
     case "AboutNetErrorLoad":
       this.onPageLoad(aEvent);
+      break;
+    case "AboutNetErrorOpenCaptivePortal":
+      this.openCaptivePortalPage(aEvent);
       break;
     case "AboutNetErrorSetAutomatic":
       this.onSetAutomatic(aEvent);
@@ -360,7 +372,7 @@ var AboutNetAndCertErrorListener = {
     }
   },
 
-  changedCertPrefs: function () {
+  changedCertPrefs: function() {
     for (let prefName of PREF_SSL_IMPACT) {
       if (Services.prefs.prefHasUserValue(prefName)) {
         return true;
@@ -388,6 +400,10 @@ var AboutNetAndCertErrorListener = {
 
     sendAsyncMessage("Browser:SSLErrorReportTelemetry",
                      {reportStatus: TLS_ERROR_REPORT_TELEMETRY_UI_SHOWN});
+  },
+
+  openCaptivePortalPage: function(evt) {
+    sendAsyncMessage("Browser:OpenCaptivePortalPage");
   },
 
 
@@ -519,7 +535,7 @@ var ClickEventHandler = {
     }
   },
 
-  onCertError: function (targetElement, ownerDoc) {
+  onCertError: function(targetElement, ownerDoc) {
     let docShell = ownerDoc.defaultView.QueryInterface(Ci.nsIInterfaceRequestor)
                                        .getInterface(Ci.nsIWebNavigation)
                                        .QueryInterface(Ci.nsIDocShell);
@@ -531,7 +547,7 @@ var ClickEventHandler = {
     });
   },
 
-  onAboutBlocked: function (targetElement, ownerDoc) {
+  onAboutBlocked: function(targetElement, ownerDoc) {
     var reason = 'phishing';
     if (/e=malwareBlocked/.test(ownerDoc.documentURI)) {
       reason = 'malware';
@@ -546,7 +562,7 @@ var ClickEventHandler = {
     });
   },
 
-  onAboutNetError: function (event, documentURI) {
+  onAboutNetError: function(event, documentURI) {
     let elmId = event.originalTarget.getAttribute("id");
     if (elmId == "returnButton") {
       sendAsyncMessage("Browser:SSLErrorGoBack", {});
@@ -683,7 +699,7 @@ var PageMetadataMessenger = {
 }
 PageMetadataMessenger.init();
 
-addEventListener("ActivateSocialFeature", function (aEvent) {
+addEventListener("ActivateSocialFeature", function(aEvent) {
   let document = content.document;
   let dwu = content.QueryInterface(Ci.nsIInterfaceRequestor)
                    .getInterface(Ci.nsIDOMWindowUtils);
@@ -835,7 +851,7 @@ addMessageListener("ContextMenu:SearchFieldBookmarkData", (message) => {
         ((type == "checkbox" || type == "radio") && el.checked)) {
       formData.push(escapeNameValuePair(el.name, el.value, isURLEncoded));
     } else if (el instanceof content.HTMLSelectElement && el.selectedIndex >= 0) {
-      for (let j=0; j < el.options.length; j++) {
+      for (let j = 0; j < el.options.length; j++) {
         if (el.options[j].selected)
           formData.push(escapeNameValuePair(el.name, el.options[j].value,
                                             isURLEncoded));
@@ -873,7 +889,7 @@ var LightWeightThemeWebInstallListener = {
     addEventListener("ResetBrowserThemePreview", this, false, true);
   },
 
-  handleEvent: function (event) {
+  handleEvent: function(event) {
     switch (event.type) {
       case "InstallBrowserTheme": {
         sendAsyncMessage("LightWeightThemeWebInstaller:Install", {
@@ -907,7 +923,7 @@ var LightWeightThemeWebInstallListener = {
     }
   },
 
-  _resetPreviewWindow: function () {
+  _resetPreviewWindow: function() {
     this._previewWindow.removeEventListener("pagehide", this, true);
     this._previewWindow = null;
   }
@@ -1147,8 +1163,8 @@ var PageInfoListener = {
     // multiple background images.
     let mediaItems = [];
 
-    let addImage = (url, type, alt, elem, isBg) => {
-      let element = this.serializeElementInfo(document, url, type, alt, elem, isBg);
+    let addImage = (url, type, alt, el, isBg) => {
+      let element = this.serializeElementInfo(document, url, type, alt, el, isBg);
       mediaItems.push([url, type, alt, element, isBg]);
     };
 
@@ -1303,7 +1319,7 @@ var PageInfoListener = {
     return result;
   },
 
-  //******** Other Misc Stuff
+  // Other Misc Stuff
   // Modified from the Links Panel v2.3, http://segment7.net/mozilla/links/links.html
   // parse a node to extract the contents of the node
   getValueText: function(node)

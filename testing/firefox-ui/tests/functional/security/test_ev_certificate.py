@@ -2,15 +2,15 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from firefox_puppeteer import PuppeteerMixin
 from marionette_driver import Wait
+from marionette_harness import MarionetteTestCase
 
-from firefox_ui_harness.testcases import FirefoxTestCase
 
-
-class TestEVCertificate(FirefoxTestCase):
+class TestEVCertificate(PuppeteerMixin, MarionetteTestCase):
 
     def setUp(self):
-        FirefoxTestCase.setUp(self)
+        super(TestEVCertificate, self).setUp()
 
         self.locationbar = self.browser.navbar.locationbar
         self.identity_popup = self.locationbar.identity_popup
@@ -21,17 +21,13 @@ class TestEVCertificate(FirefoxTestCase):
         try:
             self.browser.switch_to()
             self.identity_popup.close(force=True)
-            self.windows.close_all([self.browser])
+            self.puppeteer.windows.close_all([self.browser])
         finally:
-            FirefoxTestCase.tearDown(self)
+            super(TestEVCertificate, self).tearDown()
 
     def test_ev_certificate(self):
         with self.marionette.using_context('content'):
             self.marionette.navigate(self.url)
-
-        # The lock icon should be shown
-        self.assertIn('identity-secure',
-                      self.locationbar.connection_icon.value_of_css_property('list-style-image'))
 
         # Check the identity box
         self.assertEqual(self.locationbar.identity_box.get_attribute('className'),
@@ -39,7 +35,7 @@ class TestEVCertificate(FirefoxTestCase):
 
         # Get the information from the certificate
         cert = self.browser.tabbar.selected_tab.certificate
-        address = self.security.get_address_from_certificate(cert)
+        address = self.puppeteer.security.get_address_from_certificate(cert)
 
         # Check the identity popup label displays
         self.assertEqual(self.locationbar.identity_organization_label.get_attribute('value'),
@@ -83,14 +79,14 @@ class TestEVCertificate(FirefoxTestCase):
         # Check the owner location string
         # More information:
         # hg.mozilla.org/mozilla-central/file/eab4a81e4457/browser/base/content/browser.js#l7012
-        location = self.browser.get_property('identity.identified.state_and_country')
+        location = self.browser.localize_property('identity.identified.state_and_country')
         location = location.replace('%S', address['state'], 1).replace('%S', address['country'])
         location = address['city'] + '\n' + location
         self.assertEqual(security_view.owner_location.get_attribute('textContent'),
                          location)
 
         # Check the verifier
-        l10n_verifier = self.browser.get_property('identity.identified.verifier')
+        l10n_verifier = self.browser.localize_property('identity.identified.verifier')
         l10n_verifier = l10n_verifier.replace('%S', cert['issuerOrganization'])
         self.assertEqual(security_view.verifier.get_attribute('textContent'),
                          l10n_verifier)

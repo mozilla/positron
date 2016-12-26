@@ -100,8 +100,16 @@ Ping
   Thread Hangs
 ">
 
+<!ENTITY aboutTelemetry.capturedStacksSection "
+  Captured Stacks
+">
+
 <!ENTITY aboutTelemetry.scalarsSection "
   Scalars
+">
+
+<!ENTITY aboutTelemetry.keyedScalarsSection "
+  Keyed Scalars
 ">
 
 <!ENTITY aboutTelemetry.histogramsSection "
@@ -110,6 +118,10 @@ Ping
 
 <!ENTITY aboutTelemetry.keyedHistogramsSection "
   Keyed Histograms
+">
+
+<!ENTITY aboutTelemetry.eventsSection "
+  Events
 ">
 
 <!ENTITY aboutTelemetry.simpleMeasurementsSection "

@@ -11,6 +11,8 @@
  * features greater than JavaScript 1.7.
  */
 
+/* eslint-disable no-undef */
+
 const FILE_SIMPLE_MAR = "simple.mar";
 const SIZE_SIMPLE_MAR = "1031";
 const MD5_HASH_SIMPLE_MAR    = "1f8c038577bb6845d94ccec4999113ee";
@@ -88,11 +90,11 @@ function getRemoteUpdatesXMLString(aUpdates) {
 function getRemoteUpdateString(aPatches, aType, aName, aDisplayVersion,
                                aAppVersion, aBuildID, aDetailsURL, aShowPrompt,
                                aShowNeverForVersion, aPromptWaitTime,
-                               aCustom1, aCustom2) {
+                               aBackgroundInterval, aCustom1, aCustom2) {
   return getUpdateString(aType, aName, aDisplayVersion, aAppVersion,
                          aBuildID, aDetailsURL, aShowPrompt,
                          aShowNeverForVersion, aPromptWaitTime,
-                         aCustom1, aCustom2) + ">\n" +
+                         aBackgroundInterval, aCustom1, aCustom2) + ">\n" +
               aPatches +
          "  </update>\n";
 }
@@ -117,7 +119,7 @@ function getRemotePatchString(aType, aURL, aHashFunction, aHashValue, aSize) {
  */
 function getLocalUpdatesXMLString(aUpdates) {
   if (!aUpdates || aUpdates == "") {
-    return "<updates xmlns=\"http://www.mozilla.org/2005/app-update\"/>"
+    return "<updates xmlns=\"http://www.mozilla.org/2005/app-update\"/>";
   }
   return ("<updates xmlns=\"http://www.mozilla.org/2005/app-update\">" +
             aUpdates +
@@ -155,22 +157,23 @@ function getLocalUpdateString(aPatches, aType, aName, aDisplayVersion,
                               aInstallDate, aStatusText, aIsCompleteUpdate,
                               aChannel, aForegroundDownload, aShowPrompt,
                               aShowNeverForVersion, aPromptWaitTime,
-                              aPreviousAppVersion, aCustom1, aCustom2) {
+                              aBackgroundInterval, aPreviousAppVersion,
+                              aCustom1, aCustom2) {
   let serviceURL = aServiceURL ? aServiceURL : "http://test_service/";
   let installDate = aInstallDate ? aInstallDate : "1238441400314";
   let statusText = aStatusText ? aStatusText : "Install Pending";
   let isCompleteUpdate =
-    typeof(aIsCompleteUpdate) == "string" ? aIsCompleteUpdate : "true";
+    typeof aIsCompleteUpdate == "string" ? aIsCompleteUpdate : "true";
   let channel = aChannel ? aChannel
                          : gDefaultPrefBranch.getCharPref(PREF_APP_UPDATE_CHANNEL);
   let foregroundDownload =
-    typeof(aForegroundDownload) == "string" ? aForegroundDownload : "true";
+    typeof aForegroundDownload == "string" ? aForegroundDownload : "true";
   let previousAppVersion = aPreviousAppVersion ? "previousAppVersion=\"" +
                                                  aPreviousAppVersion + "\" "
                                                : "";
   return getUpdateString(aType, aName, aDisplayVersion, aAppVersion, aBuildID,
                          aDetailsURL, aShowPrompt, aShowNeverForVersion,
-                         aPromptWaitTime, aCustom1, aCustom2) +
+                         aPromptWaitTime, aBackgroundInterval, aCustom1, aCustom2) +
                    " " +
                    previousAppVersion +
                    "serviceURL=\"" + serviceURL + "\" " +
@@ -178,7 +181,7 @@ function getLocalUpdateString(aPatches, aType, aName, aDisplayVersion,
                    "statusText=\"" + statusText + "\" " +
                    "isCompleteUpdate=\"" + isCompleteUpdate + "\" " +
                    "channel=\"" + channel + "\" " +
-                   "foregroundDownload=\"" + foregroundDownload + "\">"  +
+                   "foregroundDownload=\"" + foregroundDownload + "\">" +
               aPatches +
          "  </update>";
 }
@@ -198,7 +201,7 @@ function getLocalUpdateString(aPatches, aType, aName, aDisplayVersion,
  */
 function getLocalPatchString(aType, aURL, aHashFunction, aHashValue, aSize,
                              aSelected, aState) {
-  let selected = typeof(aSelected) == "string" ? aSelected : "true";
+  let selected = typeof aSelected == "string" ? aSelected : "true";
   let state = aState ? aState : STATE_SUCCEEDED;
   return getPatchString(aType, aURL, aHashFunction, aHashValue, aSize) + " " +
          "selected=\"" + selected + "\" " +
@@ -241,6 +244,8 @@ function getLocalPatchString(aType, aURL, aHashFunction, aHashValue, aSize,
  *         default to false.
  * @param  aPromptWaitTime (optional)
  *         Override for the app.update.promptWaitTime preference.
+ * @param  aBackgroundInterval (optional)
+ *         Override for the app.update.download.backgroundInterval preference.
  * @param  aCustom1 (optional)
  *         A custom attribute name and attribute value to add to the xml.
  *         Example: custom1_attribute="custom1 value"
@@ -253,7 +258,8 @@ function getLocalPatchString(aType, aURL, aHashFunction, aHashValue, aSize,
  */
 function getUpdateString(aType, aName, aDisplayVersion, aAppVersion, aBuildID,
                          aDetailsURL, aShowPrompt, aShowNeverForVersion,
-                         aPromptWaitTime, aCustom1, aCustom2) {
+                         aPromptWaitTime, aBackgroundInterval, aCustom1,
+                         aCustom2) {
   let type = aType ? aType : "major";
   let name = aName ? aName : "App Update Test";
   let displayVersion = aDisplayVersion ? "displayVersion=\"" +
@@ -275,6 +281,9 @@ function getUpdateString(aType, aName, aDisplayVersion, aAppVersion, aBuildID,
   let promptWaitTime = aPromptWaitTime ? "promptWaitTime=\"" + aPromptWaitTime +
                                          "\" "
                                        : "";
+  let backgroundInterval = aBackgroundInterval ? "backgroundInterval=\"" +
+                                                 aBackgroundInterval + "\" "
+                                               : "";
   let custom1 = aCustom1 ? aCustom1 + " " : "";
   let custom2 = aCustom2 ? aCustom2 + " " : "";
   return "  <update type=\"" + type + "\" " +
@@ -285,6 +294,7 @@ function getUpdateString(aType, aName, aDisplayVersion, aAppVersion, aBuildID,
                     showPrompt +
                     showNeverForVersion +
                     promptWaitTime +
+                    backgroundInterval +
                     custom1 +
                     custom2 +
                    "buildID=\"" + buildID + "\"";

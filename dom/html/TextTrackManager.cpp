@@ -101,6 +101,7 @@ TextTrackManager::TextTrackManager(HTMLMediaElement *aMediaElement)
   , mHasSeeked(false)
   , mLastTimeMarchesOnCalled(0.0)
   , mTimeMarchesOnDispatched(false)
+  , mUpdateCueDisplayDispatched(false)
   , performedTrackSelection(false)
   , mCueTelemetryReported(false)
   , mShutdown(false)
@@ -588,8 +589,8 @@ TextTrackManager::TimeMarchesOn()
   WEBVTT_LOG("TimeMarchesOn");
   mTimeMarchesOnDispatched = false;
 
-  // Early return if we don't have any TextTracks.
-  if (!mTextTracks || mTextTracks->Length() == 0) {
+  // Early return if we don't have any TextTracks or shutting down.
+  if (!mTextTracks || mTextTracks->Length() == 0 || mShutdown) {
     return;
   }
 

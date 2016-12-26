@@ -6,7 +6,20 @@
 
 DIRS += ['locales']
 
-CONFIGURE_SUBST_FILES += ['adjust_sdk_app_token']
+GENERATED_FILES += [
+    '../geckoview/generated/preprocessed/org/mozilla/geckoview/BuildConfig.java',
+    'generated/preprocessed/org/mozilla/gecko/AdjustConstants.java',
+    'generated/preprocessed/org/mozilla/gecko/AppConstants.java',
+]
+w = GENERATED_FILES['../geckoview/generated/preprocessed/org/mozilla/geckoview/BuildConfig.java']
+w.script = 'generate_build_config.py'
+w.inputs += ['../geckoview/BuildConfig.java.in']
+x = GENERATED_FILES['generated/preprocessed/org/mozilla/gecko/AdjustConstants.java']
+x.script = 'generate_build_config.py'
+x.inputs += ['AdjustConstants.java.in']
+y = GENERATED_FILES['generated/preprocessed/org/mozilla/gecko/AppConstants.java']
+y.script = 'generate_build_config.py'
+y.inputs += ['AppConstants.java.in']
 
 include('android-services.mozbuild')
 
@@ -31,8 +44,9 @@ constants_jar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'Locales.java',
 ]]
 constants_jar.generated_sources = [
-    'preprocessed/org/mozilla/gecko/AdjustConstants.java',
-    'preprocessed/org/mozilla/gecko/AppConstants.java',
+    '../geckoview/generated/preprocessed/org/mozilla/geckoview/BuildConfig.java',
+    'generated/preprocessed/org/mozilla/gecko/AdjustConstants.java',
+    'generated/preprocessed/org/mozilla/gecko/AppConstants.java',
 ]
 constants_jar.extra_jars = [
     CONFIG['ANDROID_SUPPORT_ANNOTATIONS_JAR_LIB'],
@@ -56,37 +70,45 @@ else:
 resjar = add_java_jar('gecko-R')
 resjar.sources = []
 resjar.generated_sources += [
-    'org/mozilla/gecko/R.java',
+    'generated/org/mozilla/gecko/R.java',
 ]
 
 if CONFIG['ANDROID_SUPPORT_V4_AAR']:
     ANDROID_EXTRA_PACKAGES += ['android.support.v4']
     ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_SUPPORT_V4_AAR_RES']]
-# (no resources) resjar.generated_sources += ['android/support/v4/R.java']
+# (no resources) resjar.generated_sources += ['generated/android/support/v4/R.java']
 if CONFIG['ANDROID_APPCOMPAT_V7_AAR']:
     ANDROID_EXTRA_PACKAGES += ['android.support.v7.appcompat']
     ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_APPCOMPAT_V7_AAR_RES']]
-    resjar.generated_sources += ['android/support/v7/appcompat/R.java']
+    resjar.generated_sources += ['generated/android/support/v7/appcompat/R.java']
+if CONFIG['ANDROID_SUPPORT_VECTOR_DRAWABLE_AAR']:
+    ANDROID_EXTRA_PACKAGES += ['android.support.graphics.drawable']
+    ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_SUPPORT_VECTOR_DRAWABLE_AAR_RES']]
+# (no reosurces) resjar.generated_sources += ['generated/android/support/graphics/drawable/R.java']
+if CONFIG['ANDROID_ANIMATED_VECTOR_DRAWABLE_AAR']:
+    ANDROID_EXTRA_PACKAGES += ['android.support.graphics.drawable.animated']
+    ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_ANIMATED_VECTOR_DRAWABLE_AAR_RES']]
+# (no resources) resjar.generated_sources += ['generated/android/support/graphics/drawable/animated/R.java']
 if CONFIG['ANDROID_CARDVIEW_V7_AAR']:
     ANDROID_EXTRA_PACKAGES += ['android.support.v7.cardview']
     ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_CARDVIEW_V7_AAR_RES']]
-    resjar.generated_sources += ['android/support/v7/cardview/R.java']
+    resjar.generated_sources += ['generated/android/support/v7/cardview/R.java']
 if CONFIG['ANDROID_DESIGN_AAR']:
     ANDROID_EXTRA_PACKAGES += ['android.support.design']
     ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_DESIGN_AAR_RES']]
-    resjar.generated_sources += ['android/support/design/R.java']
+    resjar.generated_sources += ['generated/android/support/design/R.java']
 if CONFIG['ANDROID_RECYCLERVIEW_V7_AAR']:
     ANDROID_EXTRA_PACKAGES += ['android.support.v7.recyclerview']
     ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_RECYCLERVIEW_V7_AAR_RES']]
-    resjar.generated_sources += ['android/support/v7/recyclerview/R.java']
+    resjar.generated_sources += ['generated/android/support/v7/recyclerview/R.java']
 if CONFIG['ANDROID_CUSTOMTABS_AAR']:
     ANDROID_EXTRA_PACKAGES += ['android.support.customtabs']
     ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_CUSTOMTABS_AAR_RES']]
-# (no resources) resjar.generated_sources += ['android/support/customtabs/R.java']
+# (no resources) resjar.generated_sources += ['generated/android/support/customtabs/R.java']
 if CONFIG['ANDROID_PALETTE_V7_AAR']:
     ANDROID_EXTRA_PACKAGES += ['android.support.v7.palette']
     ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PALETTE_V7_AAR_RES']]
-# (no resources) resjar.generated_sources += ['android/support/v7/palette/R.java']
+# (no resources) resjar.generated_sources += ['generated/android/support/v7/palette/R.java']
 
 resjar.javac_flags += ['-Xlint:all']
 
@@ -102,6 +124,7 @@ mgjar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x for x in 
 ]]
 mgjar.generated_sources = [] # Keep it this way.
 mgjar.extra_jars += [
+    CONFIG['ANDROID_SUPPORT_ANNOTATIONS_JAR_LIB'],
     'constants.jar',
 ]
 mgjar.javac_flags += ['-Xlint:all']
@@ -115,12 +138,12 @@ gujar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x for x in 
     'util/Clipboard.java',
     'util/ContextUtils.java',
     'util/DateUtil.java',
-    'util/DrawableUtil.java',
     'util/EventCallback.java',
     'util/FileUtils.java',
     'util/FloatUtils.java',
     'util/GamepadUtils.java',
     'util/GeckoBackgroundThread.java',
+    'util/GeckoBundle.java',
     'util/GeckoEventListener.java',
     'util/GeckoJarReader.java',
     'util/GeckoRequest.java',
@@ -140,6 +163,8 @@ gujar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x for x in 
     'util/NonEvictingLruCache.java',
     'util/PrefUtils.java',
     'util/ProxySelector.java',
+    'util/publicsuffix/PublicSuffix.java',
+    'util/publicsuffix/PublicSuffixPatterns.java',
     'util/RawResource.java',
     'util/StringUtils.java',
     'util/ThreadUtils.java',
@@ -229,19 +254,14 @@ gvjar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x
     'GeckoProfileDirectories.java',
     'GeckoScreenOrientation.java',
     'GeckoSharedPrefs.java',
-    'GeckoSmsManager.java',
     'GeckoThread.java',
     'GeckoView.java',
     'GeckoViewChrome.java',
     'GeckoViewContent.java',
     'GeckoViewFragment.java',
-    'gfx/Axis.java',
     'gfx/BitmapUtils.java',
     'gfx/BufferedImage.java',
     'gfx/BufferedImageGLInfo.java',
-    'gfx/DisplayPortCalculator.java',
-    'gfx/DisplayPortMetrics.java',
-    'gfx/DrawTimingQueue.java',
     'gfx/DynamicToolbarAnimator.java',
     'gfx/FloatSize.java',
     'gfx/FullScreenState.java',
@@ -260,11 +280,10 @@ gvjar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x
     'gfx/ProgressiveUpdateData.java',
     'gfx/RectUtils.java',
     'gfx/RenderTask.java',
-    'gfx/SimpleScaleGestureDetector.java',
     'gfx/StackScroller.java',
-    'gfx/SubdocumentScrollHelper.java',
     'gfx/SurfaceTextureListener.java',
     'gfx/ViewTransform.java',
+    'gfx/VsyncSource.java',
     'InputConnectionListener.java',
     'InputMethods.java',
     'NotificationListener.java',
@@ -273,7 +292,10 @@ gvjar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x
     'permissions/Permissions.java',
     'permissions/PermissionsHelper.java',
     'PrefsHelper.java',
-    'SmsManager.java',
+    'process/GeckoProcessManager.java',
+    'process/GeckoServiceChildProcess.java',
+    'ScreenManagerHelper.java',
+    'ScreenOrientationDelegate.java',
     'sqlite/ByteBufferInputStream.java',
     'sqlite/MatrixBlobCursor.java',
     'sqlite/SQLiteBridge.java',
@@ -313,6 +335,9 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'ActionModeCompatView.java',
     'ActivityHandlerHelper.java',
     'activitystream/ActivityStream.java',
+    'activitystream/ActivityStreamTelemetry.java',
+    'activitystream/Utils.java',
+    'adjust/AdjustBrowserAppDelegate.java',
     'animation/AnimationUtils.java',
     'animation/HeightChangeAnimation.java',
     'animation/PropertyAnimator.java',
@@ -428,6 +453,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'GeckoService.java',
     'GeckoUpdateReceiver.java',
     'GlobalHistory.java',
+    'GlobalPageMetadata.java',
     'GuestSession.java',
     'health/HealthRecorder.java',
     'health/SessionInformation.java',
@@ -435,6 +461,9 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'home/activitystream/ActivityStream.java',
     'home/activitystream/ActivityStreamHomeFragment.java',
     'home/activitystream/ActivityStreamHomeScreen.java',
+    'home/activitystream/menu/ActivityStreamContextMenu.java',
+    'home/activitystream/menu/BottomSheetContextMenu.java',
+    'home/activitystream/menu/PopupContextMenu.java',
     'home/activitystream/StreamItem.java',
     'home/activitystream/StreamRecyclerAdapter.java',
     'home/activitystream/topsites/CirclePageIndicator.java',
@@ -551,11 +580,20 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'media/Codec.java',
     'media/CodecProxy.java',
     'media/FormatParam.java',
+    'media/GeckoMediaDrm.java',
+    'media/GeckoMediaDrmBridgeV21.java',
+    'media/GeckoMediaDrmBridgeV23.java',
     'media/JellyBeanAsyncCodec.java',
+    'media/LocalMediaDrmBridge.java',
     'media/MediaControlService.java',
+    'media/MediaDrmProxy.java',
     'media/MediaManager.java',
     'media/RemoteManager.java',
+    'media/RemoteMediaDrmBridge.java',
+    'media/RemoteMediaDrmBridgeStub.java',
     'media/Sample.java',
+    'media/SamplePool.java',
+    'media/SessionKeyInfo.java',
     'media/VideoPlayer.java',
     'MediaCastingBar.java',
     'MemoryMonitor.java',
@@ -569,13 +607,12 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'menu/MenuPanel.java',
     'menu/MenuPopup.java',
     'MotionEventInterceptor.java',
-    'notifications/AppNotificationClient.java',
+    'mozglue/SharedMemBuffer.java',
+    'mozglue/SharedMemory.java',
     'notifications/NotificationClient.java',
-    'notifications/NotificationHandler.java',
     'notifications/NotificationHelper.java',
     'notifications/NotificationReceiver.java',
     'notifications/NotificationService.java',
-    'notifications/ServiceNotificationClient.java',
     'notifications/WhatsNewReceiver.java',
     'overlays/OverlayConstants.java',
     'overlays/service/OverlayActionService.java',
@@ -588,6 +625,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'overlays/ui/SendTabList.java',
     'overlays/ui/SendTabTargetSelectedListener.java',
     'overlays/ui/ShareDialog.java',
+    'PackageReplacedReceiver.java',
     'preferences/AlignRightLinkPreference.java',
     'preferences/AndroidImport.java',
     'preferences/AndroidImportPreference.java',
@@ -613,6 +651,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'preferences/SearchPreferenceCategory.java',
     'preferences/SetHomepagePreference.java',
     'preferences/SyncPreference.java',
+    'PresentationView.java',
     'PrintHelper.java',
     'PrivateTab.java',
     'promotion/AddToHomeScreenPromotion.java',
@@ -656,6 +695,8 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'tabqueue/TabQueueService.java',
     'tabqueue/TabReceivedService.java',
     'Tabs.java',
+    'tabs/AutoFitTabsGridLayout.java',
+    'tabs/CompactTabsGridLayout.java',
     'tabs/PrivateTabsPanel.java',
     'tabs/TabCurve.java',
     'tabs/TabHistoryController.java',
@@ -664,11 +705,15 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'tabs/TabHistoryPage.java',
     'tabs/TabPanelBackButton.java',
     'tabs/TabsGridLayout.java',
+    'tabs/TabsGridLayoutAnimator.java',
+    'tabs/TabsLayout.java',
     'tabs/TabsLayoutAdapter.java',
     'tabs/TabsLayoutItemView.java',
     'tabs/TabsListLayout.java',
+    'tabs/TabsListLayoutAnimator.java',
     'tabs/TabsPanel.java',
     'tabs/TabsPanelThumbnailView.java',
+    'tabs/TabsTouchHelperCallback.java',
     'Telemetry.java',
     'telemetry/measurements/CampaignIdMeasurements.java',
     'telemetry/measurements/SearchCountMeasurements.java',
@@ -690,7 +735,6 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'text/FloatingToolbarTextSelection.java',
     'text/TextAction.java',
     'text/TextSelection.java',
-    'TextSelectionHandle.java',
     'ThumbnailHelper.java',
     'toolbar/AutocompleteHandler.java',
     'toolbar/BackButton.java',
@@ -717,6 +761,11 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'updater/PostUpdateHandler.java',
     'updater/UpdateService.java',
     'updater/UpdateServiceHelper.java',
+    'util/ColorUtil.java',
+    'util/DrawableUtil.java',
+    'util/ResourceDrawableUtils.java',
+    'util/TouchTargetUtil.java',
+    'util/ViewUtil.java',
     'widget/ActivityChooserModel.java',
     'widget/AllCapsTextView.java',
     'widget/AnchoredPopup.java',
@@ -728,6 +777,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'widget/CropImageView.java',
     'widget/DateTimePicker.java',
     'widget/DefaultDoorHanger.java',
+    'widget/DefaultItemAnimatorBase.java',
     'widget/DoorHanger.java',
     'widget/DoorhangerConfig.java',
     'widget/EllipsisTextView.java',
@@ -740,6 +790,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'widget/FlowLayout.java',
     'widget/GeckoActionProvider.java',
     'widget/GeckoPopupMenu.java',
+    'widget/GridSpacingDecoration.java',
     'widget/HistoryDividerItemDecoration.java',
     'widget/IconTabWidget.java',
     'widget/LoginDoorHanger.java',
@@ -752,7 +803,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'widget/SwipeDismissListViewTouchListener.java',
     'widget/TabThumbnailWrapper.java',
     'widget/ThumbnailView.java',
-    'widget/TwoWayView.java',
+    'widget/TouchDelegateWithReset.java',
     'ZoomedView.java',
 ]]
 # The following sources are checked in to version control but
@@ -806,6 +857,8 @@ if max_sdk_version >= 11:
     gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
         'tabs/TabStrip.java',
         'tabs/TabStripAdapter.java',
+        'tabs/TabStripDividerItem.java',
+        'tabs/TabStripItemAnimator.java',
         'tabs/TabStripItemView.java',
         'tabs/TabStripView.java'
     ]]
@@ -829,10 +882,13 @@ moz_native_devices_jars = [
     CONFIG['ANDROID_PLAY_SERVICES_CAST_AAR_LIB'],
 ]
 moz_native_devices_sources = ['java/org/mozilla/gecko/' + x for x in [
-    'ChromeCast.java',
+    'ChromeCastDisplay.java',
+    'ChromeCastPlayer.java',
     'GeckoMediaPlayer.java',
+    'GeckoPresentationDisplay.java',
     'MediaPlayerManager.java',
     'PresentationMediaPlayerManager.java',
+    'RemotePresentationService.java',
 ]]
 if CONFIG['MOZ_NATIVE_DEVICES']:
     gbjar.extra_jars += moz_native_devices_jars
@@ -841,22 +897,22 @@ if CONFIG['MOZ_NATIVE_DEVICES']:
     if CONFIG['ANDROID_MEDIAROUTER_V7_AAR']:
         ANDROID_EXTRA_PACKAGES += ['android.support.v7.mediarouter']
         ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_MEDIAROUTER_V7_AAR_RES']]
-        resjar.generated_sources += ['android/support/v7/mediarouter/R.java']
+        resjar.generated_sources += ['generated/android/support/v7/mediarouter/R.java']
 
     if CONFIG['ANDROID_PLAY_SERVICES_BASE_AAR']:
         ANDROID_EXTRA_PACKAGES += ['com.google.android.gms.base']
         ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_BASE_AAR_RES']]
-        resjar.generated_sources += ['com/google/android/gms/base/R.java']
+        resjar.generated_sources += ['generated/com/google/android/gms/base/R.java']
 
     if CONFIG['ANDROID_PLAY_SERVICES_BASEMENT_AAR']:
         ANDROID_EXTRA_PACKAGES += ['com.google.android.gms']
         ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_BASEMENT_AAR_RES']]
-        resjar.generated_sources += ['com/google/android/gms/R.java']
+        resjar.generated_sources += ['generated/com/google/android/gms/R.java']
 
     if CONFIG['ANDROID_PLAY_SERVICES_CAST_AAR']:
         ANDROID_EXTRA_PACKAGES += ['com.google.android.gms.cast']
         ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_CAST_AAR_RES']]
-        resjar.generated_sources += ['com/google/android/gms/cast/R.java']
+        resjar.generated_sources += ['generated/com/google/android/gms/cast/R.java']
 
 if CONFIG['MOZ_ANDROID_GCM']:
     gbjar.extra_jars += [
@@ -869,22 +925,22 @@ if CONFIG['MOZ_ANDROID_GCM']:
     if CONFIG['ANDROID_PLAY_SERVICES_BASE_AAR']:
         ANDROID_EXTRA_PACKAGES += ['com.google.android.gms']
         ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_BASE_AAR_RES']]
-        resjar.generated_sources += ['com/google/android/gms/R.java']
+        resjar.generated_sources += ['generated/com/google/android/gms/R.java']
 
     if CONFIG['ANDROID_PLAY_SERVICES_BASEMENT_AAR']:
         ANDROID_EXTRA_PACKAGES += ['com.google.android.gms']
         ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_BASEMENT_AAR_RES']]
-        resjar.generated_sources += ['com/google/android/gms/R.java']
+        resjar.generated_sources += ['generated/com/google/android/gms/R.java']
 
     if CONFIG['ANDROID_PLAY_SERVICES_GCM_AAR']:
         ANDROID_EXTRA_PACKAGES += ['com.google.android.gms.gcm']
         ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_GCM_AAR_RES']]
-# (no resources) resjar.generated_sources += ['com/google/android/gms/gcm/R.java']
+# (no resources) resjar.generated_sources += ['generated/com/google/android/gms/gcm/R.java']
 
     if CONFIG['ANDROID_PLAY_SERVICES_MEASUREMENT_AAR']:
         ANDROID_EXTRA_PACKAGES += ['com.google.android.gms.measurement']
         ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_MEASUREMENT_AAR_RES']]
-# (no resources) resjar.generated_sources += ['android/support/v7/palette/R.java']
+# (no resources) resjar.generated_sources += ['generated/android/support/v7/palette/R.java']
 
 if CONFIG['MOZ_INSTALL_TRACKING']:
     gbjar.extra_jars += [
@@ -895,14 +951,16 @@ if CONFIG['MOZ_INSTALL_TRACKING']:
     if CONFIG['ANDROID_PLAY_SERVICES_ADS_AAR']:
         ANDROID_EXTRA_PACKAGES += ['com.google.android.gms.ads']
         ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_ADS_AAR_RES']]
-        resjar.generated_sources += ['com/google/android/gms/ads/R.java']
+        resjar.generated_sources += ['generated/com/google/android/gms/ads/R.java']
 
     if CONFIG['ANDROID_PLAY_SERVICES_BASEMENT_AAR']:
         ANDROID_EXTRA_PACKAGES += ['com.google.android.gms']
         ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_BASEMENT_AAR_RES']]
-        resjar.generated_sources += ['com/google/android/gms/R.java']
+        resjar.generated_sources += ['generated/com/google/android/gms/R.java']
 
 gbjar.extra_jars += [CONFIG['ANDROID_APPCOMPAT_V7_AAR_LIB']]
+gbjar.extra_jars += [CONFIG['ANDROID_SUPPORT_VECTOR_DRAWABLE_AAR_LIB']]
+gbjar.extra_jars += [CONFIG['ANDROID_ANIMATED_VECTOR_DRAWABLE_AAR_LIB']]
 gbjar.extra_jars += [CONFIG['ANDROID_CARDVIEW_V7_AAR_LIB']]
 gbjar.extra_jars += [CONFIG['ANDROID_DESIGN_AAR_LIB']]
 gbjar.extra_jars += [CONFIG['ANDROID_RECYCLERVIEW_V7_AAR_LIB']]
@@ -1037,7 +1095,7 @@ if CONFIG['MOZ_ANDROID_DISTRIBUTION_DIRECTORY']:
 # We do not expose MOZ_ADJUST_SDK_KEY here because that # would leak the value
 # to build logs.  Instead we expose the token quietly where appropriate in
 # Makefile.in.
-for var in ('MOZ_ANDROID_ANR_REPORTER', 'MOZ_LINKER_EXTRACT', 'MOZ_DEBUG',
+for var in ('MOZ_ANDROID_ANR_REPORTER', 'MOZ_DEBUG',
             'MOZ_ANDROID_SEARCH_ACTIVITY', 'MOZ_NATIVE_DEVICES', 'MOZ_ANDROID_MLS_STUMBLER',
             'MOZ_ANDROID_DOWNLOADS_INTEGRATION', 'MOZ_INSTALL_TRACKING',
             'MOZ_ANDROID_GCM', 'MOZ_ANDROID_EXCLUDE_FONTS', 'MOZ_LOCALE_SWITCHER',
@@ -1108,5 +1166,11 @@ OBJDIR_PP_FILES.mobile.android.base += [
 gbjar.sources += ['generated/org/mozilla/gecko/' + x for x in [
     'media/ICodec.java',
     'media/ICodecCallbacks.java',
+    'media/IMediaDrmBridge.java',
+    'media/IMediaDrmBridgeCallbacks.java',
     'media/IMediaManager.java',
+]]
+
+gvjar.sources += ['generated/org/mozilla/gecko/' + x for x in [
+    'process/IChildProcess.java',
 ]]

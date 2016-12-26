@@ -8,6 +8,9 @@
 
 "use strict";
 
+/* exported gAdminDisabledPage, gFinishedPage, gFoundPage, gInstallErrorsPage,
+ *          gNoUpdatesPage, gOfflinePage, gUpdatePage */
+
 const PREF_UPDATE_EXTENSIONS_ENABLED            = "extensions.update.enabled";
 const PREF_XPINSTALL_ENABLED                    = "xpinstall.enabled";
 
@@ -76,7 +79,7 @@ var gUpdateWizard = {
       document.documentElement.currentPage = document.getElementById("versioninfo");
   },
 
-  onWizardFinish: function gUpdateWizard_onWizardFinish ()
+  onWizardFinish: function gUpdateWizard_onWizardFinish()
   {
     if (this.shouldSuggestAutoChecking)
       Services.prefs.setBoolPref(PREF_UPDATE_EXTENSIONS_ENABLED, this.shouldAutoCheck);
@@ -106,7 +109,6 @@ var gUpdateWizard = {
     this._setUpButton("cancel", aCancelButton, aCancelButtonIsDisabled);
   },
 
-  /////////////////////////////////////////////////////////////////////////////
   // Update Errors
   errorItems: [],
 
@@ -206,8 +208,7 @@ var gVersionInfoPage = {
     }
 
     logger.debug("Fetching affected addons " + idlist.toSource());
-    let fetchedAddons = yield new Promise((resolve, reject) =>
-      AddonManager.getAddonsByIDs(idlist, resolve));
+    let fetchedAddons = yield AddonManager.getAddonsByIDs(idlist);
     // We shouldn't get nulls here, but let's be paranoid...
     gUpdateWizard.addons = fetchedAddons.filter(a => a);
     if (gUpdateWizard.addons.length < 1) {
@@ -272,13 +273,12 @@ var gVersionInfoPage = {
       logger.info("VersionInfo: No updates require further action");
       // VersionInfo compatibility updates resolved all compatibility problems,
       // close this window and continue starting the application...
-      //XXX Bug 314754 - We need to use setTimeout to close the window due to
+      // XXX Bug 314754 - We need to use setTimeout to close the window due to
       // the EM using xmlHttpRequest when checking for updates.
       setTimeout(close, 0);
     }
   },
 
-  /////////////////////////////////////////////////////////////////////////////
   // UpdateListener
   onUpdateFinished: function(aAddon, status) {
     ++this._completeCount;
@@ -377,7 +377,6 @@ var gUpdatePage = {
     document.documentElement.currentPage = nextPage;
   },
 
-  /////////////////////////////////////////////////////////////////////////////
   // UpdateListener
   onUpdateAvailable: function(aAddon, aInstall) {
     logger.debug("UpdatePage got an update for " + aAddon.id + ": " + aAddon.version);
@@ -414,7 +413,6 @@ var gFoundPage = {
                                   null, false);
 
     var foundUpdates = document.getElementById("found.updates");
-    var itemCount = gUpdateWizard.addonsToUpdate.length;
     for (let install of gUpdateWizard.addonsToUpdate) {
       let listItem = foundUpdates.appendItem(install.name + " " + install.version);
       listItem.setAttribute("type", "checkbox");
@@ -551,7 +549,6 @@ var gInstallingPage = {
     install.install();
   },
 
-  /////////////////////////////////////////////////////////////////////////////
   // InstallListener
   onDownloadStarted: function(aInstall) {
     if (gUpdateWizard.shuttingDown) {

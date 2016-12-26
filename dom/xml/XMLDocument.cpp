@@ -128,12 +128,6 @@ NS_NewDOMDocument(nsIDOMDocument** aInstancePtrResult,
     return rv;
   }
 
-  if (nsCOMPtr<nsIScriptGlobalObject> sgo = do_QueryInterface(aEventObject)) {
-    d->SetScriptHandlingObject(sgo);
-  } else if (aEventObject){
-    d->SetScopeObject(aEventObject);
-  }
-
   if (isHTML) {
     nsCOMPtr<nsIHTMLDocument> htmlDoc = do_QueryInterface(d);
     NS_ASSERTION(htmlDoc, "HTML Document doesn't implement nsIHTMLDocument?");
@@ -147,26 +141,40 @@ NS_NewDOMDocument(nsIDOMDocument** aInstancePtrResult,
   doc->SetPrincipal(aPrincipal);
   doc->SetBaseURI(aBaseURI);
 
+  // We need to set the script handling object after we set the principal such
+  // that the doc group is assigned correctly.
+  if (nsCOMPtr<nsIScriptGlobalObject> sgo = do_QueryInterface(aEventObject)) {
+    d->SetScriptHandlingObject(sgo);
+  } else if (aEventObject){
+    d->SetScopeObject(aEventObject);
+  }
+
   // XMLDocuments and documents "created in memory" get to be UTF-8 by default,
   // unlike the legacy HTML mess
   doc->SetDocumentCharacterSet(NS_LITERAL_CSTRING("UTF-8"));
   
   if (aDoctype) {
-    nsCOMPtr<nsIDOMNode> tmpNode;
-    rv = doc->AppendChild(aDoctype, getter_AddRefs(tmpNode));
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<nsINode> doctypeAsNode = do_QueryInterface(aDoctype);
+    ErrorResult result;
+    d->AppendChild(*doctypeAsNode, result);
+    if (NS_WARN_IF(result.Failed())) {
+      return result.StealNSResult();
+    }
   }
   
   if (!aQualifiedName.IsEmpty()) {
-    nsCOMPtr<nsIDOMElement> root;
-    rv = doc->CreateElementNS(aNamespaceURI, aQualifiedName,
-                              getter_AddRefs(root));
-    NS_ENSURE_SUCCESS(rv, rv);
+    ErrorResult result;
+    nsCOMPtr<Element> root =
+      doc->CreateElementNS(aNamespaceURI, aQualifiedName,
+                           ElementCreationOptions(), result);
+    if (NS_WARN_IF(result.Failed())) {
+      return result.StealNSResult();
+    }
 
-    nsCOMPtr<nsIDOMNode> tmpNode;
-
-    rv = doc->AppendChild(root, getter_AddRefs(tmpNode));
-    NS_ENSURE_SUCCESS(rv, rv);
+    d->AppendChild(*root, result);
+    if (NS_WARN_IF(result.Failed())) {
+      return result.StealNSResult();
+    }
   }
 
   *aInstancePtrResult = doc;
@@ -291,10 +299,17 @@ XMLDocument::Load(const nsAString& aUrl, ErrorResult& aRv)
     return false;
   }
 
+  // Reporting a warning on ourselves is rather pointless, because we probably
+  // have no window id (and hence the warning won't show up in any web console)
+  // and probably aren't considered a "content document" because we're not
+  // loaded in a docshell, so won't accumulate telemetry for use counters.  Try
+  // warning on our entry document, if any, since that should have things like
+  // window ids and associated docshells.
+  nsIDocument* docForWarning = callingDoc ? callingDoc.get() : this;
   if (nsContentUtils::IsCallerChrome()) {
-    WarnOnceAbout(nsIDocument::eChromeUseOfDOM3LoadMethod);
+    docForWarning->WarnOnceAbout(nsIDocument::eChromeUseOfDOM3LoadMethod);
   } else {
-    WarnOnceAbout(nsIDocument::eUseOfDOM3LoadMethod);
+    docForWarning->WarnOnceAbout(nsIDocument::eUseOfDOM3LoadMethod);
   } 
 
   nsIURI *baseURI = mDocumentURI;

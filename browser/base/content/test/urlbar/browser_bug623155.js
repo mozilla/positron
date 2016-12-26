@@ -69,11 +69,11 @@ var gWebProgressListener = {
   // ---------------------------------------------------------------------------
   // NOTIFY_LOCATION mode should work fine without these methods.
   //
-  //onStateChange: function() {},
-  //onStatusChange: function() {},
-  //onProgressChange: function() {},
-  //onSecurityChange: function() {},
-  //----------------------------------------------------------------------------
+  // onStateChange: function() {},
+  // onStatusChange: function() {},
+  // onProgressChange: function() {},
+  // onSecurityChange: function() {},
+  // ----------------------------------------------------------------------------
 
   onLocationChange: function(aWebProgress, aRequest, aLocation, aFlags) {
     if (!aRequest) {
@@ -108,9 +108,10 @@ function delayed(aIsSelectedTab) {
     gBrowser.selectedTab = gNewTab;
   }
 
-  ok(isRedirectedURISpec(content.location.href),
+  let currentURI = gBrowser.selectedBrowser.currentURI.spec;
+  ok(isRedirectedURISpec(currentURI),
      "The content area is redirected. aIsSelectedTab:" + aIsSelectedTab);
-  is(gURLBar.value, content.location.href,
+  is(gURLBar.value, currentURI,
      "The URL bar shows the content URI. aIsSelectedTab:" + aIsSelectedTab);
 
   if (!aIsSelectedTab) {

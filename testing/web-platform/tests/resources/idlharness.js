@@ -447,6 +447,14 @@ IdlArray.prototype.assert_type_is = function(value, type)
         return;
     }
 
+    if (type.generic === "Promise") {
+        assert_own_property(value, "then", "Attribute with a Promise type has a then property");
+        // TODO: Ideally, we would check on project fulfillment
+        // that we get the right type
+        // but that would require making the type check async
+        return;
+    }
+
     type = type.idlType;
 
     switch(type)
@@ -1393,6 +1401,9 @@ IdlInterface.prototype.test_members = function()
             if (!member.isUnforgeable)
             {
                 this.test_member_attribute(member);
+            }
+            if (member.stringifier) {
+                this.test_member_stringifier(member);
             }
             break;
 

@@ -248,6 +248,7 @@ WidgetShutdownObserver::Unregister()
 void
 nsBaseWidget::Shutdown()
 {
+  RevokeTransactionIdAllocator();
   DestroyCompositor();
   FreeShutdownObserver();
 #if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
@@ -260,6 +261,15 @@ nsBaseWidget::Shutdown()
 
 void nsBaseWidget::DestroyCompositor()
 {
+  // We release this before releasing the compositor, since it may hold the
+  // last reference to our ClientLayerManager. ClientLayerManager's dtor can
+  // trigger a paint, creating a new compositor, and we don't want to re-use
+  // the old vsync dispatcher.
+  if (mCompositorVsyncDispatcher) {
+    mCompositorVsyncDispatcher->Shutdown();
+    mCompositorVsyncDispatcher = nullptr;
+  }
+
   // The compositor shutdown sequence looks like this:
   //  1. CompositorSession calls CompositorBridgeChild::Destroy.
   //  2. CompositorBridgeChild synchronously sends WillClose.
@@ -284,13 +294,23 @@ void nsBaseWidget::DestroyCompositor()
     RefPtr<CompositorSession> session = mCompositorSession.forget();
     session->Shutdown();
   }
+}
 
-  // Can have base widgets that are things like tooltips
-  // which don't have CompositorVsyncDispatchers
-  if (mCompositorVsyncDispatcher) {
-    mCompositorVsyncDispatcher->Shutdown();
-    mCompositorVsyncDispatcher = nullptr;
+// This prevents the layer manager from starting a new transaction during
+// shutdown.
+void
+nsBaseWidget::RevokeTransactionIdAllocator()
+{
+  if (!mLayerManager) {
+    return;
   }
+
+  ClientLayerManager* clm = mLayerManager->AsClientLayerManager();
+  if (!clm) {
+    return;
+  }
+
+  clm->SetTransactionIdAllocator(nullptr);
 }
 
 void nsBaseWidget::ReleaseContentController()
@@ -311,7 +331,7 @@ void nsBaseWidget::DestroyLayerManager()
 }
 
 void
-nsBaseWidget::OnRenderingDeviceReset()
+nsBaseWidget::OnRenderingDeviceReset(uint64_t aSeqNo)
 {
   if (!mLayerManager || !mCompositorSession) {
     return;
@@ -333,14 +353,9 @@ nsBaseWidget::OnRenderingDeviceReset()
     return;
   }
 
-  RefPtr<CompositorBridgeParent> parent = mCompositorSession->GetInProcessBridge();
-  if (!parent) {
-    return;
-  }
-
   // Recreate the compositor.
   TextureFactoryIdentifier identifier;
-  if (!parent->ResetCompositor(backendHints, &identifier)) {
+  if (!mCompositorSession->Reset(backendHints, aSeqNo, &identifier)) {
     // No action was taken, so we don't have to do anything.
     return;
   }
@@ -350,9 +365,6 @@ nsBaseWidget::OnRenderingDeviceReset()
 
   // Update the texture factory identifier.
   clm->UpdateTextureFactoryIdentifier(identifier);
-  if (ShadowLayerForwarder* lf = clm->AsShadowForwarder()) {
-    lf->IdentifyTextureHost(identifier);
-  }
   ImageBridgeChild::IdentifyCompositorTextureHost(identifier);
   gfx::VRManagerChild::IdentifyTextureHost(identifier);
 }
@@ -376,12 +388,14 @@ nsBaseWidget::~nsBaseWidget()
 {
   IMEStateManager::WidgetDestroyed(this);
 
-  if (mLayerManager &&
-      mLayerManager->GetBackendType() == LayersBackend::LAYERS_BASIC) {
-    static_cast<BasicLayerManager*>(mLayerManager.get())->ClearRetainerWidget();
+  if (mLayerManager) {
+    if (BasicLayerManager* mgr = mLayerManager->AsBasicLayerManager()) {
+      mgr->ClearRetainerWidget();
+    }
   }
 
   FreeShutdownObserver();
+  RevokeTransactionIdAllocator();
   DestroyLayerManager();
 
 #ifdef NOISY_WIDGET_LEAKS
@@ -524,18 +538,6 @@ void nsBaseWidget::Destroy()
 #endif
 }
 
-
-//-------------------------------------------------------------------------
-//
-// Set this nsBaseWidget's parent
-//
-//-------------------------------------------------------------------------
-NS_IMETHODIMP nsBaseWidget::SetParent(nsIWidget* aNewParent)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-
 //-------------------------------------------------------------------------
 //
 // Get this nsBaseWidget parent
@@ -610,15 +612,15 @@ double nsIWidget::DefaultScaleOverride()
 //-------------------------------------------------------------------------
 void nsBaseWidget::AddChild(nsIWidget* aChild)
 {
-  MOZ_RELEASE_ASSERT(!aChild->GetNextSibling() && !aChild->GetPrevSibling(),
-                     "aChild not properly removed from its old child list");
+  MOZ_ASSERT(!aChild->GetNextSibling() && !aChild->GetPrevSibling(),
+             "aChild not properly removed from its old child list");
 
   if (!mFirstChild) {
     mFirstChild = mLastChild = aChild;
   } else {
     // append to the list
-    MOZ_RELEASE_ASSERT(mLastChild);
-    MOZ_RELEASE_ASSERT(!mLastChild->GetNextSibling());
+    MOZ_ASSERT(mLastChild);
+    MOZ_ASSERT(!mLastChild->GetNextSibling());
     mLastChild->SetNextSibling(aChild);
     aChild->SetPrevSibling(mLastChild);
     mLastChild = aChild;
@@ -681,7 +683,7 @@ void nsBaseWidget::SetZIndex(int32_t aZIndex)
   mZIndex = aZIndex;
 
   // reorder this child in its parent's list.
-  nsBaseWidget* parent = static_cast<nsBaseWidget*>(GetParent());
+  auto* parent = static_cast<nsBaseWidget*>(GetParent());
   if (parent) {
     parent->RemoveChild(this);
     // Scope sib outside the for loop so we can check it afterward
@@ -837,16 +839,6 @@ nsBaseWidget::SetWindowClipRegion(const nsTArray<LayoutDeviceIntRect>& aRects,
   return NS_OK;
 }
 
-//-------------------------------------------------------------------------
-//
-// Hide window borders/decorations for this widget
-//
-//-------------------------------------------------------------------------
-NS_IMETHODIMP nsBaseWidget::HideWindowChrome(bool aShouldHide)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
 /* virtual */ void
 nsBaseWidget::PerformFullscreenTransition(FullscreenTransitionStage aStage,
                                           uint16_t aDuration,
@@ -907,20 +899,21 @@ nsBaseWidget::AutoLayerManagerSetup::AutoLayerManagerSetup(
     BufferMode aDoubleBuffering, ScreenRotation aRotation)
   : mWidget(aWidget)
 {
-  mLayerManager = static_cast<BasicLayerManager*>(mWidget->GetLayerManager());
-  if (mLayerManager) {
-    NS_ASSERTION(mLayerManager->GetBackendType() == LayersBackend::LAYERS_BASIC,
-      "AutoLayerManagerSetup instantiated for non-basic layer backend!");
-    mLayerManager->SetDefaultTarget(aTarget);
-    mLayerManager->SetDefaultTargetConfiguration(aDoubleBuffering, aRotation);
+  LayerManager* lm = mWidget->GetLayerManager();
+  NS_ASSERTION(!lm || lm->GetBackendType() == LayersBackend::LAYERS_BASIC,
+    "AutoLayerManagerSetup instantiated for non-basic layer backend!");
+  if (lm) {
+    mLayerManager = lm->AsBasicLayerManager();
+    if (mLayerManager) {
+      mLayerManager->SetDefaultTarget(aTarget);
+      mLayerManager->SetDefaultTargetConfiguration(aDoubleBuffering, aRotation);
+    }
   }
 }
 
 nsBaseWidget::AutoLayerManagerSetup::~AutoLayerManagerSetup()
 {
   if (mLayerManager) {
-    NS_ASSERTION(mLayerManager->GetBackendType() == LayersBackend::LAYERS_BASIC,
-      "AutoLayerManagerSetup instantiated for non-basic layer backend!");
     mLayerManager->SetDefaultTarget(nullptr);
     mLayerManager->SetDefaultTargetConfiguration(mozilla::layers::BufferMode::BUFFER_NONE, ROTATION_0);
   }
@@ -934,12 +927,8 @@ bool nsBaseWidget::IsSmallPopup() const
 bool
 nsBaseWidget::ComputeShouldAccelerate()
 {
-  bool enabled = gfx::gfxConfig::IsEnabled(gfx::Feature::HW_COMPOSITING);
-#ifdef MOZ_WIDGET_GTK
-  return enabled && !IsSmallPopup();
-#else
-  return enabled;
-#endif
+  return gfx::gfxConfig::IsEnabled(gfx::Feature::HW_COMPOSITING) &&
+         WidgetTypeSupportsAcceleration();
 }
 
 bool
@@ -1334,38 +1323,55 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
     mInitialZoomConstraints.reset();
   }
 
-  TextureFactoryIdentifier textureFactoryIdentifier;
-  PLayerTransactionChild* shadowManager = nullptr;
-
-  nsTArray<LayersBackend> backendHints;
-  gfxPlatform::GetPlatform()->GetCompositorBackends(ComputeShouldAccelerate(), backendHints);
-
-  bool success = false;
-  if (!backendHints.IsEmpty()) {
-    shadowManager = mCompositorBridgeChild->SendPLayerTransactionConstructor(
-      backendHints, 0, &textureFactoryIdentifier, &success);
-  }
-
   ShadowLayerForwarder* lf = lm->AsShadowForwarder();
+  // As long as we are creating a ClientLayerManager above lf must be non-null.
+  MOZ_ASSERT(lf);
 
-  if (!success || !lf) {
-    NS_WARNING("Failed to create an OMT compositor.");
-    DestroyCompositor();
-    mLayerManager = nullptr;
-    return;
+  if (lf) {
+    TextureFactoryIdentifier textureFactoryIdentifier;
+    PLayerTransactionChild* shadowManager = nullptr;
+
+    nsTArray<LayersBackend> backendHints;
+    gfxPlatform::GetPlatform()->GetCompositorBackends(ComputeShouldAccelerate(), backendHints);
+
+    bool success = false;
+    if (!backendHints.IsEmpty()) {
+      shadowManager = mCompositorBridgeChild->SendPLayerTransactionConstructor(
+        backendHints, 0, &textureFactoryIdentifier, &success);
+    }
+
+    if (!success) {
+      NS_WARNING("Failed to create an OMT compositor.");
+      DestroyCompositor();
+      mLayerManager = nullptr;
+      return;
+    }
+
+    lf->SetShadowManager(shadowManager);
+    if (ClientLayerManager* clm = lm->AsClientLayerManager()) {
+      clm->UpdateTextureFactoryIdentifier(textureFactoryIdentifier);
+    }
+    // Some popup or transparent widgets may use a different backend than the
+    // compositors used with ImageBridge and VR (and more generally web content).
+    if (WidgetTypeSupportsAcceleration()) {
+      ImageBridgeChild::IdentifyCompositorTextureHost(textureFactoryIdentifier);
+      gfx::VRManagerChild::IdentifyTextureHost(textureFactoryIdentifier);
+    }
   }
 
-  lf->SetShadowManager(shadowManager);
-  lm->UpdateTextureFactoryIdentifier(textureFactoryIdentifier);
-  ImageBridgeChild::IdentifyCompositorTextureHost(textureFactoryIdentifier);
-  gfx::VRManagerChild::IdentifyTextureHost(textureFactoryIdentifier);
   WindowUsesOMTC();
 
   mLayerManager = lm.forget();
 
-  if (mWindowType == eWindowType_toplevel) {
-    // Only track compositors for top-level windows, since other window types
-    // may use the basic compositor.
+  // Only track compositors for top-level windows, since other window types
+  // may use the basic compositor.  Except on the OS X - see bug 1306383
+#if defined(XP_MACOSX)
+  bool getCompositorFromThisWindow = true;
+#else
+  bool getCompositorFromThisWindow = (mWindowType == eWindowType_toplevel);
+#endif
+
+  if (getCompositorFromThisWindow) {
     gfxPlatform::GetPlatform()->NotifyCompositorCreated(mLayerManager->GetCompositorBackendType());
   }
 }
@@ -1446,7 +1452,8 @@ void nsBaseWidget::OnDestroy()
   ReleaseContentController();
 }
 
-NS_IMETHODIMP nsBaseWidget::MoveClient(double aX, double aY)
+void
+nsBaseWidget::MoveClient(double aX, double aY)
 {
   LayoutDeviceIntPoint clientOffset(GetClientOffset());
 
@@ -1454,15 +1461,14 @@ NS_IMETHODIMP nsBaseWidget::MoveClient(double aX, double aY)
   // if that's what this widget uses for the Move/Resize APIs
   if (BoundsUseDesktopPixels()) {
     DesktopPoint desktopOffset = clientOffset / GetDesktopToDeviceScale();
-    return Move(aX - desktopOffset.x, aY - desktopOffset.y);
+    Move(aX - desktopOffset.x, aY - desktopOffset.y);
   } else {
-    return Move(aX - clientOffset.x, aY - clientOffset.y);
+    Move(aX - clientOffset.x, aY - clientOffset.y);
   }
 }
 
-NS_IMETHODIMP nsBaseWidget::ResizeClient(double aWidth,
-                                         double aHeight,
-                                         bool aRepaint)
+void
+nsBaseWidget::ResizeClient(double aWidth, double aHeight, bool aRepaint)
 {
   NS_ASSERTION((aWidth >=0) , "Negative width passed to ResizeClient");
   NS_ASSERTION((aHeight >=0), "Negative height passed to ResizeClient");
@@ -1475,19 +1481,20 @@ NS_IMETHODIMP nsBaseWidget::ResizeClient(double aWidth,
     DesktopSize desktopDelta =
       (LayoutDeviceIntSize(mBounds.width, mBounds.height) -
        clientBounds.Size()) / GetDesktopToDeviceScale();
-    return Resize(aWidth + desktopDelta.width, aHeight + desktopDelta.height,
-                  aRepaint);
+    Resize(aWidth + desktopDelta.width, aHeight + desktopDelta.height,
+           aRepaint);
   } else {
-    return Resize(mBounds.width + (aWidth - clientBounds.width),
-                  mBounds.height + (aHeight - clientBounds.height), aRepaint);
+    Resize(mBounds.width + (aWidth - clientBounds.width),
+           mBounds.height + (aHeight - clientBounds.height), aRepaint);
   }
 }
 
-NS_IMETHODIMP nsBaseWidget::ResizeClient(double aX,
-                                         double aY,
-                                         double aWidth,
-                                         double aHeight,
-                                         bool aRepaint)
+void
+nsBaseWidget::ResizeClient(double aX,
+                           double aY,
+                           double aWidth,
+                           double aHeight,
+                           bool aRepaint)
 {
   NS_ASSERTION((aWidth >=0) , "Negative width passed to ResizeClient");
   NS_ASSERTION((aHeight >=0), "Negative height passed to ResizeClient");
@@ -1501,14 +1508,14 @@ NS_IMETHODIMP nsBaseWidget::ResizeClient(double aX,
     DesktopSize desktopDelta =
       (LayoutDeviceIntSize(mBounds.width, mBounds.height) -
        clientBounds.Size()) / scale;
-    return Resize(aX - desktopOffset.x, aY - desktopOffset.y,
-                  aWidth + desktopDelta.width, aHeight + desktopDelta.height,
-                  aRepaint);
+    Resize(aX - desktopOffset.x, aY - desktopOffset.y,
+           aWidth + desktopDelta.width, aHeight + desktopDelta.height,
+           aRepaint);
   } else {
-    return Resize(aX - clientOffset.x, aY - clientOffset.y,
-                  aWidth + mBounds.width - clientBounds.width,
-                  aHeight + mBounds.height - clientBounds.height,
-                  aRepaint);
+    Resize(aX - clientOffset.x, aY - clientOffset.y,
+           aWidth + mBounds.width - clientBounds.width,
+           aHeight + mBounds.height - clientBounds.height,
+           aRepaint);
   }
 }
 
@@ -1576,21 +1583,10 @@ uint32_t nsBaseWidget::GetMaxTouchPoints() const
   return 0;
 }
 
-NS_IMETHODIMP
-nsBaseWidget::GetAttention(int32_t aCycleCount) {
-    return NS_OK;
-}
-
 bool
 nsBaseWidget::HasPendingInputEvent()
 {
   return false;
-}
-
-NS_IMETHODIMP
-nsBaseWidget::SetIcon(const nsAString&)
-{
-  return NS_OK;
 }
 
 bool
@@ -1664,20 +1660,6 @@ nsBaseWidget::ResolveIconName(const nsAString &aIconName,
               getter_AddRefs(file));
   if (file && ResolveIconNameHelper(file, aIconName, aIconSuffix))
     NS_ADDREF(*aResult = file);
-}
-
-NS_IMETHODIMP
-nsBaseWidget::BeginResizeDrag(WidgetGUIEvent* aEvent,
-                              int32_t aHorizontal,
-                              int32_t aVertical)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-nsBaseWidget::BeginMoveDrag(WidgetMouseEvent* aEvent)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 void nsBaseWidget::SetSizeConstraints(const SizeConstraints& aConstraints)
@@ -1924,7 +1906,7 @@ nsBaseWidget::StartAsyncScrollbarDrag(const AsyncDragMetrics& aDragMetrics)
 }
 
 already_AddRefed<nsIScreen>
-nsIWidget::GetWidgetScreen()
+nsBaseWidget::GetWidgetScreen()
 {
   nsCOMPtr<nsIScreenManager> screenManager;
   screenManager = do_GetService("@mozilla.org/gfx/screenmanager;1");
@@ -1959,9 +1941,8 @@ nsIWidget::SynthesizeNativeTouchTap(LayoutDeviceIntPoint aPoint, bool aLongTap,
   }
 
   if (!aLongTap) {
-    nsresult rv = SynthesizeNativeTouchPoint(pointerId, TOUCH_REMOVE,
-                                             aPoint, 0, 0, nullptr);
-    return rv;
+    return SynthesizeNativeTouchPoint(pointerId, TOUCH_REMOVE,
+                                      aPoint, 0, 0, nullptr);
   }
 
   // initiate a long tap
@@ -2004,7 +1985,7 @@ nsIWidget::SynthesizeNativeTouchTap(LayoutDeviceIntPoint aPoint, bool aLongTap,
 void
 nsIWidget::OnLongTapTimerCallback(nsITimer* aTimer, void* aClosure)
 {
-  nsIWidget *self = static_cast<nsIWidget *>(aClosure);
+  auto *self = static_cast<nsIWidget *>(aClosure);
 
   if ((self->mLongTapTouchPoint->mStamp + self->mLongTapTouchPoint->mDuration) >
       TimeStamp::Now()) {
@@ -3043,6 +3024,8 @@ case _value: eventName.AssignLiteral(_name) ; break
     _ASSIGN_eventName(eDragOver,"eDragOver");
     _ASSIGN_eventName(eEditorInput,"eEditorInput");
     _ASSIGN_eventName(eFocus,"eFocus");
+    _ASSIGN_eventName(eFocusIn,"eFocusIn");
+    _ASSIGN_eventName(eFocusOut,"eFocusOut");
     _ASSIGN_eventName(eFormSelect,"eFormSelect");
     _ASSIGN_eventName(eFormChange,"eFormChange");
     _ASSIGN_eventName(eFormReset,"eFormReset");
@@ -3057,6 +3040,7 @@ case _value: eventName.AssignLiteral(_name) ; break
     _ASSIGN_eventName(eMouseDown,"eMouseDown");
     _ASSIGN_eventName(eMouseUp,"eMouseUp");
     _ASSIGN_eventName(eMouseClick,"eMouseClick");
+    _ASSIGN_eventName(eMouseAuxClick,"eMouseAuxClick");
     _ASSIGN_eventName(eMouseDoubleClick,"eMouseDoubleClick");
     _ASSIGN_eventName(eMouseMove,"eMouseMove");
     _ASSIGN_eventName(eLoad,"eLoad");

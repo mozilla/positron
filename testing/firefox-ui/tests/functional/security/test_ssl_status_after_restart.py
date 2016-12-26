@@ -2,16 +2,15 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from firefox_puppeteer import PuppeteerMixin
 from marionette_driver import Wait
-from marionette.marionette_test import skip_if_e10s
-
-from firefox_ui_harness.testcases import FirefoxTestCase
+from marionette_harness import MarionetteTestCase, skip_if_e10s
 
 
-class TestSSLStatusAfterRestart(FirefoxTestCase):
+class TestSSLStatusAfterRestart(PuppeteerMixin, MarionetteTestCase):
 
     def setUp(self):
-        FirefoxTestCase.setUp(self)
+        super(TestSSLStatusAfterRestart, self).setUp()
 
         self.test_data = (
             {
@@ -32,19 +31,20 @@ class TestSSLStatusAfterRestart(FirefoxTestCase):
         )
 
         # Set browser to restore previous session
-        self.prefs.set_pref('browser.startup.page', 3)
+        self.marionette.set_pref('browser.startup.page', 3)
 
         self.locationbar = self.browser.navbar.locationbar
         self.identity_popup = self.locationbar.identity_popup
 
     def tearDown(self):
         try:
-            self.windows.close_all([self.browser])
+            self.puppeteer.windows.close_all([self.browser])
             self.browser.tabbar.close_all_tabs([self.browser.tabbar.tabs[0]])
             self.browser.switch_to()
             self.identity_popup.close(force=True)
+            self.marionette.clear_pref('browser.startup.page')
         finally:
-            FirefoxTestCase.tearDown(self)
+            super(TestSSLStatusAfterRestart, self).tearDown()
 
     @skip_if_e10s
     def test_ssl_status_after_restart(self):
@@ -100,7 +100,7 @@ class TestSSLStatusAfterRestart(FirefoxTestCase):
         # Verify the domain listed on the security panel
         # If this is a wildcard cert, check only the domain
         if cert['commonName'].startswith('*'):
-            self.assertIn(self.security.get_domain_from_common_name(cert['commonName']),
+            self.assertIn(self.puppeteer.security.get_domain_from_common_name(cert['commonName']),
                           page_info.deck.security.domain.get_attribute('value'),
                           'Expected domain found in certificate for ' + url)
         else:
@@ -112,7 +112,7 @@ class TestSSLStatusAfterRestart(FirefoxTestCase):
         if identity != '':
             owner = cert['organization']
         else:
-            owner = page_info.get_property('securityNoOwner')
+            owner = page_info.localize_property('securityNoOwner')
 
         self.assertEqual(page_info.deck.security.owner.get_attribute('value'), owner,
                          'Expected owner label found for ' + url)

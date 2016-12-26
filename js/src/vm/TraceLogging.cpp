@@ -7,6 +7,7 @@
 #include "vm/TraceLogging.h"
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/ScopeExit.h"
 
 #include <string.h>
 
@@ -193,7 +194,7 @@ TraceLoggerThread::enable()
 bool
 TraceLoggerThread::fail(JSContext* cx, const char* error)
 {
-    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_TRACELOGGER_ENABLE_FAIL, error);
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_TRACELOGGER_ENABLE_FAIL, error);
     failed = true;
     enabled_ = 0;
 
@@ -229,8 +230,8 @@ TraceLoggerThread::enable(JSContext* cx)
             script = it.script();
             engine = it.isIonJS() ? TraceLogger_IonMonkey : TraceLogger_Baseline;
         } else if (act->isWasm()) {
-            JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_TRACELOGGER_ENABLE_FAIL,
-                                 "not yet supported in wasm code");
+            JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_TRACELOGGER_ENABLE_FAIL,
+                                      "not yet supported in wasm code");
             return false;
         } else {
             MOZ_ASSERT(act->isInterpreter());
@@ -239,9 +240,9 @@ TraceLoggerThread::enable(JSContext* cx)
 
             script = fp->script();
             engine = TraceLogger_Interpreter;
-            if (script->compartment() != cx->compartment())
-                return fail(cx, "compartment mismatch");
         }
+        if (script->compartment() != cx->compartment())
+            return fail(cx, "compartment mismatch");
 
         TraceLoggerEvent event(this, TraceLogger_Scripts, script);
         startEvent(event);
@@ -277,13 +278,14 @@ TraceLoggerThread::disable(bool force, const char* error)
 }
 
 const char*
-TraceLoggerThread::eventText(uint32_t id)
+TraceLoggerThread::maybeEventText(uint32_t id)
 {
     if (id < TraceLogger_Last)
         return TLTextIdString(static_cast<TraceLoggerTextId>(id));
 
     TextIdHashMap::Ptr p = textIdPayloads.lookup(id);
-    MOZ_ASSERT(p);
+    if (!p)
+        return nullptr;
 
     return p->value()->string();
 }
@@ -361,7 +363,14 @@ TraceLoggerThread::getOrCreateEventPayload(const char* text)
         return p->value();
     }
 
-    AutoTraceLog internal(this, TraceLogger_Internal);
+    TraceLoggerEventPayload* payload = nullptr;
+
+    startEvent(TraceLogger_Internal);
+    auto guardInternalStopEvent = mozilla::MakeScopeExit([&] {
+        stopEvent(TraceLogger_Internal);
+        if (payload)
+            payload->release();
+    });
 
     char* str = js_strdup(text);
     if (!str)
@@ -369,7 +378,7 @@ TraceLoggerThread::getOrCreateEventPayload(const char* text)
 
     uint32_t textId = nextTextId;
 
-    TraceLoggerEventPayload* payload = js_new<TraceLoggerEventPayload>(textId, str);
+    payload = js_new<TraceLoggerEventPayload>(textId, str);
     if (!payload) {
         js_free(str);
         return nullptr;
@@ -377,8 +386,12 @@ TraceLoggerThread::getOrCreateEventPayload(const char* text)
 
     if (!textIdPayloads.putNew(textId, payload)) {
         js_delete(payload);
+        payload = nullptr;
         return nullptr;
     }
+
+    // Temporarily mark the payload as used. To make sure it doesn't get GC'ed.
+    payload->use();
 
     if (graph.get())
         graph->addTextId(textId, str);
@@ -416,7 +429,14 @@ TraceLoggerThread::getOrCreateEventPayload(TraceLoggerTextId type, const char* f
         }
     }
 
-    AutoTraceLog internal(this, TraceLogger_Internal);
+    TraceLoggerEventPayload* payload = nullptr;
+
+    startEvent(TraceLogger_Internal);
+    auto guardInternalStopEvent = mozilla::MakeScopeExit([&] {
+        stopEvent(TraceLogger_Internal);
+        if (payload)
+            payload->release();
+    });
 
     // Compute the length of the string to create.
     size_t lenFilename = strlen(filename);
@@ -436,7 +456,7 @@ TraceLoggerThread::getOrCreateEventPayload(TraceLoggerTextId type, const char* f
     MOZ_ASSERT(strlen(str) == len);
 
     uint32_t textId = nextTextId;
-    TraceLoggerEventPayload* payload = js_new<TraceLoggerEventPayload>(textId, str);
+    payload = js_new<TraceLoggerEventPayload>(textId, str);
     if (!payload) {
         js_free(str);
         return nullptr;
@@ -444,8 +464,12 @@ TraceLoggerThread::getOrCreateEventPayload(TraceLoggerTextId type, const char* f
 
     if (!textIdPayloads.putNew(textId, payload)) {
         js_delete(payload);
+        payload = nullptr;
         return nullptr;
     }
+
+    // Temporarily mark the payload as used. To make sure it doesn't get GC'ed.
+    payload->use();
 
     if (graph.get())
         graph->addTextId(textId, str);
@@ -547,7 +571,10 @@ TraceLoggerThread::stopEvent(uint32_t id)
             MOZ_ASSERT(prev >= TraceLogger_Last);
         } else if (id >= TraceLogger_Last) {
             MOZ_ASSERT(prev >= TraceLogger_Last);
-            MOZ_ASSERT_IF(prev != id, strcmp(eventText(id), eventText(prev)) == 0);
+            if (prev != id) {
+                // Ignore if the text has been flushed already.
+                MOZ_ASSERT_IF(maybeEventText(prev), strcmp(eventText(id), eventText(prev)) == 0);
+            }
         } else {
             MOZ_ASSERT(id == prev);
         }
@@ -701,10 +728,11 @@ TraceLoggerThreadState::init()
             "                 SplitCriticalEdges, RenumberBlocks, ScalarReplacement, \n"
             "                 DominatorTree, PhiAnalysis, MakeLoopsContiguous, ApplyTypes, \n"
             "                 EagerSimdUnbox, AliasAnalysis, GVN, LICM, Sincos, RangeAnalysis, \n"
-            "                 LoopUnrolling, EffectiveAddressAnalysis, AlignmentMaskAnalysis, \n"
-            "                 EliminateDeadCode, ReorderInstructions, EdgeCaseAnalysis, \n"
-            "                 EliminateRedundantChecks, AddKeepAliveInstructions, GenerateLIR, \n"
-            "                 RegisterAllocation, GenerateCode, Scripts, IonBuilderRestartLoop\n"
+            "                 LoopUnrolling, FoldLinearArithConstants, EffectiveAddressAnalysis, \n"
+            "                 AlignmentMaskAnalysis, EliminateDeadCode, ReorderInstructions, \n"
+            "                 EdgeCaseAnalysis, EliminateRedundantChecks, \n"
+            "                 AddKeepAliveInstructions, GenerateLIR, RegisterAllocation, \n"
+            "                 GenerateCode, Scripts, IonBuilderRestartLoop\n"
             "\n"
             "  VMSpecific     Output the specific name of the VM call"
             "\n"
@@ -773,6 +801,7 @@ TraceLoggerThreadState::init()
         enabledTextIds[TraceLogger_Sincos] = true;
         enabledTextIds[TraceLogger_RangeAnalysis] = true;
         enabledTextIds[TraceLogger_LoopUnrolling] = true;
+        enabledTextIds[TraceLogger_FoldLinearArithConstants] = true;
         enabledTextIds[TraceLogger_EffectiveAddressAnalysis] = true;
         enabledTextIds[TraceLogger_AlignmentMaskAnalysis] = true;
         enabledTextIds[TraceLogger_EliminateDeadCode] = true;

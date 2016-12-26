@@ -2,9 +2,19 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
+requestLongerTimeout(2);
+
+function add_tasks(task) {
+  add_task(task.bind(null, {embedded: false}));
+
+  add_task(task.bind(null, {embedded: true}));
+}
+
 function* loadExtension(options) {
   let extension = ExtensionTestUtils.loadExtension({
     useAddonManager: "temporary",
+
+    embedded: options.embedded,
 
     manifest: Object.assign({
       "permissions": ["tabs"],
@@ -20,6 +30,7 @@ function* loadExtension(options) {
         </html>`,
 
       "options.js": function() {
+        window.iAmOption = true;
         browser.runtime.sendMessage("options.html");
         browser.runtime.onMessage.addListener((msg, sender, respond) => {
           if (msg == "ping") {
@@ -37,10 +48,12 @@ function* loadExtension(options) {
   return extension;
 }
 
-add_task(function* test_inline_options() {
+add_tasks(function* test_inline_options(extraOptions) {
+  info(`Test options opened inline (${JSON.stringify(extraOptions)})`);
+
   let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, "http://example.com/");
 
-  let extension = yield loadExtension({
+  let extension = yield loadExtension(Object.assign({}, extraOptions, {
     manifest: {
       applications: {gecko: {id: "inline_options@tests.mozilla.org"}},
       "options_ui": {
@@ -48,7 +61,7 @@ add_task(function* test_inline_options() {
       },
     },
 
-    background: function() {
+    background: async function() {
       let _optionsPromise;
       let awaitOptions = () => {
         browser.test.assertFalse(_optionsPromise, "Should not be awaiting options already");
@@ -69,61 +82,65 @@ add_task(function* test_inline_options() {
         }
       });
 
-      let firstTab, optionsTab;
-      browser.tabs.query({currentWindow: true, active: true}).then(tabs => {
-        firstTab = tabs[0].id;
+      try {
+        let [firstTab] = await browser.tabs.query({currentWindow: true, active: true});
 
         browser.test.log("Open options page. Expect fresh load.");
-        return Promise.all([
+
+        let [, optionsTab] = await Promise.all([
           browser.runtime.openOptionsPage(),
           awaitOptions(),
         ]);
-      }).then(([, tab]) => {
-        browser.test.assertEq("about:addons", tab.url, "Tab contains AddonManager");
-        browser.test.assertTrue(tab.active, "Tab is active");
-        browser.test.assertTrue(tab.id != firstTab, "Tab is a new tab");
 
-        optionsTab = tab.id;
+        browser.test.assertEq("about:addons", optionsTab.url, "Tab contains AddonManager");
+        browser.test.assertTrue(optionsTab.active, "Tab is active");
+        browser.test.assertTrue(optionsTab.id != firstTab.id, "Tab is a new tab");
+
+        browser.test.assertEq(0, browser.extension.getViews({type: "popup"}).length, "viewType is not popup");
+        browser.test.assertEq(1, browser.extension.getViews({type: "tab"}).length, "viewType is tab");
+        browser.test.assertEq(1, browser.extension.getViews({windowId: optionsTab.windowId}).length, "windowId matches");
+
+        let views = browser.extension.getViews();
+        browser.test.assertEq(2, views.length, "Expected the options page and the background page");
+        browser.test.assertTrue(views.includes(window), "One of the views is the background page");
+        browser.test.assertTrue(views.some(w => w.iAmOption), "One of the views is the options page");
 
         browser.test.log("Switch tabs.");
-        return browser.tabs.update(firstTab, {active: true});
-      }).then(() => {
+        await browser.tabs.update(firstTab.id, {active: true});
+
         browser.test.log("Open options page again. Expect tab re-selected, no new load.");
 
-        return browser.runtime.openOptionsPage();
-      }).then(() => {
-        return browser.tabs.query({currentWindow: true, active: true});
-      }).then(([tab]) => {
-        browser.test.assertEq(optionsTab, tab.id, "Tab is the same as the previous options tab");
+        await browser.runtime.openOptionsPage();
+        let [tab] = await browser.tabs.query({currentWindow: true, active: true});
+
+        browser.test.assertEq(optionsTab.id, tab.id, "Tab is the same as the previous options tab");
         browser.test.assertEq("about:addons", tab.url, "Tab contains AddonManager");
 
         browser.test.log("Ping options page.");
-        return browser.runtime.sendMessage("ping");
-      }).then((pong) => {
+        let pong = await browser.runtime.sendMessage("ping");
         browser.test.assertEq("pong", pong, "Got pong.");
 
         browser.test.log("Remove options tab.");
-        return browser.tabs.remove(optionsTab);
-      }).then(() => {
+        await browser.tabs.remove(optionsTab.id);
+
         browser.test.log("Open options page again. Expect fresh load.");
-        return Promise.all([
+        [, tab] = await Promise.all([
           browser.runtime.openOptionsPage(),
           awaitOptions(),
         ]);
-      }).then(([, tab]) => {
         browser.test.assertEq("about:addons", tab.url, "Tab contains AddonManager");
         browser.test.assertTrue(tab.active, "Tab is active");
-        browser.test.assertTrue(tab.id != optionsTab, "Tab is a new tab");
+        browser.test.assertTrue(tab.id != optionsTab.id, "Tab is a new tab");
 
-        return browser.tabs.remove(tab.id);
-      }).then(() => {
+        await browser.tabs.remove(tab.id);
+
         browser.test.notifyPass("options-ui");
-      }).catch(error => {
-        browser.test.log(`Error: ${error} :: ${error.stack}`);
+      } catch (error) {
+        browser.test.fail(`Error: ${error} :: ${error.stack}`);
         browser.test.notifyFail("options-ui");
-      });
+      }
     },
-  });
+  }));
 
   yield extension.awaitFinish("options-ui");
   yield extension.unload();
@@ -131,10 +148,12 @@ add_task(function* test_inline_options() {
   yield BrowserTestUtils.removeTab(tab);
 });
 
-add_task(function* test_tab_options() {
+add_tasks(function* test_tab_options(extraOptions) {
+  info(`Test options opened in a tab (${JSON.stringify(extraOptions)})`);
+
   let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, "http://example.com/");
 
-  let extension = yield loadExtension({
+  let extension = yield loadExtension(Object.assign({}, extraOptions, {
     manifest: {
       applications: {gecko: {id: "tab_options@tests.mozilla.org"}},
       "options_ui": {
@@ -143,7 +162,7 @@ add_task(function* test_tab_options() {
       },
     },
 
-    background: function() {
+    background: async function() {
       let _optionsPromise;
       let awaitOptions = () => {
         browser.test.assertFalse(_optionsPromise, "Should not be awaiting options already");
@@ -166,32 +185,36 @@ add_task(function* test_tab_options() {
 
       let optionsURL = browser.extension.getURL("options.html");
 
-      let firstTab, optionsTab;
-      browser.tabs.query({currentWindow: true, active: true}).then(tabs => {
-        firstTab = tabs[0].id;
+      try {
+        let [firstTab] = await browser.tabs.query({currentWindow: true, active: true});
 
         browser.test.log("Open options page. Expect fresh load.");
-        return Promise.all([
+        let [, optionsTab] = await Promise.all([
           browser.runtime.openOptionsPage(),
           awaitOptions(),
         ]);
-      }).then(([, tab]) => {
-        browser.test.assertEq(optionsURL, tab.url, "Tab contains options.html");
-        browser.test.assertTrue(tab.active, "Tab is active");
-        browser.test.assertTrue(tab.id != firstTab, "Tab is a new tab");
+        browser.test.assertEq(optionsURL, optionsTab.url, "Tab contains options.html");
+        browser.test.assertTrue(optionsTab.active, "Tab is active");
+        browser.test.assertTrue(optionsTab.id != firstTab.id, "Tab is a new tab");
 
-        optionsTab = tab.id;
+        browser.test.assertEq(0, browser.extension.getViews({type: "popup"}).length, "viewType is not popup");
+        browser.test.assertEq(1, browser.extension.getViews({type: "tab"}).length, "viewType is tab");
+        browser.test.assertEq(1, browser.extension.getViews({windowId: optionsTab.windowId}).length, "windowId matches");
+
+        let views = browser.extension.getViews();
+        browser.test.assertEq(2, views.length, "Expected the options page and the background page");
+        browser.test.assertTrue(views.includes(window), "One of the views is the background page");
+        browser.test.assertTrue(views.some(w => w.iAmOption), "One of the views is the options page");
 
         browser.test.log("Switch tabs.");
-        return browser.tabs.update(firstTab, {active: true});
-      }).then(() => {
+        await browser.tabs.update(firstTab.id, {active: true});
+
         browser.test.log("Open options page again. Expect tab re-selected, no new load.");
 
-        return browser.runtime.openOptionsPage();
-      }).then(() => {
-        return browser.tabs.query({currentWindow: true, active: true});
-      }).then(([tab]) => {
-        browser.test.assertEq(optionsTab, tab.id, "Tab is the same as the previous options tab");
+        await browser.runtime.openOptionsPage();
+        let [tab] = await browser.tabs.query({currentWindow: true, active: true});
+
+        browser.test.assertEq(optionsTab.id, tab.id, "Tab is the same as the previous options tab");
         browser.test.assertEq(optionsURL, tab.url, "Tab contains options.html");
 
         // Unfortunately, we can't currently do this, since onMessage doesn't
@@ -201,27 +224,26 @@ add_task(function* test_tab_options() {
         // return new Promise(resolve => browser.runtime.sendMessage("ping", resolve));
 
         browser.test.log("Remove options tab.");
-        return browser.tabs.remove(optionsTab);
-      }).then(() => {
+        await browser.tabs.remove(optionsTab.id);
+
         browser.test.log("Open options page again. Expect fresh load.");
-        return Promise.all([
+        [, tab] = await Promise.all([
           browser.runtime.openOptionsPage(),
           awaitOptions(),
         ]);
-      }).then(([, tab]) => {
         browser.test.assertEq(optionsURL, tab.url, "Tab contains options.html");
         browser.test.assertTrue(tab.active, "Tab is active");
-        browser.test.assertTrue(tab.id != optionsTab, "Tab is a new tab");
+        browser.test.assertTrue(tab.id != optionsTab.id, "Tab is a new tab");
 
-        return browser.tabs.remove(tab.id);
-      }).then(() => {
+        await browser.tabs.remove(tab.id);
+
         browser.test.notifyPass("options-ui-tab");
-      }).catch(error => {
-        browser.test.log(`Error: ${error} :: ${error.stack}`);
+      } catch (error) {
+        browser.test.fail(`Error: ${error} :: ${error.stack}`);
         browser.test.notifyFail("options-ui-tab");
-      });
+      }
     },
-  });
+  }));
 
   yield extension.awaitFinish("options-ui-tab");
   yield extension.unload();
@@ -229,34 +251,25 @@ add_task(function* test_tab_options() {
   yield BrowserTestUtils.removeTab(tab);
 });
 
-add_task(function* test_options_no_manifest() {
-  let extension = yield loadExtension({
+add_tasks(function* test_options_no_manifest(extraOptions) {
+  info(`Test with no manifest key (${JSON.stringify(extraOptions)})`);
+
+  let extension = yield loadExtension(Object.assign({}, extraOptions, {
     manifest: {
       applications: {gecko: {id: "no_options@tests.mozilla.org"}},
     },
 
-    background: function() {
+    async background() {
       browser.test.log("Try to open options page when not specified in the manifest.");
 
-      browser.runtime.openOptionsPage().then(
-        () => {
-          browser.test.fail("Opening options page without one specified in the manifest generated an error");
-          browser.test.notifyFail("options-no-manifest");
-        },
-        error => {
-          let expected = "No `options_ui` declared";
-          browser.test.assertTrue(
-            error.message.includes(expected),
-            `Got expected error (got: '${error.message}', expected: '${expected}'`);
-        }
-      ).then(() => {
-        browser.test.notifyPass("options-no-manifest");
-      }).catch(error => {
-        browser.test.log(`Error: ${error} :: ${error.stack}`);
-        browser.test.notifyFail("options-no-manifest");
-      });
+      await browser.test.assertRejects(
+        browser.runtime.openOptionsPage(),
+        /No `options_ui` declared/,
+        "Expected error from openOptionsPage()");
+
+      browser.test.notifyPass("options-no-manifest");
     },
-  });
+  }));
 
   yield extension.awaitFinish("options-no-manifest");
   yield extension.unload();

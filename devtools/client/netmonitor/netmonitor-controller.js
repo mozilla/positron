@@ -1,114 +1,12 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-/* globals window, document, NetMonitorView */
+
+/* eslint-disable mozilla/reject-some-requires */
+/* globals window, NetMonitorView, gStore, dumpn */
+
 "use strict";
 
-var { utils: Cu } = Components;
-
-// The panel's window global is an EventEmitter firing the following events:
-const EVENTS = {
-  // When the monitored target begins and finishes navigating.
-  TARGET_WILL_NAVIGATE: "NetMonitor:TargetWillNavigate",
-  TARGET_DID_NAVIGATE: "NetMonitor:TargetNavigate",
-
-  // When a network or timeline event is received.
-  // See https://developer.mozilla.org/docs/Tools/Web_Console/remoting for
-  // more information about what each packet is supposed to deliver.
-  NETWORK_EVENT: "NetMonitor:NetworkEvent",
-  TIMELINE_EVENT: "NetMonitor:TimelineEvent",
-
-  // When a network event is added to the view
-  REQUEST_ADDED: "NetMonitor:RequestAdded",
-
-  // When request headers begin and finish receiving.
-  UPDATING_REQUEST_HEADERS: "NetMonitor:NetworkEventUpdating:RequestHeaders",
-  RECEIVED_REQUEST_HEADERS: "NetMonitor:NetworkEventUpdated:RequestHeaders",
-
-  // When request cookies begin and finish receiving.
-  UPDATING_REQUEST_COOKIES: "NetMonitor:NetworkEventUpdating:RequestCookies",
-  RECEIVED_REQUEST_COOKIES: "NetMonitor:NetworkEventUpdated:RequestCookies",
-
-  // When request post data begins and finishes receiving.
-  UPDATING_REQUEST_POST_DATA: "NetMonitor:NetworkEventUpdating:RequestPostData",
-  RECEIVED_REQUEST_POST_DATA: "NetMonitor:NetworkEventUpdated:RequestPostData",
-
-  // When security information begins and finishes receiving.
-  UPDATING_SECURITY_INFO: "NetMonitor::NetworkEventUpdating:SecurityInfo",
-  RECEIVED_SECURITY_INFO: "NetMonitor::NetworkEventUpdated:SecurityInfo",
-
-  // When response headers begin and finish receiving.
-  UPDATING_RESPONSE_HEADERS: "NetMonitor:NetworkEventUpdating:ResponseHeaders",
-  RECEIVED_RESPONSE_HEADERS: "NetMonitor:NetworkEventUpdated:ResponseHeaders",
-
-  // When response cookies begin and finish receiving.
-  UPDATING_RESPONSE_COOKIES: "NetMonitor:NetworkEventUpdating:ResponseCookies",
-  RECEIVED_RESPONSE_COOKIES: "NetMonitor:NetworkEventUpdated:ResponseCookies",
-
-  // When event timings begin and finish receiving.
-  UPDATING_EVENT_TIMINGS: "NetMonitor:NetworkEventUpdating:EventTimings",
-  RECEIVED_EVENT_TIMINGS: "NetMonitor:NetworkEventUpdated:EventTimings",
-
-  // When response content begins, updates and finishes receiving.
-  STARTED_RECEIVING_RESPONSE: "NetMonitor:NetworkEventUpdating:ResponseStart",
-  UPDATING_RESPONSE_CONTENT: "NetMonitor:NetworkEventUpdating:ResponseContent",
-  RECEIVED_RESPONSE_CONTENT: "NetMonitor:NetworkEventUpdated:ResponseContent",
-
-  // When the request post params are displayed in the UI.
-  REQUEST_POST_PARAMS_DISPLAYED: "NetMonitor:RequestPostParamsAvailable",
-
-  // When the response body is displayed in the UI.
-  RESPONSE_BODY_DISPLAYED: "NetMonitor:ResponseBodyAvailable",
-
-  // When the html response preview is displayed in the UI.
-  RESPONSE_HTML_PREVIEW_DISPLAYED: "NetMonitor:ResponseHtmlPreviewAvailable",
-
-  // When the image response thumbnail is displayed in the UI.
-  RESPONSE_IMAGE_THUMBNAIL_DISPLAYED:
-    "NetMonitor:ResponseImageThumbnailAvailable",
-
-  // When a tab is selected in the NetworkDetailsView and subsequently rendered.
-  TAB_UPDATED: "NetMonitor:TabUpdated",
-
-  // Fired when Sidebar has finished being populated.
-  SIDEBAR_POPULATED: "NetMonitor:SidebarPopulated",
-
-  // Fired when NetworkDetailsView has finished being populated.
-  NETWORKDETAILSVIEW_POPULATED: "NetMonitor:NetworkDetailsViewPopulated",
-
-  // Fired when CustomRequestView has finished being populated.
-  CUSTOMREQUESTVIEW_POPULATED: "NetMonitor:CustomRequestViewPopulated",
-
-  // Fired when charts have been displayed in the PerformanceStatisticsView.
-  PLACEHOLDER_CHARTS_DISPLAYED: "NetMonitor:PlaceholderChartsDisplayed",
-  PRIMED_CACHE_CHART_DISPLAYED: "NetMonitor:PrimedChartsDisplayed",
-  EMPTY_CACHE_CHART_DISPLAYED: "NetMonitor:EmptyChartsDisplayed",
-
-  // Fired once the NetMonitorController establishes a connection to the debug
-  // target.
-  CONNECTED: "connected",
-};
-
-// Descriptions for what this frontend is currently doing.
-const ACTIVITY_TYPE = {
-  // Standing by and handling requests normally.
-  NONE: 0,
-
-  // Forcing the target to reload with cache enabled or disabled.
-  RELOAD: {
-    WITH_CACHE_ENABLED: 1,
-    WITH_CACHE_DISABLED: 2,
-    WITH_CACHE_DEFAULT: 3
-  },
-
-  // Enabling or disabling the cache without triggering a reload.
-  ENABLE_CACHE: 3,
-  DISABLE_CACHE: 4
-};
-
-const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
 const promise = require("promise");
 const Services = require("Services");
 const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
@@ -116,24 +14,22 @@ const EventEmitter = require("devtools/shared/event-emitter");
 const Editor = require("devtools/client/sourceeditor/editor");
 const {TimelineFront} = require("devtools/shared/fronts/timeline");
 const {Task} = require("devtools/shared/task");
+const { ACTIVITY_TYPE } = require("./constants");
+const { EVENTS } = require("./events");
+const { configureStore } = require("./store");
+const Actions = require("./actions/index");
+const { getDisplayedRequestById } = require("./selectors/index");
+const { Prefs } = require("./prefs");
 
-XPCOMUtils.defineConstant(this, "EVENTS", EVENTS);
-XPCOMUtils.defineConstant(this, "ACTIVITY_TYPE", ACTIVITY_TYPE);
-XPCOMUtils.defineConstant(this, "Editor", Editor);
-
-XPCOMUtils.defineLazyModuleGetter(this, "Chart",
+XPCOMUtils.defineConstant(window, "EVENTS", EVENTS);
+XPCOMUtils.defineConstant(window, "ACTIVITY_TYPE", ACTIVITY_TYPE);
+XPCOMUtils.defineConstant(window, "Editor", Editor);
+XPCOMUtils.defineConstant(window, "Prefs", Prefs);
+XPCOMUtils.defineLazyModuleGetter(window, "Chart",
   "resource://devtools/client/shared/widgets/Chart.jsm");
 
-XPCOMUtils.defineLazyServiceGetter(this, "clipboardHelper",
-  "@mozilla.org/widget/clipboardhelper;1", "nsIClipboardHelper");
-
-Object.defineProperty(this, "NetworkHelper", {
-  get: function () {
-    return require("devtools/shared/webconsole/network-helper");
-  },
-  configurable: true,
-  enumerable: true
-});
+// Initialize the global Redux store
+window.gStore = configureStore();
 
 /**
  * Object defining the network monitor controller components.
@@ -170,6 +66,7 @@ var NetMonitorController = {
     }
     this._shutdown = promise.defer();
     {
+      gStore.dispatch(Actions.batchReset());
       NetMonitorView.destroy();
       this.TargetEventsHandler.disconnect();
       this.NetworkEventsHandler.disconnect();
@@ -366,19 +263,18 @@ var NetMonitorController = {
     let deferred = promise.defer();
     let request = null;
     let inspector = function () {
-      let predicate = i => i.value === requestId;
-      request = NetMonitorView.RequestsMenu.getItemForPredicate(predicate);
+      request = getDisplayedRequestById(gStore.getState(), requestId);
       if (!request) {
         // Reset filters so that the request is visible.
-        NetMonitorView.RequestsMenu.filterOn("all");
-        request = NetMonitorView.RequestsMenu.getItemForPredicate(predicate);
+        gStore.dispatch(Actions.toggleFilterType("all"));
+        request = getDisplayedRequestById(gStore.getState(), requestId);
       }
 
       // If the request was found, select it. Otherwise this function will be
       // called again once new requests arrive.
       if (request) {
         window.off(EVENTS.REQUEST_ADDED, inspector);
-        NetMonitorView.RequestsMenu.selectedItem = request;
+        gStore.dispatch(Actions.selectRequest(request.id));
         deferred.resolve();
       }
     };
@@ -477,14 +373,14 @@ TargetEventsHandler.prototype = {
         // Reset UI.
         if (!Services.prefs.getBoolPref("devtools.webconsole.persistlog")) {
           NetMonitorView.RequestsMenu.reset();
-          NetMonitorView.Sidebar.toggle(false);
+        } else {
+          // If the log is persistent, just clear all accumulated timing markers.
+          gStore.dispatch(Actions.clearTimingMarkers());
         }
         // Switch to the default network traffic inspector view.
         if (NetMonitorController.getCurrentActivity() == ACTIVITY_TYPE.NONE) {
           NetMonitorView.showNetworkInspectorView();
         }
-        // Clear any accumulated markers.
-        NetMonitorController.NetworkEventsHandler.clearMarkers();
 
         window.emit(EVENTS.TARGET_WILL_NAVIGATE);
         break;
@@ -508,8 +404,6 @@ TargetEventsHandler.prototype = {
  * Functions handling target network events.
  */
 function NetworkEventsHandler() {
-  this._markers = [];
-
   this._onNetworkEvent = this._onNetworkEvent.bind(this);
   this._onNetworkEventUpdate = this._onNetworkEventUpdate.bind(this);
   this._onDocLoadingMarker = this._onDocLoadingMarker.bind(this);
@@ -533,19 +427,6 @@ NetworkEventsHandler.prototype = {
 
   get timelineFront() {
     return NetMonitorController.timelineFront;
-  },
-
-  get firstDocumentDOMContentLoadedTimestamp() {
-    let marker = this._markers.filter(e => {
-      return e.name == "document::DOMContentLoaded";
-    })[0];
-
-    return marker ? marker.unixTime / 1000 : -1;
-  },
-
-  get firstDocumentLoadTimestamp() {
-    let marker = this._markers.filter(e => e.name == "document::Load")[0];
-    return marker ? marker.unixTime / 1000 : -1;
   },
 
   /**
@@ -604,7 +485,7 @@ NetworkEventsHandler.prototype = {
    */
   _onDocLoadingMarker: function (marker) {
     window.emit(EVENTS.TIMELINE_EVENT, marker);
-    this._markers.push(marker);
+    gStore.dispatch(Actions.addTimingMarker(marker));
   },
 
   /**
@@ -626,8 +507,7 @@ NetworkEventsHandler.prototype = {
     } = networkInfo;
 
     NetMonitorView.RequestsMenu.addRequest(
-      actor, startedDateTime, method, url, isXHR, cause, fromCache,
-        fromServiceWorker
+      actor, {startedDateTime, method, url, isXHR, cause, fromCache, fromServiceWorker}
     );
     window.emit(EVENTS.NETWORK_EVENT, actor);
   },
@@ -716,7 +596,7 @@ NetworkEventsHandler.prototype = {
   _onRequestHeaders: function (response) {
     NetMonitorView.RequestsMenu.updateRequest(response.from, {
       requestHeaders: response
-    }, () => {
+    }).then(() => {
       window.emit(EVENTS.RECEIVED_REQUEST_HEADERS, response.from);
     });
   },
@@ -730,7 +610,7 @@ NetworkEventsHandler.prototype = {
   _onRequestCookies: function (response) {
     NetMonitorView.RequestsMenu.updateRequest(response.from, {
       requestCookies: response
-    }, () => {
+    }).then(() => {
       window.emit(EVENTS.RECEIVED_REQUEST_COOKIES, response.from);
     });
   },
@@ -744,7 +624,7 @@ NetworkEventsHandler.prototype = {
   _onRequestPostData: function (response) {
     NetMonitorView.RequestsMenu.updateRequest(response.from, {
       requestPostData: response
-    }, () => {
+    }).then(() => {
       window.emit(EVENTS.RECEIVED_REQUEST_POST_DATA, response.from);
     });
   },
@@ -758,7 +638,7 @@ NetworkEventsHandler.prototype = {
   _onSecurityInfo: function (response) {
     NetMonitorView.RequestsMenu.updateRequest(response.from, {
       securityInfo: response.securityInfo
-    }, () => {
+    }).then(() => {
       window.emit(EVENTS.RECEIVED_SECURITY_INFO, response.from);
     });
   },
@@ -772,7 +652,7 @@ NetworkEventsHandler.prototype = {
   _onResponseHeaders: function (response) {
     NetMonitorView.RequestsMenu.updateRequest(response.from, {
       responseHeaders: response
-    }, () => {
+    }).then(() => {
       window.emit(EVENTS.RECEIVED_RESPONSE_HEADERS, response.from);
     });
   },
@@ -786,7 +666,7 @@ NetworkEventsHandler.prototype = {
   _onResponseCookies: function (response) {
     NetMonitorView.RequestsMenu.updateRequest(response.from, {
       responseCookies: response
-    }, () => {
+    }).then(() => {
       window.emit(EVENTS.RECEIVED_RESPONSE_COOKIES, response.from);
     });
   },
@@ -800,7 +680,7 @@ NetworkEventsHandler.prototype = {
   _onResponseContent: function (response) {
     NetMonitorView.RequestsMenu.updateRequest(response.from, {
       responseContent: response
-    }, () => {
+    }).then(() => {
       window.emit(EVENTS.RECEIVED_RESPONSE_CONTENT, response.from);
     });
   },
@@ -814,16 +694,9 @@ NetworkEventsHandler.prototype = {
   _onEventTimings: function (response) {
     NetMonitorView.RequestsMenu.updateRequest(response.from, {
       eventTimings: response
-    }, () => {
+    }).then(() => {
       window.emit(EVENTS.RECEIVED_EVENT_TIMINGS, response.from);
     });
-  },
-
-  /**
-   * Clears all accumulated markers.
-   */
-  clearMarkers: function () {
-    this._markers.length = 0;
   },
 
   /**
@@ -843,18 +716,9 @@ NetworkEventsHandler.prototype = {
 };
 
 /**
- * Returns true if this is document is in RTL mode.
- * @return boolean
- */
-XPCOMUtils.defineLazyGetter(window, "isRTL", function () {
-  return window.getComputedStyle(document.documentElement, null)
-    .direction == "rtl";
-});
-
-/**
  * Convenient way of emitting events from the panel window.
  */
-EventEmitter.decorate(this);
+EventEmitter.decorate(window);
 
 /**
  * Preliminary setup for the NetMonitorController object.
@@ -874,14 +738,4 @@ Object.defineProperties(window, {
   }
 });
 
-/**
- * Helper method for debugging.
- * @param string
- */
-function dumpn(str) {
-  if (wantLogging) {
-    dump("NET-FRONTEND: " + str + "\n");
-  }
-}
-
-var wantLogging = Services.prefs.getBoolPref("devtools.debugger.log");
+exports.NetMonitorController = NetMonitorController;

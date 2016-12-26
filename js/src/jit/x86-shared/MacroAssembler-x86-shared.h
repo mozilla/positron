@@ -548,7 +548,7 @@ class MacroAssemblerX86Shared : public Assembler
     void jump(const Address& addr) {
         jmp(Operand(addr));
     }
-    void jump(wasm::JumpTarget target) {
+    void jump(wasm::TrapDesc target) {
         jmp(target);
     }
 
@@ -1300,13 +1300,6 @@ class MacroAssemblerX86Shared : public Assembler
 
             bind(&end);
         }
-    }
-
-    template <typename T1, typename T2>
-    void cmp32Set(Assembler::Condition cond, T1 lhs, T2 rhs, Register dest)
-    {
-        cmp32(lhs, rhs);
-        emitSet(cond, dest);
     }
 
     // Emit a JMP that can be toggled to a CMP. See ToggleToJmp(), ToggleToCmp().

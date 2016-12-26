@@ -115,7 +115,7 @@ GMPVideoDecoderParams::GMPVideoDecoderParams(const CreateDecoderParams& aParams)
   , mCallback(nullptr)
   , mAdapter(nullptr)
   , mImageContainer(aParams.mImageContainer)
-  , mLayersBackend(aParams.mLayersBackend)
+  , mLayersBackend(aParams.GetLayersBackend())
   , mCrashHelper(aParams.mCrashHelper)
 {}
 
@@ -311,7 +311,11 @@ GMPVideoDecoder::Init()
   nsTArray<nsCString> tags;
   InitTags(tags);
   UniquePtr<GetGMPVideoDecoderCallback> callback(new GMPInitDoneCallback(this));
-  if (NS_FAILED(mMPS->GetGMPVideoDecoder(mCrashHelper, &tags, GetNodeId(), Move(callback)))) {
+  if (NS_FAILED(mMPS->GetDecryptingGMPVideoDecoder(mCrashHelper,
+                                                   &tags,
+                                                   GetNodeId(),
+                                                   Move(callback),
+                                                   DecryptorId()))) {
     mInitPromise.Reject(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
   }
 

@@ -39,6 +39,7 @@ public:
                       int32_t aInitialWidth, int32_t aInitialHeight,
                       bool aIsHiddenWindow,
                       nsITabParent *aOpeningTab,
+                      mozIDOMWindowProxy *aOpenerWIndow,
                       nsWidgetInitData& widgetInitData);
 
   nsresult Toolbar();
@@ -69,7 +70,6 @@ protected:
   
   virtual ~nsWebShellWindow();
 
-  void                     LoadContentAreas();
   bool                     ExecuteCloseHandler();
   void                     ConstrainToOpenerScreen(int32_t* aX, int32_t* aY);
 

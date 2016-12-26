@@ -41,6 +41,7 @@
 #include "GLContextSymbols.h"
 #include "base/platform_thread.h"       // for PlatformThreadId
 #include "mozilla/GenericRefCounted.h"
+#include "mozilla/WeakPtr.h"
 #include "gfx2DGlue.h"
 #include "GeckoProfiler.h"
 
@@ -179,6 +180,7 @@ enum class GLRenderer {
     Mali450MP,
     SGX530,
     SGX540,
+    SGX544MP,
     Tegra,
     AndroidEmulator,
     GalliumLlvmpipe,
@@ -190,7 +192,11 @@ enum class GLRenderer {
 class GLContext
     : public GLLibraryLoader
     , public GenericAtomicRefCounted
+    , public SupportsWeakPtr<GLContext>
 {
+public:
+    MOZ_DECLARE_WEAKREFERENCE_TYPENAME(GLContext)
+
 // -----------------------------------------------------------------------------
 // basic enums
 public:
@@ -474,6 +480,8 @@ public:
         IMG_texture_compression_pvrtc,
         IMG_texture_npot,
         KHR_debug,
+        KHR_texture_compression_astc_hdr,
+        KHR_texture_compression_astc_ldr,
         NV_draw_instanced,
         NV_fence,
         NV_framebuffer_blit,

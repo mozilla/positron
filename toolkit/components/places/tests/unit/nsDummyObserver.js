@@ -15,24 +15,24 @@ function DummyObserver() {
 
 DummyObserver.prototype = {
   // history observer
-  onBeginUpdateBatch: function () {},
-  onEndUpdateBatch: function () {},
-  onVisit: function (aURI, aVisitID, aTime, aSessionID, aReferringID, aTransitionType) {
+  onBeginUpdateBatch: function() {},
+  onEndUpdateBatch: function() {},
+  onVisit: function(aURI, aVisitID, aTime, aSessionID, aReferringID, aTransitionType) {
     Services.obs.notifyObservers(null, "dummy-observer-visited", null);
   },
-  onTitleChanged: function () {},
-  onDeleteURI: function () {},
-  onClearHistory: function () {},
-  onPageChanged: function () {},
-  onDeleteVisits: function () {},
+  onTitleChanged: function() {},
+  onDeleteURI: function() {},
+  onClearHistory: function() {},
+  onPageChanged: function() {},
+  onDeleteVisits: function() {},
 
   // bookmark observer
-  //onBeginUpdateBatch: function() {},
-  //onEndUpdateBatch: function() {},
+  // onBeginUpdateBatch: function() {},
+  // onEndUpdateBatch: function() {},
   onItemAdded: function(aItemId, aParentId, aIndex, aItemType, aURI) {
     Services.obs.notifyObservers(null, "dummy-observer-item-added", null);
   },
-  onItemChanged: function () {},
+  onItemChanged: function() {},
   onItemRemoved: function() {},
   onItemVisited: function() {},
   onItemMoved: function() {},

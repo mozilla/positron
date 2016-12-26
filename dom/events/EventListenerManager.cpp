@@ -408,13 +408,11 @@ EventListenerManager::AddEventListenerInternal(
 #endif
       window->SetHasMouseEnterLeaveEventListeners();
     }
-#ifdef MOZ_GAMEPAD
   } else if (aEventMessage >= eGamepadEventFirst &&
              aEventMessage <= eGamepadEventLast) {
     if (nsPIDOMWindowInner* window = GetInnerWindowForTarget()) {
       window->SetHasGamepadEventListener();
     }
-#endif
   } else if (aTypeAtom == nsGkAtoms::onkeydown ||
              aTypeAtom == nsGkAtoms::onkeypress ||
              aTypeAtom == nsGkAtoms::onkeyup) {
@@ -856,7 +854,7 @@ EventListenerManager::SetEventHandler(nsIAtom* aName,
     if (csp) {
       // let's generate a script sample and pass it as aContent,
       // it will not match the hash, but allows us to pass
-      // the script sample in aCOntent.
+      // the script sample in aContent.
       nsAutoString scriptSample, attr, tagName(NS_LITERAL_STRING("UNKNOWN"));
       aName->ToString(attr);
       nsCOMPtr<nsIDOMNode> domNode(do_QueryInterface(mTarget));
@@ -872,6 +870,7 @@ EventListenerManager::SetEventHandler(nsIAtom* aName,
       bool allowsInlineScript = true;
       rv = csp->GetAllowsInline(nsIContentPolicy::TYPE_SCRIPT,
                                 EmptyString(), // aNonce
+                                true, // aParserCreated (true because attribute event handler)
                                 scriptSample,
                                 0,             // aLineNumber
                                 &allowsInlineScript);
@@ -995,14 +994,12 @@ EventListenerManager::CompileEventHandlerInternal(Listener* aListener,
   }
   aListener = nullptr;
 
-  uint32_t lineNo = 0;
   nsAutoCString url (NS_LITERAL_CSTRING("-moz-evil:lying-event-listener"));
   MOZ_ASSERT(body);
   MOZ_ASSERT(aElement);
   nsIURI *uri = aElement->OwnerDoc()->GetDocumentURI();
   if (uri) {
     uri->GetSpec(url);
-    lineNo = 1;
   }
 
   nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(mTarget);
@@ -1072,8 +1069,9 @@ EventListenerManager::CompileEventHandlerInternal(Listener* aListener,
     return NS_ERROR_FAILURE;
   }
   JS::CompileOptions options(cx);
+  // Use line 0 to make the function body starts from line 1.
   options.setIntroductionType("eventHandler")
-         .setFileAndLine(url.get(), lineNo)
+         .setFileAndLine(url.get(), 0)
          .setVersion(JSVERSION_DEFAULT)
          .setElement(&v.toObject())
          .setElementAttributeName(jsStr);

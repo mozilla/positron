@@ -593,6 +593,30 @@ protected:
    */
   Selection& SelectionForTSFRef();
 
+  class MOZ_STACK_CLASS AutoSetTemporarySelection final
+  {
+  public:
+    explicit AutoSetTemporarySelection(Selection& aSelection)
+      : mSelection(aSelection)
+    {
+      mDirty = mSelection.IsDirty();
+      if (mDirty) {
+        mSelection.CollapseAt(0);
+      }
+    }
+
+    ~AutoSetTemporarySelection()
+    {
+      if (mDirty) {
+        mSelection.MarkDirty();
+      }
+    }
+
+ private:
+    Selection& mSelection;
+    bool mDirty;
+  };
+
   struct PendingAction final
   {
     enum ActionType : uint8_t
@@ -688,7 +712,7 @@ protected:
   class MOZ_STACK_CLASS AutoPendingActionAndContentFlusher final
   {
   public:
-    AutoPendingActionAndContentFlusher(TSFTextStore* aTextStore)
+    explicit AutoPendingActionAndContentFlusher(TSFTextStore* aTextStore)
       : mTextStore(aTextStore)
     {
       MOZ_ASSERT(!mTextStore->mIsRecordingActionsWithoutLock);

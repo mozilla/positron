@@ -157,6 +157,8 @@ static const char* const sExtensionNames[] = {
     "GL_IMG_texture_compression_pvrtc",
     "GL_IMG_texture_npot",
     "GL_KHR_debug",
+    "GL_KHR_texture_compression_astc_hdr",
+    "GL_KHR_texture_compression_astc_ldr",
     "GL_NV_draw_instanced",
     "GL_NV_fence",
     "GL_NV_framebuffer_blit",
@@ -825,6 +827,7 @@ GLContext::InitWithPrefixImpl(const char* prefix, bool trygl)
         "Mali-450 MP",
         "PowerVR SGX 530",
         "PowerVR SGX 540",
+        "PowerVR SGX 544MP",
         "NVIDIA Tegra",
         "Android Emulator",
         "Gallium 0.4 on llvmpipe",
@@ -1794,12 +1797,30 @@ GLContext::InitExtensions()
             MarkExtensionSupported(OES_EGL_sync);
         }
 
+        if (Vendor() == GLVendor::ATI) {
+            // ATI drivers say this extension exists, but we can't
+            // actually find the EGLImageTargetRenderbufferStorageOES
+            // extension function pointer in the drivers.
+            MarkExtensionUnsupported(OES_EGL_image);
+        }
+
         if (Vendor() == GLVendor::Imagination &&
             Renderer() == GLRenderer::SGX540)
         {
             // Bug 980048
             MarkExtensionUnsupported(OES_EGL_sync);
         }
+
+#ifdef MOZ_WIDGET_ANDROID
+        if (Vendor() == GLVendor::Imagination &&
+            Renderer() == GLRenderer::SGX544MP &&
+            AndroidBridge::Bridge()->GetAPIVersion() < 21)
+        {
+            // Bug 1026404
+            MarkExtensionUnsupported(OES_EGL_image);
+            MarkExtensionUnsupported(OES_EGL_image_external);
+        }
+#endif
 
         if (Vendor() == GLVendor::ARM &&
             (Renderer() == GLRenderer::Mali400MP ||
@@ -2131,13 +2152,13 @@ GLContext::AssembleOffscreenFBs(const GLuint colorMSRB,
     if (drawFB_out) {
         *drawFB_out = drawFB;
     } else if (drawFB) {
-        NS_RUNTIMEABORT("drawFB created when not requested!");
+        MOZ_CRASH("drawFB created when not requested!");
     }
 
     if (readFB_out) {
         *readFB_out = readFB;
     } else if (readFB) {
-        NS_RUNTIMEABORT("readFB created when not requested!");
+        MOZ_CRASH("readFB created when not requested!");
     }
 
     return isComplete;
@@ -2861,6 +2882,35 @@ GLContext::fReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum f
     }
 
     AfterGLReadCall();
+
+    // Check if GL is giving back 1.0 alpha for
+    // RGBA reads to RGBA images from no-alpha buffers.
+#ifdef XP_MACOSX
+    if (WorkAroundDriverBugs() &&
+        Vendor() == gl::GLVendor::NVIDIA &&
+        format == LOCAL_GL_RGBA &&
+        type == LOCAL_GL_UNSIGNED_BYTE &&
+        !IsCoreProfile() &&
+        width && height)
+    {
+        GLint alphaBits = 0;
+        fGetIntegerv(LOCAL_GL_ALPHA_BITS, &alphaBits);
+        if (!alphaBits) {
+            const uint32_t alphaMask = 0xff000000;
+
+            uint32_t* itr = (uint32_t*)pixels;
+            uint32_t testPixel = *itr;
+            if ((testPixel & alphaMask) != alphaMask) {
+                // We need to set the alpha channel to 1.0 manually.
+                uint32_t* itrEnd = itr + width*height;  // Stride is guaranteed to be width*4.
+
+                for (; itr != itrEnd; itr++) {
+                    *itr |= alphaMask;
+                }
+            }
+        }
+    }
+#endif
 }
 
 void

@@ -20,6 +20,7 @@
 #include "IrishCasing.h"
 
 using namespace mozilla;
+using namespace mozilla::gfx;
 
 // Unicode characters needing special casing treatment in tr/az languages
 #define LATIN_CAPITAL_LETTER_I_WITH_DOT_ABOVE  0x0130
@@ -71,10 +72,9 @@ nsTransformedTextRun::SetCapitalization(uint32_t aStart, uint32_t aLength,
 
 bool
 nsTransformedTextRun::SetPotentialLineBreaks(Range aRange,
-                                             uint8_t* aBreakBefore)
+                                             const uint8_t* aBreakBefore)
 {
-  bool changed =
-    gfxTextRun::SetPotentialLineBreaks(aRange, aBreakBefore);
+  bool changed = gfxTextRun::SetPotentialLineBreaks(aRange, aBreakBefore);
   if (changed) {
     mNeedsRebuild = true;
   }
@@ -310,8 +310,12 @@ nsCaseTransformTextRunFactory::TransformString(
   mozilla::IrishCasing::State irishState;
   uint32_t irishMark = uint32_t(-1); // location of possible prefix letter(s)
                                      // in the output string
-  uint32_t irishMarkSrc; // corresponding location in source string (may differ
-                         // from output due to expansions like eszet -> 'SS')
+  uint32_t irishMarkSrc = uint32_t(-1); // corresponding location in source
+                                        // string (may differ from output due to
+                                        // expansions like eszet -> 'SS')
+  uint32_t greekMark = uint32_t(-1); // location of uppercase ETA that may need
+                                     // tonos added (if it is disjunctive eta)
+  const char16_t kGreekUpperEta = 0x0397;
 
   for (uint32_t i = 0; i < length; ++i, ++aOffsetInTextRun) {
     uint32_t ch = str[i];
@@ -331,6 +335,8 @@ nsCaseTransformTextRunFactory::TransformString(
         greekState.Reset();
         irishState.Reset();
         irishMark = uint32_t(-1);
+        irishMarkSrc = uint32_t(-1);
+        greekMark = uint32_t(-1);
       }
     }
 
@@ -452,7 +458,21 @@ nsCaseTransformTextRunFactory::TransformString(
       }
 
       if (languageSpecificCasing == eLSCB_Greek) {
-        ch = mozilla::GreekCasing::UpperCase(ch, greekState);
+        bool markEta;
+        bool updateEta;
+        ch = mozilla::GreekCasing::UpperCase(ch, greekState,
+                                             markEta, updateEta);
+        if (markEta) {
+          greekMark = aConvertedString.Length();
+        } else if (updateEta) {
+          // Remove the TONOS from an uppercase ETA-TONOS that turned out
+          // not to be disjunctive-eta.
+          MOZ_ASSERT(aConvertedString.Length() > 0 &&
+                     greekMark < aConvertedString.Length(),
+                     "bad greekMark!");
+          aConvertedString.SetCharAt(kGreekUpperEta, greekMark);
+          greekMark = uint32_t(-1);
+        }
         break;
       }
 
@@ -473,6 +493,7 @@ nsCaseTransformTextRunFactory::TransformString(
                          "bad irishMark!");
             str.SetCharAt(ToLowerCase(str[irishMark]), irishMark);
             irishMark = uint32_t(-1);
+            irishMarkSrc = uint32_t(-1);
             break;
           case 2:
             // lowercase two prefix letters (immediately before current pos)
@@ -481,12 +502,15 @@ nsCaseTransformTextRunFactory::TransformString(
             str.SetCharAt(ToLowerCase(str[irishMark]), irishMark);
             str.SetCharAt(ToLowerCase(str[irishMark + 1]), irishMark + 1);
             irishMark = uint32_t(-1);
+            irishMarkSrc = uint32_t(-1);
             break;
           case 3:
             // lowercase one prefix letter, and delete following hyphen
             // (which must be the immediately-preceding char)
             NS_ASSERTION(str.Length() >= 2 && irishMark == str.Length() - 2,
                          "bad irishMark!");
+            MOZ_ASSERT(irishMark != uint32_t(-1) && irishMarkSrc != uint32_t(-1),
+                       "failed to set irishMarks");
             str.Replace(irishMark, 2, ToLowerCase(str[irishMark]));
             aDeletedCharsArray[irishMarkSrc + 1] = true;
             // Remove the trailing entries (corresponding to the deleted hyphen)
@@ -499,6 +523,7 @@ nsCaseTransformTextRunFactory::TransformString(
             }
             mergeNeeded = true;
             irishMark = uint32_t(-1);
+            irishMarkSrc = uint32_t(-1);
             break;
           }
           // ch has been set to the uppercase for current char;

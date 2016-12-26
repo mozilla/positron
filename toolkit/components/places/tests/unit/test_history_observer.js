@@ -27,7 +27,7 @@ NavHistoryObserver.prototype = {
 function onNotify(callback) {
   return new Promise(resolve => {
     let obs = new NavHistoryObserver();
-    obs[callback.name] = function () {
+    obs[callback.name] = function() {
       PlacesUtils.history.removeObserver(this);
       callback.apply(this, arguments);
       resolve();
@@ -100,7 +100,7 @@ add_task(function* test_multiple_onVisit() {
     let observer = {
       _c: 0,
       __proto__: NavHistoryObserver.prototype,
-      onVisit(uri, id, time, undefined, referrerId, transition, guid,
+      onVisit(uri, id, time, unused, referrerId, transition, guid,
               hidden, visitCount, typed) {
         Assert.ok(testuri.equals(uri));
         Assert.ok(id > 0);

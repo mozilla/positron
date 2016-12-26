@@ -39,7 +39,7 @@ ComputeStackString(JSContext* cx);
  * the rug.
  */
 extern void
-ErrorToException(JSContext* cx, const char* message, JSErrorReport* reportp,
+ErrorToException(JSContext* cx, JSErrorReport* reportp,
                  JSErrorCallback callback, void* userRef);
 
 extern JSErrorReport*
@@ -85,8 +85,15 @@ ExnTypeFromProtoKey(JSProtoKey key)
 {
     JSExnType type = static_cast<JSExnType>(key - JSProto_Error);
     MOZ_ASSERT(type >= JSEXN_ERR);
-    MOZ_ASSERT(type < JSEXN_WARN);
+    MOZ_ASSERT(type < JSEXN_ERROR_LIMIT);
     return type;
+}
+
+static inline bool
+IsErrorProtoKey(JSProtoKey key)
+{
+    JSExnType type = static_cast<JSExnType>(key - JSProto_Error);
+    return type >= JSEXN_ERR && type < JSEXN_ERROR_LIMIT;
 }
 
 class AutoClearPendingException

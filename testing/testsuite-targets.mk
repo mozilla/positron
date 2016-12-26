@@ -113,29 +113,9 @@ reftest-b2g:
         $(CHECK_TEST_ERROR); \
 	fi
 
-reftest-ipc: TEST_PATH?=layout/reftests/reftest.list
-reftest-ipc:
-	$(call RUN_REFTEST,'$(topsrcdir)/$(TEST_PATH)' $(OOP_CONTENT))
-	$(CHECK_TEST_ERROR)
-
-reftest-ipc-gpu: TEST_PATH?=layout/reftests/reftest.list
-reftest-ipc-gpu:
-	$(call RUN_REFTEST,'$(topsrcdir)/$(TEST_PATH)' $(OOP_CONTENT) $(GPU_RENDERING))
-	$(CHECK_TEST_ERROR)
-
 crashtest: TEST_PATH?=testing/crashtest/crashtests.list
 crashtest:
 	$(call RUN_REFTEST,'$(topsrcdir)/$(TEST_PATH)')
-	$(CHECK_TEST_ERROR)
-
-crashtest-ipc: TEST_PATH?=testing/crashtest/crashtests.list
-crashtest-ipc:
-	$(call RUN_REFTEST,'$(topsrcdir)/$(TEST_PATH)' $(OOP_CONTENT))
-	$(CHECK_TEST_ERROR)
-
-crashtest-ipc-gpu: TEST_PATH?=testing/crashtest/crashtests.list
-crashtest-ipc-gpu:
-	$(call RUN_REFTEST,'$(topsrcdir)/$(TEST_PATH)' $(OOP_CONTENT) $(GPU_RENDERING))
 	$(CHECK_TEST_ERROR)
 
 jstestbrowser: TESTS_PATH?=test-stage/jsreftest/tests/
@@ -285,10 +265,6 @@ stage-gtest: make-stage-dir
 	cp $(DEPTH)/mozinfo.json $(PKG_STAGE)/gtest
 
 stage-android: make-stage-dir
-ifdef MOZ_ENABLE_SZIP
-# Tinderbox scripts are not unzipping everything, so the file needs to be in a directory it unzips
-	$(NSINSTALL) $(DIST)/host/bin/szip $(PKG_STAGE)/bin/host
-endif
 	$(NSINSTALL) $(topsrcdir)/mobile/android/fonts $(DEPTH)/_tests/reftest
 	$(NSINSTALL) $(topsrcdir)/mobile/android/fonts $(DEPTH)/_tests/testing/mochitest
 
@@ -335,6 +311,12 @@ stage-extensions: make-stage-dir
 	$(NSINSTALL) -D $(PKG_STAGE)/extensions/
 	@$(foreach ext,$(TEST_EXTENSIONS), cp -RL $(DIST)/xpi-stage/$(ext) $(PKG_STAGE)/extensions;)
 
+
+check::
+	$(eval cores=$(shell $(PYTHON) -c 'import multiprocessing; print(multiprocessing.cpu_count())'))
+	@$(topsrcdir)/mach --log-no-times python-test -j$(cores)
+
+
 .PHONY: \
   reftest \
   crashtest \
@@ -354,4 +336,5 @@ stage-extensions: make-stage-dir
   stage-steeplechase \
   stage-instrumentation-tests \
   test-packages-manifest \
+  check \
   $(NULL)

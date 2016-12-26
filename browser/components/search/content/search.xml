@@ -373,12 +373,12 @@
           var textValue = textBox.value;
 
           let selection = this.telemetrySearchDetails;
-          this.doSearch(textValue, aWhere, aEngine, aParams);
+          let oneOffRecorded = false;
 
           if (!selection || (selection.index == -1)) {
-            let recorded = this.textbox.popup.oneOffButtons
-                               .maybeRecordTelemetry(aEvent, aWhere, aParams);
-            if (!recorded) {
+            oneOffRecorded = this.textbox.popup.oneOffButtons
+                                 .maybeRecordTelemetry(aEvent, aWhere, aParams);
+            if (!oneOffRecorded) {
               let source = "unknown";
               let type = "unknown";
               let target = aEvent.originalTarget;
@@ -403,6 +403,9 @@
             }
           }
 
+          // This is a one-off search only if oneOffRecorded is true.
+          this.doSearch(textValue, aWhere, aEngine, aParams, oneOffRecorded);
+
           if (aWhere == "tab" && aParams && aParams.inBackground)
             this.focus();
         ]]></body>
@@ -413,6 +416,7 @@
         <parameter name="aWhere"/>
         <parameter name="aEngine"/>
         <parameter name="aParams"/>
+        <parameter name="aOneOff"/>
         <body><![CDATA[
           var textBox = this._textbox;
 
@@ -434,7 +438,13 @@
           if (telemetrySearchDetails && telemetrySearchDetails.index == -1) {
             telemetrySearchDetails = null;
           }
-          BrowserSearch.recordSearchInTelemetry(engine, "searchbar", telemetrySearchDetails);
+          // If we hit here, we come either from a one-off, a plain search or a suggestion.
+          const details = {
+            isOneOff: aOneOff,
+            isSuggestion: (!aOneOff && telemetrySearchDetails),
+            selection: telemetrySearchDetails
+          };
+          BrowserSearch.recordSearchInTelemetry(engine, "searchbar", details);
           // null parameter below specifies HTML response for search
           let params = {
             postData: submission.postData,
@@ -682,8 +692,8 @@
             // Initially the panel used for the searchbar (PopupSearchAutoComplete
             // in browser.xul) is hidden to avoid impacting startup / new
             // window performance. The base binding's openPopup would normally
-            // call the overriden openAutocompletePopup in urlbarBindings.xml's
-            // browser-autocomplete-result-popup binding to unhide the popup,
+            // call the overriden openAutocompletePopup in
+            // browser-search-autocomplete-result-popup binding to unhide the popup,
             // but since we're overriding openPopup we need to unhide the panel
             // ourselves.
             popup.hidden = false;
@@ -740,6 +750,24 @@
             return true;
           ]]>
         </body>
+      </method>
+
+      <method name="handleEnter">
+        <parameter name="event"/>
+        <body><![CDATA[
+          // Toggle the open state of the add-engine menu button if it's
+          // selected.  We're using handleEnter for this instead of listening
+          // for the command event because a command event isn't fired.
+          if (this.selectedButton &&
+              this.selectedButton.getAttribute("anonid") ==
+                "addengine-menu-button") {
+            this.selectedButton.open = !this.selectedButton.open;
+            return true;
+          }
+          // Otherwise, "call super": do what the autocomplete binding's
+          // handleEnter implementation does.
+          return this.mController.handleEnter(false, event || null);
+        ]]></body>
       </method>
 
       <!-- override |onTextEntered| in autocomplete.xml -->
@@ -806,12 +834,10 @@
           return true;
         },
 
-        doCommand: function (aCommand) {
+        doCommand: function(aCommand) {
           switch (aCommand) {
             case "cmd_clearhistory":
               var param = this._self.getAttribute("autocompletesearchparam");
-
-              let searchBar = this._self.parentNode;
 
               BrowserSearch.searchBar.FormHistory.update({ op : "remove", fieldname : param }, null);
               this._self.value = "";
@@ -856,7 +882,7 @@
       <handler event="dragover">
       <![CDATA[
         var types = event.dataTransfer.types;
-        if (types.contains("text/plain") || types.contains("text/x-moz-text-internal"))
+        if (types.includes("text/plain") || types.includes("text/x-moz-text-internal"))
           event.preventDefault();
       ]]>
       </handler>
@@ -878,7 +904,7 @@
     </handlers>
   </binding>
 
-  <binding id="browser-search-autocomplete-result-popup" extends="chrome://browser/content/urlbarBindings.xml#browser-autocomplete-result-popup">
+  <binding id="browser-search-autocomplete-result-popup" extends="chrome://global/content/bindings/autocomplete.xml#autocomplete-result-popup">
     <resources>
       <stylesheet src="chrome://browser/content/search/searchbarBindings.css"/>
       <stylesheet src="chrome://browser/skin/searchbar.css"/>
@@ -901,6 +927,81 @@
       <xul:vbox anonid="search-one-off-buttons" class="search-one-offs"/>
     </content>
     <implementation>
+      <field name="AppConstants" readonly="true">
+        (Components.utils.import("resource://gre/modules/AppConstants.jsm", {})).AppConstants;
+      </field>
+
+      <method name="openAutocompletePopup">
+        <parameter name="aInput"/>
+        <parameter name="aElement"/>
+        <body><![CDATA[
+          // initially the panel is hidden
+          // to avoid impacting startup / new window performance
+          aInput.popup.hidden = false;
+
+          // this method is defined on the base binding
+          this._openAutocompletePopup(aInput, aElement);
+        ]]></body>
+      </method>
+
+      <method name="onPopupClick">
+        <parameter name="aEvent"/>
+        <body><![CDATA[
+          // Ignore all right-clicks
+          if (aEvent.button == 2)
+            return;
+
+          var controller = this.view.QueryInterface(Components.interfaces.nsIAutoCompleteController);
+
+          var searchBar = BrowserSearch.searchBar;
+          var popupForSearchBar = searchBar && searchBar.textbox == this.mInput;
+          if (popupForSearchBar) {
+            searchBar.telemetrySearchDetails = {
+              index: controller.selection.currentIndex,
+              kind: "mouse"
+            };
+          }
+
+          // Check for unmodified left-click, and use default behavior
+          if (aEvent.button == 0 && !aEvent.shiftKey && !aEvent.ctrlKey &&
+              !aEvent.altKey && !aEvent.metaKey) {
+            controller.handleEnter(true, aEvent);
+            return;
+          }
+
+          // Check for middle-click or modified clicks on the search bar
+          if (popupForSearchBar) {
+            // Handle search bar popup clicks
+            var search = controller.getValueAt(this.selectedIndex);
+
+            // open the search results according to the clicking subtlety
+            var where = whereToOpenLink(aEvent, false, true);
+            let params = {};
+
+            // But open ctrl/cmd clicks on autocomplete items in a new background tab.
+            let modifier = this.AppConstants.platform == "macosx" ?
+                           aEvent.metaKey :
+                           aEvent.ctrlKey;
+            if (where == "tab" && (aEvent instanceof MouseEvent) &&
+                (aEvent.button == 1 || modifier))
+              params.inBackground = true;
+
+            // leave the popup open for background tab loads
+            if (!(where == "tab" && params.inBackground)) {
+              // close the autocomplete popup and revert the entered search term
+              this.closePopup();
+              controller.handleEscape();
+            }
+
+            searchBar.doSearch(search, where, null, params);
+            if (where == "tab" && params.inBackground)
+              searchBar.focus();
+            else
+              searchBar.value = search;
+          }
+        ]]></body>
+      </method>
+
       <!-- Popup rollup is triggered by native events before the mousedown event
            reaches the DOM. The will be set to true by the popuphiding event and
            false after the mousedown event has been triggered to detect what
@@ -976,10 +1077,12 @@
           );
           this.style.minWidth = minWidth + "px";
 
+          // Set the origin before assigning the popup, as the assignment does
+          // a rebuild and would miss the origin.
+          this.oneOffButtons.telemetryOrigin = "searchbar";
           // Set popup after setting the minWidth since it builds the buttons.
           this.oneOffButtons.popup = this;
           this.oneOffButtons.textbox = this.input;
-          this.oneOffButtons.telemetryOrigin = "searchbar";
         }
 
         // First handle deciding if we are showing the reduced version of the
@@ -1358,42 +1461,7 @@
           // Handle opensearch items. This needs to be done before building the
           // list of one off providers, as that code will return early if all the
           // alternative engines are hidden.
-          let addEngineList =
-            document.getAnonymousElementByAttribute(this, "anonid", "add-engines");
-          while (addEngineList.firstChild)
-            addEngineList.firstChild.remove();
-
-          const kXULNS =
-            "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-
-          // Add a button for each engine that the page in the selected browser
-          // offers.  But not when the one-offs are compact.  Compact one-offs
-          // are shown in the urlbar, and the add-engine buttons span the width
-          // of the popup, so if we added all the engines that a site offers, it
-          // could effectively break the urlbar popup by offering a ton of
-          // engines.  We should probably make a smaller version of the buttons
-          // for compact one-offs.
-          if (!this.compact) {
-            for (let engine of gBrowser.selectedBrowser.engines || []) {
-              let button = document.createElementNS(kXULNS, "button");
-              let label = this.bundle.formatStringFromName("cmd_addFoundEngine",
-                                                           [engine.title], 1);
-              button.id = this.telemetryOrigin + "-add-engine-" +
-                          engine.title.replace(/ /g, '-');
-              button.setAttribute("class", "addengine-item");
-              button.setAttribute("label", label);
-              button.setAttribute("pack", "start");
-
-              button.setAttribute("crop", "end");
-              button.setAttribute("tooltiptext", engine.uri);
-              button.setAttribute("uri", engine.uri);
-              if (engine.icon) {
-                button.setAttribute("image", engine.icon);
-              }
-              button.setAttribute("title", engine.title);
-              addEngineList.appendChild(button);
-            }
-          }
+          this._rebuildAddEngineList();
 
           let settingsButton =
             document.getAnonymousElementByAttribute(this, "anonid",
@@ -1451,6 +1519,9 @@
           compactSettingsEl.id = this.telemetryOrigin +
                                  "-anon-search-settings-compact";
 
+          const kXULNS =
+            "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+
           let dummyItems = enginesPerRow - (oneOffCount % enginesPerRow || enginesPerRow);
           for (let i = 0; i < engines.length; ++i) {
             let engine = engines[i];
@@ -1507,11 +1578,127 @@
         ]]></body>
       </method>
 
+      <!-- If a page offers more than this number of engines, the add-engines
+           menu button is shown, instead of showing the engines directly in the
+           popup. -->
+      <field name="_addEngineMenuThreshold">5</field>
+
+      <method name="_rebuildAddEngineList">
+        <body><![CDATA[
+        let list = document.getAnonymousElementByAttribute(this, "anonid",
+                                                           "add-engines");
+        while (list.firstChild) {
+          list.firstChild.remove();
+        }
+
+        // Add a button for each engine that the page in the selected browser
+        // offers, but with the following exceptions:
+        //
+        // (1) Not when the one-offs are compact.  Compact one-offs are shown in
+        // the urlbar, and the add-engine buttons span the width of the popup,
+        // so if we added all the engines that a page offers, it could break the
+        // urlbar popup by offering a ton of engines.  We should probably make a
+        // smaller version of the buttons for compact one-offs.
+        //
+        // (2) Not when there are too many offered engines.  The popup isn't
+        // designed to handle too many (by scrolling for example), so a page
+        // could break the popup by offering too many.  Instead, add a single
+        // menu button with a submenu of all the engines.
+
+        if (this.compact || !gBrowser.selectedBrowser.engines) {
+          return;
+        }
+
+        const kXULNS =
+          "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+
+        let engines = gBrowser.selectedBrowser.engines;
+        let tooManyEngines = engines.length > this._addEngineMenuThreshold;
+
+        if (tooManyEngines) {
+          // Make the top-level menu button.
+          let button = document.createElementNS(kXULNS, "button");
+          list.appendChild(button);
+          button.classList.add("addengine-item");
+          button.setAttribute("anonid", "addengine-menu-button");
+          button.setAttribute("type", "menu");
+          button.setAttribute("label",
+            this.bundle.GetStringFromName("cmd_addFoundEngineMenu"));
+          button.setAttribute("crop", "end");
+          button.setAttribute("pack", "start");
+
+          // Set the menu button's image to the image of the first engine.  The
+          // offered engines may have differing images, so there's no perfect
+          // choice here.
+          let engine = engines[0];
+          if (engine.icon) {
+            button.setAttribute("image", engine.icon);
+          }
+
+          // Now make the button's child menupopup.
+          list = document.createElementNS(kXULNS, "menupopup");
+          button.appendChild(list);
+          list.setAttribute("anonid", "addengine-menu");
+          list.setAttribute("position", "topright topleft");
+
+          // Events from child menupopups bubble up to the autocomplete binding,
+          // which breaks it, so prevent these events from propagating.
+          let suppressEventTypes = [
+            "popupshowing",
+            "popuphiding",
+            "popupshown",
+            "popuphidden",
+          ];
+          for (let type of suppressEventTypes) {
+            list.addEventListener(type, event => {
+              event.stopPropagation();
+            });
+          }
+        }
+
+        // Finally, add the engines to the list.  If there aren't too many
+        // engines, the list is the add-engines vbox.  Otherwise it's the
+        // menupopup created earlier.  In the latter case, create menuitem
+        // elements instead of buttons, because buttons don't get keyboard
+        // handling for free inside menupopups.
+        let eltType = tooManyEngines ? "menuitem" : "button";
+        for (let engine of engines) {
+          let button = document.createElementNS(kXULNS, eltType);
+          button.classList.add("addengine-item");
+          button.id = this.telemetryOrigin + "-add-engine-" +
+                      this._fixUpEngineNameForID(engine.title);
+          let label = this.bundle.formatStringFromName("cmd_addFoundEngine",
+                                                       [engine.title], 1);
+          button.setAttribute("label", label);
+          button.setAttribute("crop", "end");
+          button.setAttribute("tooltiptext", engine.uri);
+          button.setAttribute("uri", engine.uri);
+          button.setAttribute("title", engine.title);
+          if (engine.icon) {
+            button.setAttribute("image", engine.icon);
+          }
+          if (tooManyEngines) {
+            button.classList.add("menuitem-iconic");
+          } else {
+            button.setAttribute("pack", "start");
+          }
+          list.appendChild(button);
+        }
+        ]]></body>
+      </method>
+
       <method name="_buttonIDForEngine">
         <parameter name="engine"/>
         <body><![CDATA[
           return this.telemetryOrigin + "-engine-one-off-item-" +
-                 engine.name.replace(/ /g, '-');
+                 this._fixUpEngineNameForID(engine.name);
+        ]]></body>
+      </method>
+
+      <method name="_fixUpEngineNameForID">
+        <parameter name="name"/>
+        <body><![CDATA[
+          return name.replace(/ /g, "-");
         ]]></body>
       </method>
 
@@ -1670,9 +1857,6 @@
         <parameter name="aWrapAround"/>
         <parameter name="aCycleEngines"/>
         <body><![CDATA[
-          let popup = this.popup;
-          let list = document.getAnonymousElementByAttribute(popup, "anonid",
-                                                             "search-panel-one-offs");
           let selectedButton = this.selectedButton;
           let buttons = this.getSelectableButtons(aCycleEngines);
 
@@ -1840,6 +2024,22 @@
             }
           }
 
+          // If the add-engine overflow menu item is selected and the user
+          // presses the right arrow key, open the submenu.  Unfortunately
+          // handling the left arrow key -- to close the popup -- isn't
+          // straightforward.  Once the popup is open, it consumes all key
+          // events.  Setting ignorekeys=handled on it doesn't help, since the
+          // popup handles all arrow keys.  Setting ignorekeys=true on it does
+          // mean that the popup no longer consumes the left arrow key, but then
+          // it no longer handles up/down keys to select items in the popup.
+          else if (this.selectedButton &&
+                   this.selectedButton.getAttribute("anonid") ==
+                     "addengine-menu-button" &&
+                   event.keyCode == KeyEvent.DOM_VK_RIGHT) {
+            this.selectedButton.open = true;
+            stopEvent = true;
+          }
+
           if (stopEvent) {
             event.preventDefault();
             event.stopPropagation();
@@ -1913,17 +2113,61 @@
         ]]></body>
       </method>
 
+      <!-- All this stuff is to make the add-engines menu button behave like an
+           actual menu.  The add-engines menu button is shown when there are
+           many engines offered by the current site. -->
+      <field name="_addEngineMenuTimeoutMs">200</field>
+      <field name="_addEngineMenuTimeout">null</field>
+      <field name="_addEngineMenuShouldBeOpen">false</field>
+
+      <method name="_resetAddEngineMenuTimeout">
+        <body><![CDATA[
+        if (this._addEngineMenuTimeout) {
+          clearTimeout(this._addEngineMenuTimeout);
+        }
+        this._addEngineMenuTimeout = setTimeout(() => {
+          delete this._addEngineMenuTimeout;
+          let button = document.getAnonymousElementByAttribute(
+            this, "anonid", "addengine-menu-button"
+          );
+          button.open = this._addEngineMenuShouldBeOpen;
+        }, this._addEngineMenuTimeoutMs);
+        ]]></body>
+      </method>
+
     </implementation>
 
     <handlers>
 
       <handler event="mousedown"><![CDATA[
+        let target = event.originalTarget;
+        if (!target.classList.contains("searchbar-engine-one-off-item")) {
+          return;
+        }
         // Required to receive click events from the buttons on Linux.
         event.preventDefault();
       ]]></handler>
 
       <handler event="mousemove"><![CDATA[
         let target = event.originalTarget;
+
+        // Handle mouseover on the add-engine menu button and its popup items.
+        if (target.getAttribute("anonid") == "addengine-menu-button" ||
+            (target.localName == "menuitem" &&
+             target.classList.contains("addengine-item"))) {
+          // Make the menu button visually selected.  It's highlighted in the
+          // CSS when the popup is open, but the popup doesn't open until a
+          // short timeout has elapsed.  Making the button visually selected now
+          // provides better feedback to the user.
+          let menuButton = document.getAnonymousElementByAttribute(
+            this, "anonid", "addengine-menu-button"
+          );
+          this._changeVisuallySelectedButton(menuButton);
+          this._addEngineMenuShouldBeOpen = true;
+          this._resetAddEngineMenuTimeout();
+          return;
+        }
+
         if (target.localName != "button")
           return;
 
@@ -1931,8 +2175,10 @@
          if (this._ignoreMouseEvents)
            return;
 
-        if ((target.classList.contains("searchbar-engine-one-off-item") &&
-             !target.classList.contains("dummy")) ||
+        let isOneOff =
+          target.classList.contains("searchbar-engine-one-off-item") &&
+          !target.classList.contains("dummy");
+        if (isOneOff ||
             target.classList.contains("addengine-item") ||
             target.classList.contains("search-setting-button")) {
           this._changeVisuallySelectedButton(target);
@@ -1940,7 +2186,21 @@
       ]]></handler>
 
       <handler event="mouseout"><![CDATA[
+
         let target = event.originalTarget;
+
+        // Handle mouseout on the add-engine menu button and its popup items.
+        if (target.getAttribute("anonid") == "addengine-menu-button" ||
+            (target.localName == "menuitem" &&
+             target.classList.contains("addengine-item"))) {
+          // The menu button will appear selected since the mouse is either over
+          // it or over one of the menu items in the popup.  Make it unselected.
+          this._changeVisuallySelectedButton(null);
+          this._addEngineMenuShouldBeOpen = false;
+          this._resetAddEngineMenuTimeout();
+          return;
+        }
+
         if (target.localName != "button") {
           return;
         }
@@ -1969,14 +2229,6 @@
 
         if (!engine)
           return;
-
-        // For some reason, if the context menu had been opened prior to the
-        // click, the suggestions popup won't be closed after loading the search
-        // in the current tab - so we hide it manually. Some focusing magic
-        // that happens when a search is loaded ensures that the popup is opened
-        // again if it needs to be, so we don't need to worry about which cases
-        // require manual hiding.
-        this.popup.hidePopup();
 
         // Select the clicked button so that consumers can easily tell which
         // button was acted on.
@@ -2026,17 +2278,19 @@
         if (anonid == "search-one-offs-context-set-default") {
           let currentEngine = Services.search.currentEngine;
 
-          // Make the target button of the context menu reflect the current
-          // search engine first. Doing this as opposed to rebuilding all the
-          // one-off buttons avoids flicker.
-          let button = this._buttonForEngine(this._contextEngine);
-          button.id = this._buttonIDForEngine(currentEngine);
-          let uri = "chrome://browser/skin/search-engine-placeholder.png";
-          if (currentEngine.iconURI)
-            uri = currentEngine.iconURI.spec;
-          button.setAttribute("image", uri);
-          button.setAttribute("tooltiptext", currentEngine.name);
-          button.engine = currentEngine;
+          if (!this.getAttribute("includecurrentengine")) {
+            // Make the target button of the context menu reflect the current
+            // search engine first. Doing this as opposed to rebuilding all the
+            // one-off buttons avoids flicker.
+            let button = this._buttonForEngine(this._contextEngine);
+            button.id = this._buttonIDForEngine(currentEngine);
+            let uri = "chrome://browser/skin/search-engine-placeholder.png";
+            if (currentEngine.iconURI)
+              uri = currentEngine.iconURI.spec;
+            button.setAttribute("image", uri);
+            button.setAttribute("tooltiptext", currentEngine.name);
+            button.engine = currentEngine;
+          }
 
           Services.search.currentEngine = this._contextEngine;
         }

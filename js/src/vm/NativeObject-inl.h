@@ -99,7 +99,7 @@ NativeObject::removeDenseElementForSparseIndex(ExclusiveContext* cx,
 {
     MarkObjectGroupFlags(cx, obj, OBJECT_FLAG_NON_PACKED | OBJECT_FLAG_SPARSE_INDEXES);
     if (obj->containsDenseElement(index))
-        obj->setDenseElement(index, MagicValue(JS_ELEMENTS_HOLE));
+        obj->setDenseElementUnchecked(index, MagicValue(JS_ELEMENTS_HOLE));
 }
 
 inline bool
@@ -120,6 +120,7 @@ NativeObject::ensureDenseInitializedLengthNoPackedCheck(ExclusiveContext* cx, ui
                                                         uint32_t extra)
 {
     MOZ_ASSERT(!denseElementsAreCopyOnWrite());
+    MOZ_ASSERT(!denseElementsAreFrozen());
 
     /*
      * Ensure that the array's contents have been initialized up to index, and
@@ -154,6 +155,7 @@ NativeObject::extendDenseElements(ExclusiveContext* cx,
                                   uint32_t requiredCapacity, uint32_t extra)
 {
     MOZ_ASSERT(!denseElementsAreCopyOnWrite());
+    MOZ_ASSERT(!denseElementsAreFrozen());
 
     /*
      * Don't grow elements for non-extensible objects or watched objects. Dense
@@ -161,7 +163,7 @@ NativeObject::extendDenseElements(ExclusiveContext* cx,
      * long as there is capacity for them.
      */
     if (!nonProxyIsExtensible() || watched()) {
-        MOZ_ASSERT(getDenseCapacity() == 0 || (!watched() && getElementsHeader()->isFrozen()));
+        MOZ_ASSERT(getDenseCapacity() == 0);
         return DenseElementResult::Incomplete;
     }
 
@@ -249,9 +251,9 @@ NativeObject::copy(ExclusiveContext* cx, gc::AllocKind kind, gc::InitialHeap hea
     RootedObjectGroup group(cx, templateObject->group());
     MOZ_ASSERT(!templateObject->denseElementsAreCopyOnWrite());
 
-    JSObject* baseObj = create(cx, kind, heap, shape, group);
-    if (!baseObj)
-        return nullptr;
+    JSObject* baseObj;
+    JS_TRY_VAR_OR_RETURN_NULL(cx, baseObj, create(cx, kind, heap, shape, group));
+
     NativeObject* obj = &baseObj->as<NativeObject>();
 
     size_t span = shape->slotSpan();
@@ -289,7 +291,7 @@ NativeObject::setSlotWithType(ExclusiveContext* cx, Shape* shape,
 inline void
 NativeObject::updateShapeAfterMovingGC()
 {
-    Shape* shape = shape_.unbarrieredGet();
+    Shape* shape = shape_;
     if (IsForwarded(shape))
         shape_.unsafeSet(Forwarded(shape));
 }
@@ -593,8 +595,8 @@ ThrowIfNotConstructing(JSContext *cx, const CallArgs &args, const char *builtinN
 {
     if (args.isConstructing())
         return true;
-    return JS_ReportErrorFlagsAndNumber(cx, JSREPORT_ERROR, GetErrorMessage, nullptr,
-                                        JSMSG_BUILTIN_CTOR_NO_NEW, builtinName);
+    return JS_ReportErrorFlagsAndNumberASCII(cx, JSREPORT_ERROR, GetErrorMessage, nullptr,
+                                             JSMSG_BUILTIN_CTOR_NO_NEW, builtinName);
 }
 
 inline bool

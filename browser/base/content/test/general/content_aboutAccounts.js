@@ -30,23 +30,23 @@ addEventListener("DOMContentLoaded", function domContentLoaded(event) {
   }
   // We use DOMContentLoaded here as that fires for our iframe even when we've
   // arranged for the URL in the iframe to cause an error.
-  addEventListener("DOMContentLoaded", function iframeLoaded(event) {
+  addEventListener("DOMContentLoaded", function iframeLoaded(dclEvent) {
     if (iframe.contentWindow.location.href == "about:blank" ||
-        event.target != iframe.contentDocument) {
+        dclEvent.target != iframe.contentDocument) {
       return;
     }
     removeEventListener("DOMContentLoaded", iframeLoaded, true);
     sendAsyncMessage("test:iframe:load", {url: iframe.contentDocument.location.href});
     // And an event listener for the test responses, which we send to the test
     // via a message.
-    iframe.contentWindow.addEventListener("FirefoxAccountsTestResponse", function (event) {
-      sendAsyncMessage("test:response", {data: event.detail.data});
+    iframe.contentWindow.addEventListener("FirefoxAccountsTestResponse", function(fxAccountsEvent) {
+      sendAsyncMessage("test:response", {data: fxAccountsEvent.detail.data});
     }, true);
   }, true);
 }, true);
 
 // Return the visibility state of a list of ids.
-addMessageListener("test:check-visibilities", function (message) {
+addMessageListener("test:check-visibilities", function(message) {
   let result = {};
   for (let id of message.data.ids) {
     let elt = content.document.getElementById(id);
@@ -66,15 +66,15 @@ addMessageListener("test:check-visibilities", function (message) {
   sendAsyncMessage("test:check-visibilities-response", result);
 });
 
-addMessageListener("test:load-with-mocked-profile-path", function (message) {
+addMessageListener("test:load-with-mocked-profile-path", function(message) {
   addEventListener("DOMContentLoaded", function domContentLoaded(event) {
     removeEventListener("DOMContentLoaded", domContentLoaded, true);
     content.getDefaultProfilePath = () => message.data.profilePath;
     // now wait for the iframe to load.
     let iframe = content.document.getElementById("remote");
-    iframe.addEventListener("load", function iframeLoaded(event) {
+    iframe.addEventListener("load", function iframeLoaded(loadEvent) {
       if (iframe.contentWindow.location.href == "about:blank" ||
-          event.target != iframe) {
+          loadEvent.target != iframe) {
         return;
       }
       iframe.removeEventListener("load", iframeLoaded, true);

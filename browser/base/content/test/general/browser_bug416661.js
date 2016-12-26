@@ -4,7 +4,7 @@ function start_test_prefNotSet() {
     is(ZoomManager.zoom, 1, "initial zoom level should be 1");
     FullZoom.enlarge();
 
-    //capture the zoom level to test later
+    // capture the zoom level to test later
     zoomLevel = ZoomManager.zoom;
     isnot(zoomLevel, 1, "zoom level should have changed");
 
@@ -12,7 +12,7 @@ function start_test_prefNotSet() {
   }).then(continue_test_prefNotSet, FullZoomHelper.failAndContinue(finish));
 }
 
-function continue_test_prefNotSet () {
+function continue_test_prefNotSet() {
   Task.spawn(function* () {
     is(ZoomManager.zoom, 1, "zoom level pref should not apply to an image");
     yield FullZoom.reset();

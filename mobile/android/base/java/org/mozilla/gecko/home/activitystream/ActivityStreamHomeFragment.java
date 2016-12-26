@@ -11,6 +11,8 @@ import android.view.View;
 import android.view.ViewGroup;
 
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.Telemetry;
+import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.home.HomeFragment;
 
 /**
@@ -19,6 +21,8 @@ import org.mozilla.gecko.home.HomeFragment;
 public class ActivityStreamHomeFragment
         extends HomeFragment {
     private ActivityStream activityStream;
+
+    private boolean isSessionActive;
 
     @Override
     protected void load() {
@@ -31,9 +35,56 @@ public class ActivityStreamHomeFragment
                              @Nullable Bundle savedInstanceState) {
         if (activityStream == null) {
             activityStream = (ActivityStream) inflater.inflate(R.layout.activity_stream, container, false);
-            activityStream.setOnUrlOpenListener(mUrlOpenListener);
+            activityStream.setOnUrlOpenListeners(mUrlOpenListener, mUrlOpenInBackgroundListener);
         }
 
         return activityStream;
+    }
+
+    @Override
+    public void setUserVisibleHint(boolean isVisibleToUser) {
+        super.setUserVisibleHint(isVisibleToUser);
+
+        if (isVisibleToUser) {
+            sendPanelShownTelemetry();
+        } else {
+            sendPanelHiddenTelemetry();
+        }
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+
+        if (!isSessionActive && getUserVisibleHint()) {
+            // The activity is being resumed and we are showing the panel again: Start session.
+            sendPanelShownTelemetry();
+        }
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+
+        // User is navigating away from activity (to other app or settings). Stop the session.
+        sendPanelHiddenTelemetry();
+    }
+
+    private void sendPanelHiddenTelemetry() {
+        if (isSessionActive) {
+            Telemetry.sendUIEvent(TelemetryContract.Event.CANCEL, TelemetryContract.Method.PANEL, "as_newtab");
+
+            Telemetry.stopUISession(TelemetryContract.Session.ACTIVITY_STREAM, "newtab");
+
+            isSessionActive = false;
+        }
+    }
+
+    private void sendPanelShownTelemetry() {
+        Telemetry.startUISession(TelemetryContract.Session.ACTIVITY_STREAM, "newtab");
+
+        Telemetry.sendUIEvent(TelemetryContract.Event.SHOW, TelemetryContract.Method.PANEL, "as_newtab");
+
+        isSessionActive = true;
     }
 }

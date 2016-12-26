@@ -17,7 +17,6 @@
 #include "mozilla/layers/AsyncCanvasRenderer.h"
 #include "mozilla/layers/CompositableForwarder.h"
 #include "mozilla/layers/CompositorBridgeChild.h" // for CompositorBridgeChild
-#include "mozilla/layers/GrallocTextureClient.h"
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/layers/TextureClient.h"  // for TextureClient, etc
 #include "mozilla/layers/TextureClientOGL.h"
@@ -501,7 +500,9 @@ CanvasClientSharedSurface::Updated()
   mNewFront = nullptr;
 
   // Add the new TexClient.
-  MOZ_ALWAYS_TRUE( AddTextureClient(mFront) );
+  if (!AddTextureClient(mFront)) {
+    return;
+  }
 
   AutoTArray<CompositableForwarder::TimedTextureClient,1> textures;
   CompositableForwarder::TimedTextureClient* t = textures.AppendElement();

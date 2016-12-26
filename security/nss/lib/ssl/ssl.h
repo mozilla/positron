@@ -228,7 +228,7 @@ SSL_IMPORT PRFileDesc *DTLS_ImportFD(PRFileDesc *model, PRFileDesc *fd);
  * on the server to read that data. Calls to
  * SSL_GetPreliminaryChannelInfo() and SSL_GetNextProto()
  * can be made used during this period to learn about the channel
- * parameters [TODO(ekr@rtfm.com): This hasn't landed yet].
+ * parameters.
  *
  * The transition between the 0-RTT and 1-RTT modes is marked by the
  * handshake callback.
@@ -342,49 +342,56 @@ SSL_IMPORT SECStatus SSL_CipherPolicySet(PRInt32 cipher, PRInt32 policy);
 SSL_IMPORT SECStatus SSL_CipherPolicyGet(PRInt32 cipher, PRInt32 *policy);
 
 /*
-** Control for TLS signature algorithms for TLS 1.2 only.
+** Control for TLS signature schemes for TLS 1.2 and 1.3.
 **
-** This governs what signature algorithms are sent by a client in the
-** signature_algorithms extension.  A client will not accept a signature from a
-** server unless it uses an enabled algorithm.
+** This governs what signature schemes (or algorithms) are sent by a client in
+** the signature_algorithms extension.  A client will not accept a signature
+** from a server unless it uses an enabled algorithm.
 **
 ** This also governs what the server sends in the supported_signature_algorithms
 ** field of a CertificateRequest.
 **
 ** This changes what the server uses to sign ServerKeyExchange and
 ** CertificateVerify messages.  An endpoint uses the first entry from this list
-** that is compatible with both its certificate and its peer's advertised
+** that is compatible with both its certificate and its peer's supported
 ** values.
 **
-** Omitting SHA-256 from this list might be foolish.  Support is mandatory in
-** TLS 1.2 and there might be interoperability issues.
+** NSS uses the strict signature schemes from TLS 1.3 in TLS 1.2.  That means
+** that if a peer indicates support for SHA-384 and ECDSA, NSS will not
+** generate a signature if it has a P-256 key, even though that is permitted in
+** TLS 1.2.
 **
-** NSS doesn't support the full combinatorial matrix of hash and signature
-** algorithms with all keys.  NSS preferentially uses the schemes that are
-** defined in TLS 1.3.
-**
-** To select TLS 1.3 signature schemes, split the SignatureScheme into an most
-** significant octet (the hash) and a less significant octet (the signature) and
-** then use this structure.
+** Omitting SHA-256 schemes from this list might be foolish.  Support is
+** mandatory in TLS 1.2 and 1.3 and there might be interoperability issues.
 */
+SSL_IMPORT SECStatus SSL_SignatureSchemePrefSet(
+    PRFileDesc *fd, const SSLSignatureScheme *schemes, unsigned int count);
+
+/* Deprecated, use SSL_SignatureSchemePrefSet() instead. */
 SSL_IMPORT SECStatus SSL_SignaturePrefSet(
     PRFileDesc *fd, const SSLSignatureAndHashAlg *algorithms,
     unsigned int count);
 
 /*
-** Get the currently configured signature algorithms.
+** Get the currently configured signature schemes.
 **
-** The algorithms are written to |algorithms| but not if there are more than
-** |maxCount| values configured.  The number of algorithms that are in use are
+** The schemes are written to |schemes| but not if there are more than
+** |maxCount| values configured.  The number of schemes that are in use are
 ** written to |count|.  This fails if |maxCount| is insufficiently large.
 */
+SSL_IMPORT SECStatus SSL_SignatureSchemePrefGet(
+    PRFileDesc *fd, SSLSignatureScheme *algorithms, unsigned int *count,
+    unsigned int maxCount);
+
+/* Deprecated, use SSL_SignatureSchemePrefGet() instead. */
 SSL_IMPORT SECStatus SSL_SignaturePrefGet(
     PRFileDesc *fd, SSLSignatureAndHashAlg *algorithms, unsigned int *count,
     unsigned int maxCount);
 
 /*
 ** Returns the maximum number of signature algorithms that are supported and
-** can be set or retrieved using SSL_SignaturePrefSet or SSL_SignaturePrefGet.
+** can be set or retrieved using SSL_SignatureSchemePrefSet or
+** SSL_SignatureSchemePrefGet.
 */
 SSL_IMPORT unsigned int SSL_SignatureMaxCount();
 
@@ -1208,6 +1215,16 @@ SSL_IMPORT SECStatus SSL_ExportKeyingMaterial(PRFileDesc *fd,
                                               unsigned int contextLen,
                                               unsigned char *out,
                                               unsigned int outLen);
+
+/* Early exporters are used if 0-RTT is enabled.  This is TLS 1.3 only.  Note
+ * that in TLS 1.3, an empty context is equivalent to an absent context. */
+SSL_IMPORT SECStatus SSL_ExportEarlyKeyingMaterial(PRFileDesc *fd,
+                                                   const char *label,
+                                                   unsigned int labelLen,
+                                                   const unsigned char *context,
+                                                   unsigned int contextLen,
+                                                   unsigned char *out,
+                                                   unsigned int outLen);
 
 /*
 ** Return a new reference to the certificate that was most recently sent

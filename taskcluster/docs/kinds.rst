@@ -11,6 +11,10 @@ users or automated tests.  This is more restrictive than most definitions of
 "build" in a Mozilla context: it does not include tasks that run build-like
 actions for static analysis or to produce instrumented artifacts.
 
+build-signing
+--------------
+
+
 artifact-build
 --------------
 
@@ -70,13 +74,6 @@ spidermonkey
 Spidermonkey tasks check out the full gecko source tree, then compile only the
 spidermonkey portion.  Each task runs specific tests after the build.
 
-b2g-device
-----------
-
-B2G device builds produce binaries targetted to specific devices.  These
-involve some device-specific binaries which are not redistributable, so the
-inputs to and outputs from these tasks are restricted.
-
 marionette-harness
 ------------------
 
@@ -91,12 +88,13 @@ files named in ``kind.yml``:
 
  * For each build task, determine the related test platforms based on the build
    platform.  For example, a Windows 2010 build might be tested on Windows 7
-   and Windows 10.  Each test platform specifies a "test set" indicating which
+   and Windows 10.  Each test platform specifies "test sets" indicating which
    tests to run.  This is configured in the file named
    ``test-platforms.yml``.
 
  * Each test set is expanded to a list of tests to run.  This is configured in
-   the file named by ``test-sets.yml``.
+   the file named by ``test-sets.yml``. A platform may specify several test
+   sets, in which case the union of those sets is used.
 
  * Each named test is looked up in the file named by ``tests.yml`` to find a
    test description.  This test description indicates what the test does, how
@@ -141,7 +139,7 @@ Docker tasks run.
 The tasks to generate each docker image have predictable labels:
 ``build-docker-image-<name>``.
 
-Docker images are built from subdirectories of ``testing/docker``, using
+Docker images are built from subdirectories of ``taskcluster/docker``, using
 ``docker build``.  There is currently no capability for one Docker image to
 depend on another in-tree docker image, without uploading the latter to a
 Docker repository
@@ -149,3 +147,6 @@ Docker repository
 The task definition used to create the image-building tasks is given in
 ``image.yml`` in the kind directory, and is interpreted as a :doc:`YAML
 Template <yaml-templates>`.
+
+android-stuff
+--------------

@@ -62,8 +62,10 @@ Structure:
       keyedHistograms: {...},
       chromeHangs: {...},
       threadHangStats: [...],
+      capturedStacks: {...},
       log: [...],
       webrtc: {...},
+      gc: {...},
       fileIOReports: {...},
       lateWrites: {...},
       addonDetails: {...},
@@ -223,7 +225,7 @@ As of Firefox 48, this section does not contain empty keyed histograms anymore.
 
 threadHangStats
 ---------------
-Contains the statistics about the hangs in main and background threads. Note that hangs in this section capture the [C++ pseudostack](https://developer.mozilla.org/en-US/docs/Mozilla/Performance/Profiling_with_the_Built-in_Profiler#Native_stack_vs._Pseudo_stack) and an incomplete JS stack, which is not 100% precise.
+Contains the statistics about the hangs in main and background threads. Note that hangs in this section capture the `C++ pseudostack <https://developer.mozilla.org/en-US/docs/Mozilla/Performance/Profiling_with_the_Built-in_Profiler#Native_stack_vs._Pseudo_stack>`_ and an incomplete JS stack, which is not 100% precise.
 
 To avoid submitting overly large payloads, some limits are applied:
 
@@ -261,6 +263,39 @@ Structure:
       },
       ... other threads ...
      ]
+
+capturedStacks
+--------------
+Contains information about stacks captured on demand via Telemetry API. This is similar to `chromeHangs`, but only stacks captured on the main thread of the parent process are reported. It reports precise C++ stacks are reported and is only available on Windows, either in Firefox Nightly or in builds using "--enable-profiling" switch.
+
+Limits for captured stacks are the same as for chromeHangs (see below). Furthermore:
+
+* the key length is limited to 50 characters,
+* keys are restricted to alpha-numeric characters and `-`.
+
+Structure:
+
+.. code-block:: js
+
+    "capturedStacks" : {
+      "memoryMap": [
+        ["wgdi32.pdb", "08A541B5942242BDB4AEABD8C87E4CFF2"],
+        ["igd10iumd32.pdb", "D36DEBF2E78149B5BE1856B772F1C3991"],
+        // ... other entries in the format ["module name", "breakpad identifier"] ...
+      ],
+      "stacks": [
+        [
+           [
+             0, // the module index or -1 for invalid module indices
+             190649 // the offset of this program counter in its module or an absolute pc
+           ],
+           [1, 2540075],
+           // ... other frames ...
+        ],
+        // ... other stacks ...
+      ],
+      "captures": [["string-key", stack-index, count], ... ]
+    }
 
 chromeHangs
 -----------
@@ -365,6 +400,112 @@ Structure:
           }
         }
       }
+    },
+
+gc
+--
+Contains statistics about selected garbage collections. To avoid
+bloating the ping, only a few GCs are included. There are two
+selection strategies. We always save the two GCs with the worst
+max_pause time. Additionally, in content processes, two collections
+are selected at random. If a GC runs for C milliseconds and the total
+time for all GCs since the session began is T milliseconds, then the
+GC has a C/T probablility of being selected for one of these "slots".
+
+Structure:
+
+.. code-block:: js
+
+    "gc": {
+      "random": [
+        {
+          // Timestamps are in milliseconds since startup. All the times here
+          // are wall-clock times, which may not be monotonically increasing.
+          "timestamp": 294872.2,
+          // All durations are in milliseconds.
+          "max_pause": 73.629,
+          "total_time": 364.951, // Sum of all slice times.
+          "zones_collected": 9,
+          "total_zones": 9,
+          "total_compartments": 309,
+          "minor_gcs": 44,
+          "store_buffer_overflows": 19,
+          "mmu_20ms": 0,
+          "mmu_50ms": 0,
+          // Reasons include "None", "NonIncrementalRequested",
+          // "AbortRequested", "KeepAtomsSet", "IncrementalDisabled",
+          // "ModeChange", "MallocBytesTrigger", "GCBytesTrigger",
+          // "ZoneChange", "CompartmentRevived".
+          "nonincremental_reason": "None",
+          "allocated": 37, // In megabytes.
+          "added_chunks": 54,
+          "removed_chunks": 12,
+          // Total number of slices (some of which may not appear
+          // in the "slices" array).
+          "num_slices": 15,
+          // We record at most 4 slices.
+          "slices": [
+            {
+              "slice": 0,  // The index of this slice.
+              "pause": 23.221,  // How long the slice took.
+              "when": 0,  // Milliseconds since the start of the GC.
+              "reason": "SET_NEW_DOCUMENT",
+              // GC state when the slice started
+              "initial_state": "NotActive",
+              // GC state when the slice ended
+              "final_state": "Mark",
+              // Budget is either "Xms", "work(Y)", or
+              // "unlimited".
+              "budget": "10ms",
+              // Number of page faults during the slice.
+              "page_faults": 0,
+              "start_timestamp": 294875,
+              "end_timestamp": 294879,
+              // Time taken by each phase. There are at most 65 possible
+              // phases, but usually only a few phases run in a given slice.
+              "times": {
+                "wait_background_thread": 0.012,
+                "mark_discard_code": 2.845,
+                "purge": 0.723,
+                "mark": 9.831,
+                "mark_roots": 0.102,
+                "buffer_gray_roots": 3.095,
+                "mark_cross_compartment_wrappers": 0.039,
+                "mark_c_and_js_stacks": 0.005,
+                "mark_runtime_wide_data": 2.313,
+                "mark_embedding": 0.117,
+                "mark_compartments": 2.27,
+                "unmark": 1.063,
+                "minor_gcs_to_evict_nursery": 8.701,
+                ...
+              }
+            },
+            { ... },
+          ],
+          // Sum of the phase times across all slices, including
+          // omitted slices. As before, there are <= 65 possible phases.
+          "totals": {
+            "wait_background_thread": 0.012,
+            "mark_discard_code": 2.845,
+            "purge": 0.723,
+            "mark": 9.831,
+            "mark_roots": 0.102,
+            "buffer_gray_roots": 3.095,
+            "mark_cross_compartment_wrappers": 0.039,
+            "mark_c_and_js_stacks": 0.005,
+            "mark_runtime_wide_data": 2.313,
+            "mark_embedding": 0.117,
+            "mark_compartments": 2.27,
+            "unmark": 1.063,
+            "minor_gcs_to_evict_nursery": 8.701,
+            ...
+          }
+        },
+        ... // Up to four more selected GCs follow.
+      ],
+      "worst": [
+        ... // Same as above, but the 2 worst GCs by max_pause.
+      ]
     },
 
 fileIOReports

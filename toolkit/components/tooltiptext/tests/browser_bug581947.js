@@ -1,6 +1,5 @@
 function check(aBrowser, aElementName, aBarred, aType) {
   return ContentTask.spawn(aBrowser, [aElementName, aBarred, aType], function*([aElementName, aBarred, aType]) {
-    let doc = content.document;
     let e = content.document.createElement(aElementName);
     let contentElement = content.document.getElementById('content');
     contentElement.appendChild(e);
@@ -20,16 +19,16 @@ function check(aBrowser, aElementName, aBarred, aType) {
          "No tooltip should be shown when the element is barred from constraint validation");
     } else {
       ok(tttp.getNodeText(e, {}, {}),
-         e.tagName + " " +"A tooltip should be shown when the element isn't valid");
+         e.tagName + " " + "A tooltip should be shown when the element isn't valid");
     }
 
     e.setAttribute('title', '');
-    ok (!tttp.getNodeText(e, {}, {}),
+    ok(!tttp.getNodeText(e, {}, {}),
         "No tooltip should be shown if the title attribute is set");
 
     e.removeAttribute('title');
     contentElement.setAttribute('novalidate', '');
-    ok (!tttp.getNodeText(e, {}, {}),
+    ok(!tttp.getNodeText(e, {}, {}),
         "No tooltip should be shown if the novalidate attribute is set on the form owner");
     contentElement.removeAttribute('novalidate');
 
@@ -39,7 +38,6 @@ function check(aBrowser, aElementName, aBarred, aType) {
 
 function todo_check(aBrowser, aElementName, aBarred) {
   return ContentTask.spawn(aBrowser, [aElementName, aBarred], function*([aElementName, aBarred]) {
-    let doc = content.document;
     let e = content.document.createElement(aElementName);
     let contentElement = content.document.getElementById('content');
     contentElement.appendChild(e);
@@ -87,4 +85,3 @@ add_task(function*() {
     }
   });
 });
-

@@ -70,7 +70,7 @@ class AsyncCompositionManager final
 public:
   NS_INLINE_DECL_REFCOUNTING(AsyncCompositionManager)
 
-  explicit AsyncCompositionManager(LayerManagerComposite* aManager);
+  explicit AsyncCompositionManager(HostLayerManager* aManager);
 
   /**
    * This forces the is-first-paint flag to true. This is intended to
@@ -135,7 +135,6 @@ public:
 
   typedef std::map<Layer*, ClipParts> ClipPartsCache;
 private:
-  void TransformScrollableLayer(Layer* aLayer);
   // Return true if an AsyncPanZoomController content transform was
   // applied for |aLayer|. |*aOutFoundRoot| is set to true on Android only, if
   // one of the metrics on one of the layers was determined to be the "root"
@@ -152,14 +151,6 @@ private:
   void SetFirstPaintViewport(const LayerIntPoint& aOffset,
                              const CSSToLayerScale& aZoom,
                              const CSSRect& aCssPageRect);
-  void SetPageRect(const CSSRect& aCssPageRect);
-  void SyncViewportInfo(const LayerIntRect& aDisplayPort,
-                        const CSSToLayerScale& aDisplayResolution,
-                        bool aLayersUpdated,
-                        int32_t aPaintSyncId,
-                        ParentLayerRect& aScrollRect,
-                        CSSToParentLayerScale& aScale,
-                        ScreenMargin& aFixedLayerMargins);
   void SyncFrameMetrics(const ParentLayerPoint& aScrollOffset,
                         const CSSToParentLayerScale& aZoom,
                         const CSSRect& aCssPageRect,
@@ -227,7 +218,7 @@ private:
   TargetConfig mTargetConfig;
   CSSRect mContentRect;
 
-  RefPtr<LayerManagerComposite> mLayerManager;
+  RefPtr<HostLayerManager> mLayerManager;
   // When this flag is set, the next composition will be the first for a
   // particular document (i.e. the document displayed on the screen will change).
   // This happens when loading a new page or switching tabs. We notify the

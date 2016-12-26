@@ -596,6 +596,32 @@ Section "-InstallEndCleanup"
   ${Unless} ${Silent}
     ${MUI_INSTALLOPTIONS_READ} $0 "summary.ini" "Field 4" "State"
     ${If} "$0" == "1"
+      ; NB: this code is duplicated in stub.nsi. Please keep in sync.
+      ; For data migration in the app, we want to know what the default browser
+      ; value was before we changed it. To do so, we read it here and store it
+      ; in our own registry key.
+      StrCpy $0 ""
+      ${If} ${AtLeastWinVista}
+        AppAssocReg::QueryCurrentDefault "http" "protocol" "effective"
+        Pop $1
+        ; If the method hasn't failed, $1 will contain the progid. Check:
+        ${If} "$1" != "method failed"
+        ${AndIf} "$1" != "method not available"
+          ; Read the actual command from the progid
+          ReadRegStr $0 HKCR "$1\shell\open\command" ""
+        ${EndIf}
+      ${EndIf}
+      ; If using the App Association Registry didn't happen or failed, fall back
+      ; to the effective http default:
+      ${If} "$0" == ""
+        ReadRegStr $0 HKCR "http\shell\open\command" ""
+      ${EndIf}
+      ; If we have something other than empty string now, write the value.
+      ${If} "$0" != ""
+        ClearErrors
+        WriteRegStr HKCU "Software\Mozilla\Firefox" "OldDefaultBrowserCommand" "$0"
+      ${EndIf}
+
       ${LogHeader} "Setting as the default browser"
       ClearErrors
       ${GetParameters} $0
@@ -608,9 +634,10 @@ Section "-InstallEndCleanup"
       ${EndIf}
     ${Else}
       ${LogHeader} "Writing default-browser opt-out"
+      ClearErrors
       WriteRegStr HKCU "Software\Mozilla\Firefox" "DefaultBrowserOptOut" "True"
       ${If} ${Errors}
-        ${LogHeader} "Error writing default-browser opt-out"
+        ${LogMsg} "Error writing default-browser opt-out"
       ${EndIf}
     ${EndIf}
   ${EndUnless}
@@ -1111,13 +1138,11 @@ Function .onInit
 
   ; Don't install on systems that don't support SSE2. The parameter value of
   ; 10 is for PF_XMMI64_INSTRUCTIONS_AVAILABLE which will check whether the
-  ; SSE2 instruction set is available.
+  ; SSE2 instruction set is available. Result returned in $R7.
   System::Call "kernel32::IsProcessorFeaturePresent(i 10)i .R7"
 
-!ifdef HAVE_64BIT_BUILD
-  ; Restrict x64 builds from being installed on x86 and pre Win7
-  ${Unless} ${RunningX64}
-  ${OrUnless} ${AtLeastWin7}
+  ; Windows NT 6.0 (Vista/Server 2008) and lower are not supported.
+  ${Unless} ${AtLeastWin7}
     ${If} "$R7" == "0"
       strCpy $R7 "$(WARN_MIN_SUPPORTED_OSVER_CPU_MSG)"
     ${Else}
@@ -1128,50 +1153,21 @@ Function .onInit
     Quit
   ${EndUnless}
 
-  SetRegView 64
-!else
-  StrCpy $R8 "0"
-  ${If} ${AtMostWin2000}
-    StrCpy $R8 "1"
-  ${EndIf}
-
-  ${If} ${IsWinXP}
-  ${AndIf} ${AtMostServicePack} 1
-    StrCpy $R8 "1"
-  ${EndIf}
-
-  ${If} $R8 == "1"
-    ; XXX-rstrong - some systems failed the AtLeastWin2000 test that we
-    ; used to use for an unknown reason and likely fail the AtMostWin2000
-    ; and possibly the IsWinXP test as well. To work around this also
-    ; check if the Windows NT registry Key exists and if it does if the
-    ; first char in CurrentVersion is equal to 3 (Windows NT 3.5 and
-    ; 3.5.1), 4 (Windows NT 4), or 5 (Windows 2000 and Windows XP).
-    StrCpy $R8 ""
-    ClearErrors
-    ReadRegStr $R8 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion" "CurrentVersion"
-    StrCpy $R8 "$R8" 1
-    ${If} ${Errors}
-    ${OrIf} "$R8" == "3"
-    ${OrIf} "$R8" == "4"
-    ${OrIf} "$R8" == "5"
-      ${If} "$R7" == "0"
-        strCpy $R7 "$(WARN_MIN_SUPPORTED_OSVER_CPU_MSG)"
-      ${Else}
-        strCpy $R7 "$(WARN_MIN_SUPPORTED_OSVER_MSG)"
-      ${EndIf}
-      MessageBox MB_OKCANCEL|MB_ICONSTOP "$R7" IDCANCEL +2
-      ExecShell "open" "${URLSystemRequirements}"
-      Quit
-    ${EndIf}
-  ${EndUnless}
-!endif
-
+  ; SSE2 CPU support
   ${If} "$R7" == "0"
     MessageBox MB_OKCANCEL|MB_ICONSTOP "$(WARN_MIN_SUPPORTED_CPU_MSG)" IDCANCEL +2
     ExecShell "open" "${URLSystemRequirements}"
     Quit
   ${EndIf}
+
+!ifdef HAVE_64BIT_BUILD
+  ${Unless} ${RunningX64}
+    MessageBox MB_OKCANCEL|MB_ICONSTOP "$(WARN_MIN_SUPPORTED_OSVER_MSG)" IDCANCEL +2
+    ExecShell "open" "${URLSystemRequirements}"
+    Quit
+  ${EndUnless}
+  SetRegView 64
+!endif
 
   ${InstallOnInitCommon} "$(WARN_MIN_SUPPORTED_OSVER_CPU_MSG)"
 

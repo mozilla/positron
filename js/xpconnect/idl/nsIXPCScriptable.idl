@@ -15,6 +15,9 @@
 #include "js/TypeDecls.h"
 
 struct JSFreeOp;
+namespace js {
+struct Class;
+}
 %}
 
 interface nsIXPConnectWrappedNative;
@@ -25,6 +28,7 @@ interface nsIXPConnectWrappedNative;
 [ptr] native JSFreeOpPtr(JSFreeOp);
 [ref] native JSCallArgsRef(const JS::CallArgs);
 [ref] native JSAutoIdVector(JS::AutoIdVector);
+[ptr] native jsClassPtr(const js::Class);
 
 /**
  * Note: This is not really an XPCOM interface.  For example, callers must
@@ -40,7 +44,7 @@ interface nsIXPCScriptable : nsISupports
     const uint32_t WANT_PRECREATE                   = 1 <<  0;
     // unused bit here
     // unused bit here
-    const uint32_t WANT_ADDPROPERTY                 = 1 <<  3;
+    // unused bit here
     // unused bit here
     const uint32_t WANT_GETPROPERTY                 = 1 <<  5;
     const uint32_t WANT_SETPROPERTY                 = 1 <<  6;
@@ -73,13 +77,10 @@ interface nsIXPCScriptable : nsISupports
 
     readonly attribute string   className;
     [notxpcom,nostdcall] uint32_t getScriptableFlags();
+    [notxpcom,nostdcall] jsClassPtr getClass();
 
     void   preCreate(in nsISupports nativeObj, in JSContextPtr cx,
                      in JSObjectPtr globalObj, out JSObjectPtr parentObj);
-
-    boolean addProperty(in nsIXPConnectWrappedNative wrapper,
-                       in JSContextPtr cx, in JSObjectPtr obj, in jsid id,
-                       in jsval val);
 
     boolean getProperty(in nsIXPConnectWrappedNative wrapper,
                        in JSContextPtr cx, in JSObjectPtr obj, in jsid id,

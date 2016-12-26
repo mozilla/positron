@@ -47,11 +47,6 @@ NS_EVENT_MESSAGE(eKeyDown)
 NS_EVENT_MESSAGE(eKeyDownOnPlugin)
 NS_EVENT_MESSAGE(eKeyUpOnPlugin)
 
-NS_EVENT_MESSAGE(eBeforeKeyDown)
-NS_EVENT_MESSAGE(eAfterKeyDown)
-NS_EVENT_MESSAGE(eBeforeKeyUp)
-NS_EVENT_MESSAGE(eAfterKeyUp)
-
 // This message is sent after a content process handles a key event or accesskey
 // to indicate that an potential accesskey was not found. The parent process may
 // then respond by, for example, opening menus and processing other shortcuts.
@@ -63,6 +58,7 @@ NS_EVENT_MESSAGE(eScroll)
 
 // Application installation
 NS_EVENT_MESSAGE(eInstall)
+NS_EVENT_MESSAGE(eAppInstalled)
 
 // A plugin was clicked or otherwise focused. ePluginActivate should be
 // used when the window is not active. ePluginFocus should be used when
@@ -83,6 +79,7 @@ NS_EVENT_MESSAGE(eMouseEnterIntoWidget)
 NS_EVENT_MESSAGE(eMouseExitFromWidget)
 NS_EVENT_MESSAGE(eMouseDoubleClick)
 NS_EVENT_MESSAGE(eMouseClick)
+NS_EVENT_MESSAGE(eMouseAuxClick)
 // eMouseActivate is fired when the widget is activated by a click.
 NS_EVENT_MESSAGE(eMouseActivate)
 NS_EVENT_MESSAGE(eMouseOver)
@@ -128,6 +125,8 @@ NS_EVENT_MESSAGE(eFormInvalid)
 //Need separate focus/blur notifications for non-native widgets
 NS_EVENT_MESSAGE(eFocus)
 NS_EVENT_MESSAGE(eBlur)
+NS_EVENT_MESSAGE(eFocusIn)
+NS_EVENT_MESSAGE(eFocusOut)
 
 NS_EVENT_MESSAGE(eDragEnter)
 NS_EVENT_MESSAGE(eDragOver)
@@ -142,6 +141,7 @@ NS_EVENT_MESSAGE_FIRST_LAST(eDragDropEvent, eDragEnter, eDragLeave)
 // XUL specific events
 NS_EVENT_MESSAGE(eXULPopupShowing)
 NS_EVENT_MESSAGE(eXULPopupShown)
+NS_EVENT_MESSAGE(eXULPopupPositioned)
 NS_EVENT_MESSAGE(eXULPopupHiding)
 NS_EVENT_MESSAGE(eXULPopupHidden)
 NS_EVENT_MESSAGE(eXULBroadcast)
@@ -332,7 +332,10 @@ NS_EVENT_MESSAGE(eGestureNotify)
 NS_EVENT_MESSAGE(eScrolledAreaChanged)
 
 // CSS Transition & Animation events:
+NS_EVENT_MESSAGE(eTransitionStart)
+NS_EVENT_MESSAGE(eTransitionRun)
 NS_EVENT_MESSAGE(eTransitionEnd)
+NS_EVENT_MESSAGE(eTransitionCancel)
 NS_EVENT_MESSAGE(eAnimationStart)
 NS_EVENT_MESSAGE(eAnimationEnd)
 NS_EVENT_MESSAGE(eAnimationIteration)
@@ -420,10 +423,6 @@ NS_EVENT_MESSAGE(eMediaRecorderDataAvailable)
 NS_EVENT_MESSAGE(eMediaRecorderWarning)
 NS_EVENT_MESSAGE(eMediaRecorderStop)
 
-// SpeakerManager events
-NS_EVENT_MESSAGE(eSpeakerForcedChange)
-
-#ifdef MOZ_GAMEPAD
 // Gamepad input events
 NS_EVENT_MESSAGE(eGamepadButtonDown)
 NS_EVENT_MESSAGE(eGamepadButtonUp)
@@ -432,7 +431,6 @@ NS_EVENT_MESSAGE(eGamepadConnected)
 NS_EVENT_MESSAGE(eGamepadDisconnected)
 NS_EVENT_MESSAGE_FIRST_LAST(eGamepadEvent,
                             eGamepadButtonDown, eGamepadDisconnected)
-#endif
 
 // input and beforeinput events.
 NS_EVENT_MESSAGE(eEditorInput)

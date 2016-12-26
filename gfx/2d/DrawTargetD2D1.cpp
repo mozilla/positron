@@ -176,6 +176,10 @@ DrawTargetD2D1::DrawSurface(SourceSurface *aSurface,
   } else {
     // This has issues ignoring the alpha channel on windows 7 with images marked opaque.
     MOZ_ASSERT(aSurface->GetFormat() != SurfaceFormat::B8G8R8X8);
+
+    // Bug 1275478 - D2D1 cannot draw A8 surface correctly.
+    MOZ_ASSERT(aSurface->GetFormat() != SurfaceFormat::A8);
+
     mDC->CreateImageBrush(image,
                           D2D1::ImageBrushProperties(samplingBounds,
                                                      D2D1_EXTEND_MODE_CLAMP,
@@ -239,21 +243,29 @@ DrawTargetD2D1::DrawSurfaceWithShadow(SourceSurface *aSurface,
 
   // Step 1, create the shadow effect.
   RefPtr<ID2D1Effect> shadowEffect;
-  HRESULT hr = mDC->CreateEffect(CLSID_D2D1Shadow, getter_AddRefs(shadowEffect));
+  HRESULT hr = mDC->CreateEffect(mFormat == SurfaceFormat::A8 ? CLSID_D2D1GaussianBlur : CLSID_D2D1Shadow,
+                                 getter_AddRefs(shadowEffect));
   if (FAILED(hr) || !shadowEffect) {
     gfxWarning() << "Failed to create shadow effect. Code: " << hexa(hr);
     return;
   }
   shadowEffect->SetInput(0, image);
-  shadowEffect->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, aSigma);
-  D2D1_VECTOR_4F color = { aColor.r, aColor.g, aColor.b, aColor.a };
-  shadowEffect->SetValue(D2D1_SHADOW_PROP_COLOR, color);
+  if (mFormat == SurfaceFormat::A8) {
+    shadowEffect->SetValue(D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, aSigma);
+    shadowEffect->SetValue(D2D1_GAUSSIANBLUR_PROP_BORDER_MODE, D2D1_BORDER_MODE_HARD);
+  } else {
+    shadowEffect->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, aSigma);
+    D2D1_VECTOR_4F color = { aColor.r, aColor.g, aColor.b, aColor.a };
+    shadowEffect->SetValue(D2D1_SHADOW_PROP_COLOR, color);
+  }
 
   D2D1_POINT_2F shadowPoint = D2DPoint(aDest + aOffset);
   mDC->DrawImage(shadowEffect, &shadowPoint, nullptr, D2D1_INTERPOLATION_MODE_LINEAR, D2DCompositionMode(aOperator));
 
-  D2D1_POINT_2F imgPoint = D2DPoint(aDest);
-  mDC->DrawImage(image, &imgPoint, nullptr, D2D1_INTERPOLATION_MODE_LINEAR, D2DCompositionMode(aOperator));
+  if (aSurface->GetFormat() != SurfaceFormat::A8) {
+    D2D1_POINT_2F imgPoint = D2DPoint(aDest);
+    mDC->DrawImage(image, &imgPoint, nullptr, D2D1_INTERPOLATION_MODE_LINEAR, D2DCompositionMode(aOperator));
+  }
 }
 
 void
@@ -1368,6 +1380,11 @@ DrawTargetD2D1::FinalizeDrawing(CompositionOp aOp, const Pattern &aPattern)
     return;
   }
 
+  if (!pat->mStops) {
+    // Draw nothing because of no color stops
+    return;
+  }
+
   RefPtr<ID2D1Effect> radialGradientEffect;
 
   HRESULT hr = mDC->CreateEffect(CLSID_RadialGradientEffect, getter_AddRefs(radialGradientEffect));
@@ -1420,6 +1437,7 @@ DrawTargetD2D1::GetDeviceSpaceClipRect(D2D1_RECT_F& aClipRect, bool& aIsPixelAli
     return false;
   }
 
+  aIsPixelAligned = true;
   aClipRect = D2D1::RectF(0, 0, mSize.width, mSize.height);
   for (auto iter = CurrentLayer().mPushedClips.begin();iter != CurrentLayer().mPushedClips.end(); iter++) {
     if (iter->mGeometry) {

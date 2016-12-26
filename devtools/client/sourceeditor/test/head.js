@@ -1,43 +1,25 @@
 /* vim: set ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+/* import-globals-from ../../framework/test/shared-head.js */
+/* exported promiseWaitForFocus, setup, ch, teardown, loadHelperScript,
+            limit, ch, read, codemirrorSetStatus */
 
 "use strict";
 
-const { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
+// shared-head.js handles imports, constants, and utility functions
+Services.scriptloader.loadSubScript(
+  "chrome://mochitests/content/browser/devtools/client/framework/test/shared-head.js",
+  this);
+
 const { NetUtil } = require("resource://gre/modules/NetUtil.jsm");
 const Editor = require("devtools/client/sourceeditor/editor");
-const promise = require("promise");
-const flags = require("devtools/shared/flags");
 const {getClientCssProperties} = require("devtools/shared/fronts/css-properties");
 
 flags.testing = true;
 SimpleTest.registerCleanupFunction(() => {
   flags.testing = false;
 });
-
-/**
- * Open a new tab at a URL and call a callback on load
- */
-function addTab(url, callback) {
-  waitForExplicitFinish();
-
-  gBrowser.selectedTab = gBrowser.addTab(url);
-  let tab = gBrowser.selectedTab;
-  let browser = gBrowser.getBrowserForTab(tab);
-
-  return BrowserTestUtils.browserLoaded(browser).then(function () {
-    if (typeof(callback) == "function") {
-      callback(browser, tab, browser.contentDocument);
-    }
-    return tab;
-  });
-}
-
-function promiseTab(url) {
-  return new Promise(resolve =>
-    addTab(url, resolve));
-}
 
 function promiseWaitForFocus() {
   return new Promise(resolve =>
@@ -125,16 +107,16 @@ function loadHelperScript(filePath) {
  * This method returns the portion of the input string `source` up to the
  * [line, ch] location.
  */
-function limit(source, [line, ch]) {
+function limit(source, [line, char]) {
   line++;
   let list = source.split("\n");
   if (list.length < line) {
     return source;
   }
   if (line == 1) {
-    return list[0].slice(0, ch);
+    return list[0].slice(0, char);
   }
-  return [...list.slice(0, line - 1), list[line - 1].slice(0, ch)].join("\n");
+  return [...list.slice(0, line - 1), list[line - 1].slice(0, char)].join("\n");
 }
 
 function read(url) {

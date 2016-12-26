@@ -142,10 +142,10 @@ add_test(function test_checkForAddons_404Error() {
  * Tests that a xhr abort() works as expected
  */
 add_test(function test_checkForAddons_abort() {
-  let xhr = overrideXHR(200, "", { dropRequest: true} );
+  let overriddenXhr = overrideXHR(200, "", { dropRequest: true} );
   let installManager = new GMPInstallManager();
   let promise = installManager.checkForAddons();
-  xhr.abort();
+  overriddenXhr.abort();
   promise.then(res => {
     do_check_true(res.usedFallback);
     installManager.uninit();
@@ -549,12 +549,8 @@ add_task(function* test_simpleCheckAndInstall_tooFrequent() {
  * Tests that installing addons when there is no server works as expected
  */
 add_test(function test_installAddon_noServer() {
-  let dir = FileUtils.getDir("TmpD", [], true);
   let zipFileName = "test_GMP.zip";
   let zipURL = URL_HOST + ":0/" + zipFileName;
-
-  let data = "e~=0.5772156649";
-  let zipFile = createNewZipFile(zipFileName, data);
 
   let responseXML =
     "<?xml version=\"1.0\"?>" +

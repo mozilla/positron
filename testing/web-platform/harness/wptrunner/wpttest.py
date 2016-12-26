@@ -68,10 +68,7 @@ class WdspecSubtestResult(SubtestResult):
 
 
 def get_run_info(metadata_root, product, **kwargs):
-    if product == "b2g":
-        return B2GRunInfo(metadata_root, product, **kwargs)
-    else:
-        return RunInfo(metadata_root, product, **kwargs)
+    return RunInfo(metadata_root, product, **kwargs)
 
 
 class RunInfo(dict):
@@ -101,19 +98,14 @@ class RunInfo(dict):
         mozinfo.find_and_update_from_json(*dirs)
 
 
-class B2GRunInfo(RunInfo):
-    def __init__(self, *args, **kwargs):
-        RunInfo.__init__(self, *args, **kwargs)
-        self["os"] = "b2g"
-
-
 class Test(object):
     result_cls = None
     subtest_result_cls = None
     test_type = None
 
-    def __init__(self, url, inherit_metadata, test_metadata, timeout=DEFAULT_TIMEOUT, path=None,
-                 protocol="http"):
+    def __init__(self, tests_root, url, inherit_metadata, test_metadata,
+                 timeout=DEFAULT_TIMEOUT, path=None, protocol="http"):
+        self.tests_root = tests_root
         self.url = url
         self._inherit_metadata = inherit_metadata
         self._test_metadata = test_metadata
@@ -127,12 +119,14 @@ class Test(object):
     @classmethod
     def from_manifest(cls, manifest_item, inherit_metadata, test_metadata):
         timeout = LONG_TIMEOUT if manifest_item.timeout == "long" else DEFAULT_TIMEOUT
-        return cls(manifest_item.url,
+        protocol = "https" if hasattr(manifest_item, "https") and manifest_item.https else "http"
+        return cls(manifest_item.source_file.tests_root,
+                   manifest_item.url,
                    inherit_metadata,
                    test_metadata,
                    timeout=timeout,
-                   path=manifest_item.path,
-                   protocol="https" if hasattr(manifest_item, "https") and manifest_item.https else "http")
+                   path=manifest_item.source_file.path,
+                   protocol=protocol)
 
     @property
     def id(self):
@@ -141,6 +135,10 @@ class Test(object):
     @property
     def keys(self):
         return tuple()
+
+    @property
+    def abs_path(self):
+        return os.path.join(self.tests_root, self.path)
 
     def _get_metadata(self, subtest=None):
         if self._test_metadata is not None and subtest is not None:
@@ -242,10 +240,11 @@ class ReftestTest(Test):
     result_cls = ReftestResult
     test_type = "reftest"
 
-    def __init__(self, url, inherit_metadata, test_metadata, references,
+    def __init__(self, tests_root, url, inherit_metadata, test_metadata, references,
                  timeout=DEFAULT_TIMEOUT, path=None, viewport_size=None,
                  dpi=None, protocol="http"):
-        Test.__init__(self, url, inherit_metadata, test_metadata, timeout, path, protocol)
+        Test.__init__(self, tests_root, url, inherit_metadata, test_metadata, timeout,
+                      path, protocol)
 
         for _, ref_type in references:
             if ref_type not in ("==", "!="):
@@ -272,7 +271,8 @@ class ReftestTest(Test):
 
         url = manifest_test.url
 
-        node = cls(manifest_test.url,
+        node = cls(manifest_test.source_file.tests_root,
+                   manifest_test.url,
                    inherit_metadata,
                    test_metadata,
                    [],
@@ -306,7 +306,11 @@ class ReftestTest(Test):
                                                       nodes,
                                                       references_seen)
             else:
-                reference = ReftestTest(ref_url, [], None, [])
+                reference = ReftestTest(manifest_test.source_file.tests_root,
+                                        ref_url,
+                                        [],
+                                        None,
+                                        [])
 
             node.references.append((reference, ref_type))
 

@@ -13,11 +13,11 @@
 #include "mozilla/gfx/DeviceManagerDx.h"
 #include "mozilla/layers/D3D11ShareHandleImage.h"
 #include "mozilla/layers/ImageBridgeChild.h"
-#include "mozilla/layers/VideoBridgeChild.h"
+#include "mozilla/layers/TextureForwarder.h"
 #include "mozilla/Telemetry.h"
 #include "MediaTelemetryConstants.h"
 #include "mfapi.h"
-#include "MediaPrefs.h"
+#include "gfxPrefs.h"
 #include "MFTDecoder.h"
 #include "DriverCrashGuard.h"
 #include "nsPrintfCString.h"
@@ -91,7 +91,8 @@ public:
   D3D9DXVA2Manager();
   virtual ~D3D9DXVA2Manager();
 
-  HRESULT Init(nsACString& aFailureReason);
+  HRESULT Init(layers::KnowsCompositor* aKnowsCompositor,
+               nsACString& aFailureReason);
 
   IUnknown* GetDXVADeviceManager() override;
 
@@ -262,7 +263,8 @@ D3D9DXVA2Manager::GetDXVADeviceManager()
 }
 
 HRESULT
-D3D9DXVA2Manager::Init(nsACString& aFailureReason)
+D3D9DXVA2Manager::Init(layers::KnowsCompositor* aKnowsCompositor,
+                       nsACString& aFailureReason)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -406,7 +408,7 @@ D3D9DXVA2Manager::Init(nsACString& aFailureReason)
     return hr;
   }
 
-  if (adapter.VendorId == 0x1022 && !MediaPrefs::PDMWMFSkipBlacklist()) {
+  if (adapter.VendorId == 0x1022 && !gfxPrefs::PDMWMFSkipBlacklist()) {
     for (size_t i = 0; i < MOZ_ARRAY_LENGTH(sAMDPreUVD4); i++) {
       if (adapter.DeviceId == sAMDPreUVD4[i]) {
         mIsAMDPreUVD4 = true;
@@ -430,10 +432,12 @@ D3D9DXVA2Manager::Init(nsACString& aFailureReason)
   mSyncSurface = syncSurf;
 
   if (layers::ImageBridgeChild::GetSingleton()) {
+    // There's no proper KnowsCompositor for ImageBridge currently (and it
+    // implements the interface), so just use that if it's available.
     mTextureClientAllocator = new D3D9RecycleAllocator(layers::ImageBridgeChild::GetSingleton().get(),
                                                        mDevice);
   } else {
-    mTextureClientAllocator = new D3D9RecycleAllocator(layers::VideoBridgeChild::GetSingleton(),
+    mTextureClientAllocator = new D3D9RecycleAllocator(aKnowsCompositor,
                                                        mDevice);
   }
   mTextureClientAllocator->SetMaxPoolSize(5);
@@ -491,18 +495,15 @@ static uint32_t sDXVAVideosCount = 0;
 
 /* static */
 DXVA2Manager*
-DXVA2Manager::CreateD3D9DXVA(nsACString& aFailureReason)
+DXVA2Manager::CreateD3D9DXVA(layers::KnowsCompositor* aKnowsCompositor,
+                             nsACString& aFailureReason)
 {
   MOZ_ASSERT(NS_IsMainThread());
   HRESULT hr;
 
   // DXVA processing takes up a lot of GPU resources, so limit the number of
   // videos we use DXVA with at any one time.
-  uint32_t dxvaLimit = 4;
-  // TODO: Sync this value across to the GPU process.
-  if (XRE_GetProcessType() != GeckoProcessType_GPU) {
-    dxvaLimit = MediaPrefs::PDMWMFMaxDXVAVideos();
-  }
+  uint32_t dxvaLimit = gfxPrefs::PDMWMFMaxDXVAVideos();
 
   if (sDXVAVideosCount == dxvaLimit) {
     aFailureReason.AssignLiteral("Too many DXVA videos playing");
@@ -510,7 +511,7 @@ DXVA2Manager::CreateD3D9DXVA(nsACString& aFailureReason)
   }
 
   nsAutoPtr<D3D9DXVA2Manager> d3d9Manager(new D3D9DXVA2Manager());
-  hr = d3d9Manager->Init(aFailureReason);
+  hr = d3d9Manager->Init(aKnowsCompositor, aFailureReason);
   if (SUCCEEDED(hr)) {
     return d3d9Manager.forget();
   }
@@ -525,7 +526,8 @@ public:
   D3D11DXVA2Manager();
   virtual ~D3D11DXVA2Manager();
 
-  HRESULT Init(nsACString& aFailureReason);
+  HRESULT Init(layers::KnowsCompositor* aKnowsCompositor,
+               nsACString& aFailureReason);
 
   IUnknown* GetDXVADeviceManager() override;
 
@@ -633,7 +635,8 @@ D3D11DXVA2Manager::GetDXVADeviceManager()
 }
 
 HRESULT
-D3D11DXVA2Manager::Init(nsACString& aFailureReason)
+D3D11DXVA2Manager::Init(layers::KnowsCompositor* aKnowsCompositor,
+                        nsACString& aFailureReason)
 {
   HRESULT hr;
 
@@ -738,7 +741,7 @@ D3D11DXVA2Manager::Init(nsACString& aFailureReason)
     return hr;
   }
 
-  if (adapterDesc.VendorId == 0x1022 && !MediaPrefs::PDMWMFSkipBlacklist()) {
+  if (adapterDesc.VendorId == 0x1022 && !gfxPrefs::PDMWMFSkipBlacklist()) {
     for (size_t i = 0; i < MOZ_ARRAY_LENGTH(sAMDPreUVD4); i++) {
       if (adapterDesc.DeviceId == sAMDPreUVD4[i]) {
         mIsAMDPreUVD4 = true;
@@ -764,10 +767,12 @@ D3D11DXVA2Manager::Init(nsACString& aFailureReason)
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
   if (layers::ImageBridgeChild::GetSingleton()) {
+    // There's no proper KnowsCompositor for ImageBridge currently (and it
+    // implements the interface), so just use that if it's available.
     mTextureClientAllocator = new D3D11RecycleAllocator(layers::ImageBridgeChild::GetSingleton().get(),
                                                         mDevice);
   } else {
-    mTextureClientAllocator = new D3D11RecycleAllocator(layers::VideoBridgeChild::GetSingleton(),
+    mTextureClientAllocator = new D3D11RecycleAllocator(aKnowsCompositor,
                                                         mDevice);
   }
   mTextureClientAllocator->SetMaxPoolSize(5);
@@ -910,15 +915,12 @@ D3D11DXVA2Manager::ConfigureForSize(uint32_t aWidth, uint32_t aHeight)
 
 /* static */
 DXVA2Manager*
-DXVA2Manager::CreateD3D11DXVA(nsACString& aFailureReason)
+DXVA2Manager::CreateD3D11DXVA(layers::KnowsCompositor* aKnowsCompositor,
+                              nsACString& aFailureReason)
 {
   // DXVA processing takes up a lot of GPU resources, so limit the number of
   // videos we use DXVA with at any one time.
-  uint32_t dxvaLimit = 4;
-  // TODO: Sync this value across to the GPU process.
-  if (XRE_GetProcessType() != GeckoProcessType_GPU) {
-    dxvaLimit = MediaPrefs::PDMWMFMaxDXVAVideos();
-  }
+  uint32_t dxvaLimit = gfxPrefs::PDMWMFMaxDXVAVideos();
 
   if (sDXVAVideosCount == dxvaLimit) {
     aFailureReason.AssignLiteral("Too many DXVA videos playing");
@@ -926,7 +928,7 @@ DXVA2Manager::CreateD3D11DXVA(nsACString& aFailureReason)
   }
 
   nsAutoPtr<D3D11DXVA2Manager> manager(new D3D11DXVA2Manager());
-  HRESULT hr = manager->Init(aFailureReason);
+  HRESULT hr = manager->Init(aKnowsCompositor, aFailureReason);
   NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   return manager.forget();

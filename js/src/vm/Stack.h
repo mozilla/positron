@@ -16,14 +16,15 @@
 #include "jsscript.h"
 #include "jsutil.h"
 
-#include "asmjs/WasmFrameIterator.h"
 #include "gc/Rooting.h"
 #include "jit/JitFrameIterator.h"
 #ifdef CHECK_OSIPOINT_REGISTERS
 #include "jit/Registers.h" // for RegisterDump
 #endif
 #include "js/RootingAPI.h"
+#include "vm/ArgumentsObject.h"
 #include "vm/SavedFrame.h"
+#include "wasm/WasmFrameIterator.h"
 
 struct JSCompartment;
 
@@ -35,7 +36,6 @@ class AutoEntryMonitor;
 
 namespace js {
 
-class ArgumentsObject;
 class InterpreterRegs;
 class CallObject;
 class FrameIter;
@@ -297,7 +297,7 @@ class InterpreterFrame
         DEBUGGEE               =       0x40,  /* Execution is being observed by Debugger */
 
         /* Used in tracking calls and profiling (see vm/SPSProfiler.cpp) */
-        HAS_PUSHED_SPS_FRAME   =       0x80,  /* SPS was notified of enty */
+        HAS_PUSHED_SPS_FRAME   =       0x80,  /* SPS was notified of entry */
 
         /*
          * If set, we entered one of the JITs and ScriptFrameIter should skip
@@ -915,7 +915,7 @@ class InterpreterStack
     }
 };
 
-void MarkInterpreterActivations(JSRuntime* rt, JSTracer* trc);
+void TraceInterpreterActivations(JSRuntime* rt, JSTracer* trc);
 
 /*****************************************************************************/
 
@@ -929,8 +929,8 @@ class AnyConstructArgs : public JS::CallArgs
 {
     // Only js::Construct (or internal methods that call the qualified CallArgs
     // versions) should do these things!
-    void setCallee(Value v) = delete;
-    void setThis(Value v) = delete;
+    void setCallee(const Value& v) = delete;
+    void setThis(const Value& v) = delete;
     MutableHandleValue newTarget() const = delete;
     MutableHandleValue rval() const = delete;
 };
@@ -948,7 +948,12 @@ class GenericArgsBase
     explicit GenericArgsBase(JSContext* cx) : v_(cx) {}
 
   public:
-    bool init(unsigned argc) {
+    bool init(JSContext* cx, unsigned argc) {
+        if (argc > ARGS_LENGTH_MAX) {
+            JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_TOO_MANY_ARGUMENTS);
+            return false;
+        }
+
         // callee, this, arguments[, new.target iff constructing]
         size_t len = 2 + argc + uint32_t(Construct);
         MOZ_ASSERT(len > argc);  // no overflow
@@ -968,6 +973,8 @@ template <MaybeConstruct Construct, size_t N>
 class FixedArgsBase
   : public mozilla::Conditional<Construct, AnyConstructArgs, AnyInvokeArgs>::Type
 {
+    static_assert(N <= ARGS_LENGTH_MAX, "o/~ too many args o/~");
+
   protected:
     JS::AutoValueArray<2 + N + uint32_t(Construct)> v_;
 
@@ -1024,7 +1031,7 @@ inline bool
 FillArgumentsFromArraylike(JSContext* cx, Args& args, const Arraylike& arraylike)
 {
     uint32_t len = arraylike.length();
-    if (!args.init(len))
+    if (!args.init(cx, len))
         return false;
 
     for (uint32_t i = 0; i < len; i++)
@@ -1532,7 +1539,7 @@ class JitActivation : public Activation
     // Remove a previous rematerialization by fp.
     void removeRematerializedFrame(uint8_t* top);
 
-    void markRematerializedFrames(JSTracer* trc);
+    void traceRematerializedFrames(JSTracer* trc);
 
 
     // Register the results of on Ion frame recovery.
@@ -1545,7 +1552,7 @@ class JitActivation : public Activation
     // from the activation.
     void removeIonFrameRecovery(JitFrameLayout* fp);
 
-    void markIonRecovery(JSTracer* trc);
+    void traceIonRecovery(JSTracer* trc);
 
     // Return the bailout information if it is registered.
     const BailoutFrameInfo* bailoutData() const { return bailoutData_; }
@@ -1670,11 +1677,11 @@ class WasmActivation : public Activation
         return true;
     }
 
-    // Returns a pointer to the base of the innermost stack frame of asm.js code
+    // Returns a pointer to the base of the innermost stack frame of wasm code
     // in this activation.
     uint8_t* fp() const { return fp_; }
 
-    // Returns the reason why asm.js code called out of asm.js code.
+    // Returns the reason why wasm code called out of wasm code.
     wasm::ExitReason exitReason() const { return exitReason_; }
 
     // Read by JIT code:
@@ -1703,7 +1710,7 @@ class WasmActivation : public Activation
 // Additionally, there are derived FrameIter types that automatically skip
 // certain frames:
 //  - ScriptFrameIter only shows frames that have an associated JSScript
-//    (currently everything other than asm.js stack frames). When !hasScript(),
+//    (currently everything other than wasm stack frames). When !hasScript(),
 //    clients must stick to the portion of the
 //    interface marked below.
 //  - NonBuiltinScriptFrameIter additionally filters out builtin (self-hosted)

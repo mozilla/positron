@@ -1,14 +1,17 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-from collections import namedtuple
-from time import sleep
-import re
-from json import loads
 
-from marionette import Marionette
+import re
+
+from collections import namedtuple
+from json import loads
+from time import sleep
+
 from marionette_driver import By, expected, Wait
 from marionette_driver.errors import TimeoutException, NoSuchElementException
+from marionette_harness import Marionette
+
 from video_puppeteer import VideoPuppeteer, VideoException
 from external_media_tests.utils import verbose_until
 
@@ -484,8 +487,10 @@ class YouTubePuppeteer(VideoPuppeteer):
             return '\n'.join(messages)
         messages += ['.html5-media-player: {']
         for field in self._last_seen_player_state._fields:
-            messages += [('\t{}: {}'
-                          .format(field, getattr(self._last_seen_player_state,
-                                                 field)))]
+            # For compatibility with different test environments we force ascii
+            field_ascii = (
+                unicode(getattr(self._last_seen_player_state, field))
+                        .encode('ascii', 'replace'))
+            messages += [('\t{}: {}'.format(field, field_ascii))]
         messages += '}'
         return '\n'.join(messages)

@@ -65,6 +65,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsSVGOuterSVGFrame)
 
 nsSVGOuterSVGFrame::nsSVGOuterSVGFrame(nsStyleContext* aContext)
     : nsSVGDisplayContainerFrame(aContext)
+    , mCallingReflowSVG(false)
     , mFullZoom(aContext->PresContext()->GetFullZoom())
     , mViewportInitialized(false)
     , mIsRootContent(false)
@@ -347,13 +348,10 @@ nsSVGOuterSVGFrame::ComputeSize(nsRenderingContext *aRenderingContext,
                "we lack an intrinsic height or width.");
   }
 
-  return nsLayoutUtils::ComputeSizeWithIntrinsicDimensions(aWM,
-                            aRenderingContext, this,
-                            intrinsicSize, GetIntrinsicRatio(),
-                            cbSize,
-                            aMargin,
-                            aBorder,
-                            aPadding);
+  return ComputeSizeWithIntrinsicDimensions(aRenderingContext, aWM,
+                                            intrinsicSize, GetIntrinsicRatio(),
+                                            cbSize, aMargin, aBorder, aPadding,
+                                            aFlags);
 }
 
 void

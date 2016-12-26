@@ -188,7 +188,7 @@ add_task(function* test_import_chromefavicon()
   yield PlacesTestUtils.promiseAsyncUpdates();
 
   do_print("Insert bookmark");
-  let bookmark = yield PlacesUtils.bookmarks.insert({
+  yield PlacesUtils.bookmarks.insert({
     parentGuid: PlacesUtils.bookmarks.unfiledGuid,
     url: PAGE_URI,
     title: "Test"
@@ -204,7 +204,7 @@ add_task(function* test_import_chromefavicon()
 
   let data = yield new Promise(resolve => {
     PlacesUtils.favicons.getFaviconDataForPage(
-      PAGE_URI, (uri, dataLen, data, mimeType) => resolve(data));
+      PAGE_URI, (uri, dataLen, faviconData, mimeType) => resolve(faviconData));
   });
 
   let base64Icon = "data:image/png;base64," +
@@ -333,7 +333,7 @@ function* checkItem(aExpected, aNode)
           let deferred = Promise.defer();
           PlacesUtils.favicons.getFaviconDataForPage(
             NetUtil.newURI(aExpected.url),
-            function (aURI, aDataLen, aData, aMimeType) {
+            function(aURI, aDataLen, aData, aMimeType) {
               deferred.resolve(aData);
             });
           let data = yield deferred.promise;

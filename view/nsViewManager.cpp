@@ -127,7 +127,7 @@ nsViewManager::CreateView(const nsRect& aBounds,
                           nsView* aParent,
                           nsViewVisibility aVisibilityFlag)
 {
-  nsView *v = new nsView(this, aVisibilityFlag);
+  auto *v = new nsView(this, aVisibilityFlag);
   v->SetParent(aParent);
   v->SetPosition(aBounds.x, aBounds.y);
   nsRect dim(0, 0, aBounds.width, aBounds.height);
@@ -732,7 +732,7 @@ void nsViewManager::WillPaintWindow(nsIWidget* aWidget)
 }
 
 bool nsViewManager::PaintWindow(nsIWidget* aWidget,
-                                LayoutDeviceIntRegion aRegion)
+                                const LayoutDeviceIntRegion& aRegion)
 {
   if (!aWidget || !mContext)
     return false;
@@ -836,11 +836,7 @@ void nsViewManager::ReparentChildWidgets(nsView* aView, nsIWidget *aNewWidget)
     if (parentWidget) {
       // Child widget
       if (parentWidget != aNewWidget) {
-#ifdef DEBUG
-        nsresult rv =
-#endif
-          widget->SetParent(aNewWidget);
-        NS_ASSERTION(NS_SUCCEEDED(rv), "SetParent failed!");
+        widget->SetParent(aNewWidget);
       }
     } else {
       // Toplevel widget (popup, dialog, etc)

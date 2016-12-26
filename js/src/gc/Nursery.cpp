@@ -149,7 +149,8 @@ js::Nursery::init(uint32_t maxNurseryBytes, AutoLockGC& lock)
     if (!freeMallocedBuffersTask || !freeMallocedBuffersTask->init())
         return false;
 
-    updateNumChunksLocked(1, lock);
+    AutoMaybeStartBackgroundAllocation maybeBgAlloc;
+    updateNumChunksLocked(1, maybeBgAlloc, lock);
     if (numChunks() == 0)
         return false;
 
@@ -339,7 +340,7 @@ js::Nursery::allocate(size_t size)
 }
 
 void*
-js::Nursery::allocateBuffer(Zone* zone, uint32_t nbytes)
+js::Nursery::allocateBuffer(Zone* zone, size_t nbytes)
 {
     MOZ_ASSERT(nbytes > 0);
 
@@ -358,7 +359,7 @@ js::Nursery::allocateBuffer(Zone* zone, uint32_t nbytes)
 }
 
 void*
-js::Nursery::allocateBuffer(JSObject* obj, uint32_t nbytes)
+js::Nursery::allocateBuffer(JSObject* obj, size_t nbytes)
 {
     MOZ_ASSERT(obj);
     MOZ_ASSERT(nbytes > 0);
@@ -370,7 +371,7 @@ js::Nursery::allocateBuffer(JSObject* obj, uint32_t nbytes)
 
 void*
 js::Nursery::reallocateBuffer(JSObject* obj, void* oldBuffer,
-                              uint32_t oldBytes, uint32_t newBytes)
+                              size_t oldBytes, size_t newBytes)
 {
     if (!IsInsideNursery(obj))
         return obj->zone()->pod_realloc<uint8_t>((uint8_t*)oldBuffer, oldBytes, newBytes);
@@ -487,9 +488,13 @@ js::TenuringTracer::TenuringTracer(JSRuntime* rt, Nursery* nursery)
 {
 }
 
-/* static */ void
+void
 js::Nursery::printProfileHeader()
 {
+    if (!enableProfiling_)
+        return;
+
+    fprintf(stderr, "MinorGC:               Reason  PRate Size ");
 #define PRINT_HEADER(name, text)                                              \
     fprintf(stderr, " %6s", text);
 FOR_EACH_NURSERY_PROFILE_TIME(PRINT_HEADER)
@@ -548,15 +553,15 @@ js::Nursery::collect(JSRuntime* rt, JS::gcreason::Reason reason)
     MOZ_RELEASE_ASSERT(CurrentThreadCanAccessRuntime(rt));
 
     if (!isEnabled() || isEmpty()) {
-        /*
-         * Our barriers are not always exact, and there may be entries in the
-         * storebuffer even when the nursery is disabled or empty. It's not
-         * safe to keep these entries as they may refer to tenured cells which
-         * may be freed after this point.
-         */
+        // Our barriers are not always exact, and there may be entries in the
+        // storebuffer even when the nursery is disabled or empty. It's not safe
+        // to keep these entries as they may refer to tenured cells which may be
+        // freed after this point.
         rt->gc.storeBuffer.clear();
-        return;
     }
+
+    if (!isEnabled())
+        return;
 
     rt->gc.incMinorGcNumber();
 
@@ -578,7 +583,14 @@ js::Nursery::collect(JSRuntime* rt, JS::gcreason::Reason reason)
     JS::AutoSuppressGCAnalysis nogc;
 
     TenureCountCache tenureCounts;
-    double promotionRate = doCollection(rt, reason, tenureCounts);
+    double promotionRate = 0;
+    if (!isEmpty())
+        promotionRate = doCollection(rt, reason, tenureCounts);
+
+    // Resize the nursery.
+    maybeStartProfile(ProfileKey::Resize);
+    maybeResizeNursery(reason, promotionRate);
+    maybeEndProfile(ProfileKey::Resize);
 
     // If we are promoting the nursery, or exhausted the store buffer with
     // pointers to nursery things, which will force a collection well before
@@ -622,11 +634,7 @@ js::Nursery::collect(JSRuntime* rt, JS::gcreason::Reason reason)
     TraceMinorGCEnd();
 
     if (enableProfiling_ && totalTime >= profileThreshold_) {
-        static int printedHeader = 0;
-        if ((printedHeader++ % 200) == 0) {
-            fprintf(stderr, "MinorGC:               Reason  PRate Size ");
-            printProfileHeader();
-        }
+        rt->gc.stats.maybePrintProfileHeaders();
 
         fprintf(stderr, "MinorGC: %20s %5.1f%% %4u ",
                 JS::gcreason::ExplainReason(reason),
@@ -650,6 +658,7 @@ js::Nursery::doCollection(JSRuntime* rt, JS::gcreason::Reason reason,
                           TenureCountCache& tenureCounts)
 {
     AutoTraceSession session(rt, JS::HeapState::MinorCollecting);
+    AutoSetThreadIsPerformingGC performingGC;
     AutoStopVerifyingBarriers av(rt, false);
     AutoDisableProxyCheck disableStrictProxyChecking(rt);
     mozilla::DebugOnly<AutoEnterOOMUnsafeRegion> oomUnsafeRegion;
@@ -696,7 +705,7 @@ js::Nursery::doCollection(JSRuntime* rt, JS::gcreason::Reason reason,
     maybeStartProfile(ProfileKey::MarkDebugger);
     {
         gcstats::AutoPhase ap(rt->gc.stats, gcstats::PHASE_MARK_ROOTS);
-        Debugger::markAll(&mover);
+        Debugger::traceAll(&mover);
     }
     maybeEndProfile(ProfileKey::MarkDebugger);
 
@@ -749,13 +758,8 @@ js::Nursery::doCollection(JSRuntime* rt, JS::gcreason::Reason reason,
 #endif
     maybeEndProfile(ProfileKey::CheckHashTables);
 
-    // Resize the nursery.
-    maybeStartProfile(ProfileKey::Resize);
-    double promotionRate = mover.tenuredSize / double(initialNurserySize);
-    maybeResizeNursery(reason, promotionRate);
-    maybeEndProfile(ProfileKey::Resize);
-
-    return promotionRate;
+    // Calculate and return the promotion rate.
+    return mover.tenuredSize / double(initialNurserySize);
 }
 
 void
@@ -933,21 +937,22 @@ void
 js::Nursery::updateNumChunks(unsigned newCount)
 {
     if (numChunks() != newCount) {
+        AutoMaybeStartBackgroundAllocation maybeBgAlloc;
         AutoLockGC lock(runtime());
-        updateNumChunksLocked(newCount, lock);
+        updateNumChunksLocked(newCount, maybeBgAlloc, lock);
     }
 }
 
 void
-js::Nursery::updateNumChunksLocked(unsigned newCount, AutoLockGC& lock)
+js::Nursery::updateNumChunksLocked(unsigned newCount,
+                                   AutoMaybeStartBackgroundAllocation& maybeBgAlloc,
+                                   AutoLockGC& lock)
 {
     // The GC nursery is an optimization and so if we fail to allocate nursery
     // chunks we do not report an error.
 
     unsigned priorCount = numChunks();
     MOZ_ASSERT(priorCount != newCount);
-
-    AutoMaybeStartBackgroundAllocation maybeBgAlloc;
 
     if (newCount < priorCount) {
         // Shrink the nursery and free unused chunks.

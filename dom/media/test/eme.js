@@ -264,19 +264,24 @@ function LoadTest(test, elem, token, loadParams)
   });
 }
 
-// Same as LoadTest, but manage a token+"_load" start&finished.
-// Also finish main token if loading fails.
-function LoadTestWithManagedLoadToken(test, elem, manager, token, loadParams)
-{
-  manager.started(token + "_load");
-  return LoadTest(test, elem, token, loadParams)
-  .catch(function (reason) {
-    ok(false, TimeStamp(token) + " - Error during load: " + reason);
-    manager.finished(token + "_load");
+function EMEPromise() {
+  var self = this;
+  self.promise = new Promise(function(resolve, reject) {
+    self.resolve = resolve;
+    self.reject = reject;
+  });
+}
+
+// Finish |token| when all promises are resolved or any one promise is
+// rejected. It also clean up the media element to release resources.
+function EMEPromiseAll(v, token, promises) {
+  Promise.all(promises).then(values => {
+    removeNodeAndSource(v);
     manager.finished(token);
-  })
-  .then(function () {
-    manager.finished(token + "_load");
+  }, reason => {
+    ok(false, TimeStamp(token) + " - Error during load: " + reason);
+    removeNodeAndSource(v);
+    manager.finished(token);
   });
 }
 
@@ -460,4 +465,36 @@ function SetupEMEPref(callback) {
   }
 
   SpecialPowers.pushPrefEnv({ "set" : prefs }, callback);
+}
+
+function fetchWithXHR(uri, onLoadFunction) {
+  var p = new Promise(function(resolve, reject) {
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", uri, true);
+    xhr.responseType = "arraybuffer";
+    xhr.addEventListener("load", function () {
+      is(xhr.status, 200, "fetchWithXHR load uri='" + uri + "' status=" + xhr.status);
+      resolve(xhr.response);
+    });
+    xhr.send();
+  });
+
+  if (onLoadFunction) {
+    p.then(onLoadFunction);
+  }
+
+  return p;
+};
+
+function once(target, name, cb) {
+  var p = new Promise(function(resolve, reject) {
+    target.addEventListener(name, function onceEvent(arg) {
+      target.removeEventListener(name, onceEvent);
+      resolve(arg);
+    });
+  });
+  if (cb) {
+    p.then(cb);
+  }
+  return p;
 }

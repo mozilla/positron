@@ -479,7 +479,7 @@ nsresult nsCocoaWindow::CreateNativeWindow(const NSRect &aRect,
     [mWindow setOpaque:NO];
   } else {
     // Make sure that regular windows are opaque from the start, so that
-    // nsChildView::ComputeShouldAccelerate returns true for them.
+    // nsChildView::WidgetTypeSupportsAcceleration returns true for them.
     [mWindow setOpaque:YES];
   }
 
@@ -757,6 +757,13 @@ NS_IMETHODIMP nsCocoaWindow::Show(bool bState)
     (NSWindow*)parentWidget->GetNativeData(NS_NATIVE_WINDOW) : nil;
 
   if (bState && !mBounds.IsEmpty()) {
+    // Don't try to show a popup when the parent isn't visible or is minimized.
+    if (mWindowType == eWindowType_popup && nativeParentWindow) {
+      if (![nativeParentWindow isVisible] || [nativeParentWindow isMiniaturized]) {
+        return NS_OK;
+      }
+    }
+
     if (mPopupContentView) {
       // Ensure our content view is visible. We never need to hide it.
       mPopupContentView->Show(true);
@@ -1106,9 +1113,9 @@ void nsCocoaWindow::SetTransparencyMode(nsTransparencyMode aMode)
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
-NS_IMETHODIMP nsCocoaWindow::Enable(bool aState)
+void
+nsCocoaWindow::Enable(bool aState)
 {
-  return NS_OK;
 }
 
 bool nsCocoaWindow::IsEnabled() const
@@ -1216,10 +1223,13 @@ void nsCocoaWindow::SetSizeConstraints(const SizeConstraints& aConstraints)
 }
 
 // Coordinates are desktop pixels
-NS_IMETHODIMP nsCocoaWindow::Move(double aX, double aY)
+void
+nsCocoaWindow::Move(double aX, double aY)
 {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
   if (!mWindow) {
-    return NS_OK;
+    return;
   }
 
   // The point we have is in Gecko coordinates (origin top-left). Convert
@@ -1235,7 +1245,7 @@ NS_IMETHODIMP nsCocoaWindow::Move(double aX, double aY)
     [mWindow setFrameTopLeftPoint:coord];
   }
 
-  return NS_OK;
+  NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
 void
@@ -1278,13 +1288,14 @@ nsCocoaWindow::SetSizeMode(nsSizeMode aMode)
 // This has to preserve the window's frame bounds.
 // This method requires (as does the Windows impl.) that you call Resize shortly
 // after calling HideWindowChrome. See bug 498835 for fixing this.
-NS_IMETHODIMP nsCocoaWindow::HideWindowChrome(bool aShouldHide)
+void
+nsCocoaWindow::HideWindowChrome(bool aShouldHide)
 {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
   if (!mWindow || !mWindowMadeHere ||
       (mWindowType != eWindowType_toplevel && mWindowType != eWindowType_dialog))
-    return NS_ERROR_FAILURE;
+    return;
 
   BOOL isVisible = [mWindow isVisible];
 
@@ -1308,7 +1319,7 @@ NS_IMETHODIMP nsCocoaWindow::HideWindowChrome(bool aShouldHide)
   NSRect frameRect = [mWindow frame];
   DestroyNativeWindow();
   nsresult rv = CreateNativeWindow(frameRect, aShouldHide ? eBorderStyle_none : mBorderStyle, true);
-  NS_ENSURE_SUCCESS(rv, rv);
+  NS_ENSURE_SUCCESS_VOID(rv);
 
   // Re-import state.
   [mWindow importState:state];
@@ -1329,12 +1340,10 @@ NS_IMETHODIMP nsCocoaWindow::HideWindowChrome(bool aShouldHide)
     mIsAnimationSuppressed = true;
     rv = Show(true);
     mIsAnimationSuppressed = wasAnimationSuppressed;
-    NS_ENSURE_SUCCESS(rv, rv);
+    NS_ENSURE_SUCCESS_VOID(rv);
   }
 
-  return NS_OK;
-
-  NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
+  NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
 class FullscreenTransitionData : public nsISupports
@@ -1539,15 +1548,16 @@ nsCocoaWindow::DoMakeFullScreen(bool aFullScreen, bool aUseSystemTransition)
 }
 
 // Coordinates are desktop pixels
-nsresult nsCocoaWindow::DoResize(double aX, double aY,
-                                 double aWidth, double aHeight,
-                                 bool aRepaint,
-                                 bool aConstrainToCurrentScreen)
+void
+nsCocoaWindow::DoResize(double aX, double aY,
+                        double aWidth, double aHeight,
+                        bool aRepaint,
+                        bool aConstrainToCurrentScreen)
 {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
   if (!mWindow || mInResize) {
-    return NS_OK;
+    return;
   }
 
   AutoRestore<bool> reentrantResizeGuard(mInResize);
@@ -1578,7 +1588,7 @@ nsresult nsCocoaWindow::DoResize(double aX, double aY,
                     newFrame.size.height != frame.size.height;
 
   if (!isMoving && !isResizing) {
-    return NS_OK;
+    return;
   }
 
   // We ignore aRepaint -- we have to call display:YES, otherwise the
@@ -1586,25 +1596,25 @@ nsresult nsCocoaWindow::DoResize(double aX, double aY,
   // the wrong place, leading to a visual jump.
   [mWindow setFrame:newFrame display:YES];
 
-  return NS_OK;
-
-  NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
+  NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
 // Coordinates are desktop pixels
-NS_IMETHODIMP nsCocoaWindow::Resize(double aX, double aY,
-                                    double aWidth, double aHeight,
-                                    bool aRepaint)
+void
+nsCocoaWindow::Resize(double aX, double aY,
+                      double aWidth, double aHeight,
+                      bool aRepaint)
 {
-  return DoResize(aX, aY, aWidth, aHeight, aRepaint, false);
+  DoResize(aX, aY, aWidth, aHeight, aRepaint, false);
 }
 
 // Coordinates are desktop pixels
-NS_IMETHODIMP nsCocoaWindow::Resize(double aWidth, double aHeight, bool aRepaint)
+void
+nsCocoaWindow::Resize(double aWidth, double aHeight, bool aRepaint)
 {
   double invScale = 1.0 / BackingScaleFactor();
-  return DoResize(mBounds.x * invScale, mBounds.y * invScale,
-                  aWidth, aHeight, aRepaint, true);
+  DoResize(mBounds.x * invScale, mBounds.y * invScale,
+           aWidth, aHeight, aRepaint, true);
 }
 
 LayoutDeviceIntRect
@@ -2111,7 +2121,8 @@ nsCocoaWindow::CaptureRollupEvents(nsIRollupListener* aListener,
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
-NS_IMETHODIMP nsCocoaWindow::GetAttention(int32_t aCycleCount)
+nsresult
+nsCocoaWindow::GetAttention(int32_t aCycleCount)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 

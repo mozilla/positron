@@ -9,6 +9,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Base64.h"
 #include "mozilla/Likely.h"
+#include "mozilla/Unused.h"
 
 #include "xpcprivate.h"
 #include "XPCWrapper.h"
@@ -169,7 +170,7 @@ nsXPConnect::IsISupportsDescendant(nsIInterfaceInfo* info)
 }
 
 void
-xpc::ErrorReport::Init(JSErrorReport* aReport, const char* aFallbackMessage,
+xpc::ErrorReport::Init(JSErrorReport* aReport, const char* aToStringResult,
                        bool aIsChrome, uint64_t aWindowID)
 {
     mCategory = aIsChrome ? NS_LITERAL_CSTRING("chrome javascript")
@@ -177,8 +178,8 @@ xpc::ErrorReport::Init(JSErrorReport* aReport, const char* aFallbackMessage,
     mWindowID = aWindowID;
 
     ErrorReportToMessageString(aReport, mErrorMsg);
-    if (mErrorMsg.IsEmpty() && aFallbackMessage) {
-        mErrorMsg.AssignWithConversion(aFallbackMessage);
+    if (mErrorMsg.IsEmpty() && aToStringResult) {
+        AppendUTF8toUTF16(aToStringResult, mErrorMsg);
     }
 
     if (!aReport->filename) {
@@ -290,14 +291,13 @@ xpc::ErrorReport::ErrorReportToMessageString(JSErrorReport* aReport,
                                              nsAString& aString)
 {
     aString.Truncate();
-    const char16_t* m = aReport->ucmessage;
-    if (m) {
+    if (aReport->message()) {
         JSFlatString* name = js::GetErrorTypeName(CycleCollectedJSContext::Get()->Context(), aReport->exnType);
         if (name) {
             AssignJSFlatString(aString, name);
             aString.AppendLiteral(": ");
         }
-        aString.Append(m);
+        aString.Append(NS_ConvertUTF8toUTF16(aReport->message().c_str()));
     }
 }
 
@@ -342,12 +342,12 @@ xpc_MarkInCCGeneration(nsISupports* aVariant, uint32_t aGeneration)
 void
 xpc_TryUnmarkWrappedGrayObject(nsISupports* aWrappedJS)
 {
-#ifdef DEBUG
+    // QIing to nsIXPConnectWrappedJSUnmarkGray may have side effects!
     nsCOMPtr<nsIXPConnectWrappedJSUnmarkGray> wjsug =
       do_QueryInterface(aWrappedJS);
+    Unused << wjsug;
     MOZ_ASSERT(!wjsug, "One should never be able to QI to "
                        "nsIXPConnectWrappedJSUnmarkGray successfully!");
-#endif
 }
 
 /***************************************************************************/
@@ -1090,22 +1090,29 @@ WriteScriptOrFunction(nsIObjectOutputStream* stream, JSContext* cx,
         return rv;
 
 
-    uint32_t size;
-    void* data;
+    TranscodeBuffer buffer;
+    TranscodeResult code;
     {
         if (functionObj)
-            data = JS_EncodeInterpretedFunction(cx, functionObj, &size);
+            code = EncodeInterpretedFunction(cx, buffer, functionObj);
         else
-            data = JS_EncodeScript(cx, script, &size);
+            code = EncodeScript(cx, buffer, script);
     }
 
-    if (!data)
+    if (code != TranscodeResult_Ok) {
+        if ((code & TranscodeResult_Failure) != 0)
+            return NS_ERROR_FAILURE;
+        MOZ_ASSERT((code & TranscodeResult_Throw) != 0);
+        JS_ClearPendingException(cx);
         return NS_ERROR_OUT_OF_MEMORY;
-    MOZ_ASSERT(size);
+    }
+
+    size_t size = buffer.length();
+    if (size > UINT32_MAX)
+        return NS_ERROR_FAILURE;
     rv = stream->Write32(size);
     if (NS_SUCCEEDED(rv))
-        rv = stream->WriteBytes(static_cast<char*>(data), size);
-    js_free(data);
+        rv = stream->WriteBytes(reinterpret_cast<char*>(buffer.begin()), size);
 
     return rv;
 }
@@ -1138,23 +1145,32 @@ ReadScriptOrFunction(nsIObjectInputStream* stream, JSContext* cx,
     if (NS_FAILED(rv))
         return rv;
 
+    TranscodeBuffer buffer;
+    buffer.replaceRawBuffer(reinterpret_cast<uint8_t*>(data), size);
+
     {
+        TranscodeResult code;
         if (scriptp) {
-            JSScript* script = JS_DecodeScript(cx, data, size);
-            if (!script)
-                rv = NS_ERROR_OUT_OF_MEMORY;
-            else
-                *scriptp = script;
+            Rooted<JSScript*> script(cx);
+            code = DecodeScript(cx, buffer, &script);
+            if (code == TranscodeResult_Ok)
+                *scriptp = script.get();
         } else {
-            JSObject* funobj = JS_DecodeInterpretedFunction(cx, data, size);
-            if (!funobj)
-                rv = NS_ERROR_OUT_OF_MEMORY;
-            else
-                *functionObjp = funobj;
+            Rooted<JSFunction*> funobj(cx);
+            code = DecodeInterpretedFunction(cx, buffer, &funobj);
+            if (code == TranscodeResult_Ok)
+                *functionObjp = JS_GetFunctionObject(funobj.get());
+        }
+
+        if (code != TranscodeResult_Ok) {
+            if ((code & TranscodeResult_Failure) != 0)
+                return NS_ERROR_FAILURE;
+            MOZ_ASSERT((code & TranscodeResult_Throw) != 0);
+            JS_ClearPendingException(cx);
+            return NS_ERROR_OUT_OF_MEMORY;
         }
     }
 
-    free(data);
     return rv;
 }
 

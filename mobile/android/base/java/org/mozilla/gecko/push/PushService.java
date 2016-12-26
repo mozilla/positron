@@ -14,7 +14,6 @@ import android.util.Log;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.mozilla.gecko.EventDispatcher;
-import org.mozilla.gecko.GeckoApp;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoProfile;
 import org.mozilla.gecko.GeckoService;
@@ -28,6 +27,7 @@ import org.mozilla.gecko.gcm.GcmTokenClient;
 import org.mozilla.gecko.push.autopush.AutopushClientException;
 import org.mozilla.gecko.util.BundleEventListener;
 import org.mozilla.gecko.util.EventCallback;
+import org.mozilla.gecko.util.GeckoBundle;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import java.io.File;
@@ -246,16 +246,16 @@ public class PushService implements BundleEventListener {
 
     protected void registerGeckoEventListener() {
         Log.d(LOG_TAG, "Registered Gecko event listener.");
-        GeckoApp.getEventDispatcher().registerBackgroundThreadListener(this, GECKO_EVENTS);
+        EventDispatcher.getInstance().registerBackgroundThreadListener(this, GECKO_EVENTS);
     }
 
     protected void unregisterGeckoEventListener() {
         Log.d(LOG_TAG, "Unregistered Gecko event listener.");
-        GeckoApp.getEventDispatcher().unregisterBackgroundThreadListener(this, GECKO_EVENTS);
+        EventDispatcher.getInstance().unregisterBackgroundThreadListener(this, GECKO_EVENTS);
     }
 
     @Override
-    public void handleMessage(final String event, final Bundle message, final EventCallback callback) {
+    public void handleMessage(final String event, final GeckoBundle message, final EventCallback callback) {
         Log.i(LOG_TAG, "Handling event: " + event);
         ThreadUtils.assertOnBackgroundThread();
 
@@ -396,10 +396,6 @@ public class PushService implements BundleEventListener {
                 return;
             }
             if ("History:GetPrePathLastVisitedTimeMilliseconds".equals(event)) {
-                if (callback == null) {
-                    Log.e(LOG_TAG, "callback must not be null in " + event);
-                    return;
-                }
                 final String prePath = message.getString("prePath");
                 if (prePath == null) {
                     callback.sendError("prePath must not be null in " + event);

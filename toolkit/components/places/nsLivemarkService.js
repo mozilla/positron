@@ -4,8 +4,7 @@
 
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
-////////////////////////////////////////////////////////////////////////////////
-//// Modules and services.
+// Modules and services.
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -18,14 +17,13 @@ XPCOMUtils.defineLazyModuleGetter(this, "Task",
 XPCOMUtils.defineLazyModuleGetter(this, "Deprecated",
                                   "resource://gre/modules/Deprecated.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "asyncHistory", function () {
+XPCOMUtils.defineLazyGetter(this, "asyncHistory", function() {
   // Lazily add an history observer when it's actually needed.
   PlacesUtils.history.addObserver(PlacesUtils.livemarks, true);
   return PlacesUtils.asyncHistory;
 });
 
-////////////////////////////////////////////////////////////////////////////////
-//// Constants
+// Constants
 
 // Delay between reloads of consecute livemarks.
 const RELOAD_DELAY_MS = 500;
@@ -34,8 +32,7 @@ const EXPIRE_TIME_MS = 3600000; // 1 hour.
 // Expire livemarks after this time on error.
 const ONERROR_EXPIRE_TIME_MS = 300000; // 5 minutes.
 
-////////////////////////////////////////////////////////////////////////////////
-//// Livemarks cache.
+// Livemarks cache.
 
 XPCOMUtils.defineLazyGetter(this, "CACHE_SQL", () => {
   function getAnnoSQLFragment(aAnnoParam) {
@@ -108,8 +105,7 @@ function toDate(time) {
   return time ? new Date(parseInt(time / 1000)) : undefined;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//// LivemarkService
+// LivemarkService
 
 function LivemarkService() {
   // Cleanup on shutdown.
@@ -149,8 +145,7 @@ LivemarkService.prototype = {
     }, RELOAD_DELAY_MS, Ci.nsITimer.TYPE_ONE_SHOT);
   },
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// nsIObserver
+  // nsIObserver
 
   observe(aSubject, aTopic, aData) {
     if (aTopic == PlacesUtils.TOPIC_SHUTDOWN) {
@@ -169,8 +164,7 @@ LivemarkService.prototype = {
     }
   },
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// mozIAsyncLivemarks
+  // mozIAsyncLivemarks
 
   addLivemark(aLivemarkInfo) {
     if (!aLivemarkInfo) {
@@ -182,7 +176,7 @@ LivemarkService.prototype = {
     // Must provide at least non-null parent guid/id, index and feedURI.
     if ((!hasParentId && !hasParentGuid) ||
         (hasParentId && aLivemarkInfo.parentId < 1) ||
-        (hasParentGuid &&!/^[a-zA-Z0-9\-_]{12}$/.test(aLivemarkInfo.parentGuid)) ||
+        (hasParentGuid && !/^[a-zA-Z0-9\-_]{12}$/.test(aLivemarkInfo.parentGuid)) ||
         (hasIndex && aLivemarkInfo.index < Ci.nsINavBookmarksService.DEFAULT_INDEX) ||
         !(aLivemarkInfo.feedURI instanceof Ci.nsIURI) ||
         (aLivemarkInfo.siteURI && !(aLivemarkInfo.siteURI instanceof Ci.nsIURI)) ||
@@ -228,14 +222,15 @@ LivemarkService.prototype = {
                                   , lastModified: toPRTime(folder.lastModified)
                                   });
 
-      livemark.writeFeedURI(aLivemarkInfo.feedURI);
+      livemark.writeFeedURI(aLivemarkInfo.feedURI, aLivemarkInfo.source);
       if (aLivemarkInfo.siteURI) {
-        livemark.writeSiteURI(aLivemarkInfo.siteURI);
+        livemark.writeSiteURI(aLivemarkInfo.siteURI, aLivemarkInfo.source);
       }
 
       if (aLivemarkInfo.lastModified) {
         yield PlacesUtils.bookmarks.update({ guid: folder.guid,
-                                             lastModified: toDate(aLivemarkInfo.lastModified) });
+                                             lastModified: toDate(aLivemarkInfo.lastModified),
+                                             source: aLivemarkInfo.source });
         livemark.lastModified = aLivemarkInfo.lastModified;
       }
 
@@ -266,7 +261,8 @@ LivemarkService.prototype = {
       if (!livemarksMap.has(aLivemarkInfo.guid))
         throw new Components.Exception("Invalid livemark", Cr.NS_ERROR_INVALID_ARG);
 
-      yield PlacesUtils.bookmarks.remove(aLivemarkInfo.guid);
+      yield PlacesUtils.bookmarks.remove(aLivemarkInfo.guid,
+                                         { source: aLivemarkInfo.source });
     }.bind(this));
   },
 
@@ -312,8 +308,7 @@ LivemarkService.prototype = {
     }.bind(this));
   },
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// nsINavBookmarkObserver
+  // nsINavBookmarkObserver
 
   onBeginUpdateBatch() {},
   onEndUpdateBatch() {},
@@ -364,8 +359,7 @@ LivemarkService.prototype = {
     });
   },
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// nsINavHistoryObserver
+  // nsINavHistoryObserver
 
   onPageChanged() {},
   onTitleChanged() {},
@@ -395,8 +389,7 @@ LivemarkService.prototype = {
     });
   },
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// nsISupports
+  // nsISupports
 
   classID: Components.ID("{dca61eb5-c7cd-4df1-b0fb-d0722baba251}"),
 
@@ -411,8 +404,7 @@ LivemarkService.prototype = {
   ])
 };
 
-////////////////////////////////////////////////////////////////////////////////
-//// Livemark
+// Livemark
 
 /**
  * Object used internally to represent a livemark.
@@ -465,18 +457,20 @@ Livemark.prototype = {
     return this._status;
   },
 
-  writeFeedURI(aFeedURI) {
+  writeFeedURI(aFeedURI, aSource) {
     PlacesUtils.annotations
                .setItemAnnotation(this.id, PlacesUtils.LMANNO_FEEDURI,
                                   aFeedURI.spec,
-                                  0, PlacesUtils.annotations.EXPIRE_NEVER);
+                                  0, PlacesUtils.annotations.EXPIRE_NEVER,
+                                  aSource);
     this.feedURI = aFeedURI;
   },
 
-  writeSiteURI(aSiteURI) {
+  writeSiteURI(aSiteURI, aSource) {
     if (!aSiteURI) {
       PlacesUtils.annotations.removeItemAnnotation(this.id,
-                                                   PlacesUtils.LMANNO_SITEURI)
+                                                   PlacesUtils.LMANNO_SITEURI,
+                                                   aSource)
       this.siteURI = null;
       return;
     }
@@ -495,7 +489,8 @@ Livemark.prototype = {
     PlacesUtils.annotations
                .setItemAnnotation(this.id, PlacesUtils.LMANNO_SITEURI,
                                   aSiteURI.spec,
-                                  0, PlacesUtils.annotations.EXPIRE_NEVER);
+                                  0, PlacesUtils.annotations.EXPIRE_NEVER,
+                                  aSource);
     this.siteURI = aSiteURI;
   },
 
@@ -725,8 +720,7 @@ Livemark.prototype = {
   ])
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//// LivemarkLoadListener
+// LivemarkLoadListener
 
 /**
  * Object used internally to handle loading a livemark's contents.

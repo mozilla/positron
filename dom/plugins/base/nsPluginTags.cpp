@@ -368,14 +368,12 @@ void nsPluginTag::InitMime(const char* const* aMimeTypes,
           mSupportsAsyncInit = true;
         }
         break;
-      case nsPluginHost::eSpecialType_Silverlight:
-      case nsPluginHost::eSpecialType_Unity:
       case nsPluginHost::eSpecialType_Test:
         mSupportsAsyncInit = true;
         break;
       case nsPluginHost::eSpecialType_None:
       default:
-#ifndef RELEASE_BUILD
+#ifndef RELEASE_OR_BETA
         // Allow async init for all plugins on Nightly and Aurora
         mSupportsAsyncInit = true;
 #endif
@@ -755,13 +753,6 @@ nsPluginTag::GetNiceName(nsACString & aResult)
 {
   aResult = GetNiceFileName();
   return NS_OK;
-}
-
-void nsPluginTag::ImportFlagsToPrefs(uint32_t flags)
-{
-  if (!(flags & NS_PLUGIN_FLAG_ENABLED)) {
-    SetPluginState(ePluginState_Disabled);
-  }
 }
 
 NS_IMETHODIMP

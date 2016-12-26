@@ -38,6 +38,8 @@ JOB_NAME_WHITELIST = set([
     'linux64-opt',
     'linux64-pgo',
     'linux64-st-an-opt',
+    'linux64-stylo-debug',
+    'linux64-stylo-opt',
     'linux64-valgrind-opt',
     'linux-debug',
     'linux-opt',
@@ -45,16 +47,15 @@ JOB_NAME_WHITELIST = set([
     'macosx64-debug',
     'macosx64-opt',
     'macosx64-st-an-opt',
-    'mulet-dbg',
-    'mulet-haz-debug',
-    'mulet-opt',
     'nexus-5-l-eng-debug',
     'nexus-5-l-eng-opt',
+    'osx-10-10',
     'shell-haz-debug',
     'sm-arm64-sim-debug',
     'sm-arm-sim-debug',
     'sm-asan-opt',
     'sm-compacting-debug',
+    'sm-mozjs-sys-debug',
     'sm-msan-opt',
     'sm-nonunified-debug',
     'sm-package-opt',
@@ -62,14 +63,20 @@ JOB_NAME_WHITELIST = set([
     'sm-plain-opt',
     'sm-rootanalysis-debug',
     'sm-tsan-opt',
+    'win32-clang-debug',
+    'win32-clang-opt',
     'win32-debug',
     'win32-opt',
+    'win32-pgo',
+    'win64-clang-debug',
+    'win64-clang-opt',
     'win64-debug',
     'win64-opt',
+    'win64-pgo',
 ])
 
 JOB_NAME_WHITELIST_ERROR = """\
-The gecko-v2 job name {} is not in the whitelist in __file__.
+The gecko-v2 job name {} is not in the whitelist in gecko_v2_whitelist.py.
 If this job runs on Buildbot, please ensure that the job names match between
 Buildbot and TaskCluster, then add the job name to the whitelist.  If this is a
 new job, there is nothing to check -- just add the job to the whitelist.

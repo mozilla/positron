@@ -15,7 +15,7 @@
 
 .options-vertical-pane {
   display: inline;
-  float: left;
+  float: inline-start;
 }
 
 .options-vertical-pane {
@@ -104,4 +104,9 @@
 
 #devtools-sourceeditor-tabsize-select {
   min-width: 80px;
+}
+
+#screenshot-icon::before {
+  background-image: url(chrome://devtools/skin/images/command-screenshot.svg);
+  margin-inline-start: 5px;
 }

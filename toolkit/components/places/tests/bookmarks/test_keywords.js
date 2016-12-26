@@ -51,7 +51,7 @@ function expectNotifications() {
             if (arg && arg instanceof Ci.nsIURI)
               return new URL(arg.spec);
             if (arg && typeof(arg) == "number" && arg >= Date.now() * 1000)
-              return new Date(parseInt(arg/1000));
+              return new Date(parseInt(arg / 1000));
             return arg;
           });
           notifications.push({ name: name, arguments: args });
@@ -95,7 +95,7 @@ add_task(function* test_addBookmarkAndKeyword() {
   let bookmark = yield PlacesUtils.bookmarks.fetch({ url: URI1 });
   observer.check([ { name: "onItemChanged",
                      arguments: [ itemId, "keyword", false, "keyword",
-                                  bookmark.lastModified, bookmark.type,
+                                  bookmark.lastModified * 1000, bookmark.type,
                                   (yield PlacesUtils.promiseItemId(bookmark.parentGuid)),
                                   bookmark.guid, bookmark.parentGuid, "",
                                   Ci.nsINavBookmarksService.SOURCE_DEFAULT ] }
@@ -147,13 +147,13 @@ add_task(function* test_sameKeywordDifferentURI() {
   observer.check([ { name: "onItemChanged",
                      arguments: [ (yield PlacesUtils.promiseItemId(bookmark1.guid)),
                                   "keyword", false, "",
-                                  bookmark1.lastModified, bookmark1.type,
+                                  bookmark1.lastModified * 1000, bookmark1.type,
                                   (yield PlacesUtils.promiseItemId(bookmark1.parentGuid)),
                                   bookmark1.guid, bookmark1.parentGuid, "",
                                   Ci.nsINavBookmarksService.SOURCE_DEFAULT ] },
                     { name: "onItemChanged",
                      arguments: [ itemId, "keyword", false, "keyword",
-                                  bookmark2.lastModified, bookmark2.type,
+                                  bookmark2.lastModified * 1000, bookmark2.type,
                                   (yield PlacesUtils.promiseItemId(bookmark2.parentGuid)),
                                   bookmark2.guid, bookmark2.parentGuid, "",
                                   Ci.nsINavBookmarksService.SOURCE_DEFAULT ] }
@@ -188,14 +188,14 @@ add_task(function* test_sameURIDifferentKeyword() {
   observer.check([ { name: "onItemChanged",
                      arguments: [ (yield PlacesUtils.promiseItemId(bookmarks[0].guid)),
                                   "keyword", false, "keyword2",
-                                  bookmarks[0].lastModified, bookmarks[0].type,
+                                  bookmarks[0].lastModified * 1000, bookmarks[0].type,
                                   (yield PlacesUtils.promiseItemId(bookmarks[0].parentGuid)),
                                   bookmarks[0].guid, bookmarks[0].parentGuid, "",
                                   Ci.nsINavBookmarksService.SOURCE_DEFAULT ] },
                     { name: "onItemChanged",
                      arguments: [ (yield PlacesUtils.promiseItemId(bookmarks[1].guid)),
                                   "keyword", false, "keyword2",
-                                  bookmarks[1].lastModified, bookmarks[1].type,
+                                  bookmarks[1].lastModified * 1000, bookmarks[1].type,
                                   (yield PlacesUtils.promiseItemId(bookmarks[1].parentGuid)),
                                   bookmarks[1].guid, bookmarks[1].parentGuid, "",
                                   Ci.nsINavBookmarksService.SOURCE_DEFAULT ] }
@@ -246,21 +246,21 @@ add_task(function* test_unsetKeyword() {
   observer.check([ { name: "onItemChanged",
                      arguments: [ (yield PlacesUtils.promiseItemId(bookmarks[0].guid)),
                                   "keyword", false, "",
-                                  bookmarks[0].lastModified, bookmarks[0].type,
+                                  bookmarks[0].lastModified * 1000, bookmarks[0].type,
                                   (yield PlacesUtils.promiseItemId(bookmarks[0].parentGuid)),
                                   bookmarks[0].guid, bookmarks[0].parentGuid, "",
                                   Ci.nsINavBookmarksService.SOURCE_DEFAULT ] },
                     { name: "onItemChanged",
                      arguments: [ (yield PlacesUtils.promiseItemId(bookmarks[1].guid)),
                                   "keyword", false, "",
-                                  bookmarks[1].lastModified, bookmarks[1].type,
+                                  bookmarks[1].lastModified * 1000, bookmarks[1].type,
                                   (yield PlacesUtils.promiseItemId(bookmarks[1].parentGuid)),
                                   bookmarks[1].guid, bookmarks[1].parentGuid, "",
                                   Ci.nsINavBookmarksService.SOURCE_DEFAULT ] },
                     { name: "onItemChanged",
                      arguments: [ (yield PlacesUtils.promiseItemId(bookmarks[2].guid)),
                                   "keyword", false, "",
-                                  bookmarks[2].lastModified, bookmarks[2].type,
+                                  bookmarks[2].lastModified * 1000, bookmarks[2].type,
                                   (yield PlacesUtils.promiseItemId(bookmarks[2].parentGuid)),
                                   bookmarks[2].guid, bookmarks[2].parentGuid, "",
                                   Ci.nsINavBookmarksService.SOURCE_DEFAULT ] }
@@ -275,7 +275,6 @@ add_task(function* test_unsetKeyword() {
 });
 
 add_task(function* test_addRemoveBookmark() {
-  let fc = yield foreign_count(URI3);
   let observer = expectNotifications();
 
   let itemId =
@@ -292,7 +291,7 @@ add_task(function* test_addRemoveBookmark() {
   observer.check([ { name: "onItemChanged",
                      arguments: [ itemId,
                                   "keyword", false, "keyword",
-                                  bookmark.lastModified, bookmark.type,
+                                  bookmark.lastModified * 1000, bookmark.type,
                                   parentId,
                                   bookmark.guid, bookmark.parentGuid, "",
                                   Ci.nsINavBookmarksService.SOURCE_DEFAULT ] }

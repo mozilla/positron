@@ -22,6 +22,7 @@
 #include "nsXULAppAPI.h"
 #include "nsEscape.h"
 #include "nsNetCID.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "nsServiceManagerUtils.h"
 
@@ -30,6 +31,8 @@ namespace dom {
 
 static const char kStartupTopic[] = "sessionstore-windows-restored";
 static const uint32_t kStartupDelay = 0;
+
+const char kTestingPref[] = "dom.storage.testing";
 
 NS_IMPL_ISUPPORTS(DOMStorageObserver,
                   nsIObserver,
@@ -62,7 +65,7 @@ DOMStorageObserver::Init()
   obs->AddObserver(sSelf, "perm-changed", true);
   obs->AddObserver(sSelf, "browser:purge-domain-data", true);
   obs->AddObserver(sSelf, "last-pb-context-exited", true);
-  obs->AddObserver(sSelf, "clear-origin-data", true);
+  obs->AddObserver(sSelf, "clear-origin-attributes-data", true);
 
   // Shutdown
   obs->AddObserver(sSelf, "profile-after-change", true);
@@ -72,15 +75,9 @@ DOMStorageObserver::Init()
   // Observe low device storage notifications.
   obs->AddObserver(sSelf, "disk-space-watcher", true);
 
-#ifdef DOM_STORAGE_TESTS
   // Testing
-  obs->AddObserver(sSelf, "domstorage-test-flush-force", true);
-  if (XRE_IsParentProcess()) {
-    // Only to forward to child process.
-    obs->AddObserver(sSelf, "domstorage-test-flushed", true);
-  }
-
-  obs->AddObserver(sSelf, "domstorage-test-reload", true);
+#ifdef DOM_STORAGE_TESTS
+  Preferences::RegisterCallbackAndCall(TestingPrefChanged, kTestingPref);
 #endif
 
   return NS_OK;
@@ -96,6 +93,32 @@ DOMStorageObserver::Shutdown()
 
   NS_RELEASE(sSelf);
   return NS_OK;
+}
+
+// static
+void
+DOMStorageObserver::TestingPrefChanged(const char* aPrefName, void* aClosure)
+{
+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+  if (!obs) {
+    return;
+  }
+
+  if (Preferences::GetBool(kTestingPref)) {
+    obs->AddObserver(sSelf, "domstorage-test-flush-force", true);
+    if (XRE_IsParentProcess()) {
+      // Only to forward to child process.
+      obs->AddObserver(sSelf, "domstorage-test-flushed", true);
+    }
+    obs->AddObserver(sSelf, "domstorage-test-reload", true);
+  } else {
+    obs->RemoveObserver(sSelf, "domstorage-test-flush-force");
+    if (XRE_IsParentProcess()) {
+      // Only to forward to child process.
+      obs->RemoveObserver(sSelf, "domstorage-test-flushed");
+    }
+    obs->RemoveObserver(sSelf, "domstorage-test-reload");
+  }
 }
 
 void
@@ -266,7 +289,7 @@ DOMStorageObserver::Observe(nsISupports* aSubject,
   }
 
   // Clear data of the origins whose prefixes will match the suffix.
-  if (!strcmp(aTopic, "clear-origin-data")) {
+  if (!strcmp(aTopic, "clear-origin-attributes-data")) {
     OriginAttributesPattern pattern;
     if (!pattern.Init(nsDependentString(aData))) {
       NS_ERROR("Cannot parse origin attributes pattern");

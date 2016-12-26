@@ -78,7 +78,7 @@ public:
   // via the fontgroup.
   
   // Takes ownership of aInnerTransformTextRunFactory
-  explicit nsCaseTransformTextRunFactory(UniquePtr<nsTransformingTextRunFactory> aInnerTransformingTextRunFactory,
+  explicit nsCaseTransformTextRunFactory(mozilla::UniquePtr<nsTransformingTextRunFactory> aInnerTransformingTextRunFactory,
                                          bool aAllUppercase = false)
     : mInnerTransformingTextRunFactory(Move(aInnerTransformingTextRunFactory)),
       mAllUppercase(aAllUppercase) {}
@@ -137,7 +137,8 @@ public:
   
   void SetCapitalization(uint32_t aStart, uint32_t aLength,
                          bool* aCapitalization);
-  virtual bool SetPotentialLineBreaks(Range aRange, uint8_t* aBreakBefore);
+  virtual bool SetPotentialLineBreaks(Range aRange,
+                                      const uint8_t* aBreakBefore);
   /**
    * Called after SetCapitalization and SetPotentialLineBreaks
    * are done and before we request any data from the textrun. Also always

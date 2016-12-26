@@ -19,20 +19,23 @@ public:
   static bool CreateForContent(Endpoint<PVideoDecoderManagerParent>&& aEndpoint);
 
   // Can be called from any thread
-  SurfaceDescriptorGPUVideo StoreImage(layers::TextureClient* aImage);
+  SurfaceDescriptorGPUVideo StoreImage(layers::Image* aImage, layers::TextureClient* aTexture);
 
   static void StartupThreads();
   static void ShutdownThreads();
 
+  static void ShutdownVideoBridge();
+
   bool OnManagerThread();
 
 protected:
-  PVideoDecoderParent* AllocPVideoDecoderParent() override;
+  PVideoDecoderParent* AllocPVideoDecoderParent(const VideoInfo& aVideoInfo, const layers::TextureFactoryIdentifier& aIdentifier, bool* aSuccess) override;
   bool DeallocPVideoDecoderParent(PVideoDecoderParent* actor) override;
 
-  bool RecvDeallocateSurfaceDescriptorGPUVideo(const SurfaceDescriptorGPUVideo& aSD) override;
+  mozilla::ipc::IPCResult RecvReadback(const SurfaceDescriptorGPUVideo& aSD, SurfaceDescriptor* aResult) override;
+  mozilla::ipc::IPCResult RecvDeallocateSurfaceDescriptorGPUVideo(const SurfaceDescriptorGPUVideo& aSD) override;
 
-  void ActorDestroy(mozilla::ipc::IProtocolManager<mozilla::ipc::IProtocol>::ActorDestroyReason) override {}
+  void ActorDestroy(mozilla::ipc::IProtocol::ActorDestroyReason) override {}
 
   void DeallocPVideoDecoderManagerParent() override;
 
@@ -42,6 +45,7 @@ protected:
 
   void Open(Endpoint<PVideoDecoderManagerParent>&& aEndpoint);
 
+  std::map<uint64_t, RefPtr<layers::Image>> mImageMap;
   std::map<uint64_t, RefPtr<layers::TextureClient>> mTextureMap;
 };
 

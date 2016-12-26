@@ -408,8 +408,13 @@ nsMenuFrame::HandleEvent(nsPresContext* aPresContext,
     // On mac, open menulist on either up/down arrow or space (w/o Cmd pressed)
     if (!IsOpen() && ((keyEvent->mCharCode == ' ' && !keyEvent->IsMeta()) ||
         (keyCode == NS_VK_UP || keyCode == NS_VK_DOWN))) {
-      *aEventStatus = nsEventStatus_eConsumeNoDefault;
-      OpenMenu(false);
+
+      // When pressing space, don't open the menu if performing an incremental search.
+      if (keyEvent->mCharCode != ' ' ||
+          !nsMenuPopupFrame::IsWithinIncrementalTime(keyEvent->mTime)) {
+        *aEventStatus = nsEventStatus_eConsumeNoDefault;
+        OpenMenu(false);
+      }
     }
 #else
     // On other platforms, toggle menulist on unmodified F4 or Alt arrow
@@ -498,6 +503,10 @@ nsMenuFrame::HandleEvent(nsPresContext* aPresContext,
       return NS_OK;
     }
 
+    if (IsDisabled() && GetParentMenuListType() != eNotMenuList) {
+      return NS_OK;
+    }
+
     // Let the menu parent know we're the new item.
     menuParent->ChangeMenuItem(this, false, false);
     NS_ENSURE_TRUE(weakFrame.IsAlive(), NS_OK);
@@ -540,6 +549,8 @@ nsMenuFrame::ToggleMenuState()
 void
 nsMenuFrame::PopupOpened()
 {
+  gMenuJustOpenedOrClosed = true;
+
   nsWeakFrame weakFrame(this);
   mContent->SetAttr(kNameSpaceID_None, nsGkAtoms::open,
                     NS_LITERAL_STRING("true"), true);
@@ -698,8 +709,6 @@ nsMenuFrame::OpenMenu(bool aSelectFirstItem)
 {
   if (!mContent)
     return;
-
-  gMenuJustOpenedOrClosed = true;
 
   nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
   if (pm) {
@@ -995,7 +1004,7 @@ nsMenuFrame::UpdateMenuSpecialState()
   // get the first sibling in this menu popup. This frame may be it, and if we're
   // being called at creation time, this frame isn't yet in the parent's child list.
   // All I'm saying is that this may fail, but it's most likely alright.
-  nsIFrame* firstMenuItem = nsXULPopupManager::GetNextMenuItem(GetParent(), nullptr, true);
+  nsIFrame* firstMenuItem = nsXULPopupManager::GetNextMenuItem(GetParent(), nullptr, true, false);
   nsIFrame* sib = firstMenuItem;
   while (sib) {
     nsMenuFrame* menu = do_QueryFrame(sib);
@@ -1009,7 +1018,7 @@ nsMenuFrame::UpdateMenuSpecialState()
         return;
       }
     }
-    sib = nsXULPopupManager::GetNextMenuItem(GetParent(), menu, true);
+    sib = nsXULPopupManager::GetNextMenuItem(GetParent(), menu, true, true);
     if (sib == firstMenuItem) {
       break;
     }

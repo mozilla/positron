@@ -85,8 +85,8 @@ add_test(function test_dh_addRemoveDownload()
     // Verify that the URI is already available in results at this time.
     do_check_true(!!page_in_database(DOWNLOAD_URI));
 
-    waitForOnDeleteURI(function DHRAD_onDeleteURI(aURI) {
-      do_check_true(aURI.equals(DOWNLOAD_URI));
+    waitForOnDeleteURI(function DHRAD_onDeleteURI(aDeletedURI) {
+      do_check_true(aDeletedURI.equals(DOWNLOAD_URI));
 
       // Verify that the URI is already available in results at this time.
       do_check_false(!!page_in_database(DOWNLOAD_URI));
@@ -104,13 +104,13 @@ add_test(function test_dh_addMultiRemoveDownload()
   PlacesTestUtils.addVisits({
     uri: DOWNLOAD_URI,
     transition: TRANSITION_TYPED
-  }).then(function () {
+  }).then(function() {
     waitForOnVisit(function DHAD_onVisit(aURI) {
       do_check_true(aURI.equals(DOWNLOAD_URI));
       do_check_true(!!page_in_database(DOWNLOAD_URI));
 
-      waitForOnDeleteVisits(function DHRAD_onDeleteVisits(aURI) {
-        do_check_true(aURI.equals(DOWNLOAD_URI));
+      waitForOnDeleteVisits(function DHRAD_onDeleteVisits(aDeletedURI) {
+        do_check_true(aDeletedURI.equals(DOWNLOAD_URI));
         do_check_true(!!page_in_database(DOWNLOAD_URI));
 
         PlacesTestUtils.clearHistory().then(run_next_test);
@@ -132,8 +132,8 @@ add_test(function test_dh_addBookmarkRemoveDownload()
     do_check_true(aURI.equals(DOWNLOAD_URI));
     do_check_true(!!page_in_database(DOWNLOAD_URI));
 
-    waitForOnDeleteVisits(function DHRAD_onDeleteVisits(aURI) {
-      do_check_true(aURI.equals(DOWNLOAD_URI));
+    waitForOnDeleteVisits(function DHRAD_onDeleteVisits(aDeletedURI) {
+      do_check_true(aDeletedURI.equals(DOWNLOAD_URI));
       do_check_true(!!page_in_database(DOWNLOAD_URI));
 
       PlacesTestUtils.clearHistory().then(run_next_test);
@@ -150,9 +150,9 @@ add_test(function test_dh_addDownload_referrer()
     do_check_true(aURI.equals(REFERRER_URI));
     let referrerVisitId = aVisitID;
 
-    waitForOnVisit(function DHAD_onVisit(aURI, aVisitID, aTime, aSessionID,
-                                              aReferringID) {
-      do_check_true(aURI.equals(DOWNLOAD_URI));
+    waitForOnVisit(function DHAD_onVisit(aVisitedURI, unused, unused2, unused3,
+                                         aReferringID) {
+      do_check_true(aVisitedURI.equals(DOWNLOAD_URI));
       do_check_eq(aReferringID, referrerVisitId);
 
       // Verify that the URI is already available in results at this time.

@@ -606,11 +606,8 @@
   /* 17: NS_ERROR_MODULE_EDITOR */
   /* ======================================================================= */
 #define MODULE NS_ERROR_MODULE_EDITOR
-  ERROR(NS_ERROR_EDITOR_NO_SELECTION,  FAILURE(1)),
-  ERROR(NS_ERROR_EDITOR_NO_TEXTNODE,   FAILURE(2)),
-  ERROR(NS_FOUND_TARGET,               FAILURE(3)),
-
-  ERROR(NS_EDITOR_ELEMENT_NOT_FOUND,   SUCCESS(1)),
+  ERROR(NS_SUCCESS_EDITOR_ELEMENT_NOT_FOUND,   SUCCESS(1)),
+  ERROR(NS_SUCCESS_EDITOR_FOUND_TARGET,        SUCCESS(2)),
 #undef MODULE
 
 
@@ -696,6 +693,8 @@
   ERROR(NS_ERROR_SRI_CORRUPT,                      FAILURE(200)),
   ERROR(NS_ERROR_SRI_DISABLED,                     FAILURE(201)),
   ERROR(NS_ERROR_SRI_NOT_ELIGIBLE,                 FAILURE(202)),
+  ERROR(NS_ERROR_SRI_UNEXPECTED_HASH_TYPE,         FAILURE(203)),
+  ERROR(NS_ERROR_SRI_IMPORT,                       FAILURE(204)),
 
   /* CMS specific nsresult error codes.  Note: the numbers used here correspond
    * to the values in nsICMSMessageErrors.idl. */
@@ -938,23 +937,6 @@
 #undef MODULE
 
   /* ======================================================================= */
-  /* 37: NS_ERROR_MODULE_DOM_BLUETOOTH */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_DOM_BLUETOOTH
-  ERROR(NS_ERROR_DOM_BLUETOOTH_FAIL,                      FAILURE(1)),
-  ERROR(NS_ERROR_DOM_BLUETOOTH_NOT_READY,                 FAILURE(2)),
-  ERROR(NS_ERROR_DOM_BLUETOOTH_NOMEM,                     FAILURE(3)),
-  ERROR(NS_ERROR_DOM_BLUETOOTH_BUSY,                      FAILURE(4)),
-  ERROR(NS_ERROR_DOM_BLUETOOTH_DONE,                      FAILURE(5)),
-  ERROR(NS_ERROR_DOM_BLUETOOTH_UNSUPPORTED,               FAILURE(6)),
-  ERROR(NS_ERROR_DOM_BLUETOOTH_PARM_INVALID,              FAILURE(7)),
-  ERROR(NS_ERROR_DOM_BLUETOOTH_UNHANDLED,                 FAILURE(8)),
-  ERROR(NS_ERROR_DOM_BLUETOOTH_AUTH_FAILURE,              FAILURE(9)),
-  ERROR(NS_ERROR_DOM_BLUETOOTH_RMT_DEV_DOWN,              FAILURE(10)),
-  ERROR(NS_ERROR_DOM_BLUETOOTH_AUTH_REJECTED,             FAILURE(11)),
-#undef MODULE
-
-  /* ======================================================================= */
   /* 38: NS_ERROR_MODULE_SIGNED_APP */
   /* ======================================================================= */
 #define MODULE NS_ERROR_MODULE_SIGNED_APP
@@ -1000,9 +982,22 @@
   ERROR(NS_ERROR_DOM_MEDIA_MEDIASINK_ERR,       FAILURE(11)),
   ERROR(NS_ERROR_DOM_MEDIA_DEMUXER_ERR,         FAILURE(12)),
   ERROR(NS_ERROR_DOM_MEDIA_CDM_ERR,             FAILURE(13)),
+  ERROR(NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER,    FAILURE(14)),
 
   /* Internal platform-related errors */
   ERROR(NS_ERROR_DOM_MEDIA_CUBEB_INITIALIZATION_ERR,  FAILURE(101)),
+#undef MODULE
+
+  /* ======================================================================= */
+  /* 42: NS_ERROR_MODULE_URL_CLASSIFIER */
+  /* ======================================================================= */
+#define MODULE NS_ERROR_MODULE_URL_CLASSIFIER
+  ERROR(NS_ERROR_UC_UPDATE_UNKNOWN,                 FAILURE(1)),
+  ERROR(NS_ERROR_UC_UPDATE_DUPLICATE_PREFIX,        FAILURE(2)),
+  ERROR(NS_ERROR_UC_UPDATE_INFINITE_LOOP,           FAILURE(3)),
+  ERROR(NS_ERROR_UC_UPDATE_WRONG_REMOVAL_INDICES,   FAILURE(4)),
+  ERROR(NS_ERROR_UC_UPDATE_CHECKSUM_MISMATCH,       FAILURE(5)),
+  ERROR(NS_ERROR_UC_UPDATE_MISSING_CHECKSUM,        FAILURE(6)),
 #undef MODULE
 
   /* ======================================================================= */

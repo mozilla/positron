@@ -27,6 +27,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.support.annotation.CheckResult;
+import android.support.annotation.VisibleForTesting;
 import android.support.v4.content.LocalBroadcastManager;
 import android.text.TextUtils;
 import android.util.Log;
@@ -35,7 +37,8 @@ public class HomeConfigPrefsBackend implements HomeConfigBackend {
     private static final String LOGTAG = "GeckoHomeConfigBackend";
 
     // Increment this to trigger a migration.
-    private static final int VERSION = 8;
+    @VisibleForTesting
+    static final int VERSION = 8;
 
     // This key was originally used to store only an array of panel configs.
     public static final String PREFS_CONFIG_KEY_OLD = "home_panels";
@@ -219,15 +222,30 @@ public class HomeConfigPrefsBackend implements HomeConfigBackend {
     private static void ensureDefaultPanelForV5orV8(Context context, JSONArray jsonPanels) throws JSONException {
         int historyIndex = -1;
 
+        // If all panels are disabled, there is no default panel - this is the only valid state
+        // that has no default. We can use this flag to track whether any visible panels have been
+        // found.
+        boolean enabledPanelsFound = false;
+
         for (int i = 0; i < jsonPanels.length(); i++) {
             final PanelConfig panelConfig = new PanelConfig(jsonPanels.getJSONObject(i));
             if (panelConfig.isDefault()) {
                 return;
             }
 
+            if (!panelConfig.isDisabled()) {
+                enabledPanelsFound = true;
+            }
+
             if (panelConfig.getType() == PanelType.COMBINED_HISTORY) {
                 historyIndex = i;
             }
+        }
+
+        if (!enabledPanelsFound) {
+            // No panels are enabled, hence there can be no default (see noEnabledPanelsFound declaration
+            // for more information).
+            return;
         }
 
         // Make the History panel default. We can't modify existing PanelConfigs, so make a new one.
@@ -252,6 +270,7 @@ public class HomeConfigPrefsBackend implements HomeConfigBackend {
     private static JSONArray removePanel(Context context, JSONArray jsonPanels,
                                          PanelType panelToRemove, PanelType replacementPanel, boolean alwaysUnhide) throws JSONException {
         boolean wasDefault = false;
+        boolean wasDisabled = false;
         int replacementPanelIndex = -1;
         boolean replacementWasDefault = false;
 
@@ -266,6 +285,7 @@ public class HomeConfigPrefsBackend implements HomeConfigBackend {
             if (panelConfig.getType() == panelToRemove) {
                 // If this panel was the default we'll need to assign a new default:
                 wasDefault = panelConfig.isDefault();
+                wasDisabled = panelConfig.isDisabled();
             } else {
                 if (panelConfig.getType() == replacementPanel) {
                     replacementPanelIndex = newJSONPanels.length();
@@ -281,7 +301,7 @@ public class HomeConfigPrefsBackend implements HomeConfigBackend {
         // Unless alwaysUnhide is true, we make the replacement panel visible only if it is going
         // to be the new default panel, since a hidden default panel doesn't make sense.
         // This is to allow preserving the behaviour of the original reading list migration function.
-        if (wasDefault || alwaysUnhide) {
+        if ((wasDefault || alwaysUnhide) && !wasDisabled) {
             final JSONObject replacementPanelConfig;
             if (wasDefault) {
                 // If the removed panel was the default, the replacement has to be made the new default
@@ -337,47 +357,13 @@ public class HomeConfigPrefsBackend implements HomeConfigBackend {
         return false;
     }
 
-    /**
-     * Migrates JSON config data storage.
-     *
-     * @param context Context used to get shared preferences and create built-in panel.
-     * @param jsonString String currently stored in preferences.
-     *
-     * @return JSONArray array representing new set of panel configs.
-     */
-    private static synchronized JSONArray maybePerformMigration(Context context, String jsonString) throws JSONException {
-        // If the migration is already done, we're at the current version.
-        if (sMigrationDone) {
-            final JSONObject json = new JSONObject(jsonString);
-            return json.getJSONArray(JSON_KEY_PANELS);
-        }
+    @CheckResult
+    static synchronized JSONArray migratePrefsFromVersionToVersion(final Context context, final int currentVersion, final int newVersion,
+                                                              final JSONArray jsonPanelsIn, final SharedPreferences.Editor prefsEditor) throws JSONException {
 
-        // Make sure we only do this version check once.
-        sMigrationDone = true;
+        JSONArray jsonPanels = jsonPanelsIn;
 
-        JSONArray jsonPanels;
-        final int version;
-
-        final SharedPreferences prefs = GeckoSharedPrefs.forProfile(context);
-        if (prefs.contains(PREFS_CONFIG_KEY_OLD)) {
-            // Our original implementation did not contain versioning, so this is implicitly version 0.
-            jsonPanels = new JSONArray(jsonString);
-            version = 0;
-        } else {
-            final JSONObject json = new JSONObject(jsonString);
-            jsonPanels = json.getJSONArray(JSON_KEY_PANELS);
-            version = json.getInt(JSON_KEY_VERSION);
-        }
-
-        if (version == VERSION) {
-            return jsonPanels;
-        }
-
-        Log.d(LOGTAG, "Performing migration");
-
-        final SharedPreferences.Editor prefsEditor = prefs.edit();
-
-        for (int v = version + 1; v <= VERSION; v++) {
+        for (int v = currentVersion + 1; v <= newVersion; v++) {
             Log.d(LOGTAG, "Migrating to version = " + v);
 
             switch (v) {
@@ -438,6 +424,51 @@ public class HomeConfigPrefsBackend implements HomeConfigBackend {
                     break;
             }
         }
+
+        return jsonPanels;
+    }
+
+    /**
+     * Migrates JSON config data storage.
+     *
+     * @param context Context used to get shared preferences and create built-in panel.
+     * @param jsonString String currently stored in preferences.
+     *
+     * @return JSONArray array representing new set of panel configs.
+     */
+    private static synchronized JSONArray maybePerformMigration(Context context, String jsonString) throws JSONException {
+        // If the migration is already done, we're at the current version.
+        if (sMigrationDone) {
+            final JSONObject json = new JSONObject(jsonString);
+            return json.getJSONArray(JSON_KEY_PANELS);
+        }
+
+        // Make sure we only do this version check once.
+        sMigrationDone = true;
+
+        JSONArray jsonPanels;
+        final int version;
+
+        final SharedPreferences prefs = GeckoSharedPrefs.forProfile(context);
+        if (prefs.contains(PREFS_CONFIG_KEY_OLD)) {
+            // Our original implementation did not contain versioning, so this is implicitly version 0.
+            jsonPanels = new JSONArray(jsonString);
+            version = 0;
+        } else {
+            final JSONObject json = new JSONObject(jsonString);
+            jsonPanels = json.getJSONArray(JSON_KEY_PANELS);
+            version = json.getInt(JSON_KEY_VERSION);
+        }
+
+        if (version == VERSION) {
+            return jsonPanels;
+        }
+
+        Log.d(LOGTAG, "Performing migration");
+
+        final SharedPreferences.Editor prefsEditor = prefs.edit();
+
+        jsonPanels = migratePrefsFromVersionToVersion(context, version, VERSION, jsonPanels, prefsEditor);
 
         // Save the new panel config and the new version number.
         final JSONObject newJson = new JSONObject();

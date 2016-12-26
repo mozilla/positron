@@ -16,6 +16,8 @@ const TEST_URI = "data:text/html;charset=utf8,<p>test file URI";
 var hud;
 
 add_task(function* () {
+  let Actions = require("devtools/client/netmonitor/actions/index");
+
   let requests = [];
   let { browser } = yield loadTab(TEST_URI);
 
@@ -39,22 +41,22 @@ add_task(function* () {
 
   let panel = toolbox.getCurrentPanel();
   let selected = panel.panelWin.NetMonitorView.RequestsMenu.selectedItem;
-  is(selected.attachment.method, htmlRequest.request.method,
+  is(selected.method, htmlRequest.request.method,
      "The correct request is selected");
-  is(selected.attachment.url, htmlRequest.request.url,
+  is(selected.url, htmlRequest.request.url,
      "The correct request is definitely selected");
 
   // Filter out the HTML request.
-  panel.panelWin.NetMonitorView.RequestsMenu.filterOn("js");
+  panel.panelWin.gStore.dispatch(Actions.toggleFilterType("js"));
 
   yield toolbox.selectTool("webconsole");
   is(toolbox.currentToolId, "webconsole", "Web console was selected");
   yield hud.ui.openNetworkPanel(htmlRequest.actor);
 
   panel.panelWin.NetMonitorView.RequestsMenu.selectedItem;
-  is(selected.attachment.method, htmlRequest.request.method,
+  is(selected.method, htmlRequest.request.method,
      "The correct request is selected");
-  is(selected.attachment.url, htmlRequest.request.url,
+  is(selected.url, htmlRequest.request.url,
      "The correct request is definitely selected");
 
   // All tests are done. Shutdown.

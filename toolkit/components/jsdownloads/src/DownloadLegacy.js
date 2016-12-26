@@ -16,8 +16,7 @@
 
 "use strict";
 
-////////////////////////////////////////////////////////////////////////////////
-//// Globals
+// Globals
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
@@ -31,8 +30,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "Downloads",
 XPCOMUtils.defineLazyModuleGetter(this, "Promise",
                                   "resource://gre/modules/Promise.jsm");
 
-////////////////////////////////////////////////////////////////////////////////
-//// DownloadLegacyTransfer
+// DownloadLegacyTransfer
 
 /**
  * nsITransfer implementation that provides a bridge to a Download object.
@@ -70,15 +68,13 @@ function DownloadLegacyTransfer()
 DownloadLegacyTransfer.prototype = {
   classID: Components.ID("{1b4c85df-cbdd-4bb6-b04e-613caece083c}"),
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// nsISupports
+  // nsISupports
 
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener,
                                          Ci.nsIWebProgressListener2,
                                          Ci.nsITransfer]),
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// nsIWebProgressListener
+  // nsIWebProgressListener
 
   onStateChange: function DLT_onStateChange(aWebProgress, aRequest, aStateFlags,
                                             aStatus)
@@ -170,7 +166,7 @@ DownloadLegacyTransfer.prototype = {
                             aMaxTotalProgress);
   },
 
-  onLocationChange: function () { },
+  onLocationChange: function() { },
 
   onStatusChange: function DLT_onStatusChange(aWebProgress, aRequest, aStatus,
                                               aMessage)
@@ -188,10 +184,9 @@ DownloadLegacyTransfer.prototype = {
     }
   },
 
-  onSecurityChange: function () { },
+  onSecurityChange: function() { },
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// nsIWebProgressListener2
+  // nsIWebProgressListener2
 
   onProgressChange64: function DLT_onProgressChange64(aWebProgress, aRequest,
                                                       aCurSelfProgress,
@@ -213,8 +208,7 @@ DownloadLegacyTransfer.prototype = {
     return true;
   },
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// nsITransfer
+  // nsITransfer
 
   init: function DLT_init(aSource, aTarget, aDisplayName, aMIMEInfo, aStartTime,
                           aTempFile, aCancelable, aIsPrivate)
@@ -263,23 +257,22 @@ DownloadLegacyTransfer.prototype = {
     }.bind(this)).then(null, Cu.reportError);
   },
 
-  setSha256Hash: function (hash)
+  setSha256Hash: function(hash)
   {
     this._sha256Hash = hash;
   },
 
-  setSignatureInfo: function (signatureInfo)
+  setSignatureInfo: function(signatureInfo)
   {
     this._signatureInfo = signatureInfo;
   },
 
-  setRedirects: function (redirects)
+  setRedirects: function(redirects)
   {
     this._redirects = redirects;
   },
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// Private methods and properties
+  // Private methods and properties
 
   /**
    * This deferred object contains a promise that is resolved with the Download
@@ -311,7 +304,6 @@ DownloadLegacyTransfer.prototype = {
   _signatureInfo: null,
 };
 
-////////////////////////////////////////////////////////////////////////////////
-//// Module
+// Module
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([DownloadLegacyTransfer]);

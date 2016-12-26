@@ -1,4 +1,4 @@
-function test () {
+function test() {
   requestLongerTimeout(3);
   waitForExplicitFinish();
 
@@ -6,19 +6,19 @@ function test () {
 
   function loadListener() {
     function testLocation(link, url, next) {
-      var tabOpenListener = new TabOpenListener(url, function () {
-          gBrowser.removeTab(this.tab);
-      }, function () {
+      new TabOpenListener(url, function() {
+        gBrowser.removeTab(this.tab);
+      }, function() {
         next();
       });
 
-      ContentTask.spawn(gBrowser.selectedBrowser, link, link => {
-        content.document.getElementById(link).click();
+      ContentTask.spawn(gBrowser.selectedBrowser, link, contentLink => {
+        content.document.getElementById(contentLink).click();
       });
     }
 
     function testLink(link, name, next) {
-      addWindowListener("chrome://mozapps/content/downloads/unknownContentType.xul", function (win) {
+      addWindowListener("chrome://mozapps/content/downloads/unknownContentType.xul", function(win) {
         ContentTask.spawn(gBrowser.selectedBrowser, null, () => {
           Assert.equal(content.document.getElementById("unload-flag").textContent,
             "Okay", "beforeunload shouldn't have fired");
@@ -29,8 +29,8 @@ function test () {
         });
       });
 
-      ContentTask.spawn(gBrowser.selectedBrowser, link, link => {
-        content.document.getElementById(link).click();
+      ContentTask.spawn(gBrowser.selectedBrowser, link, contentLink => {
+        content.document.getElementById(contentLink).click();
       });
     }
 
@@ -41,7 +41,7 @@ function test () {
             testLink.bind(null, "link5", "javascript.txt",
               testLink.bind(null, "link6", "test.blob",
                 testLocation.bind(null, "link7", "http://example.com/",
-                  function () {
+                  function() {
                     if (isHTTPS) {
                       finish();
                     } else {

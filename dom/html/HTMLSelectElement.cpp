@@ -57,8 +57,11 @@ SafeOptionListMutation::SafeOptionListMutation(nsIContent* aSelect,
   : mSelect(HTMLSelectElement::FromContentOrNull(aSelect))
   , mTopLevelMutation(false)
   , mNeedsRebuild(false)
+  , mNotify(aNotify)
+  , mInitialSelectedIndex(-1)
 {
   if (mSelect) {
+    mInitialSelectedIndex = mSelect->SelectedIndex();
     mTopLevelMutation = !mSelect->mMutating;
     if (mTopLevelMutation) {
       mSelect->mMutating = true;
@@ -67,13 +70,13 @@ SafeOptionListMutation::SafeOptionListMutation(nsIContent* aSelect,
       // option list must be up-to-date before inserting or removing options.
       // Fortunately this is called only if mutation event listener
       // adds or removes options.
-      mSelect->RebuildOptionsArray(aNotify);
+      mSelect->RebuildOptionsArray(mNotify);
     }
     nsresult rv;
     if (aKid) {
-      rv = mSelect->WillAddOptions(aKid, aParent, aIndex, aNotify);
+      rv = mSelect->WillAddOptions(aKid, aParent, aIndex, mNotify);
     } else {
-      rv = mSelect->WillRemoveOptions(aParent, aIndex, aNotify);
+      rv = mSelect->WillRemoveOptions(aParent, aIndex, mNotify);
     }
     mNeedsRebuild = NS_FAILED(rv);
   }
@@ -87,6 +90,16 @@ SafeOptionListMutation::~SafeOptionListMutation()
     }
     if (mTopLevelMutation) {
       mSelect->mMutating = false;
+    }
+    if (mSelect->SelectedIndex() != mInitialSelectedIndex) {
+      // We must have triggered the SelectSomething() codepath, which can cause
+      // our validity to change.  Unfortunately, our attempt to update validity
+      // in that case may not have worked correctly, because we actually call it
+      // before we have inserted the new <option>s into the DOM!  Go ahead and
+      // update validity here as needed, because by now we know our <option>s
+      // are where they should be.
+      mSelect->UpdateValueMissingValidityState();
+      mSelect->UpdateState(mNotify);
     }
 #ifdef DEBUG
     mSelect->VerifyOptionsArray();
@@ -587,7 +600,8 @@ HTMLSelectElement::Add(nsGenericHTMLElement& aElement,
 
   // If the before parameter is not null, we are equivalent to the
   // insertBefore method on the parent of before.
-  parent->InsertBefore(aElement, aBefore, aError);
+  nsCOMPtr<nsINode> refNode = aBefore;
+  parent->InsertBefore(aElement, refNode, aError);
 }
 
 NS_IMETHODIMP
@@ -1446,14 +1460,14 @@ HTMLSelectElement::IsDisabledForEvents(EventMessage aMessage)
 }
 
 nsresult
-HTMLSelectElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
+HTMLSelectElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   aVisitor.mCanHandle = false;
   if (IsDisabledForEvents(aVisitor.mEvent->mMessage)) {
     return NS_OK;
   }
 
-  return nsGenericHTMLFormElementWithState::PreHandleEvent(aVisitor);
+  return nsGenericHTMLFormElementWithState::GetEventTargetParent(aVisitor);
 }
 
 nsresult
@@ -1773,6 +1787,15 @@ HTMLSelectElement::IsValueMissing()
 
   for (uint32_t i = 0; i < length; ++i) {
     RefPtr<HTMLOptionElement> option = Item(i);
+    // Check for a placeholder label option, don't count it as a valid value.
+    if (i == 0 && !Multiple() && Size() <= 1 && option->GetParent() == this) {
+      nsAutoString value;
+      MOZ_ALWAYS_SUCCEEDS(option->GetValue(value));
+      if (value.IsEmpty()) {
+        continue;
+      }
+    }
+
     if (!option->Selected()) {
       continue;
     }
@@ -1781,11 +1804,7 @@ HTMLSelectElement::IsValueMissing()
       continue;
     }
 
-    nsAutoString value;
-    MOZ_ALWAYS_SUCCEEDS(option->GetValue(value));
-    if (!value.IsEmpty()) {
-      return false;
-    }
+    return false;
   }
 
   return true;

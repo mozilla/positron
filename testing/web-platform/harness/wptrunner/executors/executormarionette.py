@@ -17,11 +17,11 @@ from ..wpttest import WdspecResult, WdspecSubtestResult
 
 errors = None
 marionette = None
+pytestrunner = None
 webdriver = None
 
 here = os.path.join(os.path.split(__file__)[0])
 
-from . import pytestrunner
 from .base import (ExecutorException,
                    Protocol,
                    RefTestExecutor,
@@ -41,7 +41,7 @@ extra_timeout = 5 # seconds
 
 
 def do_delayed_imports():
-    global errors, marionette, webdriver
+    global errors, marionette
 
     # Marionette client used to be called marionette, recently it changed
     # to marionette_driver for unfathomable reasons
@@ -51,8 +51,6 @@ def do_delayed_imports():
     except ImportError:
         from marionette_driver import marionette, errors
 
-    import webdriver
-
 
 class MarionetteProtocol(Protocol):
     def __init__(self, executor, browser):
@@ -61,6 +59,8 @@ class MarionetteProtocol(Protocol):
         Protocol.__init__(self, executor, browser)
         self.marionette = None
         self.marionette_port = browser.marionette_port
+        self.timeout = None
+        self.runner_handle = None
 
     def setup(self, runner):
         """Connect to browser via Marionette."""
@@ -123,11 +123,21 @@ class MarionetteProtocol(Protocol):
     def after_connect(self):
         self.load_runner("http")
 
+    def set_timeout(self, timeout):
+        """Set the Marionette script timeout.
+
+        :param timeout: Script timeout in seconds
+
+        """
+        self.marionette.timeout.script = timeout
+        self.timeout = timeout
+
     def load_runner(self, protocol):
         # Check if we previously had a test window open, and if we did make sure it's closed
         self.marionette.execute_script("if (window.wrappedJSObject.win) {window.wrappedJSObject.win.close()}")
         url = urlparse.urljoin(self.executor.server_url(protocol), "/testharness_runner.html")
         self.logger.debug("Loading %s" % url)
+        self.runner_handle = self.marionette.current_window_handle
         try:
             self.marionette.navigate(url)
         except Exception as e:
@@ -139,10 +149,32 @@ class MarionetteProtocol(Protocol):
         self.marionette.execute_script(
             "document.title = '%s'" % threading.current_thread().name.replace("'", '"'))
 
+    def close_old_windows(self, protocol):
+        handles = self.marionette.window_handles
+        runner_handle = None
+        try:
+            handles.remove(self.runner_handle)
+            runner_handle = self.runner_handle
+        except ValueError:
+            # The runner window probably changed id but we can restore it
+            # This isn't supposed to happen, but marionette ids are not yet stable
+            # We assume that the first handle returned corresponds to the runner,
+            # but it hopefully doesn't matter too much if that assumption is
+            # wrong since we reload the runner in that tab anyway.
+            runner_handle = handles.pop(0)
+
+        for handle in handles:
+            self.marionette.switch_to_window(handle)
+            self.marionette.close()
+
+        self.marionette.switch_to_window(runner_handle)
+        if runner_handle != self.runner_handle:
+            self.load_runner(protocol)
+
     def wait(self):
         socket_timeout = self.marionette.client.sock.gettimeout()
         if socket_timeout:
-            self.marionette.set_script_timeout((socket_timeout / 2) * 1000)
+            self.marionette.timeout.script = socket_timeout / 2
 
         while True:
             try:
@@ -290,10 +322,11 @@ class RemoteMarionetteProtocol(Protocol):
 
 
 class ExecuteAsyncScriptRun(object):
-    def __init__(self, logger, func, marionette, url, timeout):
+    def __init__(self, logger, func, protocol, url, timeout):
         self.logger = logger
         self.result = (None, None)
-        self.marionette = marionette
+        self.protocol = protocol
+        self.marionette = protocol.marionette
         self.func = func
         self.url = url
         self.timeout = timeout
@@ -304,12 +337,13 @@ class ExecuteAsyncScriptRun(object):
 
         try:
             if timeout is not None:
-                self.marionette.set_script_timeout((timeout + extra_timeout) * 1000)
+                if timeout + extra_timeout != self.protocol.timeout:
+                    self.protocol.set_timeout(timeout + extra_timeout)
             else:
                 # We just want it to never time out, really, but marionette doesn't
                 # make that possible. It also seems to time out immediately if the
                 # timeout is set too high. This works at least.
-                self.marionette.set_script_timeout(2**31 - 1)
+                self.protocol.set_timeout(2**28 - 1)
         except IOError:
             self.logger.error("Lost marionette connection before starting test")
             return Stop
@@ -383,7 +417,7 @@ class MarionetteTestharnessExecutor(TestharnessExecutor):
 
         success, data = ExecuteAsyncScriptRun(self.logger,
                                               self.do_testharness,
-                                              self.protocol.marionette,
+                                              self.protocol,
                                               self.test_url(test),
                                               timeout).run()
         if success:
@@ -394,6 +428,7 @@ class MarionetteTestharnessExecutor(TestharnessExecutor):
     def do_testharness(self, marionette, url, timeout):
         if self.close_after_done:
             marionette.execute_script("if (window.wrappedJSObject.win) {window.wrappedJSObject.win.close()}")
+            self.protocol.close_old_windows(self.protocol)
 
         if timeout is not None:
             timeout_ms = str(timeout * 1000)
@@ -466,7 +501,7 @@ class MarionetteRefTestExecutor(RefTestExecutor):
 
         return ExecuteAsyncScriptRun(self.logger,
                              self._screenshot,
-                             self.protocol.marionette,
+                             self.protocol,
                              test_url,
                              timeout).run()
 
@@ -526,6 +561,7 @@ class WdspecRun(object):
 class MarionetteWdspecExecutor(WdspecExecutor):
     def __init__(self, browser, server_config, webdriver_binary,
                  timeout_multiplier=1, close_after_done=True, debug_info=None):
+        self.do_delayed_imports()
         WdspecExecutor.__init__(self, browser, server_config,
                                 timeout_multiplier=timeout_multiplier,
                                 debug_info=debug_info)
@@ -543,7 +579,7 @@ class MarionetteWdspecExecutor(WdspecExecutor):
 
         success, data = WdspecRun(self.do_wdspec,
                                   self.protocol.session,
-                                  test.path,
+                                  test.abs_path,
                                   timeout).run()
 
         if success:
@@ -555,3 +591,8 @@ class MarionetteWdspecExecutor(WdspecExecutor):
         harness_result = ("OK", None)
         subtest_results = pytestrunner.run(path, session, timeout=timeout)
         return (harness_result, subtest_results)
+
+    def do_delayed_imports(self):
+        global pytestrunner, webdriver
+        from . import pytestrunner
+        import webdriver

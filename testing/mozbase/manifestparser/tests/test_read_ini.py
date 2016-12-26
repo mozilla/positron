@@ -15,6 +15,9 @@ from manifestparser import read_ini
 from ConfigParser import ConfigParser
 from StringIO import StringIO
 
+import mozunit
+
+
 class IniParserTest(unittest.TestCase):
 
     def test_inline_comments(self):
@@ -66,4 +69,4 @@ kittens = true # This test requires kittens
 
 
 if __name__ == '__main__':
-    unittest.main()
+    mozunit.main()

@@ -29,10 +29,11 @@ NS_IMPL_ISUPPORTS0(MediaEngineRemoteVideoSource)
 
 MediaEngineRemoteVideoSource::MediaEngineRemoteVideoSource(
   int aIndex, mozilla::camera::CaptureEngine aCapEngine,
-  dom::MediaSourceEnum aMediaSource, const char* aMonitorName)
+  dom::MediaSourceEnum aMediaSource, bool aScary, const char* aMonitorName)
   : MediaEngineCameraVideoSource(aIndex, aMonitorName),
     mMediaSource(aMediaSource),
-    mCapEngine(aCapEngine)
+    mCapEngine(aCapEngine),
+    mScary(aScary)
 {
   MOZ_ASSERT(aMediaSource != dom::MediaSourceEnum::Other);
   mSettings.mWidth.Construct(0);
@@ -51,7 +52,7 @@ MediaEngineRemoteVideoSource::Init()
     &mozilla::camera::CamerasChild::GetCaptureDevice,
     mCapEngine, mCaptureIndex,
     deviceName, kMaxDeviceNameLength,
-    uniqueId, kMaxUniqueIdLength)) {
+    uniqueId, kMaxUniqueIdLength, nullptr)) {
     LOG(("Error initializing RemoteVideoSource (GetCaptureDevice)"));
     return;
   }
@@ -334,6 +335,10 @@ MediaEngineRemoteVideoSource::NotifyPull(MediaStreamGraph* aGraph,
   VideoSegment segment;
 
   MonitorAutoLock lock(mMonitor);
+  if (mState != kStarted) {
+    return;
+  }
+
   StreamTime delta = aDesiredTime - aSource->GetEndOfAppendedData(aID);
 
   if (delta > 0) {
@@ -420,53 +425,19 @@ MediaEngineRemoteVideoSource::DeliverFrame(unsigned char* buffer,
 size_t
 MediaEngineRemoteVideoSource::NumCapabilities() const
 {
+  mHardcodedCapabilities.Clear();
   int num = mozilla::camera::GetChildAndCall(
       &mozilla::camera::CamerasChild::NumberOfCapabilities,
       mCapEngine,
       GetUUID().get());
-  if (num > 0) {
-    return num;
-  }
-
-  switch(mMediaSource) {
-  case dom::MediaSourceEnum::Camera:
-#ifdef XP_MACOSX
-    // Mac doesn't support capabilities.
-    //
-    // Hardcode generic desktop capabilities modeled on OSX camera.
-    // Note: Values are empirically picked to be OSX friendly, as on OSX, values
-    // other than these cause the source to not produce.
-
-    if (mHardcodedCapabilities.IsEmpty()) {
-      for (int i = 0; i < 9; i++) {
-        webrtc::CaptureCapability c;
-        c.width = 1920 - i*128;
-        c.height = 1080 - i*72;
-        c.maxFPS = 30;
-        mHardcodedCapabilities.AppendElement(c);
-      }
-      for (int i = 0; i < 16; i++) {
-        webrtc::CaptureCapability c;
-        c.width = 640 - i*40;
-        c.height = 480 - i*30;
-        c.maxFPS = 30;
-        mHardcodedCapabilities.AppendElement(c);
-      }
-    }
-    break;
-#endif
-  default:
-    webrtc::CaptureCapability c;
+  if (num < 1) {
     // The default for devices that don't return discrete capabilities: treat
     // them as supporting all capabilities orthogonally. E.g. screensharing.
-    c.width = 0; // 0 = accept any value
-    c.height = 0;
-    c.maxFPS = 0;
-    mHardcodedCapabilities.AppendElement(c);
-    break;
+    // CaptureCapability defaults key values to 0, which means accept any value.
+    mHardcodedCapabilities.AppendElement(webrtc::CaptureCapability());
+    num = mHardcodedCapabilities.Length(); // 1
   }
-
-  return mHardcodedCapabilities.Length();
+  return num;
 }
 
 bool
@@ -525,7 +496,7 @@ void MediaEngineRemoteVideoSource::Refresh(int aIndex) {
     &mozilla::camera::CamerasChild::GetCaptureDevice,
     mCapEngine, aIndex,
     deviceName, sizeof(deviceName),
-    uniqueId, sizeof(uniqueId))) {
+    uniqueId, sizeof(uniqueId), nullptr)) {
     return;
   }
 

@@ -1,0 +1,1315 @@
+<?xml version="1.0"?>
+
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+
+<bindings id="datetimeboxBindings"
+   xmlns="http://www.mozilla.org/xbl"
+   xmlns:html="http://www.w3.org/1999/xhtml"
+   xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+   xmlns:xbl="http://www.mozilla.org/xbl">
+
+  <binding id="date-input"
+           extends="chrome://global/content/bindings/datetimebox.xml#datetime-input-base">
+    <resources>
+      <stylesheet src="chrome://global/content/textbox.css"/>
+      <stylesheet src="chrome://global/skin/textbox.css"/>
+      <stylesheet src="chrome://global/content/bindings/datetimebox.css"/>
+    </resources>
+
+    <implementation>
+      <constructor>
+      <![CDATA[
+        // TODO: Bug 1320227 - [DateTimeInput] localization for
+        // <input type=date> input box
+        this.mMonthPlaceHolder = "mm";
+        this.mDayPlaceHolder = "dd";
+        this.mYearPlaceHolder = "yyyy";
+        this.mSeparatorText = "/";
+        this.mMinMonth = 1;
+        this.mMaxMonth = 12;
+        this.mMinDay = 1;
+        this.mMaxDay = 31;
+        this.mMinYear = 1;
+        // Maximum year limited by ECMAScript date object range, year <= 275760.
+        this.mMaxYear = 275760;
+        this.mMonthDayLength = 2;
+        this.mYearLength = 4;
+        this.mMonthPageUpDownInterval = 3;
+        this.mDayPageUpDownInterval = 7;
+        this.mYearPageUpDownInterval = 10;
+
+        // Default to en-US, month-day-year order.
+        this.mMonthField =
+          document.getAnonymousElementByAttribute(this, "anonid", "input-one");
+        this.mDayField =
+          document.getAnonymousElementByAttribute(this, "anonid", "input-two");
+        this.mYearField =
+          document.getAnonymousElementByAttribute(this, "anonid", "input-three");
+        this.mYearField.size = this.mYearLength;
+        this.mYearField.maxLength = this.mMaxYear.toString().length;
+
+        this.mMonthField.placeholder = this.mMonthPlaceHolder;
+        this.mDayField.placeholder = this.mDayPlaceHolder;
+        this.mYearField.placeholder = this.mYearPlaceHolder;
+
+        this.mMonthField.setAttribute("min", this.mMinMonth);
+        this.mMonthField.setAttribute("max", this.mMaxMonth);
+        this.mMonthField.setAttribute("pginterval",
+                                      this.mMonthPageUpDownInterval);
+        this.mDayField.setAttribute("min", this.mMinDay);
+        this.mDayField.setAttribute("max", this.mMaxDay);
+        this.mDayField.setAttribute("pginterval", this.mDayPageUpDownInterval);
+        this.mYearField.setAttribute("min", this.mMinYear);
+        this.mYearField.setAttribute("max", this.mMaxYear);
+        this.mYearField.setAttribute("pginterval",
+                                     this.mYearPageUpDownInterval);
+
+        this.mDaySeparator =
+           document.getAnonymousElementByAttribute(this, "anonid", "sep-first");
+        this.mDaySeparator.textContent = this.mSeparatorText;
+        this.mYearSeparator =
+          document.getAnonymousElementByAttribute(this, "anonid", "sep-second");
+        this.mYearSeparator.textContent = this.mSeparatorText;
+
+        if (this.mInputElement.value) {
+          this.setFieldsFromInputValue();
+        }
+      ]]>
+      </constructor>
+
+      <method name="clearInputFields">
+        <parameter name="aFromInputElement"/>
+        <body>
+        <![CDATA[
+          this.log("clearInputFields");
+
+          if (this.isDisabled() || this.isReadonly()) {
+            return;
+          }
+
+          if (this.mMonthField && !this.mMonthField.disabled &&
+              !this.mMonthField.readOnly) {
+            this.mMonthField.value = "";
+            this.mMonthField.setAttribute("typeBuffer", "");
+          }
+
+          if (this.mDayField && !this.mDayField.disabled &&
+              !this.mDayField.readOnly) {
+            this.mDayField.value = "";
+            this.mDayField.setAttribute("typeBuffer", "");
+          }
+
+          if (this.mYearField && !this.mYearField.disabled &&
+              !this.mYearField.readOnly) {
+            this.mYearField.value = "";
+            this.mYearField.setAttribute("typeBuffer", "");
+          }
+
+          if (!aFromInputElement) {
+            this.mInputElement.setUserInput("");
+          }
+        ]]>
+        </body>
+      </method>
+
+      <method name="setFieldsFromInputValue">
+        <body>
+        <![CDATA[
+          let value = this.mInputElement.value;
+          if (!value) {
+            this.clearInputFields(true);
+            return;
+          }
+
+          this.log("setFieldsFromInputValue: " + value);
+          let [year, month, day] = value.split("-");
+
+          this.setFieldValue(this.mYearField, year);
+          this.setFieldValue(this.mMonthField, month);
+          this.setFieldValue(this.mDayField, day);
+
+          this.notifyPicker();
+        ]]>
+        </body>
+      </method>
+
+      <method name="getDaysInMonth">
+        <parameter name="aMonth"/>
+        <parameter name="aYear"/>
+        <body>
+        <![CDATA[
+          // Javascript's month is 0-based, so this means last day of the
+          // previous month.
+          return new Date(aYear, aMonth, 0).getDate();
+        ]]>
+        </body>
+      </method>
+
+      <method name="isFieldInvalid">
+        <parameter name="aField"/>
+        <body>
+          <![CDATA[
+            if (this.isEmpty(aField.value)) {
+              return true;
+            }
+
+            let min = Number(aField.getAttribute("min"));
+            let max = Number(aField.getAttribute("max"));
+
+            if (Number(aField.value) < min || Number(aField.value) > max) {
+              return true;
+            }
+
+            return false;
+          ]]>
+        </body>
+      </method>
+
+      <method name="setInputValueFromFields">
+        <body>
+        <![CDATA[
+          if (this.isFieldInvalid(this.mYearField) ||
+              this.isFieldInvalid(this.mMonthField) ||
+              this.isFieldInvalid(this.mDayField)) {
+            // We still need to notify picker in case any of the field has
+            // changed. If we can set input element value, then notifyPicker
+            // will be called in setFieldsFromInputValue().
+            this.notifyPicker();
+            return;
+          }
+
+          let year = this.mYearField.value;
+          let month = this.mMonthField.value;
+          let day = this.mDayField.value;
+
+          if (day > this.getDaysInMonth(month, year)) {
+            // Don't set invalid date, otherwise input element's value will be
+            // set to empty.
+            return;
+          }
+
+          let date = [year, month, day].join("-");
+
+          this.log("setInputValueFromFields: " + date);
+          this.mInputElement.setUserInput(date);
+        ]]>
+        </body>
+      </method>
+
+      <method name="setFieldsFromPicker">
+        <body>
+        <![CDATA[
+          // TODO: Bug 1320225 - [DateTimeInput] Integration of input type=date
+          // input box with picker.
+        ]]>
+        </body>
+      </method>
+
+      <method name="handleKeypress">
+        <parameter name="aEvent"/>
+        <body>
+        <![CDATA[
+          if (this.isDisabled() || this.isReadonly()) {
+            return;
+          }
+
+          let targetField = aEvent.originalTarget;
+          let key = aEvent.key;
+
+          if (targetField.classList.contains("numeric") && key.match(/[0-9]/)) {
+            let buffer = targetField.getAttribute("typeBuffer") || "";
+
+            buffer = buffer.concat(key);
+            this.setFieldValue(targetField, buffer);
+            targetField.select();
+
+            let n = Number(buffer);
+            let max = targetField.getAttribute("max");
+            if (buffer.length >= targetField.maxLength || n * 10 > max) {
+              buffer = "";
+              this.advanceToNextField();
+            }
+            targetField.setAttribute("typeBuffer", buffer);
+          }
+        ]]>
+        </body>
+      </method>
+
+      <method name="incrementFieldValue">
+        <parameter name="aTargetField"/>
+        <parameter name="aTimes"/>
+        <body>
+        <![CDATA[
+          let value;
+
+          // Use current date if field is empty.
+          if (this.isEmpty(aTargetField.value)) {
+            let now = new Date();
+
+            if (aTargetField == this.mYearField) {
+              value = now.getFullYear();
+            } else if (aTargetField == this.mMonthField) {
+              value = now.getMonth() + 1;
+            } else if (aTargetField == this.mDayField) {
+              value = now.getDate();
+            } else {
+              this.log("Field not supported in incrementFieldValue.");
+              return;
+            }
+          } else {
+            value = Number(aTargetField.value);
+          }
+
+          let min = Number(aTargetField.getAttribute("min"));
+          let max = Number(aTargetField.getAttribute("max"));
+
+          value += Number(aTimes);
+          if (value > max) {
+            value -= (max - min + 1);
+          } else if (value < min) {
+            value += (max - min + 1);
+          }
+          this.setFieldValue(aTargetField, value);
+          aTargetField.select();
+        ]]>
+        </body>
+      </method>
+
+      <method name="handleKeyboardNav">
+        <parameter name="aEvent"/>
+        <body>
+        <![CDATA[
+          if (this.isDisabled() || this.isReadonly()) {
+            return;
+          }
+
+          let targetField = aEvent.originalTarget;
+          let key = aEvent.key;
+
+          switch (key) {
+            case "ArrowUp":
+              this.incrementFieldValue(targetField, 1);
+              break;
+            case "ArrowDown":
+              this.incrementFieldValue(targetField, -1);
+              break;
+            case "PageUp": {
+              let interval = targetField.getAttribute("pginterval");
+              this.incrementFieldValue(targetField, interval);
+              break;
+            }
+            case "PageDown": {
+              let interval = targetField.getAttribute("pginterval");
+              this.incrementFieldValue(targetField, 0 - interval);
+              break;
+            }
+            case "Home":
+              let min = targetField.getAttribute("min");
+              this.setFieldValue(targetField, min);
+              targetField.select();
+              break;
+            case "End":
+              let max = targetField.getAttribute("max");
+              this.setFieldValue(targetField, max);
+              targetField.select();
+              break;
+          }
+          this.setInputValueFromFields();
+        ]]>
+        </body>
+      </method>
+
+      <method name="getCurrentValue">
+        <body>
+        <![CDATA[
+          let year;
+          if (!this.isEmpty(this.mYearField.value)) {
+            year = Number(this.mYearField.value);
+          }
+
+          let month;
+          if (!this.isEmpty(this.mMonthField.value)) {
+            month = Number(this.mMonthField.value);
+          }
+
+          let day;
+          if (!this.isEmpty(this.mDayField.value)) {
+            day = Number(this.mDayField.value);
+          }
+
+          let date = { year, month, day };
+
+          this.log("getCurrentValue: " + JSON.stringify(date));
+          return date;
+        ]]>
+        </body>
+      </method>
+
+      <method name="setFieldValue">
+       <parameter name="aField"/>
+       <parameter name="aValue"/>
+        <body>
+        <![CDATA[
+          let value = Number(aValue);
+          if (isNaN(value)) {
+            this.log("NaN on setFieldValue!");
+            return;
+          }
+
+          if (aValue.length == aField.maxLength) {
+            let min = Number(aField.getAttribute("min"));
+            let max = Number(aField.getAttribute("max"));
+
+            if (aValue < min) {
+              value = min;
+            } else if (aValue > max) {
+              value = max;
+            }
+          }
+
+          if (aField == this.mMonthField ||
+              aField == this.mDayField) {
+            // prepend zero
+            if (value < 10) {
+              value = "0" + value;
+            }
+          } else {
+            // prepend zeroes
+            if (value < 10) {
+              value = "000" + value;
+            } else if (value < 100) {
+              value = "00" + value;
+            } else if (value < 1000) {
+              value = "0" + value;
+            }
+
+            if (value.toString().length > this.mYearLength &&
+                value.toString().length <= this.mMaxYear.toString().length) {
+              this.mYearField.size = value.toString().length;
+            }
+          }
+
+          aField.value = value;
+        ]]>
+        </body>
+      </method>
+
+      <method name="isValueAvailable">
+        <body>
+        <![CDATA[
+          return !this.isEmpty(this.mMonthField.value) ||
+                 !this.isEmpty(this.mDayField.value) ||
+                 !this.isEmpty(this.mYearField.value);
+        ]]>
+        </body>
+      </method>
+
+    </implementation>
+  </binding>
+
+  <binding id="time-input"
+           extends="chrome://global/content/bindings/datetimebox.xml#datetime-input-base">
+    <resources>
+      <stylesheet src="chrome://global/content/textbox.css"/>
+      <stylesheet src="chrome://global/skin/textbox.css"/>
+      <stylesheet src="chrome://global/content/bindings/datetimebox.css"/>
+    </resources>
+
+    <implementation>
+      <constructor>
+      <![CDATA[
+        // TODO: Bug 1301312 - localization for input type=time input.
+        this.mHour12 = true;
+        this.mAMIndicator = "AM";
+        this.mPMIndicator = "PM";
+        this.mPlaceHolder = "--";
+        this.mSeparatorText = ":";
+        this.mMillisecSeparatorText = ".";
+        this.mMaxLength = 2;
+        this.mMillisecMaxLength = 3;
+        this.mDefaultStep = 60 * 1000; // in milliseconds
+
+        this.mMinHourInHour12 = 1;
+        this.mMaxHourInHour12 = 12;
+        this.mMinMinute = 0;
+        this.mMaxMinute = 59;
+        this.mMinSecond = 0;
+        this.mMaxSecond = 59;
+        this.mMinMillisecond = 0;
+        this.mMaxMillisecond = 999;
+
+        this.mHourPageUpDownInterval = 3;
+        this.mMinSecPageUpDownInterval = 10;
+
+        this.mHourField =
+          document.getAnonymousElementByAttribute(this, "anonid", "input-one");
+        this.mHourField.setAttribute("typeBuffer", "");
+        this.mMinuteField =
+          document.getAnonymousElementByAttribute(this, "anonid", "input-two");
+        this.mMinuteField.setAttribute("typeBuffer", "");
+        this.mDayPeriodField =
+          document.getAnonymousElementByAttribute(this, "anonid", "input-three");
+        this.mDayPeriodField.classList.remove("numeric");
+
+        this.mHourField.placeholder = this.mPlaceHolder;
+        this.mMinuteField.placeholder = this.mPlaceHolder;
+        this.mDayPeriodField.placeholder = this.mPlaceHolder;
+
+        this.mHourField.setAttribute("min", this.mMinHourInHour12);
+        this.mHourField.setAttribute("max", this.mMaxHourInHour12);
+        this.mMinuteField.setAttribute("min", this.mMinMinute);
+        this.mMinuteField.setAttribute("max", this.mMaxMinute);
+
+        this.mMinuteSeparator =
+           document.getAnonymousElementByAttribute(this, "anonid", "sep-first");
+        this.mMinuteSeparator.textContent = this.mSeparatorText;
+        this.mSpaceSeparator =
+          document.getAnonymousElementByAttribute(this, "anonid", "sep-second");
+        // space between time and am/pm field
+        this.mSpaceSeparator.textContent = " ";
+
+        this.mSecondSeparator = null;
+        this.mSecondField = null;
+        this.mMillisecSeparator = null;
+        this.mMillisecField = null;
+
+        if (this.mInputElement.value) {
+          this.setFieldsFromInputValue();
+        }
+        ]]>
+      </constructor>
+
+      <method name="insertSeparator">
+        <parameter name="aSeparatorText"/>
+        <body>
+        <![CDATA[
+          let container = this.mHourField.parentNode;
+          const HTML_NS = "http://www.w3.org/1999/xhtml";
+
+          let separator = document.createElementNS(HTML_NS, "span");
+          separator.textContent = aSeparatorText;
+          separator.setAttribute("class", "datetime-separator");
+          container.insertBefore(separator, this.mSpaceSeparator);
+
+          return separator;
+        ]]>
+        </body>
+      </method>
+
+      <method name="insertAdditionalField">
+        <parameter name="aPlaceHolder"/>
+        <parameter name="aMin"/>
+        <parameter name="aMax"/>
+        <parameter name="aSize"/>
+        <parameter name="aMaxLength"/>
+        <body>
+        <![CDATA[
+          let container = this.mHourField.parentNode;
+          const HTML_NS = "http://www.w3.org/1999/xhtml";
+
+          let field = document.createElementNS(HTML_NS, "input");
+          field.classList.add("textbox-input", "datetime-input", "numeric");
+          field.setAttribute("size", aSize);
+          field.setAttribute("maxlength", aMaxLength);
+          field.setAttribute("min", aMin);
+          field.setAttribute("max", aMax);
+          field.setAttribute("typeBuffer", "");
+          field.disabled = this.mInputElement.disabled;
+          field.readOnly = this.mInputElement.readOnly;
+          field.tabIndex = this.mInputElement.tabIndex;
+          field.placeholder = aPlaceHolder;
+          container.insertBefore(field, this.mSpaceSeparator);
+
+          return field;
+        ]]>
+        </body>
+      </method>
+
+      <method name="setFieldsFromInputValue">
+        <body>
+        <![CDATA[
+          let value = this.mInputElement.value;
+          if (!value) {
+            this.clearInputFields(true);
+            return;
+          }
+
+          this.log("setFieldsFromInputValue: " + value);
+          let [hour, minute, second] = value.split(':');
+
+          this.setFieldValue(this.mHourField, hour);
+          this.setFieldValue(this.mMinuteField, minute);
+          if (this.mHour12) {
+            this.mDayPeriodField.value = (hour >= this.mMaxHourInHour12) ?
+              this.mPMIndicator : this.mAMIndicator;
+          }
+
+          if (!this.isEmpty(second)) {
+            let index = second.indexOf(".");
+            let millisecond;
+            if (index != -1) {
+              millisecond = second.substring(index + 1);
+              second = second.substring(0, index);
+            }
+
+            if (!this.mSecondField) {
+              this.mSecondSeparator = this.insertSeparator(this.mSeparatorText);
+              this.mSecondField = this.insertAdditionalField(this.mPlaceHolder,
+                this.mMinSecond, this.mMaxSecond, this.mMaxLength,
+                this.mMaxLength);
+            }
+            this.setFieldValue(this.mSecondField, second);
+
+            if (!this.isEmpty(millisecond)) {
+              if (!this.mMillisecField) {
+                this.mMillisecSeparator = this.insertSeparator(
+                  this.mMillisecSeparatorText);
+                this.mMillisecField = this.insertAdditionalField(
+                  this.mPlaceHolder, this.mMinMillisecond, this.mMaxMillisecond,
+                  this.mMillisecMaxLength, this.mMillisecMaxLength);
+              }
+              this.setFieldValue(this.mMillisecField, millisecond);
+            } else if (this.mMillisecField) {
+              this.mMillisecField.remove();
+              this.mMillisecField = null;
+
+              this.mMillisecSeparator.remove();
+              this.mMillisecSeparator = null;
+            }
+          } else {
+            if (this.mSecondField) {
+              this.mSecondField.remove();
+              this.mSecondField = null;
+
+              this.mSecondSeparator.remove();
+              this.mSecondSeparator = null;
+            }
+
+            if (this.mMillisecField) {
+              this.mMillisecField.remove();
+              this.mMillisecField = null;
+
+              this.mMillisecSeparator.remove();
+              this.mMillisecSeparator = null;
+            }
+          }
+          this.notifyPicker();
+        ]]>
+        </body>
+      </method>
+
+      <method name="setInputValueFromFields">
+        <body>
+        <![CDATA[
+          if (this.isEmpty(this.mHourField.value) ||
+              this.isEmpty(this.mMinuteField.value) ||
+              (this.mDayPeriodField && this.isEmpty(this.mDayPeriodField.value)) ||
+              (this.mSecondField && this.isEmpty(this.mSecondField.value)) ||
+              (this.mMillisecField && this.isEmpty(this.mMillisecField.value))) {
+            // We still need to notify picker in case any of the field has
+            // changed. If we can set input element value, then notifyPicker
+            // will be called in setFieldsFromInputValue().
+            this.notifyPicker();
+            return;
+          }
+
+          let hour = Number(this.mHourField.value);
+          if (this.mHour12) {
+            let dayPeriod = this.mDayPeriodField.value;
+            if (dayPeriod == this.mPMIndicator &&
+                hour < this.mMaxHourInHour12) {
+              hour += this.mMaxHourInHour12;
+            } else if (dayPeriod == this.mAMIndicator &&
+                       hour == this.mMaxHourInHour12) {
+              hour = 0;
+            }
+          }
+
+          hour = (hour < 10) ? ("0" + hour) : hour;
+
+          let time = hour + ":" + this.mMinuteField.value;
+          if (this.mSecondField) {
+            time += ":" + this.mSecondField.value;
+          }
+
+          if (this.mMillisecField) {
+            time += "." + this.mMillisecField.value;
+          }
+
+          this.log("setInputValueFromFields: " + time);
+          this.mInputElement.setUserInput(time);
+        ]]>
+        </body>
+      </method>
+
+      <method name="setFieldsFromPicker">
+        <parameter name="aValue"/>
+        <body>
+        <![CDATA[
+          let hour = aValue.hour;
+          let minute = aValue.minute;
+          this.log("setFieldsFromPicker: " + hour + ":" + minute);
+
+          if (!this.isEmpty(hour)) {
+            this.setFieldValue(this.mHourField, hour);
+            if (this.mHour12) {
+              this.mDayPeriodField.value =
+                (hour >= this.mMaxHourInHour12) ? this.mPMIndicator
+                                                : this.mAMIndicator;
+            }
+          }
+
+          if (!this.isEmpty(minute)) {
+            this.setFieldValue(this.mMinuteField, minute);
+          }
+        ]]>
+        </body>
+       </method>
+
+      <method name="clearInputFields">
+        <parameter name="aFromInputElement"/>
+        <body>
+        <![CDATA[
+          this.log("clearInputFields");
+
+          if (this.isDisabled() || this.isReadonly()) {
+            return;
+          }
+
+          if (this.mHourField && !this.mHourField.disabled &&
+              !this.mHourField.readOnly) {
+            this.mHourField.value = "";
+            this.mHourField.setAttribute("typeBuffer", "");
+          }
+
+          if (this.mMinuteField && !this.mMinuteField.disabled &&
+              !this.mMinuteField.readOnly) {
+            this.mMinuteField.value = "";
+            this.mMinuteField.setAttribute("typeBuffer", "");
+          }
+
+          if (this.mSecondField && !this.mSecondField.disabled &&
+              !this.mSecondField.readOnly) {
+            this.mSecondField.value = "";
+            this.mSecondField.setAttribute("typeBuffer", "");
+          }
+
+          if (this.mMillisecField && !this.mMillisecField.disabled &&
+              !this.mMillisecField.readOnly) {
+            this.mMillisecField.value = "";
+            this.mMillisecField.setAttribute("typeBuffer", "");
+          }
+
+          if (this.mDayPeriodField && !this.mDayPeriodField.disabled &&
+              !this.mDayPeriodField.readOnly) {
+            this.mDayPeriodField.value = "";
+          }
+
+          if (!aFromInputElement) {
+            this.mInputElement.setUserInput("");
+          }
+        ]]>
+        </body>
+      </method>
+
+      <method name="incrementFieldValue">
+        <parameter name="aTargetField"/>
+        <parameter name="aTimes"/>
+        <body>
+        <![CDATA[
+          let value;
+
+          // Use current time if field is empty.
+          if (this.isEmpty(aTargetField.value)) {
+            let now = new Date();
+
+            if (aTargetField == this.mHourField) {
+              value = now.getHours() % this.mMaxHourInHour12 ||
+                this.mMaxHourInHour12;
+            } else if (aTargetField == this.mMinuteField) {
+              value = now.getMinutes();
+            } else if (aTargetField == this.mSecondField) {
+              value = now.getSeconds();
+            } else if (aTargetField == this.mMillisecField) {
+              value = now.getMilliseconds();
+            } else {
+              this.log("Field not supported in incrementFieldValue.");
+              return;
+            }
+          } else {
+            value = Number(aTargetField.value);
+          }
+
+          let min = aTargetField.getAttribute("min");
+          let max = aTargetField.getAttribute("max");
+
+          value += aTimes;
+          if (value > max) {
+            value -= (max - min + 1);
+          } else if (value < min) {
+            value += (max - min + 1);
+          }
+          this.setFieldValue(aTargetField, value);
+          aTargetField.select();
+        ]]>
+        </body>
+      </method>
+
+      <method name="handleKeyboardNav">
+        <parameter name="aEvent"/>
+        <body>
+        <![CDATA[
+          if (this.isDisabled() || this.isReadonly()) {
+            return;
+          }
+
+          let targetField = aEvent.originalTarget;
+          let key = aEvent.key;
+
+          if (this.mDayPeriodField &&
+              targetField == this.mDayPeriodField) {
+            // Home/End key does nothing on AM/PM field.
+            if (key == "Home" || key == "End") {
+              return;
+            }
+
+            this.mDayPeriodField.value =
+              this.mDayPeriodField.value == this.mAMIndicator ?
+                this.mPMIndicator : this.mAMIndicator;
+            this.mDayPeriodField.select();
+            this.setInputValueFromFields();
+            return;
+          }
+
+          switch (key) {
+            case "ArrowUp":
+              this.incrementFieldValue(targetField, 1);
+              break;
+            case "ArrowDown":
+              this.incrementFieldValue(targetField, -1);
+              break;
+            case "PageUp":
+              this.incrementFieldValue(targetField,
+                targetField == this.mHourField ? this.mHourPageUpDownInterval
+                                               : this.mMinSecPageUpDownInterval);
+              break;
+            case "PageDown":
+              this.incrementFieldValue(targetField,
+                targetField == this.mHourField ? (0 - this.mHourPageUpDownInterval)
+                                               : (0 - this.mMinSecPageUpDownInterval));
+              break;
+            case "Home":
+              let min = targetField.getAttribute("min");
+              this.setFieldValue(targetField, min);
+              targetField.select();
+              break;
+            case "End":
+              let max = targetField.getAttribute("max");
+              this.setFieldValue(targetField, max);
+              targetField.select();
+              break;
+          }
+          this.setInputValueFromFields();
+        ]]>
+        </body>
+      </method>
+
+      <method name="handleKeypress">
+        <parameter name="aEvent"/>
+        <body>
+        <![CDATA[
+          if (this.isDisabled() || this.isReadonly()) {
+            return;
+          }
+
+          let targetField = aEvent.originalTarget;
+          let key = aEvent.key;
+
+          if (this.mDayPeriodField &&
+              targetField == this.mDayPeriodField) {
+            if (key == "a" || key == "A") {
+              this.mDayPeriodField.value = this.mAMIndicator;
+              this.mDayPeriodField.select();
+            } else if (key == "p" || key == "P") {
+              this.mDayPeriodField.value = this.mPMIndicator;
+              this.mDayPeriodField.select();
+            }
+            return;
+          }
+
+          if (targetField.classList.contains("numeric") && key.match(/[0-9]/)) {
+            let buffer = targetField.getAttribute("typeBuffer") || "";
+
+            buffer = buffer.concat(key);
+            this.setFieldValue(targetField, buffer);
+            targetField.select();
+
+            let n = Number(buffer);
+            let max = targetField.getAttribute("max");
+            if (buffer.length >= targetField.maxLength || n * 10 > max) {
+              buffer = "";
+              this.advanceToNextField();
+            }
+            targetField.setAttribute("typeBuffer", buffer);
+          }
+        ]]>
+        </body>
+      </method>
+
+      <method name="setFieldValue">
+       <parameter name="aField"/>
+       <parameter name="aValue"/>
+        <body>
+        <![CDATA[
+          let value = Number(aValue);
+          if (isNaN(value)) {
+            this.log("NaN on setFieldValue!");
+            return;
+          }
+
+          if (aField.maxLength == this.mMaxLength) { // For hour, minute and second
+            if (aField == this.mHourField && this.mHour12) {
+              value = (value > this.mMaxHourInHour12) ?
+                value - this.mMaxHourInHour12 : value;
+              if (aValue == "00") {
+                value = this.mMaxHourInHour12;
+              }
+            }
+            // prepend zero
+            if (value < 10) {
+              value = "0" + value;
+            }
+          } else if (aField.maxLength == this.mMillisecMaxLength) {
+            // prepend zeroes
+            if (value < 10) {
+              value = "00" + value;
+            } else if (value < 100) {
+              value = "0" + value;
+            }
+          }
+
+          aField.value = value;
+        ]]>
+        </body>
+      </method>
+
+      <method name="isValueAvailable">
+        <body>
+        <![CDATA[
+          // Picker only cares about hour:minute.
+          return !this.isEmpty(this.mHourField.value) ||
+                 !this.isEmpty(this.mMinuteField.value);
+        ]]>
+        </body>
+      </method>
+
+      <method name="getCurrentValue">
+        <body>
+        <![CDATA[
+          let hour;
+          if (!this.isEmpty(this.mHourField.value)) {
+            hour = Number(this.mHourField.value);
+            if (this.mHour12) {
+              let dayPeriod = this.mDayPeriodField.value;
+              if (dayPeriod == this.mPMIndicator &&
+                  hour < this.mMaxHourInHour12) {
+                hour += this.mMaxHourInHour12;
+              } else if (dayPeriod == this.mAMIndicator &&
+                         hour == this.mMaxHourInHour12) {
+                hour = 0;
+              }
+            }
+           }
+
+          let minute;
+          if (!this.isEmpty(this.mMinuteField.value)) {
+            minute = Number(this.mMinuteField.value);
+          }
+
+          // Picker only needs hour/minute.
+          let time = { hour, minute };
+
+          this.log("getCurrentValue: " + JSON.stringify(time));
+          return time;
+        ]]>
+        </body>
+      </method>
+    </implementation>
+  </binding>
+
+  <binding id="datetime-input-base">
+    <resources>
+      <stylesheet src="chrome://global/content/textbox.css"/>
+      <stylesheet src="chrome://global/skin/textbox.css"/>
+      <stylesheet src="chrome://global/content/bindings/datetimebox.css"/>
+    </resources>
+
+    <content>
+      <html:div class="datetime-input-box-wrapper"
+                xbl:inherits="context,disabled,readonly">
+        <html:span>
+          <html:input anonid="input-one"
+                      class="textbox-input datetime-input numeric"
+                      size="2" maxlength="2"
+                      xbl:inherits="disabled,readonly,tabindex"/>
+          <html:span anonid="sep-first" class="datetime-separator"></html:span>
+          <html:input anonid="input-two"
+                      class="textbox-input datetime-input numeric"
+                      size="2" maxlength="2"
+                      xbl:inherits="disabled,readonly,tabindex"/>
+          <html:span anonid="sep-second" class="datetime-separator"></html:span>
+          <html:input anonid="input-three"
+                      class="textbox-input datetime-input numeric"
+                      size="2" maxlength="2"
+                      xbl:inherits="disabled,readonly,tabindex"/>
+        </html:span>
+
+        <html:button class="datetime-reset-button" anoid="reset-button"
+                     tabindex="-1" xbl:inherits="disabled"
+                     onclick="document.getBindingParent(this).clearInputFields(false);"/>
+      </html:div>
+    </content>
+
+    <implementation implements="nsIDateTimeInputArea">
+      <constructor>
+      <![CDATA[
+        this.DEBUG = false;
+        this.mInputElement = this.parentNode;
+
+        this.mMin = this.mInputElement.min;
+        this.mMax = this.mInputElement.max;
+        this.mStep = this.mInputElement.step;
+        this.mIsPickerOpen = false;
+
+        this.EVENTS.forEach((eventName) => {
+          this.addEventListener(eventName, this, { mozSystemGroup: true });
+        });
+        // Handle keypress separately since we need to catch it on capturing.
+        this.addEventListener("keypress", this, {
+          capture: true,
+          mozSystemGroup: true
+        });
+      ]]>
+      </constructor>
+
+      <destructor>
+      <![CDATA[
+        this.mInputElement = null;
+
+        this.EVENTS.forEach((eventName) => {
+          this.removeEventListener(eventName, this, { mozSystemGroup: true });
+        });
+        this.removeEventListener("keypress", onKeyPress, {
+          capture: true,
+          mozSystemGroup: true
+        });
+      ]]>
+      </destructor>
+
+      <property name="EVENTS" readonly="true">
+        <getter>
+        <![CDATA[
+          return ["click", "focus", "blur", "copy", "cut", "paste"];
+        ]]>
+        </getter>
+      </property>
+
+      <method name="log">
+        <parameter name="aMsg"/>
+        <body>
+        <![CDATA[
+          if (this.DEBUG) {
+            dump("[DateTimeBox] " + aMsg + "\n");
+          }
+        ]]>
+        </body>
+      </method>
+
+      <method name="focusInnerTextBox">
+        <body>
+        <![CDATA[
+          this.log("focusInnerTextBox");
+          document.getAnonymousElementByAttribute(this, "anonid", "input-one").focus();
+        ]]>
+        </body>
+      </method>
+
+      <method name="blurInnerTextBox">
+        <body>
+        <![CDATA[
+          this.log("blurInnerTextBox");
+          if (this.mLastFocusedField) {
+            this.mLastFocusedField.blur();
+          }
+        ]]>
+        </body>
+      </method>
+
+      <method name="notifyInputElementValueChanged">
+        <body>
+        <![CDATA[
+          this.log("inputElementValueChanged");
+          this.setFieldsFromInputValue();
+        ]]>
+        </body>
+      </method>
+
+      <method name="setValueFromPicker">
+        <parameter name="aValue"/>
+        <body>
+        <![CDATA[
+          this.setFieldsFromPicker(aValue);
+        ]]>
+        </body>
+      </method>
+
+      <method name="advanceToNextField">
+        <parameter name="aReverse"/>
+        <body>
+        <![CDATA[
+          this.log("advanceToNextField");
+
+          let focusedInput = this.mLastFocusedField;
+          let next = aReverse ? focusedInput.previousElementSibling
+                              : focusedInput.nextElementSibling;
+          if (!next && !aReverse) {
+            this.setInputValueFromFields();
+            return;
+          }
+
+          while (next) {
+            if (next.type == "text" && !next.disabled) {
+              next.focus();
+              break;
+            }
+            next = aReverse ? next.previousElementSibling
+                            : next.nextElementSibling;
+          }
+        ]]>
+        </body>
+      </method>
+
+      <method name="setPickerState">
+        <parameter name="aIsOpen"/>
+        <body>
+        <![CDATA[
+          this.log("picker is now " + (aIsOpen ? "opened" : "closed"));
+          this.mIsPickerOpen = aIsOpen;
+        ]]>
+        </body>
+      </method>
+
+      <method name="isEmpty">
+        <parameter name="aValue"/>
+        <body>
+          return (aValue == undefined || 0 === aValue.length);
+        </body>
+      </method>
+
+      <method name="clearInputFields">
+        <body>
+          throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+        </body>
+      </method>
+
+      <method name="setFieldsFromInputValue">
+        <body>
+          throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+        </body>
+      </method>
+
+      <method name="setInputValueFromFields">
+        <body>
+          throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+        </body>
+      </method>
+
+      <method name="setFieldsFromPicker">
+        <body>
+          throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+        </body>
+      </method>
+
+      <method name="handleKeypress">
+        <body>
+          throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+        </body>
+      </method>
+
+      <method name="handleKeyboardNav">
+        <body>
+          throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+        </body>
+      </method>
+
+      <method name="getCurrentValue">
+        <body>
+          throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+        </body>
+      </method>
+
+      <method name="notifyPicker">
+        <body>
+        <![CDATA[
+          if (this.mIsPickerOpen && this.isValueAvailable()) {
+            this.mInputElement.updateDateTimePicker(this.getCurrentValue());
+          }
+        ]]>
+        </body>
+      </method>
+
+      <method name="isDisabled">
+        <body>
+        <![CDATA[
+          return this.hasAttribute("disabled");
+        ]]>
+        </body>
+      </method>
+
+      <method name="isReadonly">
+        <body>
+        <![CDATA[
+          return this.hasAttribute("readonly");
+        ]]>
+        </body>
+      </method>
+
+      <method name="handleEvent">
+        <parameter name="aEvent"/>
+        <body>
+        <![CDATA[
+          this.log("handleEvent: " + aEvent.type);
+
+          switch (aEvent.type) {
+            case "keypress": {
+              this.onKeyPress(aEvent);
+              break;
+            }
+            case "click": {
+              this.onClick(aEvent);
+              break;
+            }
+            case "focus": {
+              this.onFocus(aEvent);
+              break;
+            }
+            case "blur": {
+              this.onBlur(aEvent);
+              break;
+            }
+            case "copy":
+            case "cut":
+            case "paste": {
+              aEvent.preventDefault();
+              break;
+            }
+            default:
+              break;
+          }
+        ]]>
+        </body>
+      </method>
+
+      <method name="onFocus">
+        <parameter name="aEvent"/>
+        <body>
+        <![CDATA[
+          this.log("onFocus originalTarget: " + aEvent.originalTarget);
+
+          let target = aEvent.originalTarget;
+          if ((target instanceof HTMLInputElement) && target.type == "text") {
+            this.mLastFocusedField = target;
+            target.select();
+          }
+        ]]>
+        </body>
+      </method>
+
+      <method name="onBlur">
+        <parameter name="aEvent"/>
+        <body>
+        <![CDATA[
+          this.log("onBlur originalTarget: " + aEvent.originalTarget);
+
+          let target = aEvent.originalTarget;
+          target.setAttribute("typeBuffer", "");
+          this.setInputValueFromFields();
+        ]]>
+        </body>
+      </method>
+
+      <method name="onKeyPress">
+        <parameter name="aEvent"/>
+        <body>
+        <![CDATA[
+          this.log("onKeyPress key: " + aEvent.key);
+
+          switch (aEvent.key) {
+            // Close picker on Enter or Space key.
+            case "Enter":
+            case " ": {
+              this.mInputElement.closeDateTimePicker();
+              aEvent.preventDefault();
+              break;
+            }
+            case "Backspace": {
+              let targetField = aEvent.originalTarget;
+              targetField.setAttribute("typeBuffer", "");
+              break;
+            }
+            case "ArrowRight":
+            case "ArrowLeft": {
+              this.advanceToNextField(aEvent.key == "ArrowRight" ? false : true);
+              aEvent.preventDefault();
+              break;
+            }
+            case "ArrowUp":
+            case "ArrowDown":
+            case "PageUp":
+            case "PageDown":
+            case "Home":
+            case "End": {
+              this.handleKeyboardNav(aEvent);
+              aEvent.preventDefault();
+              break;
+            }
+            default: {
+              // printable characters
+              if (aEvent.keyCode == 0 &&
+                  !(aEvent.ctrlKey || aEvent.altKey || aEvent.metaKey)) {
+                this.handleKeypress(aEvent);
+                aEvent.preventDefault();
+              }
+              break;
+            }
+          }
+        ]]>
+        </body>
+      </method>
+
+      <method name="onClick">
+        <parameter name="aEvent"/>
+        <body>
+        <![CDATA[
+          this.log("onClick originalTarget: " + aEvent.originalTarget);
+
+          // XXX: .originalTarget is not expected.
+          // When clicking on one of the inner text boxes, the .originalTarget is
+          // a HTMLDivElement and when clicking on the reset button, it's a
+          // HTMLButtonElement but it's not equal to our reset-button.
+          if (aEvent.defaultPrevented || this.isDisabled() || this.isReadonly()) {
+            return;
+          }
+
+          if (!(aEvent.originalTarget instanceof HTMLButtonElement)) {
+            this.mInputElement.openDateTimePicker(this.getCurrentValue());
+          }
+        ]]>
+        </body>
+      </method>
+    </implementation>
+  </binding>
+
+</bindings>

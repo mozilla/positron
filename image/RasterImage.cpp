@@ -73,7 +73,6 @@ RasterImage::RasterImage(ImageURL* aURI /* = nullptr */) :
   mSize(0,0),
   mLockCount(0),
   mDecodeCount(0),
-  mRequestedSampleSize(0),
   mImageProducerID(ImageContainer::AllocateProducerID()),
   mLastFrameID(0),
   mLastImageContainerDrawResult(DrawResult::NOT_READY),
@@ -278,8 +277,7 @@ RasterImage::LookupFrameInternal(const IntSize& aSize,
     MOZ_ASSERT(mFrameAnimator);
     MOZ_ASSERT(ToSurfaceFlags(aFlags) == DefaultSurfaceFlags(),
                "Can't composite frames with non-default surface flags");
-    const size_t index = mAnimationState->GetCurrentAnimationFrameIndex();
-    return mFrameAnimator->GetCompositedFrame(index);
+    return mFrameAnimator->GetCompositedFrame(*mAnimationState);
   }
 
   SurfaceFlags surfaceFlags = ToSurfaceFlags(aFlags);
@@ -338,10 +336,10 @@ RasterImage::LookupFrame(const IntSize& aSize,
                !mAnimationState || mAnimationState->KnownFrameCount() < 1,
                "Animated frames should be locked");
 
-    Decode(requestedSize, aFlags, aPlaybackType);
+    bool ranSync = Decode(requestedSize, aFlags, aPlaybackType);
 
-    // If we can sync decode, we should already have the frame.
-    if (aFlags & FLAG_SYNC_DECODE) {
+    // If we can or did sync decode, we should already have the frame.
+    if (ranSync || (aFlags & FLAG_SYNC_DECODE)) {
       result = LookupFrameInternal(requestedSize, aFlags, aPlaybackType);
     }
   }
@@ -588,8 +586,8 @@ RasterImage::GetImageContainer(LayerManager* aManager, uint32_t aFlags)
     return nullptr;
   }
 
-  if (IsUnlocked() && mProgressTracker) {
-    mProgressTracker->OnUnlockedDraw();
+  if (IsUnlocked()) {
+    SendOnUnlockedDraw(aFlags);
   }
 
   RefPtr<layers::ImageContainer> container = mImageContainer.get();
@@ -948,12 +946,9 @@ RasterImage::OnImageDataAvailable(nsIRequest*,
                                   uint32_t aCount)
 {
   nsresult rv = mSourceBuffer->AppendFromInputStream(aInputStream, aCount);
-  MOZ_ASSERT(rv == NS_OK || rv == NS_ERROR_OUT_OF_MEMORY);
-
-  if (MOZ_UNLIKELY(rv == NS_ERROR_OUT_OF_MEMORY)) {
+  if (NS_FAILED(rv)) {
     DoError();
   }
-
   return rv;
 }
 
@@ -1039,7 +1034,7 @@ RasterImage::CanDiscard() {
 }
 
 NS_IMETHODIMP
-RasterImage::StartDecoding()
+RasterImage::StartDecoding(uint32_t aFlags)
 {
   if (mError) {
     return NS_ERROR_FAILURE;
@@ -1050,7 +1045,25 @@ RasterImage::StartDecoding()
     return NS_OK;
   }
 
-  return RequestDecodeForSize(mSize, FLAG_SYNC_DECODE_IF_FAST);
+  uint32_t flags = (aFlags & FLAG_ASYNC_NOTIFY) | FLAG_SYNC_DECODE_IF_FAST;
+  return RequestDecodeForSize(mSize, flags);
+}
+
+bool
+RasterImage::StartDecodingWithResult(uint32_t aFlags)
+{
+  if (mError) {
+    return false;
+  }
+
+  if (!mHasSize) {
+    mWantFullDecode = true;
+    return false;
+  }
+
+  uint32_t flags = (aFlags & FLAG_ASYNC_NOTIFY) | FLAG_SYNC_DECODE_IF_FAST;
+  DrawableSurface surface = RequestDecodeForSizeInternal(mSize, flags);
+  return surface && surface->IsFinished();
 }
 
 NS_IMETHODIMP
@@ -1062,8 +1075,23 @@ RasterImage::RequestDecodeForSize(const IntSize& aSize, uint32_t aFlags)
     return NS_ERROR_FAILURE;
   }
 
+  RequestDecodeForSizeInternal(aSize, aFlags);
+
+  return NS_OK;
+}
+
+DrawableSurface
+RasterImage::RequestDecodeForSizeInternal(const IntSize& aSize, uint32_t aFlags)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (mError) {
+    return DrawableSurface();
+  }
+
   if (!mHasSize) {
-    return NS_OK;
+    mWantFullDecode = true;
+    return DrawableSurface();
   }
 
   // Decide whether to sync decode images we can decode quickly. Here we are
@@ -1077,13 +1105,11 @@ RasterImage::RequestDecodeForSize(const IntSize& aSize, uint32_t aFlags)
                  : aFlags & ~FLAG_SYNC_DECODE_IF_FAST;
 
   // Perform a frame lookup, which will implicitly start decoding if needed.
-  LookupFrame(aSize, flags, mAnimationState ? PlaybackType::eAnimated
-                                            : PlaybackType::eStatic);
-
-  return NS_OK;
+  return LookupFrame(aSize, flags, mAnimationState ? PlaybackType::eAnimated
+                                                   : PlaybackType::eStatic);
 }
 
-static void
+static bool
 LaunchDecodingTask(IDecodingTask* aTask,
                    RasterImage* aImage,
                    uint32_t aFlags,
@@ -1096,24 +1122,24 @@ LaunchDecodingTask(IDecodingTask* aTask,
         js::ProfileEntry::Category::GRAPHICS,
         "%s", aImage->GetURIString().get());
       DecodePool::Singleton()->SyncRunIfPossible(aTask);
-      return;
+      return true;
     }
 
     if (aFlags & imgIContainer::FLAG_SYNC_DECODE_IF_FAST) {
       PROFILER_LABEL_PRINTF("DecodePool", "SyncRunIfPreferred",
         js::ProfileEntry::Category::GRAPHICS,
         "%s", aImage->GetURIString().get());
-      DecodePool::Singleton()->SyncRunIfPreferred(aTask);
-      return;
+      return DecodePool::Singleton()->SyncRunIfPreferred(aTask);
     }
   }
 
   // Perform an async decode. We also take this path if we don't have all the
   // source data yet, since sync decoding is impossible in that situation.
   DecodePool::Singleton()->AsyncRun(aTask);
+  return false;
 }
 
-NS_IMETHODIMP
+bool
 RasterImage::Decode(const IntSize& aSize,
                     uint32_t aFlags,
                     PlaybackType aPlaybackType)
@@ -1121,13 +1147,13 @@ RasterImage::Decode(const IntSize& aSize,
   MOZ_ASSERT(NS_IsMainThread());
 
   if (mError) {
-    return NS_ERROR_FAILURE;
+    return false;
   }
 
   // If we don't have a size yet, we can't do any other decoding.
   if (!mHasSize) {
     mWantFullDecode = true;
-    return NS_OK;
+    return false;
   }
 
   // We're about to decode again, which may mean that some of the previous sizes
@@ -1167,20 +1193,18 @@ RasterImage::Decode(const IntSize& aSize,
   } else {
     task = DecoderFactory::CreateDecoder(mDecoderType, WrapNotNull(this),
                                          mSourceBuffer, mSize, aSize,
-                                         decoderFlags, surfaceFlags,
-                                         mRequestedSampleSize);
+                                         decoderFlags, surfaceFlags);
   }
 
   // Make sure DecoderFactory was able to create a decoder successfully.
   if (!task) {
-    return NS_ERROR_FAILURE;
+    return false;
   }
 
   mDecodeCount++;
 
   // We're ready to decode; start the decoder.
-  LaunchDecodingTask(task, this, aFlags, mHasSourceData);
-  return NS_OK;
+  return LaunchDecodingTask(task, this, aFlags, mHasSourceData);
 }
 
 NS_IMETHODIMP
@@ -1195,7 +1219,7 @@ RasterImage::DecodeMetadata(uint32_t aFlags)
   // Create a decoder.
   RefPtr<IDecodingTask> task =
     DecoderFactory::CreateMetadataDecoder(mDecoderType, WrapNotNull(this),
-                                          mSourceBuffer, mRequestedSampleSize);
+                                          mSourceBuffer);
 
   // Make sure DecoderFactory was able to create a decoder successfully.
   if (!task) {
@@ -1348,9 +1372,10 @@ RasterImage::Draw(gfxContext* aContext,
     return DrawResult::BAD_ARGS;
   }
 
-  if (IsUnlocked() && mProgressTracker) {
-    mProgressTracker->OnUnlockedDraw();
+  if (IsUnlocked()) {
+    SendOnUnlockedDraw(aFlags);
   }
+
 
   // If we're not using SamplingFilter::GOOD, we shouldn't high-quality scale or
   // downscale during decode.
@@ -1583,7 +1608,7 @@ RasterImage::NotifyDecodeComplete(const DecoderFinalStatus& aStatus,
   MOZ_ASSERT(NS_IsMainThread());
 
   // If the decoder detected an error, log it to the error console.
-  if (aStatus.mShouldReportError && !aStatus.mWasAborted) {
+  if (aStatus.mShouldReportError) {
     ReportDecoderError();
   }
 
@@ -1601,7 +1626,7 @@ RasterImage::NotifyDecodeComplete(const DecoderFinalStatus& aStatus,
   MOZ_ASSERT(mError || mHasSize || !aMetadata.HasSize(),
              "SetMetadata should've gotten a size");
 
-  if (!aStatus.mWasMetadataDecode && aStatus.mFinished && !aStatus.mWasAborted) {
+  if (!aStatus.mWasMetadataDecode && aStatus.mFinished) {
     // Flag that we've been decoded before.
     mHasBeenDecoded = true;
   }
@@ -1617,13 +1642,13 @@ RasterImage::NotifyDecodeComplete(const DecoderFinalStatus& aStatus,
     mAnimationState->SetDoneDecoding(true);
   }
 
-  if (!aStatus.mWasMetadataDecode && aTelemetry.mChunkCount) {
-    Telemetry::Accumulate(Telemetry::IMAGE_DECODE_CHUNKS, aTelemetry.mChunkCount);
-  }
+  // Do some telemetry if this isn't a metadata decode.
+  if (!aStatus.mWasMetadataDecode) {
+    if (aTelemetry.mChunkCount) {
+      Telemetry::Accumulate(Telemetry::IMAGE_DECODE_CHUNKS, aTelemetry.mChunkCount);
+    }
 
-  if (aStatus.mFinished) {
-    // Do some telemetry if this isn't a metadata decode.
-    if (!aStatus.mWasMetadataDecode) {
+    if (aStatus.mFinished) {
       Telemetry::Accumulate(Telemetry::IMAGE_DECODE_TIME,
                             int32_t(aTelemetry.mDecodeTime.ToMicroseconds()));
 
@@ -1631,26 +1656,30 @@ RasterImage::NotifyDecodeComplete(const DecoderFinalStatus& aStatus,
         Telemetry::Accumulate(*aTelemetry.mSpeedHistogram, aTelemetry.Speed());
       }
     }
+  }
 
-    // Detect errors.
-    if (aStatus.mHadError && !aStatus.mWasAborted) {
-      DoError();
-    } else if (aStatus.mWasMetadataDecode && !mHasSize) {
-      DoError();
-    }
+  // Only act on errors if we have no usable frames from the decoder.
+  if (aStatus.mHadError &&
+      (!mAnimationState || mAnimationState->KnownFrameCount() == 0)) {
+    DoError();
+  } else if (aStatus.mWasMetadataDecode && !mHasSize) {
+    DoError();
+  }
 
+  // XXX(aosmond): Can we get this far without mFinished == true?
+  if (aStatus.mFinished && aStatus.mWasMetadataDecode) {
     // If we were waiting to fire the load event, go ahead and fire it now.
-    if (mLoadProgress && aStatus.mWasMetadataDecode) {
+    if (mLoadProgress) {
       NotifyForLoadEvent(*mLoadProgress);
       mLoadProgress = Nothing();
       NotifyProgress(FLAG_ONLOAD_UNBLOCKED);
     }
-  }
 
-  // If we were a metadata decode and a full decode was requested, do it.
-  if (aStatus.mFinished && aStatus.mWasMetadataDecode && mWantFullDecode) {
-    mWantFullDecode = false;
-    RequestDecodeForSize(mSize, DECODE_FLAGS_DEFAULT);
+    // If we were a metadata decode and a full decode was requested, do it.
+    if (mWantFullDecode) {
+      mWantFullDecode = false;
+      RequestDecodeForSize(mSize, DECODE_FLAGS_DEFAULT);
+    }
   }
 }
 

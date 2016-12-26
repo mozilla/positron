@@ -21,6 +21,15 @@ namespace mozilla {
 enum class CSSPseudoElementType : uint8_t;
 } // namespace mozilla
 
+extern "C" {
+#define STYLE_STRUCT(name_, checkdata_cb_)     \
+  struct nsStyle##name_;                       \
+  const nsStyle##name_* Servo_GetStyle##name_( \
+    ServoComputedValuesBorrowedOrNull computed_values);
+#include "nsStyleStructList.h"
+#undef STYLE_STRUCT
+}
+
 /**
  * An nsStyleContext represents the computed style data for an element.
  * The computed style data are stored in a set of structs (see
@@ -383,7 +392,7 @@ public:
    * Like the above, but allows comparing ServoComputedValues instead of needing
    * a full-fledged style context.
    */
-  nsChangeHint CalcStyleDifference(ServoComputedValues* aNewComputedValues,
+  nsChangeHint CalcStyleDifference(const ServoComputedValues* aNewComputedValues,
                                    nsChangeHint aParentHintsNotHandledForDescendants,
                                    uint32_t* aEqualStructs,
                                    uint32_t* aSamePointerStructs);
@@ -403,9 +412,6 @@ public:
    * aProperty must be a color-valued property that StyleAnimationValue
    * knows how to extract.  It must also be a property that we know to
    * do change handling for in nsStyleContext::CalcDifference.
-   *
-   * Note that if aProperty is eCSSProperty_border_*_color, this
-   * function handles -moz-use-text-color.
    */
   nscolor GetVisitedDependentColor(nsCSSPropertyID aProperty);
 
@@ -505,45 +511,6 @@ public:
   }
 
   mozilla::NonOwningStyleContextSource StyleSource() const { return mSource.AsRaw(); }
-
-#ifdef MOZ_STYLO
-  // NOTE: It'd be great to assert here that the previous change hint is always
-  // consumed.
-  //
-  // This is not the case right now, since the changes of childs of frames that
-  // go through frame construction are not consumed.
-  void StoreChangeHint(nsChangeHint aHint)
-  {
-    MOZ_ASSERT(!IsShared());
-    mStoredChangeHint = aHint;
-#ifdef DEBUG
-    mConsumedChangeHint = false;
-#endif
-  }
-
-  nsChangeHint ConsumeStoredChangeHint()
-  {
-    MOZ_ASSERT(!mConsumedChangeHint, "Re-consuming the same change hint!");
-    nsChangeHint result = mStoredChangeHint;
-    mStoredChangeHint = nsChangeHint(0);
-#ifdef DEBUG
-    mConsumedChangeHint = true;
-#endif
-    return result;
-  }
-#else
-  void StoreChangeHint(nsChangeHint aHint)
-  {
-    MOZ_CRASH("stylo: Called nsStyleContext::StoreChangeHint in a non MOZ_STYLO "
-              "build.");
-  }
-
-  nsChangeHint ConsumeStoredChangeHint()
-  {
-    MOZ_CRASH("stylo: Called nsStyleContext::ComsumeStoredChangeHint in a non "
-               "MOZ_STYLO build.");
-  }
-#endif
 
 private:
   // Private destructor, to discourage deletion outside of Release():
@@ -676,6 +643,8 @@ private:
           newData =                                                     \
             Servo_GetStyle##name_(mSource.AsServoComputedValues());     \
         }                                                               \
+        /* perform any remaining main thread work on the struct */      \
+        const_cast<nsStyle##name_*>(newData)->FinishStyle(PresContext());\
         /* the Servo-backed StyleContextSource owns the struct */       \
         AddStyleBit(NS_STYLE_INHERIT_BIT(name_));                       \
       }                                                                 \
@@ -704,6 +673,8 @@ private:
       } else {                                                          \
         newData =                                                       \
           Servo_GetStyle##name_(mSource.AsServoComputedValues());       \
+        /* perform any remaining main thread work on the struct */      \
+        const_cast<nsStyle##name_*>(newData)->FinishStyle(PresContext());\
         /* The Servo-backed StyleContextSource owns the struct.         \
          *                                                              \
          * XXXbholley: Unconditionally caching reset structs here       \
@@ -798,15 +769,6 @@ private:
   uint64_t                mBits;
 
   uint32_t                mRefCnt;
-
-  // For now we store change hints on the style context during parallel traversal.
-  // We should improve this - see bug 1289861.
-#ifdef MOZ_STYLO
-  nsChangeHint            mStoredChangeHint;
-#ifdef DEBUG
-  bool                    mConsumedChangeHint;
-#endif
-#endif
 
 #ifdef DEBUG
   uint32_t                mFrameRefCnt; // number of frames that use this

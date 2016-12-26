@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "PrintDataUtils.h"
-#include "nsIPrintOptions.h"
 #include "nsIPrintSettings.h"
 #include "nsIServiceManager.h"
 #include "nsIWebBrowserPrint.h"
@@ -25,12 +24,10 @@ NS_IMPL_ISUPPORTS(MockWebBrowserPrint, nsIWebBrowserPrint);
 MockWebBrowserPrint::MockWebBrowserPrint(const PrintData &aData)
   : mData(aData)
 {
-  MOZ_COUNT_CTOR(MockWebBrowserPrint);
 }
 
 MockWebBrowserPrint::~MockWebBrowserPrint()
 {
-  MOZ_COUNT_DTOR(MockWebBrowserPrint);
 }
 
 NS_IMETHODIMP

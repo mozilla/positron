@@ -229,8 +229,6 @@ DEFAULT_TEST_PREFS = {
     'browser.newtabpage.introShown': True,
     # Disable useragent updates.
     'general.useragent.updates.enabled': False,
-    'dom.mozApps.debug': True,
-    'dom.apps.customization.enabled': True,
     'media.eme.enabled': True,
     'media.eme.apiVisible': True,
     # Don't forceably kill content processes after a timeout

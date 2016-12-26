@@ -24,11 +24,11 @@ VRLayerParent::~VRLayerParent()
   MOZ_COUNT_DTOR(VRLayerParent);
 }
 
-bool
+mozilla::ipc::IPCResult
 VRLayerParent::RecvDestroy()
 {
   Destroy();
-  return true;
+  return IPC_OK();
 }
 
 void
@@ -45,14 +45,13 @@ VRLayerParent::Destroy()
   }
 }
 
-bool
-VRLayerParent::RecvSubmitFrame(const int32_t& aInputFrameID,
-                               PTextureParent* texture)
+mozilla::ipc::IPCResult
+VRLayerParent::RecvSubmitFrame(PTextureParent* texture)
 {
   VRManager* vm = VRManager::Get();
-  vm->SubmitFrame(this, aInputFrameID, texture, mLeftEyeRect, mRightEyeRect);
+  vm->SubmitFrame(this, texture, mLeftEyeRect, mRightEyeRect);
 
-  return true;
+  return IPC_OK();
 }
 
 

@@ -5,8 +5,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 const EXCLUDE_FROM_BACKUP_ANNO = "places/excludeFromBackup";
-// Menu, Toolbar, Unsorted, Tags
-const PLACES_ROOTS_COUNT  = 4;
+// Menu, Toolbar, Unsorted, Tags, Mobile
+const PLACES_ROOTS_COUNT  = 5;
 var tests = [];
 
 /*
@@ -77,7 +77,7 @@ var test = {
       do_check_eq(rootNode.childCount, PLACES_ROOTS_COUNT + 2);
       // open exclude root and check it still contains one item
       var restoreRootIndex = PLACES_ROOTS_COUNT;
-      var excludeRootIndex = PLACES_ROOTS_COUNT+1;
+      var excludeRootIndex = PLACES_ROOTS_COUNT + 1;
       var excludeRootNode = rootNode.getChild(excludeRootIndex);
       do_check_eq(this._excludeRootTitle, excludeRootNode.title);
       excludeRootNode.QueryInterface(Ci.nsINavHistoryQueryResultNode);

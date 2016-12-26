@@ -1,4 +1,1 @@
-// |jit-test| test-also-wasm-baseline
-// TODO: new import syntax
-quit();
-var importedArgs = ['names.wast']; load(scriptdir + '../spec.js');
+var importedArgs = ['names.wast']; load(scriptdir + '../wast.js');

@@ -3,7 +3,6 @@
 /* global XPCOMUtils, PlacesUtils, PlacesTestUtils, PlacesProvider, NetUtil */
 /* global do_get_profile, run_next_test, add_task */
 /* global equal, ok */
-/* exported run_test */
 
 const {
   utils: Cu,
@@ -42,7 +41,7 @@ function timeDaysAgo(numDays) {
 }
 
 // utility function to make a visit for insetion into places db
-function makeVisit(index, daysAgo, isTyped, domain=TEST_URL) {
+function makeVisit(index, daysAgo, isTyped, domain = TEST_URL) {
   let {
     TRANSITION_TYPED,
     TRANSITION_LINK

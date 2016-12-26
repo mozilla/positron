@@ -12,6 +12,9 @@
 #include "mozilla/gfx/gfxVarReceiver.h"
 
 namespace mozilla {
+namespace ipc {
+class CrashReporterHost;
+} // namespace
 namespace gfx {
 
 class GPUProcessHost;
@@ -32,14 +35,21 @@ public:
   void OnVarChanged(const GfxVarUpdate& aVar) override;
 
   // PGPUChild overrides.
-  bool RecvInitComplete(const GPUDeviceData& aData) override;
-  bool RecvReportCheckerboard(const uint32_t& aSeverity, const nsCString& aLog) override;
+  mozilla::ipc::IPCResult RecvInitComplete(const GPUDeviceData& aData) override;
+  mozilla::ipc::IPCResult RecvReportCheckerboard(const uint32_t& aSeverity, const nsCString& aLog) override;
+  mozilla::ipc::IPCResult RecvInitCrashReporter(Shmem&& shmem) override;
+  mozilla::ipc::IPCResult RecvAccumulateChildHistogram(InfallibleTArray<Accumulation>&& aAccumulations) override;
+  mozilla::ipc::IPCResult RecvAccumulateChildKeyedHistogram(InfallibleTArray<KeyedAccumulation>&& aAccumulations) override;
   void ActorDestroy(ActorDestroyReason aWhy) override;
+  mozilla::ipc::IPCResult RecvGraphicsError(const nsCString& aError) override;
+  mozilla::ipc::IPCResult RecvNotifyUiObservers(const nsCString& aTopic) override;
+  mozilla::ipc::IPCResult RecvNotifyDeviceReset() override;
 
   static void Destroy(UniquePtr<GPUChild>&& aChild);
 
 private:
   GPUProcessHost* mHost;
+  UniquePtr<ipc::CrashReporterHost> mCrashReporter;
   bool mGPUReady;
 };
 

@@ -6,6 +6,7 @@
 #define MEDIA_BASE_YUV_CONVERT_H_
 
 #include "chromium_types.h"
+#include "ImageTypes.h"
 
 namespace mozilla {
 
@@ -55,7 +56,8 @@ void ConvertYCbCrToRGB32(const uint8* yplane,
                          int ystride,
                          int uvstride,
                          int rgbstride,
-                         YUVType yuv_type);
+                         YUVType yuv_type,
+                         YUVColorSpace yuv_color_space);
 
 void ConvertYCbCrToRGB32_deprecated(const uint8* yplane,
                                     const uint8* uplane,
@@ -84,6 +86,7 @@ void ScaleYCbCrToRGB32(const uint8* yplane,
                        int uvstride,
                        int rgbstride,
                        YUVType yuv_type,
+                       YUVColorSpace yuv_color_space,
                        ScaleFilter filter);
 
 void ScaleYCbCrToRGB32_deprecated(const uint8* yplane,
@@ -101,7 +104,18 @@ void ScaleYCbCrToRGB32_deprecated(const uint8* yplane,
                                   Rotate view_rotate,
                                   ScaleFilter filter);
 
+void ConvertYCbCrAToARGB32(const uint8* yplane,
+                           const uint8* uplane,
+                           const uint8* vplane,
+                           const uint8* aplane,
+                           uint8* argbframe,
+                           int pic_width,
+                           int pic_height,
+                           int yastride,
+                           int uvstride,
+                           int argbstride);
+
 } // namespace gfx
 } // namespace mozilla
- 
+
 #endif  // MEDIA_BASE_YUV_CONVERT_H_

@@ -28,7 +28,9 @@ namespace mozilla {
 
 class EffectSet;
 class RestyleTracker;
+class StyleAnimationValue;
 struct AnimationPerformanceWarning;
+struct AnimationProperty;
 struct NonOwningAnimationTarget;
 
 namespace dom {
@@ -185,8 +187,8 @@ public:
                             CSSPseudoElementType aPseudoType,
                             nsStyleContext* aStyleContext);
 
-  // Update the mWinsInCascade member for each property in effects targetting
-  // the specified (pseudo-)element.
+  // Update the mPropertiesWithImportantRules and
+  // mPropertiesForAnimationsLevel members of the corresponding EffectSet.
   //
   // This can be expensive so we should only call it if styles that apply
   // above the animation level of the cascade might have changed. For all
@@ -214,6 +216,25 @@ public:
     const nsIFrame* aFrame,
     nsCSSPropertyID aProperty,
     const AnimationPerformanceWarning& aWarning);
+
+  // Returns the base style of (pseudo-)element for |aProperty|.
+  // If there is no cached base style for the property, a new base style value
+  // is resolved with |aStyleContext|. The new resolved base style is cached
+  // until ClearBaseStyles is called.
+  static StyleAnimationValue GetBaseStyle(nsCSSPropertyID aProperty,
+                                          nsStyleContext* aStyleContext,
+                                          dom::Element& aElement,
+                                          CSSPseudoElementType aPseudoType);
+
+  // Returns the base style corresponding to |aFrame|.
+  // This function should be called only after restyle process has done, i.e.
+  // |aFrame| has a resolved style context.
+  static StyleAnimationValue GetBaseStyle(nsCSSPropertyID aProperty,
+                                          const nsIFrame* aFrame);
+
+  // Clear cached base styles of (pseudo-)element.
+  static void ClearBaseStyles(dom::Element& aElement,
+                              CSSPseudoElementType aPseudoType);
 
 private:
   ~EffectCompositor() = default;

@@ -454,6 +454,17 @@ MacroAssembler::rshift32Arithmetic(Imm32 shift, Register srcDest)
 }
 
 // ===============================================================
+// Condition functions
+
+template <typename T1, typename T2>
+void
+MacroAssembler::cmp32Set(Condition cond, T1 lhs, T2 rhs, Register dest)
+{
+    cmp32(lhs, rhs);
+    emitSet(cond, dest);
+}
+
+// ===============================================================
 // Branch instructions
 
 template <class L>
@@ -545,8 +556,9 @@ MacroAssembler::branchPtr(Condition cond, Register lhs, ImmWord rhs, Label* labe
     branchPtrImpl(cond, lhs, rhs, label);
 }
 
+template <class L>
 void
-MacroAssembler::branchPtr(Condition cond, const Address& lhs, Register rhs, Label* label)
+MacroAssembler::branchPtr(Condition cond, const Address& lhs, Register rhs, L label)
 {
     branchPtrImpl(cond, lhs, rhs, label);
 }
@@ -569,9 +581,9 @@ MacroAssembler::branchPtr(Condition cond, const Address& lhs, ImmWord rhs, Label
     branchPtrImpl(cond, lhs, rhs, label);
 }
 
-template <typename T, typename S>
+template <typename T, typename S, typename L>
 void
-MacroAssembler::branchPtrImpl(Condition cond, const T& lhs, const S& rhs, Label* label)
+MacroAssembler::branchPtrImpl(Condition cond, const T& lhs, const S& rhs, L label)
 {
     cmpPtr(Operand(lhs), rhs);
     j(cond, label);
@@ -1169,6 +1181,12 @@ MacroAssembler::storeFloat32x3(FloatRegister src, const BaseIndex& dest)
     storeFloat32(scratch, destZ);
 }
 
+void
+MacroAssembler::memoryBarrier(MemoryBarrierBits barrier)
+{
+    if (barrier & MembarStoreLoad)
+        storeLoadFence();
+}
 
 // ========================================================================
 // Truncate floating point.

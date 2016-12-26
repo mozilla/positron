@@ -33,9 +33,9 @@
 #include "nsGlobalWindow.h"
 #include "nsIDocument.h"
 #include "nsIContent.h"
+#include "nsIIDNService.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptContext.h"
-#include "nsIUnicodeNormalizer.h"
 #include "nsDOMJSUtils.h"
 #include "nsIPrincipal.h"
 #include "nsWildCard.h"
@@ -185,32 +185,14 @@ enum eNPPStreamTypeInternal {
   eNPPStreamTypeInternal_Post
 };
 
-PRIntervalTime NS_NotifyBeginPluginCall(NSPluginCallReentry aReentryState)
+void NS_NotifyBeginPluginCall(NSPluginCallReentry aReentryState)
 {
   nsNPAPIPluginInstance::BeginPluginCall(aReentryState);
-  return PR_IntervalNow();
 }
 
-// This function sends a notification using the observer service to any object
-// registered to listen to the "experimental-notify-plugin-call" subject.
-// Each "experimental-notify-plugin-call" notification carries with it the run
-// time value in milliseconds that the call took to execute.
-void NS_NotifyPluginCall(PRIntervalTime startTime, NSPluginCallReentry aReentryState)
+void NS_NotifyPluginCall(NSPluginCallReentry aReentryState)
 {
   nsNPAPIPluginInstance::EndPluginCall(aReentryState);
-
-  PRIntervalTime endTime = PR_IntervalNow() - startTime;
-  nsCOMPtr<nsIObserverService> notifyUIService =
-    mozilla::services::GetObserverService();
-  if (!notifyUIService)
-    return;
-
-  float runTimeInSeconds = float(endTime) / PR_TicksPerSecond();
-  nsAutoString runTimeString;
-  runTimeString.AppendFloat(runTimeInSeconds);
-  const char16_t* runTime = runTimeString.get();
-  notifyUIService->NotifyObservers(nullptr, "experimental-notify-plugin-call",
-                                   runTime);
 }
 
 static void CheckClassInitialized()
@@ -484,9 +466,9 @@ class nsPluginThreadRunnable : public Runnable,
 public:
   nsPluginThreadRunnable(NPP instance, PluginThreadCallback func,
                          void *userData);
-  virtual ~nsPluginThreadRunnable();
+  ~nsPluginThreadRunnable() override;
 
-  NS_IMETHOD Run();
+  NS_IMETHOD Run() override;
 
   bool IsForInstance(NPP instance)
   {
@@ -742,23 +724,6 @@ _geturl(NPP npp, const char* relativeURL, const char* target)
 
   PluginDestructionGuard guard(npp);
 
-  // Block Adobe Acrobat from loading URLs that are not http:, https:,
-  // or ftp: URLs if the given target is null.
-  if (!target && relativeURL &&
-      (strncmp(relativeURL, "http:", 5) != 0) &&
-      (strncmp(relativeURL, "https:", 6) != 0) &&
-      (strncmp(relativeURL, "ftp:", 4) != 0)) {
-    nsNPAPIPluginInstance *inst = (nsNPAPIPluginInstance *) npp->ndata;
-
-    const char *name = nullptr;
-    RefPtr<nsPluginHost> host = nsPluginHost::GetInst();
-    host->GetPluginName(inst, &name);
-
-    if (name && strstr(name, "Adobe") && strstr(name, "Acrobat")) {
-      return NPERR_NO_ERROR;
-    }
-  }
-
   return MakeNewNPAPIStreamInternal(npp, relativeURL, target,
                                     eNPPStreamTypeInternal_Get);
 }
@@ -847,7 +812,7 @@ _newstream(NPP npp, NPMIMEType type, const char* target, NPStream* *result)
     nsCOMPtr<nsIOutputStream> stream;
     if (NS_SUCCEEDED(inst->NewStreamFromPlugin((const char*) type, target,
                                                getter_AddRefs(stream)))) {
-      nsNPAPIStreamWrapper* wrapper = new nsNPAPIStreamWrapper(stream, nullptr);
+      auto* wrapper = new nsNPAPIStreamWrapper(stream, nullptr);
       if (wrapper) {
         (*result) = &wrapper->mNPStream;
         err = NPERR_NO_ERROR;
@@ -1935,18 +1900,25 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
       return NPERR_GENERIC_ERROR;
     }
 
-    nsCOMPtr<nsIUnicodeNormalizer> normalizer = do_GetService(NS_UNICODE_NORMALIZER_CONTRACTID);
-    if (!normalizer) {
+    nsCOMPtr<nsIIDNService> idnService = do_GetService(NS_IDNSERVICE_CONTRACTID);
+    if (!idnService) {
       return NPERR_GENERIC_ERROR;
     }
 
-    nsAutoString normalizedUTF16Origin;
-    res = normalizer->NormalizeUnicodeNFKC(utf16Origin, normalizedUTF16Origin);
+    // This is a bit messy: we convert to UTF-8 here, but then
+    // nsIDNService::Normalize will convert back to UTF-16 for processing,
+    // and back to UTF-8 again to return the result.
+    // Alternative: perhaps we should add a NormalizeUTF16 version of the API,
+    // and just convert to UTF-8 for the final return (resulting in one
+    // encoding form conversion instead of three).
+    NS_ConvertUTF16toUTF8 utf8Origin(utf16Origin);
+    nsAutoCString normalizedUTF8Origin;
+    res = idnService->Normalize(utf8Origin, normalizedUTF8Origin);
     if (NS_FAILED(res)) {
       return NPERR_GENERIC_ERROR;
     }
 
-    *(char**)result = ToNewUTF8String(normalizedUTF16Origin);
+    *(char**)result = ToNewCString(normalizedUTF8Origin);
     return *(char**)result ? NPERR_NO_ERROR : NPERR_GENERIC_ERROR;
   }
 

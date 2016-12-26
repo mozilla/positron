@@ -31,14 +31,14 @@ function check_results_callback(aSequence) {
   }
 
   // Build expectedData array.
-  let expectedData = visits.filter(function (aVisit, aIndex, aArray) {
+  let expectedData = visits.filter(function(aVisit, aIndex, aArray) {
     // Embed visits never appear in results.
     if (aVisit.transType == Ci.nsINavHistoryService.TRANSITION_EMBED)
       return false;
 
     if (!includeHidden && isHidden(aVisit)) {
       // If the page has any non-hidden visit, then it's visible.
-      if (visits.filter(function (refVisit) {
+      if (visits.filter(function(refVisit) {
         return refVisit.uri == aVisit.uri && !isHidden(refVisit);
           }).length == 0)
         return false;
@@ -49,7 +49,7 @@ function check_results_callback(aSequence) {
 
   // Remove duplicates, since queries are RESULTS_AS_URI (unique pages).
   let seen = [];
-  expectedData = expectedData.filter(function (aData) {
+  expectedData = expectedData.filter(function(aData) {
     if (seen.includes(aData.uri)) {
       return false;
     }
@@ -202,7 +202,7 @@ add_task(function* test_add_visits_to_database()
     Ci.nsINavHistoryService.TRANSITION_BOOKMARK,
     // Embed visits are not added to the database and we don't want redirects
     // to them, thus just avoid addition.
-    //Ci.nsINavHistoryService.TRANSITION_EMBED,
+    // Ci.nsINavHistoryService.TRANSITION_EMBED,
     Ci.nsINavHistoryService.TRANSITION_FRAMED_LINK,
     // Would make hard sorting by visit date because last_visit_date is actually
     // calculated excluding download transitions, but the query includes

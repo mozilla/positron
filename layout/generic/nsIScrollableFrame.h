@@ -352,6 +352,15 @@ public:
    */
   virtual nsIAtom* LastScrollOrigin() = 0;
   /**
+   * Sets a flag on the scrollframe that indicates the current scroll origin
+   * has been sent over in a layers transaction, and subsequent changes to
+   * the scroll position by "weaker" origins are permitted to overwrite the
+   * the scroll origin. Scroll origins that nsLayoutUtils::CanScrollOriginClobberApz
+   * returns false for are considered "weaker" than scroll origins for which
+   * that function returns true.
+   */
+  virtual void AllowScrollOriginDowngrade() = 0;
+  /**
    * Returns the origin that triggered the last smooth scroll.
    * Will equal nsGkAtoms::apz when the compositor's replica frame
    * metrics includes the latest smooth scroll.  The compositor will always
@@ -466,6 +475,14 @@ public:
   virtual ScrollSnapInfo GetScrollSnapInfo() const = 0;
 
   virtual void SetScrollsClipOnUnscrolledOutOfFlow() = 0;
+
+  /**
+   * Given the drag event aEvent, determine whether the mouse is near the edge
+   * of the scrollable area, and scroll the view in the direction of that edge
+   * if so. If scrolling occurred, true is returned. When false is returned, the
+   * caller should look for an ancestor to scroll.
+   */
+  virtual bool DragScroll(mozilla::WidgetEvent* aEvent) = 0;
 };
 
 #endif

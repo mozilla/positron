@@ -178,6 +178,14 @@ else:
     env.setdefault('CC', compiler)
     env.setdefault('CXX', cxx)
 
+rust_dir = os.path.join(DIR.tooltool, 'rustc')
+if os.path.exists(os.path.join(rust_dir, 'bin', 'rustc')):
+    env.setdefault('RUSTC', os.path.join(rust_dir, 'bin', 'rustc'))
+    env.setdefault('CARGO', os.path.join(rust_dir, 'bin', 'cargo'))
+else:
+    env.setdefault('RUSTC', 'rustc')
+    env.setdefault('CARGO', 'cargo')
+
 if platform.system() == 'Darwin':
     os.environ['SOURCE'] = DIR.source
     set_vars_from_script(os.path.join(DIR.scripts, 'macbuildenv.sh'),
@@ -322,7 +330,11 @@ if 'jittest' in test_suites:
     results.append(run_test_command([MAKE, 'check-jit-test']))
 if 'jsapitests' in test_suites:
     jsapi_test_binary = os.path.join(OBJDIR, 'dist', 'bin', 'jsapi-tests')
-    results.append(run_test_command([jsapi_test_binary]))
+    st = run_test_command([jsapi_test_binary])
+    if st < 0:
+        print("PROCESS-CRASH | jsapi-tests | application crashed")
+        print("Return code: {}".format(st))
+    results.append(st)
 if 'jstests' in test_suites:
     results.append(run_test_command([MAKE, 'check-jstests']))
 

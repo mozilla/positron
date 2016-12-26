@@ -9,74 +9,108 @@ const {
   DOM: dom,
   PropTypes
 } = require("devtools/client/shared/vendor/react");
-const ReactDOM = require("devtools/client/shared/vendor/react-dom");
 const { connect } = require("devtools/client/shared/vendor/react-redux");
 
-const { getAllMessages, getAllMessagesUiById, getAllMessagesTableDataById } = require("devtools/client/webconsole/new-console-output/selectors/messages");
+const {
+  getAllMessages,
+  getAllMessagesUiById,
+  getAllMessagesTableDataById,
+  getAllGroupsById,
+} = require("devtools/client/webconsole/new-console-output/selectors/messages");
+const { getScrollSetting } = require("devtools/client/webconsole/new-console-output/selectors/ui");
 const MessageContainer = createFactory(require("devtools/client/webconsole/new-console-output/components/message-container").MessageContainer);
 
 const ConsoleOutput = createClass({
 
-  propTypes: {
-    hudProxyClient: PropTypes.object.isRequired,
-    messages: PropTypes.object.isRequired,
-    messagesUi: PropTypes.object.isRequired,
-    sourceMapService: PropTypes.object,
-    onViewSourceInDebugger: PropTypes.func.isRequired,
-    openNetworkPanel: PropTypes.func.isRequired,
-    openLink: PropTypes.func.isRequired,
-  },
-
   displayName: "ConsoleOutput",
 
-  componentWillUpdate() {
-    let node = ReactDOM.findDOMNode(this);
-    if (node.lastChild) {
-      this.shouldScrollBottom = isScrolledToBottom(node.lastChild, node);
+  propTypes: {
+    messages: PropTypes.object.isRequired,
+    messagesUi: PropTypes.object.isRequired,
+    serviceContainer: PropTypes.shape({
+      attachRefToHud: PropTypes.func.isRequired,
+    }),
+    autoscroll: PropTypes.bool.isRequired,
+  },
+
+  componentDidMount() {
+    scrollToBottom(this.outputNode);
+    this.props.serviceContainer.attachRefToHud("outputScroller", this.outputNode);
+  },
+
+  componentWillUpdate(nextProps, nextState) {
+    if (!this.outputNode) {
+      return;
+    }
+
+    const outputNode = this.outputNode;
+
+    // Figure out if we are at the bottom. If so, then any new message should be scrolled
+    // into view.
+    if (this.props.autoscroll && outputNode.lastChild) {
+      this.shouldScrollBottom = isScrolledToBottom(outputNode.lastChild, outputNode);
     }
   },
 
   componentDidUpdate() {
     if (this.shouldScrollBottom) {
-      let node = ReactDOM.findDOMNode(this);
-      node.scrollTop = node.scrollHeight;
+      scrollToBottom(this.outputNode);
     }
   },
 
   render() {
     let {
       dispatch,
-      hudProxyClient,
+      autoscroll,
       messages,
       messagesUi,
       messagesTableData,
-      sourceMapService,
-      onViewSourceInDebugger,
-      openNetworkPanel,
-      openLink,
+      serviceContainer,
+      groups,
+      timestampsVisible,
     } = this.props;
 
     let messageNodes = messages.map((message) => {
+      const parentGroups = message.groupId ? (
+        (groups.get(message.groupId) || [])
+          .concat([message.groupId])
+      ) : [];
+
       return (
         MessageContainer({
           dispatch,
-          hudProxyClient,
           message,
           key: message.id,
-          sourceMapService,
-          onViewSourceInDebugger,
-          openNetworkPanel,
-          openLink,
+          serviceContainer,
           open: messagesUi.includes(message.id),
           tableData: messagesTableData.get(message.id),
+          autoscroll,
+          indent: parentGroups.length,
         })
       );
     });
+
+    let classList = ["webconsole-output"];
+
+    if (!timestampsVisible) {
+      classList.push("hideTimestamps");
+    }
+
     return (
-      dom.div({className: "webconsole-output"}, messageNodes)
+      dom.div({
+        className: classList.join(" "),
+        ref: node => {
+          this.outputNode = node;
+        },
+      }, messageNodes
+      )
     );
   }
 });
+
+function scrollToBottom(node) {
+  node.scrollTop = node.scrollHeight;
+}
 
 function isScrolledToBottom(outputNode, scrollNode) {
   let lastNodeHeight = outputNode.lastChild ?
@@ -85,11 +119,14 @@ function isScrolledToBottom(outputNode, scrollNode) {
          scrollNode.scrollHeight - lastNodeHeight / 2;
 }
 
-function mapStateToProps(state) {
+function mapStateToProps(state, props) {
   return {
     messages: getAllMessages(state),
     messagesUi: getAllMessagesUiById(state),
     messagesTableData: getAllMessagesTableDataById(state),
+    autoscroll: getScrollSetting(state),
+    groups: getAllGroupsById(state),
+    timestampsVisible: state.ui.timestampsVisible,
   };
 }
 

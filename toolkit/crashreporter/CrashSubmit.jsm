@@ -287,16 +287,16 @@ Submitter.prototype = {
       formData.append("Throttleable", "0");
     }
     // add the minidumps
-    formData.append("upload_file_minidump", new File(this.dump.path));
+    formData.append("upload_file_minidump", File.createFromFileName(this.dump.path));
     if (this.memory) {
-      formData.append("memory_report", new File(this.memory.path));
+      formData.append("memory_report", File.createFromFileName(this.memory.path));
     }
     if (this.additionalDumps.length > 0) {
       let names = [];
       for (let i of this.additionalDumps) {
         names.push(i.name);
-        formData.append("upload_file_minidump_"+i.name,
-                        new File(i.dump.path));
+        formData.append("upload_file_minidump_" + i.name,
+                        File.createFromFileName(i.dump.path));
       }
     }
 
@@ -308,31 +308,38 @@ Submitter.prototype = {
         let ret =
           xhr.status == 200 ? parseKeyValuePairs(xhr.responseText) : {};
         let submitted = !!ret.CrashID;
+        let p = Promise.resolve();
 
         if (this.recordSubmission) {
           let result = submitted ? manager.SUBMISSION_RESULT_OK :
                                    manager.SUBMISSION_RESULT_FAILED;
-          manager.addSubmissionResult(this.id, submissionID, new Date(),
-                                      result);
+          p = manager.addSubmissionResult(this.id, submissionID, new Date(),
+                                          result);
           if (submitted) {
             manager.setRemoteCrashID(this.id, ret.CrashID);
           }
         }
 
-        if (submitted) {
-          this.submitSuccess(ret);
-        }
-        else {
-           this.notifyStatus(FAILED);
-           this.cleanup();
-        }
+        p.then(() => {
+          if (submitted) {
+            this.submitSuccess(ret);
+          } else {
+            this.notifyStatus(FAILED);
+            this.cleanup();
+          }
+        });
       }
     }, false);
 
+    let p = Promise.resolve();
+    let id = this.id;
+
     if (this.recordSubmission) {
-      manager.addSubmissionAttempt(this.id, submissionID, new Date());
+      p = manager.ensureCrashIsPresent(id).then(() => {
+        return manager.addSubmissionAttempt(id, submissionID, new Date());
+      });
     }
-    xhr.send(formData);
+    p.then(() => { xhr.send(formData); });
     return true;
   },
 
@@ -394,7 +401,7 @@ Submitter.prototype = {
     if ("additional_minidumps" in this.extraKeyVals) {
       let names = this.extraKeyVals.additional_minidumps.split(',');
       for (let name of names) {
-        let [dump, extra, memory] = getPendingMinidump(this.id + "-" + name);
+        let [dump /* , extra, memory */] = getPendingMinidump(this.id + "-" + name);
         if (!dump.exists()) {
           this.notifyStatus(FAILED);
           this.cleanup();
@@ -416,7 +423,7 @@ Submitter.prototype = {
   }
 };
 
-//===================================
+// ===================================
 // External API goes here
 this.CrashSubmit = {
   /**
@@ -447,8 +454,6 @@ this.CrashSubmit = {
   {
     params = params || {};
     let recordSubmission = false;
-    let submitSuccess = null;
-    let submitError = null;
     let noThrottle = false;
     let extraExtraKeyVals = null;
 
@@ -489,7 +494,7 @@ this.CrashSubmit = {
    */
 
   ignore: function CrashSubmit_ignore(id) {
-    let [dump, extra, mem] = getPendingMinidump(id);
+    let [dump /* , extra, memory */] = getPendingMinidump(id);
     return OS.File.open(dump.path + ".ignore", {create: true},
                         {unixFlags: OS.Constants.libc.O_CREAT})
       .then((file) => { file.close(); });

@@ -63,6 +63,8 @@ JAVA_CLASSPATH += \
     $(ANDROID_SUPPORT_V4_AAR_LIB) \
     $(ANDROID_SUPPORT_V4_AAR_INTERNAL_LIB) \
     $(ANDROID_APPCOMPAT_V7_AAR_LIB) \
+    $(ANDROID_SUPPORT_VECTOR_DRAWABLE_AAR_LIB) \
+    $(ANDROID_ANIMATED_VECTOR_DRAWABLE_AAR_LIB) \
     $(ANDROID_CARDVIEW_V7_AAR_LIB) \
     $(ANDROID_DESIGN_AAR_LIB) \
     $(ANDROID_RECYCLERVIEW_V7_AAR_LIB) \
@@ -106,6 +108,8 @@ java_bundled_libs := \
     $(ANDROID_SUPPORT_V4_AAR_LIB) \
     $(ANDROID_SUPPORT_V4_AAR_INTERNAL_LIB) \
     $(ANDROID_APPCOMPAT_V7_AAR_LIB) \
+    $(ANDROID_SUPPORT_VECTOR_DRAWABLE_AAR_LIB) \
+    $(ANDROID_ANIMATED_VECTOR_DRAWABLE_AAR_LIB) \
     $(ANDROID_CARDVIEW_V7_AAR_LIB) \
     $(ANDROID_DESIGN_AAR_LIB) \
     $(ANDROID_RECYCLERVIEW_V7_AAR_LIB) \
@@ -151,7 +155,12 @@ GECKOVIEW_JARS = \
   gecko-mozglue.jar \
   gecko-util.jar \
   gecko-view.jar \
+  sync-thirdparty.jar \
   $(NULL)
+
+ifdef MOZ_INSTALL_TRACKING
+GECKOVIEW_JARS += gecko-thirdparty-adjust_sdk.jar
+endif
 
 geckoview_jars_classpath := $(subst $(NULL) ,:,$(strip $(GECKOVIEW_JARS)))
 
@@ -159,7 +168,6 @@ FENNEC_JARS = \
   gecko-browser.jar \
   gecko-thirdparty.jar \
   services.jar \
-  sync-thirdparty.jar \
   ../javaaddons/javaaddons-1.0.jar \
   $(NULL)
 
@@ -173,10 +181,6 @@ endif
 
 ifdef MOZ_ANDROID_MLS_STUMBLER
 FENNEC_JARS += ../stumbler/stumbler.jar
-endif
-
-ifdef MOZ_INSTALL_TRACKING
-FENNEC_JARS += gecko-thirdparty-adjust_sdk.jar
 endif
 
 # All the jars we're compiling from source. (not to be confused with
@@ -321,24 +325,6 @@ FennecJNIWrappers.cpp: $(ANNOTATION_PROCESSOR_JAR_FILES) $(FENNEC_JARS)
 		org.mozilla.gecko.annotationProcessors.AnnotationProcessor \
 		Fennec $(FENNEC_JARS)
 
-# Certain source files need to be preprocessed.  This special rule
-# generates these files into generated/org/mozilla/gecko for
-# consumption by the build system and IDEs.
-
-# The list in moz.build looks like
-# 'preprocessed/org/mozilla/gecko/AppConstants.java'.  The list in
-# constants_PP_JAVAFILES looks like
-# 'generated/preprocessed/org/mozilla/gecko/AppConstants.java'.  We
-# need to write AppConstants.java.in to
-# generated/preprocessed/org/mozilla/gecko.
-preprocessed := $(addsuffix .in,$(subst generated/preprocessed/org/mozilla/gecko/,,$(filter generated/preprocessed/org/mozilla/gecko/%,$(constants_PP_JAVAFILES))))
-
-preprocessed_PATH := generated/preprocessed/org/mozilla/gecko
-preprocessed_KEEP_PATH := 1
-preprocessed_FLAGS := --marker='//\\\#'
-
-PP_TARGETS += preprocessed
-
 include $(topsrcdir)/config/rules.mk
 
 not_android_res_files := \
@@ -414,6 +400,8 @@ generated/org/mozilla/gecko/R.java: .aapt.deps ;
 # If native devices are enabled, add Google Play Services, build their resources
 # (no resources) generated/android/support/v4/R.java: .aapt.deps ;
 generated/android/support/v7/appcompat/R.java: .aapt.deps ;
+# (no resources) generated/android/support/graphics/drawable/animated/R.java: .aapt.deps ;
+# (no resources) generated/android/support/graphics/drawable/R.java: .aapt.deps ;
 generated/android/support/v7/cardview/R.java: .aapt.deps ;
 generated/android/support/design/R.java: .aapt.deps ;
 generated/android/support/v7/mediarouter/R.java: .aapt.deps ;
@@ -470,7 +458,7 @@ $(1): $$(call mkdir_deps,$(filter-out ./,$(dir $(3) $(4) $(5)))) $(2)
 		$(if $(ANDROID_EXTRA_PACKAGES),--extra-packages $$(subst $$(NULL) ,:,$$(strip $$(ANDROID_EXTRA_PACKAGES)))) \
 		$(if $(ANDROID_EXTRA_RES_DIRS),$$(addprefix -S ,$$(ANDROID_EXTRA_RES_DIRS))) \
 		--custom-package org.mozilla.gecko \
-		--non-constant-id \
+		--no-version-vectors \
 		-F $(3) \
 		-J $(4) \
 		--output-text-symbols $(5) \
@@ -580,9 +568,15 @@ libs:: classes.dex
 
 # Generate Java binder interfaces from AIDL files.
 aidl_src_path := $(srcdir)/aidl
+aidl_geckoview_src_path := $(srcdir)/../geckoview/src/main/aidl
 aidl_target_path := generated
 media_pkg := org/mozilla/gecko/media
+process_pkg := org/mozilla/gecko/process
 
 $(aidl_target_path)/$(media_pkg)/%.java:$(aidl_src_path)/$(media_pkg)/%.aidl
 	@echo "Processing AIDL: $< => $@"
 	$(AIDL) -p$(ANDROID_SDK)/framework.aidl -I$(aidl_src_path) -o$(aidl_target_path) $<
+
+$(aidl_target_path)/$(process_pkg)/%.java:$(aidl_geckoview_src_path)/$(process_pkg)/%.aidl
+	@echo "Processing AIDL: $< => $@"
+	$(AIDL) -p$(ANDROID_SDK)/framework.aidl -I$(aidl_geckoview_src_path) -o$(aidl_target_path) $<

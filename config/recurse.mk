@@ -165,7 +165,7 @@ ifeq ($(MOZ_WIDGET_TOOLKIT),gtk3)
 toolkit/library/target: widget/gtk/mozgtk/gtk3/target
 endif
 ifdef MOZ_LDAP_XPCOM
-ldap/target: config/external/nss/target mozglue/build/target
+ldap/target: security/target mozglue/build/target
 toolkit/library/target: ldap/target
 endif
 ifeq ($(MOZ_REPLACE_MALLOC_LINKAGE),dummy library)

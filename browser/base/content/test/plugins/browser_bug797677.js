@@ -6,7 +6,7 @@ var Cc = Components.classes;
 var Ci = Components.interfaces;
 
 add_task(function* () {
-  registerCleanupFunction(function () {
+  registerCleanupFunction(function() {
     clearAllPluginPermissions();
     setTestPluginEnabledState(Ci.nsIPluginTag.STATE_ENABLED, "Test Plug-in");
     setTestPluginEnabledState(Ci.nsIPluginTag.STATE_ENABLED, "Second Test Plug-in");
@@ -18,8 +18,6 @@ add_task(function* () {
 
   gBrowser.selectedTab = gBrowser.addTab();
   gTestBrowser = gBrowser.selectedBrowser;
-
-  let bindingPromise = waitForEvent(gTestBrowser, "PluginBindingAttached", null, true, true);
 
   let consoleService = Cc["@mozilla.org/consoleservice;1"]
                          .getService(Ci.nsIConsoleService);
@@ -33,13 +31,13 @@ add_task(function* () {
 
   yield promiseTabLoadEvent(gBrowser.selectedTab, gTestRoot + "plugin_bug797677.html");
 
-  yield bindingPromise;
-
   let pluginInfo = yield promiseForPluginInfo("plugin");
   is(pluginInfo.pluginFallbackType, Ci.nsIObjectLoadingContent.PLUGIN_UNSUPPORTED, "plugin should not have been found.");
 
   // simple cpows
-  let plugin = gTestBrowser.contentDocument.getElementById("plugin");
-  ok(plugin, "plugin should be in the page");
+  yield ContentTask.spawn(gTestBrowser, null, function() {
+    let plugin = content.document.getElementById("plugin");
+    ok(plugin, "plugin should be in the page");
+  });
   is(gConsoleErrors, 0, "should have no console errors");
 });

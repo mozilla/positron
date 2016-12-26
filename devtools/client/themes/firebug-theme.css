@@ -3,8 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-@import url(variables.css);
-@import url(common.css);
+@import url(resource://devtools/client/themes/variables.css);
+@import url(resource://devtools/client/themes/common.css);
 @import url(light-theme.css);
 
 :root {
@@ -81,7 +81,7 @@
 .theme-firebug .devtools-tab,
 .theme-firebug .devtools-sidebar-tabs tab {
   margin: 3px 0 -1px 0;
-  padding: 2px 0 0 0;
+  padding: 2px 4px 0 4px;
   border: 1px solid transparent !important;
   border-radius: 4px 4px 0 0;
   font-weight: bold;

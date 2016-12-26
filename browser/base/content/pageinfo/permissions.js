@@ -11,11 +11,16 @@ var gPermURI;
 var gPermPrincipal;
 var gUsageRequest;
 
-var gPermissions = SitePermissions.listPermissions();
+// Array of permissionIDs sorted alphabetically by label.
+var gPermissions = SitePermissions.listPermissions().sort((a, b) => {
+  let firstLabel = SitePermissions.getPermissionLabel(a);
+  let secondLabel = SitePermissions.getPermissionLabel(b);
+  return firstLabel.localeCompare(secondLabel);
+});
 gPermissions.push("plugins");
 
 var permissionObserver = {
-  observe: function (aSubject, aTopic, aData)
+  observe: function(aSubject, aTopic, aData)
   {
     if (aTopic == "perm-changed") {
       var permission = aSubject.QueryInterface(Components.interfaces.nsIPermission);

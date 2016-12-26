@@ -8,11 +8,13 @@
 #define PlatformDecoderModule_h_
 
 #include "MediaDecoderReader.h"
+#include "MediaInfo.h"
 #include "mozilla/MozPromise.h"
 #include "mozilla/layers/LayersTypes.h"
+#include "mozilla/layers/KnowsCompositor.h"
 #include "nsTArray.h"
 #include "mozilla/RefPtr.h"
-#include "GMPService.h"
+#include "GMPCrashHelper.h"
 #include <queue>
 #include "MediaResult.h"
 
@@ -34,7 +36,7 @@ class CDMProxy;
 
 static LazyLogModule sPDMLog("PlatformDecoderModule");
 
-struct CreateDecoderParams {
+struct MOZ_STACK_CLASS CreateDecoderParams final {
   explicit CreateDecoderParams(const TrackInfo& aConfig)
     : mConfig(aConfig)
   {}
@@ -58,12 +60,21 @@ struct CreateDecoderParams {
     return *mConfig.GetAsAudioInfo();
   }
 
+  layers::LayersBackend GetLayersBackend() const
+  {
+    if (mKnowsCompositor) {
+      return mKnowsCompositor->GetCompositorBackendType();
+    }
+    return layers::LayersBackend::LAYERS_NONE;
+  }
+
   const TrackInfo& mConfig;
   TaskQueue* mTaskQueue = nullptr;
   MediaDataDecoderCallback* mCallback = nullptr;
   DecoderDoctorDiagnostics* mDiagnostics = nullptr;
   layers::ImageContainer* mImageContainer = nullptr;
-  layers::LayersBackend mLayersBackend = layers::LayersBackend::LAYERS_NONE;
+  MediaResult* mError = nullptr;
+  RefPtr<layers::KnowsCompositor> mKnowsCompositor;
   RefPtr<GMPCrashHelper> mCrashHelper;
   bool mUseBlankDecoder = false;
 
@@ -72,9 +83,10 @@ private:
   void Set(MediaDataDecoderCallback* aCallback) { mCallback = aCallback; }
   void Set(DecoderDoctorDiagnostics* aDiagnostics) { mDiagnostics = aDiagnostics; }
   void Set(layers::ImageContainer* aImageContainer) { mImageContainer = aImageContainer; }
-  void Set(layers::LayersBackend aLayersBackend) { mLayersBackend = aLayersBackend; }
+  void Set(MediaResult* aError) { mError = aError; }
   void Set(GMPCrashHelper* aCrashHelper) { mCrashHelper = aCrashHelper; }
   void Set(bool aUseBlankDecoder) { mUseBlankDecoder = aUseBlankDecoder; }
+  void Set(layers::KnowsCompositor* aKnowsCompositor) { mKnowsCompositor = aKnowsCompositor; }
   template <typename T1, typename T2, typename... Ts>
   void Set(T1&& a1, T2&& a2, Ts&&... args)
   {
@@ -108,6 +120,13 @@ public:
   // Indicates if the PlatformDecoderModule supports decoding of aMimeType.
   virtual bool SupportsMimeType(const nsACString& aMimeType,
                                 DecoderDoctorDiagnostics* aDiagnostics) const = 0;
+  virtual bool Supports(const TrackInfo& aTrackInfo,
+                        DecoderDoctorDiagnostics* aDiagnostics) const
+  {
+    // By default, fall back to SupportsMimeType with just the MIME string.
+    // (So PDMs do not need to override this method -- yet.)
+    return SupportsMimeType(aTrackInfo.mMimeType, aDiagnostics);
+  }
 
   enum class ConversionRequired : uint8_t {
     kNeedNone,
@@ -278,6 +297,12 @@ public:
   // video decoder implements this API to improve seek performance.
   // Note: it should be called before Input() or after Flush().
   virtual void SetSeekThreshold(const media::TimeUnit& aTime) {}
+
+  // When playing adaptive playback, recreating an Android video decoder will
+  // cause the transition not smooth during resolution change.
+  // Reuse the decoder if the decoder support recycling.
+  // Currently, only Android video decoder will return true.
+  virtual bool SupportDecoderRecycling() const { return false; }
 };
 
 } // namespace mozilla

@@ -79,9 +79,6 @@ RegExpAlloc(ExclusiveContext* cx, HandleObject proto = nullptr);
 extern JSObject*
 CloneRegExpObject(JSContext* cx, JSObject* regexp);
 
-extern JSObject*
-CreateRegExpPrototype(JSContext* cx, JSProtoKey key);
-
 /*
  * A RegExpShared is the compiled representation of a regexp. A RegExpShared is
  * potentially pointed to by multiple RegExpObjects. Additionally, C++ code may
@@ -236,6 +233,10 @@ class RegExpShared
     }
 
     size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
+
+#ifdef DEBUG
+    bool dumpBytecode(JSContext* cx, bool match_only, HandleLinearString input);
+#endif
 };
 
 /*
@@ -324,7 +325,10 @@ class RegExpCompartment
 
     /*
      * The shape of RegExp.prototype object that satisfies following:
+     *   * RegExp.prototype.flags getter is not modified
      *   * RegExp.prototype.global getter is not modified
+     *   * RegExp.prototype.ignoreCase getter is not modified
+     *   * RegExp.prototype.multiline getter is not modified
      *   * RegExp.prototype.sticky getter is not modified
      *   * RegExp.prototype.unicode getter is not modified
      *   * RegExp.prototype.exec is an own data property
@@ -400,6 +404,7 @@ class RegExpObject : public NativeObject
     static const unsigned PRIVATE_SLOT = 3;
 
     static const Class class_;
+    static const Class protoClass_;
 
     // The maximum number of pairs a MatchResult can have, without having to
     // allocate a bigger MatchResult.
@@ -425,8 +430,8 @@ class RegExpObject : public NativeObject
 
     static unsigned lastIndexSlot() { return LAST_INDEX_SLOT; }
 
-    static bool isInitialShape(NativeObject* nobj) {
-        Shape* shape = nobj->lastProperty();
+    static bool isInitialShape(RegExpObject* rx) {
+        Shape* shape = rx->lastProperty();
         if (!shape->hasSlot())
             return false;
         if (shape->maybeSlot() != LAST_INDEX_SLOT)
@@ -489,6 +494,10 @@ class RegExpObject : public NativeObject
     //       exposed to script, because it requires that the "lastIndex"
     //       property be writable.
     void initAndZeroLastIndex(HandleAtom source, RegExpFlag flags, ExclusiveContext* cx);
+
+#ifdef DEBUG
+    bool dumpBytecode(JSContext* cx, bool match_only, HandleLinearString input);
+#endif
 
   private:
     /*

@@ -8,6 +8,7 @@
 #define jit_shared_IonAssemblerBuffer_h
 
 #include "mozilla/Assertions.h"
+#include "mozilla/MathAlgorithms.h"
 
 #include "jit/shared/Assembler-shared.h"
 
@@ -48,12 +49,16 @@ class BufferOffset
     // inserted between the branch and its destination.
     template <class BOffImm>
     BOffImm diffB(BufferOffset other) const {
+        if (!BOffImm::IsInRange(offset - other.offset))
+            return BOffImm();
         return BOffImm(offset - other.offset);
     }
 
     template <class BOffImm>
     BOffImm diffB(Label* other) const {
         MOZ_ASSERT(other->bound());
+        if (!BOffImm::IsInRange(offset - other->offset()))
+            return BOffImm();
         return BOffImm(offset - other->offset());
     }
 };
@@ -169,8 +174,8 @@ class AssemblerBuffer
     { }
 
   public:
-    bool isAligned(int alignment) const {
-        MOZ_ASSERT(IsPowerOfTwo(alignment));
+    bool isAligned(size_t alignment) const {
+        MOZ_ASSERT(mozilla::IsPowerOfTwo(alignment));
         return !(size() & (alignment - 1));
     }
 

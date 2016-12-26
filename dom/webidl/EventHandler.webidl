@@ -33,6 +33,7 @@ interface GlobalEventHandlers {
 //         attribute OnErrorEventHandler onerror;
            attribute EventHandler onfocus;
            //(Not implemented)attribute EventHandler oncancel;
+           attribute EventHandler onauxclick;
            attribute EventHandler oncanplay;
            attribute EventHandler oncanplaythrough;
            attribute EventHandler onchange;
@@ -93,7 +94,6 @@ interface GlobalEventHandlers {
            [Pref="dom.select_events.enabled"]
            attribute EventHandler onselectstart;
 
-           [Pref="dom.details_element.enabled"]
            attribute EventHandler ontoggle;
 
            // Pointer events handlers
@@ -131,7 +131,10 @@ interface GlobalEventHandlers {
            attribute EventHandler onanimationend;
            attribute EventHandler onanimationiteration;
            attribute EventHandler onanimationstart;
+           attribute EventHandler ontransitioncancel;
            attribute EventHandler ontransitionend;
+           attribute EventHandler ontransitionrun;
+           attribute EventHandler ontransitionstart;
 
            // CSS-Animation and CSS-Transition legacy handlers.
            // This handler isn't standard.

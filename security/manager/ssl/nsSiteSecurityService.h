@@ -128,9 +128,9 @@ protected:
 
 private:
   nsresult GetHost(nsIURI *aURI, nsACString &aResult);
-  nsresult SetHSTSState(uint32_t aType, nsIURI* aSourceURI, int64_t maxage,
+  nsresult SetHSTSState(uint32_t aType, const char* aHost, int64_t maxage,
                         bool includeSubdomains, uint32_t flags,
-                        SecurityPropertyState aHSTSState);
+                        SecurityPropertyState aHSTSState, bool aIsPreload);
   nsresult ProcessHeaderInternal(uint32_t aType, nsIURI* aSourceURI,
                                  const char* aHeader, nsISSLStatus* aSSLStatus,
                                  uint32_t aFlags, uint64_t* aMaxAge,
@@ -143,8 +143,13 @@ private:
                             nsISSLStatus* aSSLStatus, uint32_t flags,
                             uint64_t* aMaxAge, bool* aIncludeSubdomains,
                             uint32_t* aFailureResult);
-  nsresult SetHPKPState(const char* aHost, SiteHPKPState& entry, uint32_t flags);
-
+  nsresult SetHPKPState(const char* aHost, SiteHPKPState& entry, uint32_t flags,
+                        bool aIsPreload);
+  nsresult RemoveStateInternal(uint32_t aType, const nsAutoCString& aHost,
+                               uint32_t aFlags, bool aIsPreload);
+  bool HostHasHSTSEntry(const nsAutoCString& aHost,
+                        bool aRequireIncludeSubdomains, uint32_t aFlags,
+                        bool* aResult, bool* aCached);
   const nsSTSPreload *GetPreloadListEntry(const char *aHost);
 
   uint64_t mMaxMaxAge;
@@ -152,6 +157,7 @@ private:
   int64_t mPreloadListTimeOffset;
   bool mProcessPKPHeadersFromNonBuiltInRoots;
   RefPtr<mozilla::DataStorage> mSiteStateStorage;
+  RefPtr<mozilla::DataStorage> mPreloadStateStorage;
 };
 
 #endif // __nsSiteSecurityService_h__

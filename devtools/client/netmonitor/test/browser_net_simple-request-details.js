@@ -8,10 +8,12 @@
  */
 
 add_task(function* () {
+  let { L10N } = require("devtools/client/netmonitor/l10n");
+
   let { tab, monitor } = yield initNetMonitor(SIMPLE_SJS);
   info("Starting test... ");
 
-  let { document, EVENTS, L10N, Editor, NetMonitorView } = monitor.panelWin;
+  let { document, EVENTS, Editor, NetMonitorView } = monitor.panelWin;
   let { RequestsMenu } = NetMonitorView;
   RequestsMenu.lazyUpdate = false;
 
@@ -60,7 +62,7 @@ add_task(function* () {
       "GET", "The method summary value is incorrect.");
     is(tabpanel.querySelector("#headers-summary-address-value").getAttribute("value"),
       "127.0.0.1:8888", "The remote address summary value is incorrect.");
-    is(tabpanel.querySelector("#headers-summary-status-circle").getAttribute("code"),
+    is(tabpanel.querySelector("#headers-summary-status-circle").getAttribute("data-code"),
       "200", "The status summary code is incorrect.");
     is(tabpanel.querySelector("#headers-summary-status-value").getAttribute("value"),
       "200 Och Aye", "The status summary value is incorrect.");

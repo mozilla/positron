@@ -37,6 +37,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/Telemetry.h"
+#include "gfxMathTable.h"
 #include "gfxSVGGlyphs.h"
 #include "gfx2DGlue.h"
 
@@ -174,7 +175,7 @@ gfxFontCache::gfxFontCache()
         obs->AddObserver(new Observer, "memory-pressure", false);
     }
 
-#ifndef RELEASE_BUILD
+#ifndef RELEASE_OR_BETA
     // Currently disabled for release builds, due to unexplained crashes
     // during expiration; see bug 717175 & 894798.
     mWordCacheExpirationTimer = do_CreateInstance("@mozilla.org/timer;1");
@@ -723,10 +724,9 @@ gfxShapedText::SetGlyphs(uint32_t aIndex, CompressedGlyph aGlyph,
 #define ZWNJ 0x200C
 #define ZWJ  0x200D
 static inline bool
-IsDefaultIgnorable(uint32_t aChar)
+IsIgnorable(uint32_t aChar)
 {
-    return GetIdentifierModification(aChar) == XIDMOD_DEFAULT_IGNORABLE ||
-           aChar == ZWNJ || aChar == ZWJ;
+    return (IsDefaultIgnorable(aChar)) || aChar == ZWNJ || aChar == ZWJ;
 }
 
 void
@@ -742,7 +742,7 @@ gfxShapedText::SetMissingGlyph(uint32_t aIndex, uint32_t aChar, gfxFont *aFont)
     DetailedGlyph *details = AllocateDetailedGlyphs(aIndex, 1);
 
     details->mGlyphID = aChar;
-    if (IsDefaultIgnorable(aChar)) {
+    if (IsIgnorable(aChar)) {
         // Setting advance width to zero will prevent drawing the hexbox
         details->mAdvance = 0;
     } else {
@@ -760,7 +760,7 @@ gfxShapedText::SetMissingGlyph(uint32_t aIndex, uint32_t aChar, gfxFont *aFont)
 bool
 gfxShapedText::FilterIfIgnorable(uint32_t aIndex, uint32_t aCh)
 {
-    if (IsDefaultIgnorable(aCh)) {
+    if (IsIgnorable(aCh)) {
         // There are a few default-ignorables of Letter category (currently,
         // just the Hangul filler characters) that we'd better not discard
         // if they're followed by additional characters in the same cluster.
@@ -841,6 +841,7 @@ gfxFont::gfxFont(gfxFontEntry *aFontEntry, const gfxFontStyle *aFontStyle,
     mScaledFont(aScaledFont),
     mFontEntry(aFontEntry), mIsValid(true),
     mApplySyntheticBold(false),
+    mMathInitialized(false),
     mStyle(*aFontStyle),
     mAdjustedSize(0.0),
     mFUnitsConvFactor(-1.0f), // negative to indicate "not yet initialized"
@@ -1734,8 +1735,7 @@ private:
             mRunParams.context->EnsurePathBuilder();
             Matrix mat = mRunParams.dt->GetTransform();
             mFontParams.scaledFont->CopyGlyphsToBuilder(
-                buf, mRunParams.context->mPathBuilder,
-                mRunParams.dt->GetBackendType(), &mat);
+                buf, mRunParams.context->mPathBuilder, &mat);
         }
 
         mNumGlyphs = 0;
@@ -2580,7 +2580,7 @@ gfxFont::GetShapedWord(DrawTarget *aDrawTarget,
         Telemetry::Accumulate((isContent ? Telemetry::WORD_CACHE_HITS_CONTENT :
                                    Telemetry::WORD_CACHE_HITS_CHROME),
                               aLength);
-#ifndef RELEASE_BUILD
+#ifndef RELEASE_OR_BETA
         if (aTextPerf) {
             aTextPerf->current.wordCacheHit++;
         }
@@ -2591,7 +2591,7 @@ gfxFont::GetShapedWord(DrawTarget *aDrawTarget,
     Telemetry::Accumulate((isContent ? Telemetry::WORD_CACHE_MISSES_CONTENT :
                                Telemetry::WORD_CACHE_MISSES_CHROME),
                           aLength);
-#ifndef RELEASE_BUILD
+#ifndef RELEASE_OR_BETA
     if (aTextPerf) {
         aTextPerf->current.wordCacheMiss++;
     }
@@ -2855,7 +2855,7 @@ gfxFont::ShapeTextWithoutWordCache(DrawTarget *aDrawTarget,
     return ok;
 }
 
-#ifndef RELEASE_BUILD
+#ifndef RELEASE_OR_BETA
 #define TEXT_PERF_INCR(tp, m) (tp ? (tp)->current.m++ : 0)
 #else
 #define TEXT_PERF_INCR(tp, m)
@@ -2895,7 +2895,7 @@ gfxFont::SplitAndInitTextRun(DrawTarget *aDrawTarget,
 
     gfxTextPerfMetrics *tp = nullptr;
 
-#ifndef RELEASE_BUILD
+#ifndef RELEASE_OR_BETA
     tp = aTextRun->GetFontGroup()->GetTextPerfMetrics();
     if (tp) {
         if (mStyle.systemFont) {
@@ -3154,8 +3154,11 @@ gfxFont::InitFakeSmallCapsRun(DrawTarget     *aDrawTarget,
                         // These are handled by using the full-size font with the
                         // uppercasing transform.
                         mozilla::GreekCasing::State state;
-                        uint32_t ch2 = mozilla::GreekCasing::UpperCase(ch, state);
-                        if (ch != ch2 && !aSyntheticUpper) {
+                        bool markEta, updateEta;
+                        uint32_t ch2 =
+                            mozilla::GreekCasing::UpperCase(ch, state, markEta,
+                                                            updateEta);
+                        if ((ch != ch2 || markEta) && !aSyntheticUpper) {
                             chAction = kUppercase;
                         }
                     }
@@ -3888,13 +3891,13 @@ gfxFontStyle::gfxFontStyle() :
     size(DEFAULT_PIXEL_FONT_SIZE), sizeAdjust(-1.0f), baselineOffset(0.0f),
     languageOverride(NO_FONT_LANGUAGE_OVERRIDE),
     weight(NS_FONT_WEIGHT_NORMAL), stretch(NS_FONT_STRETCH_NORMAL),
-    systemFont(true), printerFont(false), useGrayscaleAntialiasing(false),
     style(NS_FONT_STYLE_NORMAL),
+    variantCaps(NS_FONT_VARIANT_CAPS_NORMAL),
+    variantSubSuper(NS_FONT_VARIANT_POSITION_NORMAL),
+    systemFont(true), printerFont(false), useGrayscaleAntialiasing(false),
     allowSyntheticWeight(true), allowSyntheticStyle(true),
     noFallbackVariantFeatures(true),
-    explicitLanguage(false),
-    variantCaps(NS_FONT_VARIANT_CAPS_NORMAL),
-    variantSubSuper(NS_FONT_VARIANT_POSITION_NORMAL)
+    explicitLanguage(false)
 {
 }
 
@@ -3910,15 +3913,15 @@ gfxFontStyle::gfxFontStyle(uint8_t aStyle, uint16_t aWeight, int16_t aStretch,
     size(aSize), sizeAdjust(aSizeAdjust), baselineOffset(0.0f),
     languageOverride(ParseFontLanguageOverride(aLanguageOverride)),
     weight(aWeight), stretch(aStretch),
+    style(aStyle),
+    variantCaps(NS_FONT_VARIANT_CAPS_NORMAL),
+    variantSubSuper(NS_FONT_VARIANT_POSITION_NORMAL),
     systemFont(aSystemFont), printerFont(aPrinterFont),
     useGrayscaleAntialiasing(false),
-    style(aStyle),
     allowSyntheticWeight(aAllowWeightSynthesis),
     allowSyntheticStyle(aAllowStyleSynthesis),
     noFallbackVariantFeatures(true),
-    explicitLanguage(aExplicitLanguage),
-    variantCaps(NS_FONT_VARIANT_CAPS_NORMAL),
-    variantSubSuper(NS_FONT_VARIANT_POSITION_NORMAL)
+    explicitLanguage(aExplicitLanguage)
 {
     MOZ_ASSERT(!mozilla::IsNaN(size));
     MOZ_ASSERT(!mozilla::IsNaN(sizeAdjust));
@@ -3940,27 +3943,6 @@ gfxFontStyle::gfxFontStyle(uint8_t aStyle, uint16_t aWeight, int16_t aStretch,
         NS_WARNING("null language");
         language = nsGkAtoms::x_western;
     }
-}
-
-gfxFontStyle::gfxFontStyle(const gfxFontStyle& aStyle) :
-    language(aStyle.language),
-    featureValueLookup(aStyle.featureValueLookup),
-    size(aStyle.size), sizeAdjust(aStyle.sizeAdjust),
-    baselineOffset(aStyle.baselineOffset),
-    languageOverride(aStyle.languageOverride),
-    weight(aStyle.weight), stretch(aStyle.stretch),
-    systemFont(aStyle.systemFont), printerFont(aStyle.printerFont),
-    useGrayscaleAntialiasing(aStyle.useGrayscaleAntialiasing),
-    style(aStyle.style),
-    allowSyntheticWeight(aStyle.allowSyntheticWeight),
-    allowSyntheticStyle(aStyle.allowSyntheticStyle),
-    noFallbackVariantFeatures(aStyle.noFallbackVariantFeatures),
-    explicitLanguage(aStyle.explicitLanguage),
-    variantCaps(aStyle.variantCaps),
-    variantSubSuper(aStyle.variantSubSuper)
-{
-    featureSettings.AppendElements(aStyle.featureSettings);
-    alternateValues.AppendElements(aStyle.alternateValues);
 }
 
 int8_t
@@ -4006,4 +3988,22 @@ gfxFontStyle::AdjustForSubSuperscript(int32_t aAppUnitsPerDevPixel)
 
     // clear the variant field
     variantSubSuper = NS_FONT_VARIANT_POSITION_NORMAL;
+}
+
+bool
+gfxFont::TryGetMathTable()
+{
+    if (!mMathInitialized) {
+        mMathInitialized = true;
+
+        hb_face_t *face = GetFontEntry()->GetHBFace();
+        if (face) {
+            if (hb_ot_math_has_data(face)) {
+                mMathTable = MakeUnique<gfxMathTable>(face, GetAdjustedSize());
+            }
+            hb_face_destroy(face);
+        }
+    }
+
+    return !!mMathTable;
 }

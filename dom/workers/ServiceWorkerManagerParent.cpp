@@ -6,7 +6,6 @@
 
 #include "ServiceWorkerManagerParent.h"
 #include "ServiceWorkerManagerService.h"
-#include "mozilla/AppProcessChecker.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
 #include "mozilla/ipc/BackgroundParent.h"
@@ -128,8 +127,6 @@ public:
   NS_IMETHOD Run() override
   {
     if (NS_IsMainThread()) {
-      nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(mPrincipalInfo);
-      AssertAppPrincipal(mContentParent, principal);
       mContentParent = nullptr;
 
       mBackgroundThread->Dispatch(this, NS_DISPATCH_NORMAL);
@@ -155,7 +152,6 @@ private:
 ServiceWorkerManagerParent::ServiceWorkerManagerParent()
   : mService(ServiceWorkerManagerService::GetOrCreate())
   , mID(++sServiceWorkerManagerParentID)
-  , mActorDestroyed(false)
 {
   AssertIsOnBackgroundThread();
   mService->RegisterActor(this);
@@ -166,18 +162,7 @@ ServiceWorkerManagerParent::~ServiceWorkerManagerParent()
   AssertIsOnBackgroundThread();
 }
 
-already_AddRefed<ContentParent>
-ServiceWorkerManagerParent::GetContentParent() const
-{
-  AssertIsOnBackgroundThread();
-
-  // This object must be released on main-thread.
-  RefPtr<ContentParent> parent =
-    BackgroundParent::GetContentParent(Manager());
-  return parent.forget();
-}
-
-bool
+mozilla::ipc::IPCResult
 ServiceWorkerManagerParent::RecvRegister(
                                      const ServiceWorkerRegistrationData& aData)
 {
@@ -188,7 +173,7 @@ ServiceWorkerManagerParent::RecvRegister(
   if (aData.scope().IsEmpty() ||
       aData.principal().type() == PrincipalInfo::TNullPrincipalInfo ||
       aData.principal().type() == PrincipalInfo::TSystemPrincipalInfo) {
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
 
   RefPtr<RegisterServiceWorkerCallback> callback =
@@ -200,7 +185,7 @@ ServiceWorkerManagerParent::RecvRegister(
   // If the ContentParent is null we are dealing with a same-process actor.
   if (!parent) {
     callback->Run();
-    return true;
+    return IPC_OK();
   }
 
   RefPtr<CheckPrincipalWithCallbackRunnable> runnable =
@@ -208,10 +193,10 @@ ServiceWorkerManagerParent::RecvRegister(
                                            callback);
   MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 ServiceWorkerManagerParent::RecvUnregister(const PrincipalInfo& aPrincipalInfo,
                                            const nsString& aScope)
 {
@@ -222,7 +207,7 @@ ServiceWorkerManagerParent::RecvUnregister(const PrincipalInfo& aPrincipalInfo,
   if (aScope.IsEmpty() ||
       aPrincipalInfo.type() == PrincipalInfo::TNullPrincipalInfo ||
       aPrincipalInfo.type() == PrincipalInfo::TSystemPrincipalInfo) {
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
 
   RefPtr<UnregisterServiceWorkerCallback> callback =
@@ -234,7 +219,7 @@ ServiceWorkerManagerParent::RecvUnregister(const PrincipalInfo& aPrincipalInfo,
   // If the ContentParent is null we are dealing with a same-process actor.
   if (!parent) {
     callback->Run();
-    return true;
+    return IPC_OK();
   }
 
   RefPtr<CheckPrincipalWithCallbackRunnable> runnable =
@@ -242,85 +227,83 @@ ServiceWorkerManagerParent::RecvUnregister(const PrincipalInfo& aPrincipalInfo,
                                            callback);
   MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 ServiceWorkerManagerParent::RecvPropagateSoftUpdate(const PrincipalOriginAttributes& aOriginAttributes,
                                                     const nsString& aScope)
 {
   AssertIsOnBackgroundThread();
 
   if (NS_WARN_IF(!mService)) {
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
 
   mService->PropagateSoftUpdate(mID, aOriginAttributes, aScope);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 ServiceWorkerManagerParent::RecvPropagateUnregister(const PrincipalInfo& aPrincipalInfo,
                                                     const nsString& aScope)
 {
   AssertIsOnBackgroundThread();
 
   if (NS_WARN_IF(!mService)) {
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
 
   mService->PropagateUnregister(mID, aPrincipalInfo, aScope);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 ServiceWorkerManagerParent::RecvPropagateRemove(const nsCString& aHost)
 {
   AssertIsOnBackgroundThread();
 
   if (NS_WARN_IF(!mService)) {
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
 
   mService->PropagateRemove(mID, aHost);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 ServiceWorkerManagerParent::RecvPropagateRemoveAll()
 {
   AssertIsOnBackgroundThread();
 
   if (NS_WARN_IF(!mService)) {
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
 
   mService->PropagateRemoveAll(mID);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 ServiceWorkerManagerParent::RecvShutdown()
 {
   AssertIsOnBackgroundThread();
 
   if (NS_WARN_IF(!mService)) {
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
 
   mService->UnregisterActor(this);
   mService = nullptr;
 
   Unused << Send__delete__(this);
-  return true;
+  return IPC_OK();
 }
 
 void
 ServiceWorkerManagerParent::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnBackgroundThread();
-
-  mActorDestroyed = true;
 
   if (mService) {
     // This object is about to be released and with it, also mService will be

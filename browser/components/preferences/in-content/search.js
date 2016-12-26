@@ -17,12 +17,12 @@ var gSearchPane = {
   /**
    * Initialize autocomplete to ensure prefs are in sync.
    */
-  _initAutocomplete: function () {
+  _initAutocomplete: function() {
     Components.classes["@mozilla.org/autocomplete/search;1?name=unifiedcomplete"]
               .getService(Components.interfaces.mozIPlacesAutoComplete);
   },
 
-  init: function ()
+  init: function()
   {
     gEngineView = new EngineView(new EngineStore());
     document.getElementById("engineList").view = gEngineView;
@@ -194,9 +194,14 @@ var gSearchPane = {
     }
   },
 
-  onInputBlur: function() {
+  onInputBlur: function(aEvent) {
     let tree = document.getElementById("engineList");
-    tree.stopEditing(false);
+    if (!tree.hasAttribute("editing"))
+      return;
+
+    // Accept input unless discarded.
+    let accept = aEvent.charCode != KeyEvent.DOM_VK_ESCAPE;
+    tree.stopEditing(accept);
   },
 
   onTreeSelect: function() {
@@ -289,7 +294,7 @@ var gSearchPane = {
     return true;
   }),
 
-  saveOneClickEnginesList: function () {
+  saveOneClickEnginesList: function() {
     let hiddenList = [];
     for (let engine of gEngineView._engineStore.engines) {
       if (!engine.shown)
@@ -299,7 +304,7 @@ var gSearchPane = {
       hiddenList.join(",");
   },
 
-  setDefaultEngine: function () {
+  setDefaultEngine: function() {
     Services.search.currentEngine =
       document.getElementById("defaultEngine").selectedItem.engine;
   }
@@ -349,7 +354,7 @@ EngineStore.prototype = {
   },
 
   _cloneEngine: function ES_cloneEngine(aEngine) {
-    var clonedObj={};
+    var clonedObj = {};
     for (var i in aEngine)
       clonedObj[i] = aEngine[i];
     clonedObj.originalEngine = aEngine;
@@ -441,7 +446,7 @@ EngineStore.prototype = {
   },
 
   reloadIcons: function ES_reloadIcons() {
-    this._engines.forEach(function (e) {
+    this._engines.forEach(function(e) {
       e.uri = e.originalEngine.uri;
     });
   }
@@ -471,19 +476,19 @@ EngineView.prototype = {
   },
 
   // Helpers
-  rowCountChanged: function (index, count) {
+  rowCountChanged: function(index, count) {
     this.tree.rowCountChanged(index, count);
   },
 
-  invalidate: function () {
+  invalidate: function() {
     this.tree.invalidate();
   },
 
-  ensureRowIsVisible: function (index) {
+  ensureRowIsVisible: function(index) {
     this.tree.ensureRowIsVisible(index);
   },
 
-  getSourceIndexFromDrag: function (dataTransfer) {
+  getSourceIndexFromDrag: function(dataTransfer) {
     return parseInt(dataTransfer.getData(ENGINE_FLAVOR));
   },
 

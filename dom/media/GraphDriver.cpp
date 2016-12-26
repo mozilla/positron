@@ -27,7 +27,7 @@ extern mozilla::LazyLogModule gMediaStreamGraphLog;
 #ifdef ENABLE_LIFECYCLE_LOG
 #ifdef ANDROID
 #include "android/log.h"
-#define LIFECYCLE_LOG(...)  __android_log_print(ANDROID_LOG_INFO, "Gecko - MSG" , __VA_ARGS__); printf(__VA_ARGS__);printf("\n");
+#define LIFECYCLE_LOG(...)  __android_log_print(ANDROID_LOG_INFO, "Gecko - MSG" , __VA_ARGS__);
 #else
 #define LIFECYCLE_LOG(...) printf(__VA_ARGS__);printf("\n");
 #endif
@@ -209,7 +209,7 @@ public:
     }
     if (previousDriver) {
       LIFECYCLE_LOG("%p releasing an AudioCallbackDriver(%p), for graph %p\n",
-                    mDriver,
+                    mDriver.get(),
                     previousDriver,
                     mDriver->GraphImpl());
       MOZ_ASSERT(!mDriver->AsAudioCallbackDriver());
@@ -585,6 +585,32 @@ AudioCallbackDriver::~AudioCallbackDriver()
   MOZ_ASSERT(mPromisesForOperation.IsEmpty());
 }
 
+bool IsMacbookOrMacbookAir()
+{
+#ifdef XP_MACOSX
+  size_t len = 0;
+  sysctlbyname("hw.model", NULL, &len, NULL, 0);
+  if (len) {
+    UniquePtr<char[]> model(new char[len]);
+    // This string can be
+    // MacBook%d,%d for a normal MacBook
+    // MacBookPro%d,%d for a MacBook Pro
+    // MacBookAir%d,%d for a Macbook Air
+    sysctlbyname("hw.model", model.get(), &len, NULL, 0);
+    char* substring = strstr(model.get(), "MacBook");
+    if (substring) {
+      const size_t offset = strlen("MacBook");
+      if (strncmp(model.get() + offset, "Air", len - offset) ||
+          isdigit(model[offset + 1])) {
+        return true;
+      }
+    }
+    return false;
+  }
+#endif
+  return false;
+}
+
 void
 AudioCallbackDriver::Init()
 {
@@ -637,6 +663,13 @@ AudioCallbackDriver::Init()
       return;
     }
   }
+
+  // Macbook and MacBook air don't have enough CPU to run very low latency
+  // MediaStreamGraphs, cap the minimal latency to 512 frames int this case.
+  if (IsMacbookOrMacbookAir()) {
+    latency_frames = std::max((uint32_t) 512, latency_frames);
+  }
+
 
   input = output;
   input.channels = mInputChannels; // change to support optional stereo capture

@@ -12,6 +12,7 @@ import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.support.design.widget.Snackbar;
 import android.support.v4.content.ContextCompat;
+import android.support.v4.widget.TextViewCompat;
 import android.widget.ImageView;
 import android.widget.Toast;
 import org.json.JSONException;
@@ -20,7 +21,6 @@ import org.mozilla.gecko.AboutPages;
 import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.GeckoApp;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.SiteIdentity;
 import org.mozilla.gecko.SiteIdentity.SecurityMode;
@@ -97,8 +97,10 @@ public class SiteIdentityPopup extends AnchoredPopup implements GeckoEventListen
         mResources = mContext.getResources();
 
         mContentButtonClickListener = new ContentNotificationButtonListener();
+    }
 
-        GeckoApp.getEventDispatcher().registerGeckoThreadListener(this,
+    void registerListeners() {
+        EventDispatcher.getInstance().registerGeckoThreadListener(this,
                                                                   "Doorhanger:Logins",
                                                                   "Permissions:CheckResult");
     }
@@ -228,11 +230,9 @@ public class SiteIdentityPopup extends AnchoredPopup implements GeckoEventListen
                         } else {
                             password = login.getString("password");
                         }
-                        if (AppConstants.Versions.feature11Plus) {
-                            manager.setPrimaryClip(ClipData.newPlainText("password", password));
-                        } else {
-                            manager.setText(password);
-                        }
+
+                        manager.setPrimaryClip(ClipData.newPlainText("password", password));
+
                         SnackbarBuilder.builder(activity)
                                 .message(R.string.doorhanger_login_select_toast_copy)
                                 .duration(Snackbar.LENGTH_SHORT)
@@ -362,6 +362,14 @@ public class SiteIdentityPopup extends AnchoredPopup implements GeckoEventListen
 
             mSecurityState.setText(R.string.identity_connection_insecure);
             mSecurityState.setTextColor(ContextCompat.getColor(mContext, R.color.placeholder_active_grey));
+
+        } else if (siteIdentity.isSecurityException()) {
+
+            mIcon.setImageResource(R.drawable.lock_inactive);
+            setSecurityStateIcon(R.drawable.warning_major, 1);
+            mSecurityState.setText(R.string.identity_connection_insecure);
+            mSecurityState.setTextColor(ContextCompat.getColor(mContext, R.color.placeholder_active_grey));
+
         } else {
             // Connection is secure.
             mIcon.setImageResource(R.drawable.lock_secure);
@@ -385,13 +393,13 @@ public class SiteIdentityPopup extends AnchoredPopup implements GeckoEventListen
 
     private void clearSecurityStateIcon() {
         mSecurityState.setCompoundDrawablePadding(0);
-        mSecurityState.setCompoundDrawables(null, null, null, null);
+        TextViewCompat.setCompoundDrawablesRelative(mSecurityState, null, null, null, null);
     }
 
     private void setSecurityStateIcon(int resource, int factor) {
         final Drawable stateIcon = ContextCompat.getDrawable(mContext, resource);
         stateIcon.setBounds(0, 0, stateIcon.getIntrinsicWidth() / factor, stateIcon.getIntrinsicHeight() / factor);
-        mSecurityState.setCompoundDrawables(stateIcon, null, null, null);
+        TextViewCompat.setCompoundDrawablesRelative(mSecurityState, stateIcon, null, null, null);
         mSecurityState.setCompoundDrawablePadding((int) mResources.getDimension(R.dimen.doorhanger_drawable_padding));
     }
     private void updateIdentityInformation(final SiteIdentity siteIdentity) {
@@ -514,7 +522,7 @@ public class SiteIdentityPopup extends AnchoredPopup implements GeckoEventListen
                 final int dimen = (int) mResources.getDimension(R.dimen.browser_toolbar_favicon_size);
                 faviconDrawable.setBounds(0, 0, dimen, dimen);
 
-                mTitle.setCompoundDrawables(faviconDrawable, null, null, null);
+                TextViewCompat.setCompoundDrawablesRelative(mTitle, faviconDrawable, null, null, null);
                 mTitle.setCompoundDrawablePadding((int) mContext.getResources().getDimension(R.dimen.doorhanger_drawable_padding));
             }
         }
@@ -549,7 +557,10 @@ public class SiteIdentityPopup extends AnchoredPopup implements GeckoEventListen
     }
 
     void destroy() {
-        GeckoApp.getEventDispatcher().unregisterGeckoThreadListener(this,
+    }
+
+    void unregisterListeners() {
+        EventDispatcher.getInstance().unregisterGeckoThreadListener(this,
                                                                     "Doorhanger:Logins",
                                                                     "Permissions:CheckResult");
     }
@@ -559,7 +570,7 @@ public class SiteIdentityPopup extends AnchoredPopup implements GeckoEventListen
         super.dismiss();
         removeTrackingContentNotification();
         removeSelectLoginDoorhanger();
-        mTitle.setCompoundDrawablesWithIntrinsicBounds(null, null, null, null);
+        TextViewCompat.setCompoundDrawablesRelativeWithIntrinsicBounds(mTitle, null, null, null, null);
         mDivider.setVisibility(View.GONE);
     }
 

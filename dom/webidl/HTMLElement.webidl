@@ -12,6 +12,7 @@
  * and create derivative works of this document.
  */
 
+[HTMLConstructor]
 interface HTMLElement : Element {
   // metadata attributes
            attribute DOMString title;
@@ -28,6 +29,7 @@ interface HTMLElement : Element {
   // user interaction
   [SetterThrows, Pure]
            attribute boolean hidden;
+  [NeedsCallerType]
   void click();
   [SetterThrows, Pure]
            attribute long tabIndex;

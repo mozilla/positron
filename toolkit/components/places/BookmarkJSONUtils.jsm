@@ -133,7 +133,7 @@ this.BookmarkJSONUtils = Object.freeze({
    * @rejects JavaScript exception.
    * @deprecated passing an nsIFile is deprecated
    */
-  exportToFile: function BJU_exportToFile(aFilePath, aOptions={}) {
+  exportToFile: function BJU_exportToFile(aFilePath, aOptions = {}) {
     if (aFilePath instanceof Ci.nsIFile) {
       Deprecated.warning("Passing an nsIFile to BookmarksJSONUtils.exportToFile " +
                          "is deprecated. Please use an OS.File path string instead.",
@@ -322,6 +322,9 @@ BookmarkImporter.prototype = {
                 case "toolbarFolder":
                   container = PlacesUtils.toolbarFolderId;
                   break;
+                case "mobileFolder":
+                  container = PlacesUtils.mobileFolderId;
+                  break;
               }
 
               // Insert the data into the db
@@ -336,19 +339,24 @@ BookmarkImporter.prototype = {
                 searchIds = searchIds.concat(searches);
               }
             } else {
-              this.importJSONNode(
+              let [folders, searches] = this.importJSONNode(
                 node, PlacesUtils.placesRootId, node.index, 0);
+              for (let i = 0; i < folders.length; i++) {
+                if (folders[i])
+                  folderIdMap[i] = folders[i];
+              }
+              searchIds = searchIds.concat(searches);
             }
           }
 
           // Fixup imported place: uris that contain folders
-          searchIds.forEach(function(aId) {
-            let oldURI = PlacesUtils.bookmarks.getBookmarkURI(aId);
+          for (let id of searchIds) {
+            let oldURI = PlacesUtils.bookmarks.getBookmarkURI(id);
             let uri = fixupQuery(oldURI, folderIdMap);
             if (!uri.equals(oldURI)) {
-              PlacesUtils.bookmarks.changeBookmarkURI(aId, uri, this._source);
+              PlacesUtils.bookmarks.changeBookmarkURI(id, uri, this._source);
             }
-          });
+          }
 
           deferred.resolve();
         }.bind(this)
@@ -389,14 +397,14 @@ BookmarkImporter.prototype = {
         if (aContainer == PlacesUtils.tagsFolderId) {
           // Node is a tag
           if (aData.children) {
-            aData.children.forEach(function(aChild) {
+            for (let child of aData.children) {
               try {
                 PlacesUtils.tagging.tagURI(
-                  NetUtil.newURI(aChild.uri), [aData.title], this._source);
+                  NetUtil.newURI(child.uri), [aData.title], this._source);
               } catch (ex) {
                 // Invalid tag child, skip it
               }
-            });
+            }
             return [folderIdMap, searchIds];
           }
         } else if (aData.annos &&
@@ -439,8 +447,20 @@ BookmarkImporter.prototype = {
             this._importPromises.push(lmPromise);
           }
         } else {
-          id = PlacesUtils.bookmarks.createFolder(
-                 aContainer, aData.title, aIndex, aData.guid, this._source);
+          let isMobileFolder = aData.annos &&
+                               aData.annos.some(anno => anno.name == PlacesUtils.MOBILE_ROOT_ANNO);
+          if (isMobileFolder) {
+            // Mobile bookmark folders are special: we move their children to
+            // the mobile root instead of importing them. We also rewrite
+            // queries to use the special folder ID, and ignore generic
+            // properties like timestamps and annotations set on the folder.
+            id = PlacesUtils.mobileFolderId;
+          } else {
+            // For other folders, set `id` so that we can import timestamps
+            // and annotations at the end of this function.
+            id = PlacesUtils.bookmarks.createFolder(
+                   aContainer, aData.title, aIndex, aData.guid, this._source);
+          }
           folderIdMap[aData.id] = id;
           // Process children
           if (aData.children) {
@@ -525,8 +545,10 @@ BookmarkImporter.prototype = {
         // Unknown node type
     }
 
-    // Set generic properties, valid for all nodes
-    if (id != -1 && aContainer != PlacesUtils.tagsFolderId &&
+    // Set generic properties, valid for all nodes except tags and the mobile
+    // root.
+    if (id != -1 && id != PlacesUtils.mobileFolderId &&
+        aContainer != PlacesUtils.tagsFolderId &&
         aGrandParentId != PlacesUtils.tagsFolderId) {
       if (aData.dateAdded)
         PlacesUtils.bookmarks.setItemDateAdded(id, aData.dateAdded,

@@ -4,15 +4,15 @@
 
 from urlparse import urlparse
 
+from firefox_puppeteer import PuppeteerMixin
 from marionette_driver import expected, Wait
+from marionette_harness import MarionetteTestCase
 
-from firefox_ui_harness.testcases import FirefoxTestCase
 
-
-class TestNoCertificate(FirefoxTestCase):
+class TestNoCertificate(PuppeteerMixin, MarionetteTestCase):
 
     def setUp(self):
-        FirefoxTestCase.setUp(self)
+        super(TestNoCertificate, self).setUp()
 
         self.locationbar = self.browser.navbar.locationbar
         self.identity_popup = self.locationbar.identity_popup
@@ -23,9 +23,9 @@ class TestNoCertificate(FirefoxTestCase):
         try:
             self.browser.switch_to()
             self.identity_popup.close(force=True)
-            self.windows.close_all([self.browser])
+            self.puppeteer.windows.close_all([self.browser])
         finally:
-            FirefoxTestCase.tearDown(self)
+            super(TestNoCertificate, self).tearDown()
 
     def test_no_certificate(self):
         with self.marionette.using_context('content'):
@@ -74,8 +74,8 @@ class TestNoCertificate(FirefoxTestCase):
 
         # Check the owner label equals localized 'securityNoOwner'
         self.assertEqual(page_info.deck.security.owner.get_attribute('value'),
-                         page_info.get_property('securityNoOwner'))
+                         page_info.localize_property('securityNoOwner'))
 
         # Check the verifier label equals localized 'notset'
         self.assertEqual(page_info.deck.security.verifier.get_attribute('value'),
-                         page_info.get_property('notset'))
+                         page_info.localize_property('notset'))

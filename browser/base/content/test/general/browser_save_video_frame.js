@@ -91,7 +91,7 @@ add_task(function*() {
   mockTransferRegisterer.register();
 
   // Make sure that we clean these things up when we're done.
-  registerCleanupFunction(function () {
+  registerCleanupFunction(function() {
     mockTransferRegisterer.unregister();
     MockFilePicker.cleanup();
     destDir.remove(true);
@@ -104,7 +104,6 @@ add_task(function*() {
   yield promiseTabLoadEvent(tab, VIDEO_URL);
   info("Video tab loaded.");
 
-  let video = browser.contentDocument.getElementById("video1");
   let context = document.getElementById("contentAreaContextMenu");
   let popupPromise = promisePopupShown(context);
 

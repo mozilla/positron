@@ -7,7 +7,6 @@ include "mozilla/dom/MediaIPCUtils.h";
 
 include protocol PVideoDecoderManager;
 include LayersSurfaces;
-using VideoInfo from "MediaInfo.h";
 using mozilla::layers::LayersBackend from "mozilla/layers/LayersTypes.h";
 
 namespace mozilla {
@@ -46,7 +45,7 @@ async protocol PVideoDecoder
 {
   manager PVideoDecoderManager;
 parent:
-  async Init(VideoInfo info, LayersBackend backend);
+  async Init();
 
   async Input(MediaRawDataIPDL data);
 
@@ -54,12 +53,16 @@ parent:
   async Drain();
   async Shutdown();
 
+  async SetSeekThreshold(int64_t time);
+
   async __delete__();
 
 child:
 
-  async InitComplete();
+  async InitComplete(bool hardware, nsCString hardwareReason);
   async InitFailed(nsresult reason);
+
+  async FlushComplete();
 
   // Each output includes a SurfaceDescriptorGPUVideo that represents the decoded
   // frame. This SurfaceDescriptor can be used on the Layers IPDL protocol, but

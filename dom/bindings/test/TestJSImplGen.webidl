@@ -578,12 +578,8 @@ interface TestJSImplInterface {
 
   // Promise types
   void passPromise(Promise<any> arg);
-  void passNullablePromise(Promise<any>? arg);
   void passOptionalPromise(optional Promise<any> arg);
-  void passOptionalNullablePromise(optional Promise<any>? arg);
-  void passOptionalNullablePromiseWithDefaultValue(optional Promise<any>? arg = null);
   void passPromiseSequence(sequence<Promise<any>> arg);
-  void passNullablePromiseSequence(sequence<Promise<any>?> arg);
   Promise<any> receivePromise();
   Promise<any> receiveAddrefedPromise();
 
@@ -794,6 +790,10 @@ interface TestJSImplInterface {
   [Throws] attribute boolean throwingAttr;
   [GetterThrows] attribute boolean throwingGetterAttr;
   [SetterThrows] attribute boolean throwingSetterAttr;
+  // NeedsSubjectPrincipal not supported on JS-implemented things for
+  // now, because we always pass in the caller principal anyway.
+  //  [NeedsSubjectPrincipal] void needsSubjectPrincipalMethod();
+  //  [NeedsSubjectPrincipal] attribute boolean needsSubjectPrincipalAttr;
   // legacycaller short(unsigned long arg1, TestInterface arg2);
   void passArgsWithDefaults(optional long arg1,
                             optional TestInterface? arg2 = null,

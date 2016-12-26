@@ -31,6 +31,7 @@
 #include "nsRegionFwd.h"
 
 #include "nsWinGesture.h"
+#include "WinPointerEvents.h"
 #include "WinUtils.h"
 #include "WindowHook.h"
 #include "TaskbarWindowPreview.h"
@@ -104,7 +105,7 @@ public:
                                        nsWidgetInitData* aInitData = nullptr)
                                        override;
   virtual void            Destroy() override;
-  NS_IMETHOD              SetParent(nsIWidget *aNewParent) override;
+  virtual void            SetParent(nsIWidget *aNewParent) override;
   virtual nsIWidget*      GetParent(void) override;
   virtual float           GetDPI() override;
   double                  GetDefaultScaleInternal() final;
@@ -123,15 +124,16 @@ public:
   virtual void            ConstrainPosition(bool aAllowSlop, int32_t *aX, int32_t *aY) override;
   virtual void            SetSizeConstraints(const SizeConstraints& aConstraints) override;
   virtual const SizeConstraints GetSizeConstraints() override;
-  NS_IMETHOD              Move(double aX, double aY) override;
-  NS_IMETHOD              Resize(double aWidth, double aHeight, bool aRepaint) override;
-  NS_IMETHOD              Resize(double aX, double aY, double aWidth, double aHeight, bool aRepaint) override;
-  NS_IMETHOD              BeginResizeDrag(mozilla::WidgetGUIEvent* aEvent,
+  virtual void            Move(double aX, double aY) override;
+  virtual void            Resize(double aWidth, double aHeight, bool aRepaint) override;
+  virtual void            Resize(double aX, double aY, double aWidth, double aHeight, bool aRepaint) override;
+  virtual MOZ_MUST_USE nsresult
+                          BeginResizeDrag(mozilla::WidgetGUIEvent* aEvent,
                                           int32_t aHorizontal,
                                           int32_t aVertical) override;
   virtual void            PlaceBehind(nsTopLevelWidgetZPlacement aPlacement, nsIWidget *aWidget, bool aActivate) override;
   virtual void            SetSizeMode(nsSizeMode aMode) override;
-  NS_IMETHOD              Enable(bool aState) override;
+  virtual void            Enable(bool aState) override;
   virtual bool            IsEnabled() const override;
   NS_IMETHOD              SetFocus(bool aRaise) override;
   virtual LayoutDeviceIntRect GetBounds() override;
@@ -151,7 +153,7 @@ public:
                                            nsIRunnable* aCallback) override;
   virtual nsresult        MakeFullScreen(bool aFullScreen,
                                          nsIScreen* aScreen = nullptr) override;
-  NS_IMETHOD              HideWindowChrome(bool aShouldHide) override;
+  virtual void            HideWindowChrome(bool aShouldHide) override;
   NS_IMETHOD              Invalidate(bool aEraseBackground = false,
                                      bool aUpdateNCArea = false,
                                      bool aIncludeChildren = false);
@@ -160,7 +162,7 @@ public:
   void                    SetNativeData(uint32_t aDataType, uintptr_t aVal) override;
   virtual void            FreeNativeData(void * data, uint32_t aDataType) override;
   NS_IMETHOD              SetTitle(const nsAString& aTitle) override;
-  NS_IMETHOD              SetIcon(const nsAString& aIconSpec) override;
+  virtual void            SetIcon(const nsAString& aIconSpec) override;
   virtual LayoutDeviceIntPoint WidgetToScreenOffset() override;
   virtual LayoutDeviceIntSize ClientToWindowSize(const LayoutDeviceIntSize& aClientSize) override;
   NS_IMETHOD              DispatchEvent(mozilla::WidgetGUIEvent* aEvent,
@@ -169,12 +171,12 @@ public:
   virtual void            CaptureMouse(bool aCapture) override;
   virtual void            CaptureRollupEvents(nsIRollupListener* aListener,
                                               bool aDoCapture) override;
-  NS_IMETHOD              GetAttention(int32_t aCycleCount) override;
+  virtual MOZ_MUST_USE nsresult GetAttention(int32_t aCycleCount) override;
   virtual bool            HasPendingInputEvent() override;
   virtual LayerManager*   GetLayerManager(PLayerTransactionChild* aShadowManager = nullptr,
                                           LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
                                           LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT) override;
-  NS_IMETHOD              OnDefaultButtonLoaded(const LayoutDeviceIntRect& aButtonRect) override;
+  virtual MOZ_MUST_USE nsresult OnDefaultButtonLoaded(const LayoutDeviceIntRect& aButtonRect) override;
   virtual nsresult        SynthesizeNativeKeyEvent(int32_t aNativeKeyboardLayout,
                                                    int32_t aNativeKeyCode,
                                                    uint32_t aModifierFlags,
@@ -228,7 +230,7 @@ public:
                               mozilla::WidgetMouseEvent::eLeftButton,
                             uint16_t aInputSource =
                               nsIDOMMouseEvent::MOZ_SOURCE_MOUSE,
-                            uint16_t aPointerId = 0);
+                            WinPointerInfo* aPointerInfo = nullptr);
   virtual bool            DispatchWindowEvent(mozilla::WidgetGUIEvent* aEvent,
                                               nsEventStatus& aStatus);
   void                    DispatchPendingEvents();
@@ -254,14 +256,13 @@ public:
   WindowHook&             GetWindowHook() { return mWindowHook; }
   nsWindow*               GetParentWindow(bool aIncludeOwner);
   // Get an array of all nsWindow*s on the main thread.
-  typedef void            (WindowEnumCallback)(nsWindow*);
-  static void             EnumAllWindows(WindowEnumCallback aCallback);
+  static nsTArray<nsWindow*> EnumAllWindows();
 
   /**
    * Misc.
    */
   virtual bool            AutoErase(HDC dc);
-  bool ComputeShouldAccelerate() override;
+  bool WidgetTypeSupportsAcceleration() override;
 
   void                    ForcePresent();
 
@@ -428,6 +429,8 @@ protected:
   void                    OnSysColorChanged();
   void                    OnDPIChanged(int32_t x, int32_t y,
                                        int32_t width, int32_t height);
+  bool                    OnPointerEvents(UINT msg, WPARAM wParam,
+                                          LPARAM lParam);
 
   /**
    * Function that registers when the user has been active (used for detecting
@@ -647,6 +650,16 @@ protected:
   static void InitMouseWheelScrollData();
 
   double mSizeConstraintsScale; // scale in effect when setting constraints
+
+  // Used to remember the wParam (i.e. currently pressed modifier keys)
+  // and lParam (i.e. last mouse position) in screen coordinates from
+  // the previous mouse-exit.  Static since it is not
+  // associated with a particular widget (since we exited the widget).
+  static WPARAM sMouseExitwParam;
+  static LPARAM sMouseExitlParamScreen;
+
+  // Pointer events processing and management
+  WinPointerEvents mPointerEvents;
 };
 
 /**

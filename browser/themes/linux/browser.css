@@ -727,6 +727,7 @@ menuitem.bookmark-item {
   padding: 0 8px;
   border-radius: 1em;
   background-color: hsla(0,0%,0%,.05);
+  color: inherit;
   border: 1px solid ThreeDLightShadow;
 }
 
@@ -775,13 +776,12 @@ menuitem.bookmark-item {
 }
 
 #urlbar-search-splitter {
-  -moz-appearance: none;
+  /* The splitter width should equal the location and search bars' combined
+     neighboring margin and border width. */
   width: 8px;
-  margin-inline-start: -4px;
-}
-
-#urlbar-search-splitter + #search-container > #searchbar > .searchbar-textbox {
-  margin-inline-start: 0;
+  margin: 0 -4px;
+  position: relative;
+  -moz-appearance: none;
 }
 
 #urlbar-display-box {
@@ -913,6 +913,14 @@ notification[value="translation"] menulist > .menulist-dropmarker {
   display: block;
 }
 
+/* AutoComplete */
+
+%include ../shared/autocomplete.inc.css
+
+#PopupAutoComplete > richlistbox > richlistitem[originaltype~="datalist-first"] {
+  border-top: 1px solid ThreeDShadow;
+}
+
 #treecolAutoCompleteImage {
   max-width : 36px;
 }
@@ -982,28 +990,14 @@ html|span.ac-emphasize-text-url {
   list-style-image: url("chrome://browser/skin/urlbar-star.svg#star-inverted");
 }
 
-.autocomplete-treebody::-moz-tree-image(bookmark, treecolAutoCompleteImage) {
-  list-style-image: url("chrome://browser/skin/places/autocomplete-star.png");
-  width: 16px;
-  height: 16px;
-}
-
 .ac-type-icon[type=keyword],
-.ac-site-icon[type=searchengine],
-.autocomplete-treebody::-moz-tree-image(keyword, treecolAutoCompleteImage) {
+.ac-site-icon[type=searchengine] {
   list-style-image: url(chrome://global/skin/icons/autocomplete-search.svg#search-icon);
 }
 
 .ac-type-icon[type=keyword][selected],
-.ac-site-icon[type=searchengine][selected],
-.autocomplete-treebody::-moz-tree-image(keyword, treecolAutoCompleteImage, selected) {
+.ac-site-icon[type=searchengine][selected] {
   list-style-image: url(chrome://global/skin/icons/autocomplete-search.svg#search-icon-inverted);
-}
-
-.autocomplete-treebody::-moz-tree-image(tag, treecolAutoCompleteImage) {
-  list-style-image: url("chrome://browser/skin/places/tag.png");
-  width: 16px;
-  height: 16px;
 }
 
 .ac-type-icon[type=switchtab],

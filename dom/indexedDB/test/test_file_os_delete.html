@@ -10,7 +10,7 @@
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
 
   <script type="text/javascript;version=1.7">
-  function testSteps()
+  function* testSteps()
   {
     const READ_WRITE = "readwrite";
 
@@ -29,6 +29,10 @@
       key: 2,
       obj: { id: 1, file: getRandomFile("random.bin", 100000) }
     };
+
+    SpecialPowers.pushPrefEnv({ set: [["dom.indexedDB.dataThreshold", -1]] },
+                              continueToNextStep);
+    yield undefined;
 
     {
       let request = indexedDB.open(name, 1);
@@ -92,7 +96,6 @@
     is(endUsage, startUsage, "OS files deleted");
 
     finishTest();
-    yield undefined;
   }
   </script>
   <script type="text/javascript;version=1.7" src="file.js"></script>

@@ -1,4 +1,3 @@
-// |jit-test| test-also-wasm-baseline
 load(libdir + "wasm.js");
 
 wasmFailValidateText(`(module
@@ -88,8 +87,8 @@ wasmEvalText(`
 (module
     (import "check" "one" (param i32))
     (import "check" "two" (param i32) (param i32))
-    (func (param i32) (call_import 0 (get_local 0)))
-    (func (param i32) (param i32) (call_import 1 (get_local 0) (get_local 1)))
+    (func (param i32) (call 0 (get_local 0)))
+    (func (param i32) (param i32) (call 1 (get_local 0) (get_local 1)))
     (func
         (call 1
             (i32.const 43)
@@ -195,3 +194,33 @@ wasmEvalText(`
  )
 )
 `);
+
+wasmFailValidateText(`
+(module
+    (func (result i32)
+      (loop
+        (i32.const 0)
+        (br_table 1 0 (i32.const 15))
+      )
+    )
+)`, mismatchError("i32", "void"));
+
+wasmFailValidateText(`
+(module
+  (func (result i32)
+    (loop i32
+      (i32.const 0)
+      (br_table 1 0 (i32.const 15))
+    )
+  )
+)`, mismatchError("i32", "void"));
+
+wasmValidateText(`
+(module
+    (func
+        (loop
+          (i32.const 0)
+          (br_table 1 0 (i32.const 15))
+        )
+    )
+)`);

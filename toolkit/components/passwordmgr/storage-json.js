@@ -27,7 +27,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "gUUIDGenerator",
                                    "@mozilla.org/uuid-generator;1",
                                    "nsIUUIDGenerator");
 
-this.LoginManagerStorage_json = function () {};
+this.LoginManagerStorage_json = function() {};
 
 this.LoginManagerStorage_json.prototype = {
   classID: Components.ID("{c00c432d-a0c9-46d7-bef6-9c45b4d07341}"),
@@ -97,7 +97,7 @@ this.LoginManagerStorage_json.prototype = {
    */
   terminate() {
     this._store._saver.disarm();
-    return this._store.save();
+    return this._store._save();
   },
 
   addLogin(login) {
@@ -151,6 +151,7 @@ this.LoginManagerStorage_json.prototype = {
 
     // Send a notification that a login was added.
     LoginHelper.notifyStorageChanged("addLogin", loginClone);
+    return loginClone;
   },
 
   removeLogin(login) {

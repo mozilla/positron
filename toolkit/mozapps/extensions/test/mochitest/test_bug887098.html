@@ -9,6 +9,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=887098
   <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
   <script type="application/javascript">
+  /* exported loaded */
 
   /** Test for Bug 887098 **/
   SimpleTest.waitForExplicitFinish();
@@ -28,7 +29,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=887098
         evalRef('InstallTrigger.install({URL: "chrome://global/skin/global.css"});');
         ok(false, "Should have thrown when trying to install restricted URI from InstallTrigger");
       } catch (e) {
-        //XXXgijs this test broke because of the switch to webidl. I'm told
+        // XXXgijs this test broke because of the switch to webidl. I'm told
         // it has to do with compartments and the fact that we eval in "about:".
         // Tracking in bug 1007671
         todo(/permission/.test(e), "We should throw a security exception. Got: " + e);

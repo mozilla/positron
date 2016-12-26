@@ -377,25 +377,22 @@ class ScriptMixin(PlatformMixin):
                 parsed_url = urlparse.urlparse(url)
 
         request = urllib2.Request(url)
-        # Exceptions to be retried:
-        # Bug 1300663 - HTTPError: HTTP Error 404: Not Found
-        # Bug 1300413 - HTTPError: HTTP Error 500: Internal Server Error
-        # Bug 1300943 - HTTPError: HTTP Error 503: Service Unavailable
-        # Bug 1300953 - URLError: <urlopen error [Errno -2] Name or service not known>
-        # Bug 1301594 - URLError: <urlopen error [Errno 10054] An existing connection was ...
-        # Bug 1301597 - URLError: <urlopen error [Errno 8] _ssl.c:504: EOF occurred in ...
-        # Bug 1301855 - URLError: <urlopen error [Errno 60] Operation timed out>
-        # Bug 1302237 - URLError: <urlopen error [Errno 104] Connection reset by peer>
-        # Bug 1301807 - BadStatusLine: ''
-        response = urllib2.urlopen(request)
+        # When calling fetch_url_into_memory() you should retry when we raise one of these exceptions:
+        # * Bug 1300663 - HTTPError: HTTP Error 404: Not Found
+        # * Bug 1300413 - HTTPError: HTTP Error 500: Internal Server Error
+        # * Bug 1300943 - HTTPError: HTTP Error 503: Service Unavailable
+        # * Bug 1300953 - URLError: <urlopen error [Errno -2] Name or service not known>
+        # * Bug 1301594 - URLError: <urlopen error [Errno 10054] An existing connection was ...
+        # * Bug 1301597 - URLError: <urlopen error [Errno 8] _ssl.c:504: EOF occurred in ...
+        # * Bug 1301855 - URLError: <urlopen error [Errno 60] Operation timed out>
+        # * Bug 1302237 - URLError: <urlopen error [Errno 104] Connection reset by peer>
+        # * Bug 1301807 - BadStatusLine: ''
+        #
+        # Bug 1309912 - Adding timeout in hopes to solve blocking on response.read() (bug 1300413)
+        response = urllib2.urlopen(request, timeout=30)
 
         if parsed_url.scheme in ('http', 'https'):
             expected_file_size = int(response.headers.get('Content-Length'))
-
-        self.info('Http code: {}'.format(response.getcode()))
-        for k in ('Content-Encoding', 'Content-Type', 'via', 'x-amz-cf-id',
-                  'x-amz-version-id', 'x-cache'):
-            self.info('{}: {}'.format(k, response.headers.get(k)))
 
         file_contents = response.read()
         obtained_file_size = len(file_contents)
@@ -488,8 +485,7 @@ class ScriptMixin(PlatformMixin):
             raise
 
     def _retry_download(self, url, error_level, file_name=None, retry_config=None):
-        """ Helper method to retry download methods
-        Split out so we can alter the retry logic in mozharness.mozilla.testing.gaia_test.
+        """ Helper method to retry download methods.
 
         This method calls `self.retry` on `self._download_file` using the passed
         parameters if a file_name is specified. If no file is specified, we will
@@ -687,13 +683,6 @@ class ScriptMixin(PlatformMixin):
         try:
             function(**kwargs)
         except zipfile.BadZipfile:
-            # Bug 1305752 - Sometimes a good download turns out to be a
-            # corrupted zipfile. Let's upload the file for inspection
-            filepath = os.path.join(self.query_abs_dirs()['abs_upload_dir'], url.split('/')[-1])
-            self.info('Storing corrupted file to {}'.format(filepath))
-            with open(filepath, 'w') as f:
-                f.write(compressed_file.read())
-
             # Dump the exception and exit
             self.exception(level=FATAL)
 
@@ -1666,6 +1655,11 @@ class ScriptMixin(PlatformMixin):
         else:
             self.log('No extraction method found for: %s' % filename,
                      level=error_level, exit_code=fatal_exit_code)
+
+    def is_taskcluster(self):
+        """Returns boolean indicating if we're running in TaskCluster."""
+        # This may need expanding in the future to work on
+        return 'TASKCLUSTER_WORKER_TYPE' in os.environ
 
 
 def PreScriptRun(func):

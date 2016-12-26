@@ -1,4 +1,3 @@
-// |jit-test| test-also-wasm-baseline
 load(libdir + "wasm.js");
 
 var caught = false;
@@ -12,11 +11,11 @@ assertEq(caught, true);
 assertErrorMessage(() => wasmBinaryToText(wasmTextToBinary(`(module (func (result i32) (f32.const 13.37)))`)), WebAssembly.CompileError, /type mismatch/);
 
 function runTest(code) {
-  var expected = wasmTextToBinary(code);
-  var s = wasmBinaryToText(expected);
-  print("TEXT: " + s);
-  var roundtrip = wasmTextToBinary(s);
-  assertDeepEq(expected, roundtrip);
+    var expected = wasmTextToBinary(code);
+    var s = wasmBinaryToText(expected);
+    print("TEXT: " + s);
+    var roundtrip = wasmTextToBinary(s);
+    assertDeepEq(expected, roundtrip);
 }
 
 // Smoke test
@@ -156,13 +155,13 @@ runTest(`
 (module
   (type $type1 (func (param i32) (result i32)))
   (import $import1 "mod" "test" (param f32) (result f32))
-  (table $func1 $func2)
+  (table anyfunc (elem $func1 $func2))
   (func $func1 (param i32) (param f32) (nop))
   (func $func2 (param i32) (result i32) (get_local 0))
   (func $test
     (call $func1
       (call_indirect $type1 (i32.const 2) (i32.const 1))
-      (call_import $import1 (f32.const 1.0))
+      (call $import1 (f32.const 1.0))
     )
   )
   (export "test" $test)
@@ -259,4 +258,32 @@ runTest(`
     end
    )
   (export "" 0)
+)`);
+
+// Branch table.
+runTest(`(module
+    (func (export "run") (param $p i32) (local $n i32)
+        i32.const 0
+        set_local $n
+        loop $outer
+            block $c block $b block $a
+                loop $inner
+                    get_local $p
+                    br_table $b $a $c $inner $outer
+                end $inner
+            end $a
+                get_local $n
+                i32.const 1
+                i32.add
+                set_local $n
+            end $b
+                block
+                    get_local $n
+                    i32.const 2
+                    i32.add
+                    set_local $n
+                end
+            end $c
+        end $outer
+    )
 )`);

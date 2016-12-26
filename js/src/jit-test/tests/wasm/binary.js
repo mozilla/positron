@@ -1,76 +1,21 @@
-// |jit-test| test-also-wasm-baseline
 load(libdir + "wasm.js");
+load(libdir + "wasm-binary.js");
 
+const Module = WebAssembly.Module;
 const CompileError = WebAssembly.CompileError;
 
-// MagicNumber = 0x6d736100;
-const magic0 = 0x00;  // '\0'
-const magic1 = 0x61;  // 'a'
-const magic2 = 0x73;  // 's'
-const magic3 = 0x6d;  // 'm'
-
-// EncodingVersion (temporary; to be set to 1 at some point before release)
-const ver0 = (Wasm.experimentalVersion >>>  0) & 0xff;
-const ver1 = (Wasm.experimentalVersion >>>  8) & 0xff;
-const ver2 = (Wasm.experimentalVersion >>> 16) & 0xff;
-const ver3 = (Wasm.experimentalVersion >>> 24) & 0xff;
-
-// Section opcodes
-const userDefinedId = 0;
-const typeId = 1;
-const importId = 2;
-const functionId = 3;
-const tableId = 4;
-const memoryId = 5;
-const globalId = 6;
-const exportId = 7;
-const startId = 8;
-const elemId = 9;
-const codeId = 10;
-const dataId = 11;
-
-const nameName = "name";
-
 const magicError = /failed to match magic number/;
-const unknownSection = /expected user-defined section/;
+const unknownSection = /expected custom section/;
 
 function sectionError(section) {
     return RegExp(`failed to start ${section} section`);
 }
 
 function versionError(actual) {
-    var expect = Wasm.experimentalVersion;
+    var expect = experimentalVersion;
     var str = `binary version 0x${actual.toString(16)} does not match expected version 0x${expect.toString(16)}`;
     return RegExp(str);
 }
-
-const VoidCode = 0;
-const I32Code = 1;
-const I64Code = 2;
-const F32Code = 3;
-const F64Code = 4;
-
-const AnyFuncCode = 0x20;
-const FunctionConstructorCode = 0x40;
-
-const Unreachable = 0x00;
-const Block       = 0x01;
-const End         = 0x0f;
-const I32Const    = 0x10;
-const I64Const    = 0x11;
-const F64Const    = 0x12;
-const F32Const    = 0x13;
-const Call        = 0x16;
-
-// DefinitionKind
-const FunctionCode = 0x00;
-const TableCode    = 0x01;
-const MemoryCode   = 0x02;
-const GlobalCode   = 0x03;
-
-// ResizableFlags
-const DefaultFlag    = 0x1;
-const HasMaximumFlag = 0x2;
 
 function toU8(array) {
     for (let b of array)
@@ -108,7 +53,7 @@ function varS32(s32) {
 
 const U32MAX_LEB = [255, 255, 255, 255, 15];
 
-const wasmEval = (code, imports) => new WebAssembly.Instance(new WebAssembly.Module(code), imports).exports;
+const wasmEval = (code, imports) => new WebAssembly.Instance(new Module(code), imports).exports;
 
 assertErrorMessage(() => wasmEval(toU8([])), CompileError, magicError);
 assertErrorMessage(() => wasmEval(toU8([42])), CompileError, magicError);
@@ -145,12 +90,12 @@ assertErrorMessage(() => wasmEval(toU8(moduleHeaderThen(42, 0))), CompileError, 
 assertErrorMessage(() => wasmEval(toU8(moduleHeaderThen(42, 1, 0))), CompileError, unknownSection);
 
 // user sections have special rules
-assertErrorMessage(() => wasmEval(toU8(moduleHeaderThen(0))), CompileError, sectionError("user-defined"));  // no length
-assertErrorMessage(() => wasmEval(toU8(moduleHeaderThen(0, 0))), CompileError, sectionError("user-defined"));  // no id
-assertErrorMessage(() => wasmEval(toU8(moduleHeaderThen(0, 0, 0))), CompileError, sectionError("user-defined"));  // payload too small to have id length
-assertErrorMessage(() => wasmEval(toU8(moduleHeaderThen(0, 1, 1))), CompileError, sectionError("user-defined"));  // id not present
-assertErrorMessage(() => wasmEval(toU8(moduleHeaderThen(0, 1, 1, 65))), CompileError, sectionError("user-defined"));  // id length doesn't fit in section
-assertErrorMessage(() => wasmEval(toU8(moduleHeaderThen(0, 1, 0, 0))), CompileError, sectionError("user-defined"));  // second, unfinished user-defined section
+assertErrorMessage(() => wasmEval(toU8(moduleHeaderThen(0))), CompileError, sectionError("custom"));  // no length
+assertErrorMessage(() => wasmEval(toU8(moduleHeaderThen(0, 0))), CompileError, sectionError("custom"));  // no id
+assertErrorMessage(() => wasmEval(toU8(moduleHeaderThen(0, 0, 0))), CompileError, sectionError("custom"));  // payload too small to have id length
+assertErrorMessage(() => wasmEval(toU8(moduleHeaderThen(0, 1, 1))), CompileError, sectionError("custom"));  // id not present
+assertErrorMessage(() => wasmEval(toU8(moduleHeaderThen(0, 1, 1, 65))), CompileError, sectionError("custom"));  // id length doesn't fit in section
+assertErrorMessage(() => wasmEval(toU8(moduleHeaderThen(0, 1, 0, 0))), CompileError, sectionError("custom"));  // second, unfinished custom section
 wasmEval(toU8(moduleHeaderThen(0, 1, 0)));  // empty id
 wasmEval(toU8(moduleHeaderThen(0, 1, 0,  0, 1, 0)));  // 2x empty id
 wasmEval(toU8(moduleHeaderThen(0, 2, 1, 65)));  // id = "A"
@@ -184,7 +129,7 @@ function sigSection(sigs) {
     var body = [];
     body.push(...varU32(sigs.length));
     for (let sig of sigs) {
-        body.push(...varU32(FunctionConstructorCode));
+        body.push(...varU32(FuncCode));
         body.push(...varU32(sig.args.length));
         for (let arg of sig.args)
             body.push(...varU32(arg));
@@ -208,7 +153,7 @@ function funcBody(func) {
     for (let local of func.locals)
         body.push(...varU32(local));
     body = body.concat(...func.body);
-    body.push(End);
+    body.push(EndCode);
     body.splice(0, 0, ...varU32(body.length));
     return body;
 }
@@ -245,18 +190,16 @@ function tableSection(initialSize) {
     var body = [];
     body.push(...varU32(1));           // number of tables
     body.push(...varU32(AnyFuncCode));
-    body.push(...varU32(DefaultFlag)); // for now, no maximum
+    body.push(...varU32(0x0));         // for now, no maximum
     body.push(...varU32(initialSize));
-    // for now, no maximum
     return { name: tableId, body };
 }
 
 function memorySection(initialSize) {
     var body = [];
     body.push(...varU32(1));           // number of memories
-    body.push(...varU32(DefaultFlag)); // for now, no maximum
+    body.push(...varU32(0x0));         // for now, no maximum
     body.push(...varU32(initialSize));
-    // for now, no maximum
     return { name: memoryId, body };
 }
 
@@ -265,9 +208,9 @@ function elemSection(elemArrays) {
     body.push(...varU32(elemArrays.length));
     for (let array of elemArrays) {
         body.push(...varU32(0)); // table index
-        body.push(...varU32(I32Const));
+        body.push(...varU32(I32ConstCode));
         body.push(...varS32(array.offset));
-        body.push(...varU32(End));
+        body.push(...varU32(EndCode));
         body.push(...varU32(array.elems.length));
         for (let elem of array.elems)
             body.push(...varU32(elem));
@@ -292,7 +235,7 @@ function nameSection(elems) {
     return { name: userDefinedId, body };
 }
 
-function userDefinedSection(name, ...body) {
+function customSection(name, ...body) {
     return { name: userDefinedId, body: [...string(name), ...body] };
 }
 
@@ -302,7 +245,7 @@ const v2vBody = funcBody({locals:[], body:[]});
 
 assertErrorMessage(() => wasmEval(moduleWithSections([ {name: typeId, body: U32MAX_LEB } ])), CompileError, /too many signatures/);
 assertErrorMessage(() => wasmEval(moduleWithSections([ {name: typeId, body: [1, 0], } ])), CompileError, /expected function form/);
-assertErrorMessage(() => wasmEval(moduleWithSections([ {name: typeId, body: [1, FunctionConstructorCode, ...U32MAX_LEB], } ])), CompileError, /too many arguments in signature/);
+assertErrorMessage(() => wasmEval(moduleWithSections([ {name: typeId, body: [1, FuncCode, ...U32MAX_LEB], } ])), CompileError, /too many arguments in signature/);
 
 assertThrowsInstanceOf(() => wasmEval(moduleWithSections([{name: typeId, body: [1]}])), CompileError);
 assertThrowsInstanceOf(() => wasmEval(moduleWithSections([{name: typeId, body: [1, 1, 0]}])), CompileError);
@@ -342,11 +285,6 @@ wasmEval(moduleWithSections([elemSection([])]));
 wasmEval(moduleWithSections([tableSection(0), elemSection([])]));
 wasmEval(moduleWithSections([tableSection(1), elemSection([{offset:1, elems:[]}])]));
 assertErrorMessage(() => wasmEval(moduleWithSections([tableSection(1), elemSection([{offset:0, elems:[0]}])])), CompileError, /table element out of range/);
-assertErrorMessage(() => wasmEval(moduleWithSections([tableSection(0), elemSection([{offset:0, elems:[0]}])])), CompileError, /element segment does not fit/);
-assertErrorMessage(() => wasmEval(moduleWithSections([tableSection(1), elemSection([{offset:1, elems:[0]}])])), CompileError, /element segment does not fit/);
-assertErrorMessage(() => wasmEval(moduleWithSections([tableSection(1), elemSection([{offset:0, elems:[0,0]}])])), CompileError, /element segment does not fit/);
-assertErrorMessage(() => wasmEval(moduleWithSections([tableSection(0), elemSection([{offset:1, elems:[]}])])), CompileError, /element segment does not fit/);
-assertErrorMessage(() => wasmEval(moduleWithSections([tableSection(0), elemSection([{offset:-1, elems:[]}])])), CompileError, /element segment does not fit/);
 wasmEval(moduleWithSections([sigSection([v2vSig]), declSection([0]), tableSection(1), elemSection([{offset:0, elems:[0]}]), bodySection([v2vBody])]));
 wasmEval(moduleWithSections([sigSection([v2vSig]), declSection([0]), tableSection(2), elemSection([{offset:0, elems:[0,0]}]), bodySection([v2vBody])]));
 assertErrorMessage(() => wasmEval(moduleWithSections([sigSection([v2vSig]), declSection([0]), tableSection(2), elemSection([{offset:0, elems:[0,1]}]), bodySection([v2vBody])])), CompileError, /table element out of range/);
@@ -373,14 +311,14 @@ assertErrorMessage(() => wasmEval(moduleWithSections([invalidMemorySection0()]))
 
 // Test early 'end'
 const bodyMismatch = /function body length mismatch/;
-assertErrorMessage(() => wasmEval(moduleWithSections([sigSection([v2vSig]), declSection([0]), bodySection([funcBody({locals:[], body:[End]})])])), CompileError, bodyMismatch);
-assertErrorMessage(() => wasmEval(moduleWithSections([sigSection([v2vSig]), declSection([0]), bodySection([funcBody({locals:[], body:[Unreachable,End]})])])), CompileError, bodyMismatch);
-assertErrorMessage(() => wasmEval(moduleWithSections([sigSection([v2vSig]), declSection([0]), bodySection([funcBody({locals:[], body:[End,Unreachable]})])])), CompileError, bodyMismatch);
+assertErrorMessage(() => wasmEval(moduleWithSections([sigSection([v2vSig]), declSection([0]), bodySection([funcBody({locals:[], body:[EndCode]})])])), CompileError, bodyMismatch);
+assertErrorMessage(() => wasmEval(moduleWithSections([sigSection([v2vSig]), declSection([0]), bodySection([funcBody({locals:[], body:[UnreachableCode,EndCode]})])])), CompileError, bodyMismatch);
+assertErrorMessage(() => wasmEval(moduleWithSections([sigSection([v2vSig]), declSection([0]), bodySection([funcBody({locals:[], body:[EndCode,UnreachableCode]})])])), CompileError, bodyMismatch);
 
 // Deep nesting shouldn't crash or even throw.
 var manyBlocks = [];
 for (var i = 0; i < 20000; i++)
-    manyBlocks.push(Block, VoidCode, End);
+    manyBlocks.push(BlockCode, VoidCode, EndCode);
 wasmEval(moduleWithSections([sigSection([v2vSig]), declSection([0]), bodySection([funcBody({locals:[], body:manyBlocks})])]));
 
 // Ignore errors in name section.
@@ -390,20 +328,51 @@ var tooBigNameSection = {
 };
 wasmEval(moduleWithSections([tooBigNameSection]));
 
-// Skip user-defined sections before any expected section
-var userDefSec = userDefinedSection("wee", 42, 13);
+// Skip custom sections before any expected section
+var customDefSec = customSection("wee", 42, 13);
 var sigSec = sigSection([v2vSig]);
 var declSec = declSection([0]);
 var bodySec = bodySection([v2vBody]);
-wasmEval(moduleWithSections([userDefSec, sigSec, declSec, bodySec]));
-wasmEval(moduleWithSections([sigSec, userDefSec, declSec, bodySec]));
-wasmEval(moduleWithSections([sigSec, declSec, userDefSec, bodySec]));
-wasmEval(moduleWithSections([sigSec, declSec, bodySec, userDefSec]));
-wasmEval(moduleWithSections([userDefSec, userDefSec, sigSec, declSec, bodySec]));
-wasmEval(moduleWithSections([userDefSec, userDefSec, sigSec, userDefSec, declSec, userDefSec, bodySec]));
+var nameSec = nameSection([{name:'hi'}]);
+wasmEval(moduleWithSections([customDefSec, sigSec, declSec, bodySec]));
+wasmEval(moduleWithSections([sigSec, customDefSec, declSec, bodySec]));
+wasmEval(moduleWithSections([sigSec, declSec, customDefSec, bodySec]));
+wasmEval(moduleWithSections([sigSec, declSec, bodySec, customDefSec]));
+wasmEval(moduleWithSections([customDefSec, customDefSec, sigSec, declSec, bodySec]));
+wasmEval(moduleWithSections([customDefSec, customDefSec, sigSec, customDefSec, declSec, customDefSec, bodySec]));
+
+// custom sections reflection:
+function checkCustomSection(buf, val) {
+    assertEq(buf instanceof ArrayBuffer, true);
+    assertEq(buf.byteLength, 1);
+    assertEq(new Uint8Array(buf)[0], val);
+}
+var custom1 = customSection("one", 1);
+var custom2 = customSection("one", 2);
+var custom3 = customSection("two", 3);
+var custom4 = customSection("three", 4);
+var custom5 = customSection("three", 5);
+var custom6 = customSection("three", 6);
+var m = new Module(moduleWithSections([custom1, sigSec, custom2, declSec, custom3, bodySec, custom4, nameSec, custom5, custom6]));
+var arr = Module.customSections(m, "one");
+assertEq(arr.length, 2);
+checkCustomSection(arr[0], 1);
+checkCustomSection(arr[1], 2);
+var arr = Module.customSections(m, "two");
+assertEq(arr.length, 1);
+checkCustomSection(arr[0], 3);
+var arr = Module.customSections(m, "three");
+assertEq(arr.length, 3);
+checkCustomSection(arr[0], 4);
+checkCustomSection(arr[1], 5);
+checkCustomSection(arr[2], 6);
+var arr = Module.customSections(m, "name");
+assertEq(arr.length, 1);
+assertEq(arr[0].byteLength, nameSec.body.length - 5 /* 4name */);
 
 // Diagnose nonstandard block signature types.
-assertErrorMessage(() => wasmEval(moduleWithSections([sigSection([v2vSig]), declSection([0]), bodySection([funcBody({locals:[], body:[Block, F64Code + 1, End]})])])), CompileError, /unknown block signature type/);
+for (var bad of [0xff, 0, 1, 0x3f])
+    assertErrorMessage(() => wasmEval(moduleWithSections([sigSection([v2vSig]), declSection([0]), bodySection([funcBody({locals:[], body:[BlockCode, bad, EndCode]})])])), CompileError, /invalid inline block type/);
 
 // Checking stack trace.
 function runStackTraceTest(namesContent, expectedName) {
@@ -412,13 +381,13 @@ function runStackTraceTest(namesContent, expectedName) {
         importSection([{sigIndex:0, module:"env", func:"callback"}]),
         declSection([0]),
         exportSection([{funcIndex:1, name: "run"}]),
-        bodySection([funcBody({locals: [], body: [Call, varU32(0)]})]),
-        userDefinedSection("whoa"),
-        userDefinedSection("wee", 42),
+        bodySection([funcBody({locals: [], body: [CallCode, varU32(0)]})]),
+        customSection("whoa"),
+        customSection("wee", 42),
     ];
     if (namesContent)
         sections.push(nameSection(namesContent));
-    sections.push(userDefinedSection("yay", 13));
+    sections.push(customSection("yay", 13));
 
     var result = "";
     var callback = () => {
@@ -429,15 +398,16 @@ function runStackTraceTest(namesContent, expectedName) {
     assertEq(result, expectedName);
 };
 
-runStackTraceTest(null, 'wasm-function[0]');
-runStackTraceTest([{name: 'test'}], 'test');
-runStackTraceTest([{name: 'test', locals: [{name: 'var1'}, {name: 'var2'}]}], 'test');
-runStackTraceTest([{name: 'test', locals: [{name: 'var1'}, {name: 'var2'}]}], 'test');
-runStackTraceTest([{name: 'test1'}, {name: 'test2'}], 'test1');
-runStackTraceTest([{name: 'test☃'}], 'test☃');
-runStackTraceTest([{name: 'te\xE0\xFF'}], 'te\xE0\xFF');
-runStackTraceTest([], 'wasm-function[0]');
+runStackTraceTest(null, 'wasm-function[1]');
+runStackTraceTest([{name:'blah'}, {name: 'test'}], 'test');
+runStackTraceTest([{name:'blah'}, {name: 'test', locals: [{name: 'var1'}, {name: 'var2'}]}], 'test');
+runStackTraceTest([{name:'blah'}, {name: 'test', locals: [{name: 'var1'}, {name: 'var2'}]}], 'test');
+runStackTraceTest([{name:'blah'}, {name: 'test1'}, {name: 'test2'}], 'test1');
+runStackTraceTest([{name:'blah'}, {name: 'test☃'}], 'test☃');
+runStackTraceTest([{name:'blah'}, {name: 'te\xE0\xFF'}], 'te\xE0\xFF');
+runStackTraceTest([{name:'blah'}], 'wasm-function[1]');
+runStackTraceTest([], 'wasm-function[1]');
 // Notice that invalid names section content shall not fail the parsing
-runStackTraceTest([{nameLen: 100, name: 'test'}], 'wasm-function[0]'); // invalid name size
-runStackTraceTest([{name: 'test', locals: [{nameLen: 40, name: 'var1'}]}], 'wasm-function[0]'); // invalid variable name size
-runStackTraceTest([{name: ''}], 'wasm-function[0]'); // empty name
+runStackTraceTest([{name:'blah'}, {nameLen: 100, name: 'test'}], 'wasm-function[1]'); // invalid name size
+runStackTraceTest([{name:'blah'}, {name: 'test', locals: [{nameLen: 40, name: 'var1'}]}], 'wasm-function[1]'); // invalid variable name size
+runStackTraceTest([{name:'blah'}, {name: ''}], 'wasm-function[1]'); // empty name

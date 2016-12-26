@@ -6,10 +6,8 @@ const SUGGEST_URLBAR_PREF = "browser.urlbar.suggest.searches";
 const TEST_ENGINE_BASENAME = "searchSuggestionEngine.xml";
 
 add_task(function* switchToTab() {
-  let tab = gBrowser.addTab("about:about");
-  yield promiseTabLoaded(tab);
+  let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, "about:about");
 
-  let actionURL = makeActionURI("switchtab", {url: "about:about"}).spec;
   yield promiseAutocompleteResultPopup("% about");
 
   ok(gURLBar.popup.richlistbox.children.length > 1, "Should get at least 2 results");
@@ -28,7 +26,7 @@ add_task(function* searchSuggestions() {
   Services.search.currentEngine = engine;
   Services.prefs.setBoolPref(SUGGEST_ALL_PREF, true);
   Services.prefs.setBoolPref(SUGGEST_URLBAR_PREF, true);
-  registerCleanupFunction(function () {
+  registerCleanupFunction(function() {
     Services.search.currentEngine = oldCurrentEngine;
     Services.prefs.clearUserPref(SUGGEST_ALL_PREF);
     Services.prefs.clearUserPref(SUGGEST_URLBAR_PREF);

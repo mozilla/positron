@@ -3,6 +3,8 @@
 "use strict";
 
 add_task(function* testPageActionPopup() {
+  let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, "http://example.com/");
+
   let scriptPage = url => `<html><head><meta charset="utf-8"><script src="${url}"></script></head></html>`;
 
   let extension = ExtensionTestUtils.loadExtension({
@@ -37,7 +39,7 @@ add_task(function* testPageActionPopup() {
 
       "data/background.html": scriptPage("background.js"),
 
-      "data/background.js": function() {
+      "data/background.js": async function() {
         let tabId;
 
         let sendClick;
@@ -68,6 +70,12 @@ add_task(function* testPageActionPopup() {
           },
           () => {
             browser.test.sendMessage("next-test", {expectClosed: true});
+          },
+          () => {
+            sendClick({expectEvent: false, expectPopup: "a", runNextTest: true});
+          },
+          () => {
+            browser.test.sendMessage("next-test", {closeOnTabSwitch: true});
           },
         ];
 
@@ -107,7 +115,7 @@ add_task(function* testPageActionPopup() {
           browser.test.sendMessage("next-test");
         });
 
-        browser.test.onMessage.addListener((msg) => {
+        browser.test.onMessage.addListener(msg => {
           if (msg == "close-popup") {
             browser.runtime.sendMessage("close-popup");
             return;
@@ -125,13 +133,11 @@ add_task(function* testPageActionPopup() {
           }
         });
 
-        browser.tabs.query({active: true, currentWindow: true}, tabs => {
-          tabId = tabs[0].id;
+        let [tab] = await browser.tabs.query({active: true, currentWindow: true});
+        tabId = tab.id;
 
-          browser.pageAction.show(tabId).then(() => {
-            browser.test.sendMessage("next-test");
-          });
-        });
+        await browser.pageAction.show(tabId);
+        browser.test.sendMessage("next-test");
       },
     },
   });
@@ -153,6 +159,20 @@ add_task(function* testPageActionPopup() {
 
       yield promisePopupHidden(panel);
       ok(true, `Panel is closed`);
+    } else if (expecting.closeOnTabSwitch) {
+      ok(panel, "Expect panel to exist");
+      yield promisePopupShown(panel);
+
+      let oldTab = gBrowser.selectedTab;
+      ok(oldTab != gBrowser.tabs[0], "Should have an inactive tab to switch to");
+
+      let hiddenPromise = promisePopupHidden(panel);
+
+      gBrowser.selectedTab = gBrowser.tabs[0];
+      yield hiddenPromise;
+      info("Panel closed");
+
+      gBrowser.selectedTab = oldTab;
     } else if (panel) {
       yield promisePopupShown(panel);
       panel.hidePopup();
@@ -177,6 +197,8 @@ add_task(function* testPageActionPopup() {
 
   let panel = document.getElementById(panelId);
   is(panel, null, "pageAction panel removed from document");
+
+  yield BrowserTestUtils.removeTab(tab);
 });
 
 

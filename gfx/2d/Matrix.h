@@ -7,6 +7,7 @@
 #define MOZILLA_GFX_MATRIX_H_
 
 #include "Types.h"
+#include "Triangle.h"
 #include "Rect.h"
 #include "Point.h"
 #include "Quaternion.h"
@@ -462,6 +463,11 @@ public:
     , _41(a41), _42(a42), _43(a43), _44(a44)
   {}
 
+  explicit Matrix4x4Typed(const Float aArray[16])
+  {
+    memcpy(components, aArray, sizeof(components));
+  }
+
   Matrix4x4Typed(const Matrix4x4Typed& aOther)
   {
     memcpy(this, &aOther, sizeof(*this));
@@ -701,6 +707,13 @@ public:
     }
 
     return RectTyped<TargetUnits, F>(min_x, min_y, max_x - min_x, max_y - min_y);
+  }
+
+  template<class F>
+  RectTyped<TargetUnits, F> TransformAndClipBounds(const TriangleTyped<SourceUnits, F>& aTriangle,
+                                                   const RectTyped<TargetUnits, F>& aClip) const
+  {
+    return TransformAndClipBounds(aTriangle.BoundingBox(), aClip);
   }
 
   /**

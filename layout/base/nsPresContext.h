@@ -77,6 +77,9 @@ namespace layers {
 class ContainerLayer;
 class LayerManager;
 } // namespace layers
+namespace dom {
+class Element;
+} // namespace dom
 } // namespace mozilla
 
 // supported values for cached bool types
@@ -134,7 +137,8 @@ class nsRootPresContext;
 // An interface for presentation contexts. Presentation contexts are
 // objects that provide an outer context for a presentation shell.
 
-class nsPresContext : public nsIObserver {
+class nsPresContext : public nsIObserver,
+                      public mozilla::SupportsWeakPtr<nsPresContext> {
 public:
   typedef mozilla::FramePropertyTable FramePropertyTable;
   typedef mozilla::LangGroupFontPrefs LangGroupFontPrefs;
@@ -145,6 +149,7 @@ public:
   NS_DECL_NSIOBSERVER
   NS_DECL_AND_IMPL_ZEROING_OPERATOR_NEW
   NS_DECL_CYCLE_COLLECTION_CLASS(nsPresContext)
+  MOZ_DECLARE_WEAKREFERENCE_TYPENAME(nsPresContext)
 
   enum nsPresContextType {
     eContext_Galley,       // unpaginated screen presentation
@@ -720,6 +725,12 @@ public:
   }
 
   /**
+   * Check whether the given element would propagate its scrollbar styles to the
+   * viewport in non-paginated mode.  Must only be called if IsPaginated().
+   */
+  bool ElementWouldPropagateScrollbarStyles(mozilla::dom::Element* aElement);
+
+  /**
    * Set and get methods for controlling the background drawing
   */
   bool GetBackgroundImageDraw() const { return mDrawImageBackground; }
@@ -879,11 +890,19 @@ public:
     return mFramesReflowed;
   }
 
-  /**
-   * This table maps border-width enums 'thin', 'medium', 'thick'
-   * to actual nscoord values.
-   */
-  const nscoord* GetBorderWidthTable() { return mBorderWidthTable; }
+  static nscoord GetBorderWidthForKeyword(unsigned int aBorderWidthKeyword)
+  {
+    // This table maps border-width enums 'thin', 'medium', 'thick'
+    // to actual nscoord values.
+    static const nscoord kBorderWidths[] = {
+      CSSPixelsToAppUnits(1),
+      CSSPixelsToAppUnits(3),
+      CSSPixelsToAppUnits(5)
+    };
+    MOZ_ASSERT(size_t(aBorderWidthKeyword) < mozilla::ArrayLength(kBorderWidths));
+
+    return kBorderWidths[aBorderWidthKeyword];
+  }
 
   gfxTextPerfMetrics *GetTextPerfMetrics() { return mTextPerf; }
 
@@ -1054,6 +1073,12 @@ public:
 
   bool IsRootContentDocument() const;
 
+  bool HadNonBlankPaint() const {
+    return mHadNonBlankPaint;
+  }
+
+  void NotifyNonBlankPaint();
+
   bool IsGlyph() const {
     return mIsGlyph;
   }
@@ -1198,8 +1223,6 @@ protected:
 
   // Can't be inline because we can't include nsStyleSet.h.
   bool HasCachedStyleData();
-
-  bool IsChromeSlow() const;
 
   // Creates a one-shot timer with the given aCallback & aDelay.
   // Returns a refcounted pointer to the timer (or nullptr on failure).
@@ -1398,6 +1421,9 @@ protected:
 
   // Is there a pref update to process once we have a container?
   unsigned              mNeedsPrefUpdate : 1;
+
+  // Has NotifyNonBlankPaint been called on this PresContext?
+  unsigned              mHadNonBlankPaint : 1;
 
 #ifdef RESTYLE_LOGGING
   // Should we output debug information about restyling for this document?

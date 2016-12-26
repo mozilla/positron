@@ -142,6 +142,7 @@ private:
     nsCString                         mHost;
     int32_t                           mPort;
     bool                              mUsingSSL;
+    bool                              mProxyUsingSSL;
     bool                              mIsPrivate;
 
     nsISupports                      *mProxyAuthContinuationState;
@@ -173,7 +174,8 @@ private:
 
     // If a cross-origin sub-resource is being loaded, this flag will be set.
     // In that case, the prompt text will be different to warn users.
-    uint32_t                          mCrossOrigin              : 1;
+    uint32_t                          mCrossOrigin : 1;
+    uint32_t                          mConnectionBased : 1;
 
     RefPtr<nsHttpHandler>           mHttpHandler;  // keep gHttpHandler alive
 

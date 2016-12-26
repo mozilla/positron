@@ -52,6 +52,52 @@ const JNINativeMethod AndroidGamepadManager::Natives<Impl>::methods[] = {
 };
 
 template<class Impl>
+class EventDispatcher::Natives : public mozilla::jni::NativeImpl<EventDispatcher, Impl>
+{
+public:
+    static const JNINativeMethod methods[3];
+};
+
+template<class Impl>
+const JNINativeMethod EventDispatcher::Natives<Impl>::methods[] = {
+
+    mozilla::jni::MakeNativeMethod<EventDispatcher::DispatchToGecko_t>(
+            mozilla::jni::NativeStub<EventDispatcher::DispatchToGecko_t, Impl>
+            ::template Wrap<&Impl::DispatchToGecko>),
+
+    mozilla::jni::MakeNativeMethod<EventDispatcher::DisposeNative_t>(
+            mozilla::jni::NativeStub<EventDispatcher::DisposeNative_t, Impl>
+            ::template Wrap<&Impl::DisposeNative>),
+
+    mozilla::jni::MakeNativeMethod<EventDispatcher::HasGeckoListener_t>(
+            mozilla::jni::NativeStub<EventDispatcher::HasGeckoListener_t, Impl>
+            ::template Wrap<&Impl::HasGeckoListener>)
+};
+
+template<class Impl>
+class EventDispatcher::NativeCallbackDelegate::Natives : public mozilla::jni::NativeImpl<NativeCallbackDelegate, Impl>
+{
+public:
+    static const JNINativeMethod methods[3];
+};
+
+template<class Impl>
+const JNINativeMethod EventDispatcher::NativeCallbackDelegate::Natives<Impl>::methods[] = {
+
+    mozilla::jni::MakeNativeMethod<EventDispatcher::NativeCallbackDelegate::Finalize_t>(
+            mozilla::jni::NativeStub<EventDispatcher::NativeCallbackDelegate::Finalize_t, Impl>
+            ::template Wrap<&Impl::Finalize>),
+
+    mozilla::jni::MakeNativeMethod<EventDispatcher::NativeCallbackDelegate::SendError_t>(
+            mozilla::jni::NativeStub<EventDispatcher::NativeCallbackDelegate::SendError_t, Impl>
+            ::template Wrap<&Impl::SendError>),
+
+    mozilla::jni::MakeNativeMethod<EventDispatcher::NativeCallbackDelegate::SendSuccess_t>(
+            mozilla::jni::NativeStub<EventDispatcher::NativeCallbackDelegate::SendSuccess_t, Impl>
+            ::template Wrap<&Impl::SendSuccess>)
+};
+
+template<class Impl>
 class GeckoAppShell::Natives : public mozilla::jni::NativeImpl<GeckoAppShell, Impl>
 {
 public:
@@ -128,7 +174,7 @@ template<class Impl>
 class GeckoEditable::Natives : public mozilla::jni::NativeImpl<GeckoEditable, Impl>
 {
 public:
-    static const JNINativeMethod methods[8];
+    static const JNINativeMethod methods[7];
 };
 
 template<class Impl>
@@ -137,10 +183,6 @@ const JNINativeMethod GeckoEditable::Natives<Impl>::methods[] = {
     mozilla::jni::MakeNativeMethod<GeckoEditable::DisposeNative_t>(
             mozilla::jni::NativeStub<GeckoEditable::DisposeNative_t, Impl>
             ::template Wrap<&Impl::DisposeNative>),
-
-    mozilla::jni::MakeNativeMethod<GeckoEditable::OnImeAcknowledgeFocus_t>(
-            mozilla::jni::NativeStub<GeckoEditable::OnImeAcknowledgeFocus_t, Impl>
-            ::template Wrap<&Impl::OnImeAcknowledgeFocus>),
 
     mozilla::jni::MakeNativeMethod<GeckoEditable::OnImeAddCompositionRange_t>(
             mozilla::jni::NativeStub<GeckoEditable::OnImeAddCompositionRange_t, Impl>
@@ -199,73 +241,6 @@ const JNINativeMethod GeckoScreenOrientation::Natives<Impl>::methods[] = {
     mozilla::jni::MakeNativeMethod<GeckoScreenOrientation::OnOrientationChange_t>(
             mozilla::jni::NativeStub<GeckoScreenOrientation::OnOrientationChange_t, Impl>
             ::template Wrap<&Impl::OnOrientationChange>)
-};
-
-template<class Impl>
-class GeckoSmsManager::Natives : public mozilla::jni::NativeImpl<GeckoSmsManager, Impl>
-{
-public:
-    static const JNINativeMethod methods[14];
-};
-
-template<class Impl>
-const JNINativeMethod GeckoSmsManager::Natives<Impl>::methods[] = {
-
-    mozilla::jni::MakeNativeMethod<GeckoSmsManager::NotifyCursorDone_t>(
-            mozilla::jni::NativeStub<GeckoSmsManager::NotifyCursorDone_t, Impl>
-            ::template Wrap<&Impl::NotifyCursorDone>),
-
-    mozilla::jni::MakeNativeMethod<GeckoSmsManager::NotifyCursorError_t>(
-            mozilla::jni::NativeStub<GeckoSmsManager::NotifyCursorError_t, Impl>
-            ::template Wrap<&Impl::NotifyCursorError>),
-
-    mozilla::jni::MakeNativeMethod<GeckoSmsManager::NotifyGetSms_t>(
-            mozilla::jni::NativeStub<GeckoSmsManager::NotifyGetSms_t, Impl>
-            ::template Wrap<&Impl::NotifyGetSms>),
-
-    mozilla::jni::MakeNativeMethod<GeckoSmsManager::NotifyGetSmsFailed_t>(
-            mozilla::jni::NativeStub<GeckoSmsManager::NotifyGetSmsFailed_t, Impl>
-            ::template Wrap<&Impl::NotifyGetSmsFailed>),
-
-    mozilla::jni::MakeNativeMethod<GeckoSmsManager::NotifyMessageCursorResult_t>(
-            mozilla::jni::NativeStub<GeckoSmsManager::NotifyMessageCursorResult_t, Impl>
-            ::template Wrap<&Impl::NotifyMessageCursorResult>),
-
-    mozilla::jni::MakeNativeMethod<GeckoSmsManager::NotifySmsDeleteFailed_t>(
-            mozilla::jni::NativeStub<GeckoSmsManager::NotifySmsDeleteFailed_t, Impl>
-            ::template Wrap<&Impl::NotifySmsDeleteFailed>),
-
-    mozilla::jni::MakeNativeMethod<GeckoSmsManager::NotifySmsDeleted_t>(
-            mozilla::jni::NativeStub<GeckoSmsManager::NotifySmsDeleted_t, Impl>
-            ::template Wrap<&Impl::NotifySmsDeleted>),
-
-    mozilla::jni::MakeNativeMethod<GeckoSmsManager::NotifySmsDelivery_t>(
-            mozilla::jni::NativeStub<GeckoSmsManager::NotifySmsDelivery_t, Impl>
-            ::template Wrap<&Impl::NotifySmsDelivery>),
-
-    mozilla::jni::MakeNativeMethod<GeckoSmsManager::NotifySmsMarkAsReadFailed_t>(
-            mozilla::jni::NativeStub<GeckoSmsManager::NotifySmsMarkAsReadFailed_t, Impl>
-            ::template Wrap<&Impl::NotifySmsMarkAsReadFailed>),
-
-    mozilla::jni::MakeNativeMethod<GeckoSmsManager::NotifySmsMarkedAsRead_t>(
-            mozilla::jni::NativeStub<GeckoSmsManager::NotifySmsMarkedAsRead_t, Impl>
-            ::template Wrap<&Impl::NotifySmsMarkedAsRead>),
-
-    mozilla::jni::MakeNativeMethod<GeckoSmsManager::NotifySmsReceived_t>(
-            mozilla::jni::NativeStub<GeckoSmsManager::NotifySmsReceived_t, Impl>
-            ::template Wrap<&Impl::NotifySmsReceived>),
-
-    mozilla::jni::MakeNativeMethod<GeckoSmsManager::NotifySmsSendFailed_t>(
-            mozilla::jni::NativeStub<GeckoSmsManager::NotifySmsSendFailed_t, Impl>
-            ::template Wrap<&Impl::NotifySmsSendFailed>),
-
-    mozilla::jni::MakeNativeMethod<GeckoSmsManager::NotifySmsSent_t>(
-            mozilla::jni::NativeStub<GeckoSmsManager::NotifySmsSent_t, Impl>
-            ::template Wrap<&Impl::NotifySmsSent>),
-
-    mozilla::jni::MakeNativeMethod<GeckoSmsManager::NotifyThreadCursorResult_t>(
-            mozilla::jni::NativeStub<GeckoSmsManager::NotifyThreadCursorResult_t, Impl>
-            ::template Wrap<&Impl::NotifyThreadCursorResult>)
 };
 
 template<class Impl>
@@ -362,6 +337,25 @@ const JNINativeMethod PrefsHelper::Natives<Impl>::methods[] = {
 };
 
 template<class Impl>
+class ScreenManagerHelper::Natives : public mozilla::jni::NativeImpl<ScreenManagerHelper, Impl>
+{
+public:
+    static const JNINativeMethod methods[2];
+};
+
+template<class Impl>
+const JNINativeMethod ScreenManagerHelper::Natives<Impl>::methods[] = {
+
+    mozilla::jni::MakeNativeMethod<ScreenManagerHelper::AddDisplay_t>(
+            mozilla::jni::NativeStub<ScreenManagerHelper::AddDisplay_t, Impl>
+            ::template Wrap<&Impl::AddDisplay>),
+
+    mozilla::jni::MakeNativeMethod<ScreenManagerHelper::RemoveDisplay_t>(
+            mozilla::jni::NativeStub<ScreenManagerHelper::RemoveDisplay_t, Impl>
+            ::template Wrap<&Impl::RemoveDisplay>)
+};
+
+template<class Impl>
 class SurfaceTextureListener::Natives : public mozilla::jni::NativeImpl<SurfaceTextureListener, Impl>
 {
 public:
@@ -452,6 +446,21 @@ const JNINativeMethod NativePanZoomController::Natives<Impl>::methods[] = {
     mozilla::jni::MakeNativeMethod<NativePanZoomController::SetIsLongpressEnabled_t>(
             mozilla::jni::NativeStub<NativePanZoomController::SetIsLongpressEnabled_t, Impl>
             ::template Wrap<&Impl::SetIsLongpressEnabled>)
+};
+
+template<class Impl>
+class VsyncSource::Natives : public mozilla::jni::NativeImpl<VsyncSource, Impl>
+{
+public:
+    static const JNINativeMethod methods[1];
+};
+
+template<class Impl>
+const JNINativeMethod VsyncSource::Natives<Impl>::methods[] = {
+
+    mozilla::jni::MakeNativeMethod<VsyncSource::NotifyVsync_t>(
+            mozilla::jni::NativeStub<VsyncSource::NotifyVsync_t, Impl>
+            ::template Wrap<&Impl::NotifyVsync>)
 };
 
 template<class Impl>

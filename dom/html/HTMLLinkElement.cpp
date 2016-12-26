@@ -95,7 +95,7 @@ NS_IMPL_ELEMENT_CLONE(HTMLLinkElement)
 bool
 HTMLLinkElement::Disabled()
 {
-  CSSStyleSheet* ss = GetSheet();
+  StyleSheet* ss = GetSheet();
   return ss && ss->Disabled();
 }
 
@@ -109,8 +109,7 @@ HTMLLinkElement::GetMozDisabled(bool* aDisabled)
 void
 HTMLLinkElement::SetDisabled(bool aDisabled)
 {
-  CSSStyleSheet* ss = GetSheet();
-  if (ss) {
+  if (StyleSheet* ss = GetSheet()) {
     ss->SetDisabled(aDisabled);
   }
 }
@@ -170,7 +169,7 @@ HTMLLinkElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
   }
 
   if (IsInComposedDoc()) {
-    TryDNSPrefetchPreconnectOrPrefetch();
+    TryDNSPrefetchPreconnectOrPrefetchOrPrerender();
   }
 
   void (HTMLLinkElement::*update)() = &HTMLLinkElement::UpdateStyleSheetInternal;
@@ -390,7 +389,7 @@ HTMLLinkElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
 
       if ((aName == nsGkAtoms::rel || aName == nsGkAtoms::href) &&
           IsInComposedDoc()) {
-        TryDNSPrefetchPreconnectOrPrefetch();
+        TryDNSPrefetchPreconnectOrPrefetchOrPrerender();
       }
 
       UpdateStyleSheetInternal(nullptr, nullptr,
@@ -422,9 +421,9 @@ HTMLLinkElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
 }
 
 nsresult
-HTMLLinkElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
+HTMLLinkElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
-  return PreHandleEventForAnchors(aVisitor);
+  return GetEventTargetParentForAnchors(aVisitor);
 }
 
 nsresult

@@ -157,9 +157,17 @@ Bootstrap.prototype = {
 
         setTimeout(() => {
           for (let uri of Object.keys(loader.sandboxes)) {
-            Cu.nukeSandbox(loader.sandboxes[uri]);
+            let sandbox = loader.sandboxes[uri];
+            if (Cu.getClassName(sandbox, true) == "Sandbox")
+              Cu.nukeSandbox(sandbox);
             delete loader.sandboxes[uri];
             delete loader.modules[uri];
+          }
+
+          try {
+            Cu.nukeSandbox(loader.sharedGlobalSandbox);
+          } catch (e) {
+            Cu.reportError(e);
           }
 
           resolve();

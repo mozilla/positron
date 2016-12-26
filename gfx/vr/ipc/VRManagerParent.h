@@ -27,7 +27,7 @@ class VRManagerParent final : public PVRManagerParent
                             , public ShmemAllocator
 {
 public:
-  explicit VRManagerParent(ProcessId aChildProcessId);
+  explicit VRManagerParent(ProcessId aChildProcessId, bool aIsContentChild);
 
   static VRManagerParent* CreateSameProcess();
   static bool CreateForGPUProcess(Endpoint<PVRManagerParent>&& aEndpoint);
@@ -54,6 +54,7 @@ public:
 
   virtual void NotifyNotUsed(PTextureParent* aTexture, uint64_t aTransactionId) override;
   virtual void SendAsyncMessage(const InfallibleTArray<AsyncParentMessageData>& aMessage) override;
+  bool SendGamepadUpdate(const GamepadChangeEvent& aGamepadEvent);
 
 protected:
   ~VRManagerParent();
@@ -78,12 +79,15 @@ protected:
   virtual void ActorDestroy(ActorDestroyReason why) override;
   void OnChannelConnected(int32_t pid) override;
 
-  virtual bool RecvRefreshDisplays() override;
-  virtual bool RecvGetDisplays(nsTArray<VRDisplayInfo> *aDisplays) override;
-  virtual bool RecvResetSensor(const uint32_t& aDisplayID) override;
-  virtual bool RecvGetSensorState(const uint32_t& aDisplayID, VRHMDSensorState* aState) override;
-  virtual bool RecvGetImmediateSensorState(const uint32_t& aDisplayID, VRHMDSensorState* aState) override;
-  virtual bool RecvSetHaveEventListener(const bool& aHaveEventListener) override;
+  virtual mozilla::ipc::IPCResult RecvRefreshDisplays() override;
+  virtual mozilla::ipc::IPCResult RecvGetDisplays(nsTArray<VRDisplayInfo> *aDisplays) override;
+  virtual mozilla::ipc::IPCResult RecvResetSensor(const uint32_t& aDisplayID) override;
+  virtual mozilla::ipc::IPCResult RecvGetSensorState(const uint32_t& aDisplayID, VRHMDSensorState* aState) override;
+  virtual mozilla::ipc::IPCResult RecvGetImmediateSensorState(const uint32_t& aDisplayID, VRHMDSensorState* aState) override;
+  virtual mozilla::ipc::IPCResult RecvSetHaveEventListener(const bool& aHaveEventListener) override;
+  virtual mozilla::ipc::IPCResult RecvControllerListenerAdded() override;
+  virtual mozilla::ipc::IPCResult RecvControllerListenerRemoved() override;
+  virtual mozilla::ipc::IPCResult RecvGetControllers(nsTArray<VRControllerInfo> *aControllers) override;
 
 private:
   void RegisterWithManager();
@@ -105,6 +109,7 @@ private:
   // Keep the VRManager alive, until we have destroyed ourselves.
   RefPtr<VRManager> mVRManagerHolder;
   bool mHaveEventListener;
+  bool mIsContentChild;
 };
 
 } // namespace mozilla

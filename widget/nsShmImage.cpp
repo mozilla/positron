@@ -39,7 +39,6 @@ nsShmImage::nsShmImage(Display* aDisplay,
   , mShmAddr(nullptr)
 {
   mConnection = XGetXCBConnection(aDisplay);
-  mozilla::PodZero(&mPutRequest);
   mozilla::PodZero(&mSyncRequest);
 }
 
@@ -239,28 +238,29 @@ nsShmImage::DestroyImage()
     mShmSeg = XCB_NONE;
   }
   DestroyShmSegment();
+  // Avoid leaking any pending reply.  No real need to wait but CentOS 6 build
+  // machines don't have xcb_discard_reply().
+  WaitIfPendingReply();
+}
+
+// Wait for any in-flight shm-affected requests to complete.
+// Typically X clients would wait for a XShmCompletionEvent to be received,
+// but this works as it's sent immediately after the request is sent.
+void
+nsShmImage::WaitIfPendingReply()
+{
+  if (mRequestPending) {
+    xcb_get_input_focus_reply_t* reply =
+      xcb_get_input_focus_reply(mConnection, mSyncRequest, nullptr);
+    free(reply);
+    mRequestPending = false;
+  }
 }
 
 already_AddRefed<DrawTarget>
 nsShmImage::CreateDrawTarget(const mozilla::LayoutDeviceIntRegion& aRegion)
 {
-  // Wait for any in-flight requests to complete.
-  // Typically X clients would wait for a XShmCompletionEvent to be received,
-  // but this works as it's sent immediately after the request is processed.
-  if (mRequestPending) {
-    xcb_get_input_focus_reply_t* reply;
-    if ((reply = xcb_get_input_focus_reply(mConnection, mSyncRequest, nullptr))) {
-      free(reply);
-    }
-    mRequestPending = false;
-
-    xcb_generic_error_t* error;
-    if ((error = xcb_request_check(mConnection, mPutRequest))) {
-      gShmAvailable = false;
-      free(error);
-      return nullptr;
-    }
-  }
+  WaitIfPendingReply();
 
   // Due to bug 1205045, we must avoid making GTK calls off the main thread to query window size.
   // Instead we just track the largest offset within the image we are drawing to and grow the image
@@ -304,19 +304,19 @@ nsShmImage::Put(const mozilla::LayoutDeviceIntRegion& aRegion)
                           xrects.Length(), xrects.Elements());
 
   if (mPixmap != XCB_NONE) {
-    mPutRequest = xcb_copy_area_checked(mConnection, mPixmap, mWindow, mGC,
-                                        0, 0, 0, 0, mSize.width, mSize.height);
+    xcb_copy_area(mConnection, mPixmap, mWindow, mGC,
+                  0, 0, 0, 0, mSize.width, mSize.height);
   } else {
-    mPutRequest = xcb_shm_put_image_checked(mConnection, mWindow, mGC,
-                                            mSize.width, mSize.height,
-                                            0, 0, mSize.width, mSize.height,
-                                            0, 0, mDepth,
-                                            XCB_IMAGE_FORMAT_Z_PIXMAP, 0,
-                                            mShmSeg, 0);
+    xcb_shm_put_image(mConnection, mWindow, mGC,
+                      mSize.width, mSize.height,
+                      0, 0, mSize.width, mSize.height,
+                      0, 0, mDepth,
+                      XCB_IMAGE_FORMAT_Z_PIXMAP, 0,
+                      mShmSeg, 0);
   }
 
   // Send a request that returns a response so that we don't have to start a
-  // sync in nsShmImage::CreateDrawTarget to retrieve the result of mPutRequest.
+  // sync in nsShmImage::CreateDrawTarget.
   mSyncRequest = xcb_get_input_focus(mConnection);
   mRequestPending = true;
 

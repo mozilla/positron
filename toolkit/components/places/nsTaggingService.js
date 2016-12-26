@@ -110,7 +110,7 @@ TaggingService.prototype = {
    * @throws Cr.NS_ERROR_INVALID_ARG if any element of the input array is not
    *         a valid tag.
    */
-  _convertInputMixedTagsArray(aTags, trim=false) {
+  _convertInputMixedTagsArray(aTags, trim = false) {
     // Handle sparse array with a .filter.
     return aTags.filter(tag => tag !== undefined)
                 .map(idOrName => {
@@ -154,13 +154,19 @@ TaggingService.prototype = {
           this._createTag(tag.name, aSource);
         }
 
-        if (this._getItemIdForTaggedURI(aURI, tag.name) == -1) {
+        let itemId = this._getItemIdForTaggedURI(aURI, tag.name);
+        if (itemId == -1) {
           // The provided URI is not yet tagged, add a tag for it.
           // Note that bookmarks under tag containers must have null titles.
           PlacesUtils.bookmarks.insertBookmark(
             tag.id, aURI, PlacesUtils.bookmarks.DEFAULT_INDEX,
             /* aTitle */ null, /* aGuid */ null, aSource
           );
+        } else {
+          // Otherwise, bump the tag's timestamp, so that we can increment the
+          // sync change counter for all bookmarks with the URI.
+          PlacesUtils.bookmarks.setItemLastModified(itemId,
+            PlacesUtils.toPRTime(Date.now()), aSource);
         }
 
         // Try to preserve user's tag name casing.
@@ -299,7 +305,7 @@ TaggingService.prototype = {
 
     var tags = [];
     var bookmarkIds = PlacesUtils.bookmarks.getBookmarkIdsForURI(aURI);
-    for (var i=0; i < bookmarkIds.length; i++) {
+    for (var i = 0; i < bookmarkIds.length; i++) {
       var folderId = PlacesUtils.bookmarks.getFolderIdForItem(bookmarkIds[i]);
       if (this._tagFolders[folderId])
         tags.push(this._tagFolders[folderId]);
@@ -458,12 +464,11 @@ TaggingService.prototype = {
       delete this._tagFolders[aItemId];
   },
 
-  onItemVisited: function () {},
-  onBeginUpdateBatch: function () {},
-  onEndUpdateBatch: function () {},
+  onItemVisited: function() {},
+  onBeginUpdateBatch: function() {},
+  onEndUpdateBatch: function() {},
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// nsISupports
+  // nsISupports
 
   classID: Components.ID("{bbc23860-2553-479d-8b78-94d9038334f7}"),
 
@@ -620,8 +625,8 @@ TagAutoCompleteSearch.prototype = {
       searchString.lastIndexOf(";"));
     var before = '';
     if (index != -1) {
-      before = searchString.slice(0, index+1);
-      searchString = searchString.slice(index+1);
+      before = searchString.slice(0, index + 1);
+      searchString = searchString.slice(index + 1);
       // skip past whitespace
       var m = searchString.match(/\s+/);
       if (m) {
@@ -695,8 +700,7 @@ TagAutoCompleteSearch.prototype = {
     this._stopped = true;
   },
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// nsISupports
+  // nsISupports
 
   classID: Components.ID("{1dcc23b0-d4cb-11dc-9ad6-479d56d89593}"),
 

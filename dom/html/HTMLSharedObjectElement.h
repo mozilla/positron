@@ -43,6 +43,9 @@ public:
   // Can't use macro for nsIDOMHTMLEmbedElement because it has conflicts with
   // NS_DECL_NSIDOMHTMLAPPLETELEMENT.
 
+  // EventTarget
+  virtual void AsyncEventRunning(AsyncEventDispatcher* aEvent) override;
+
   // nsIDOMHTMLEmbedElement
   NS_IMETHOD GetSrc(nsAString &aSrc) override;
   NS_IMETHOD SetSrc(const nsAString &aSrc) override;
@@ -187,9 +190,10 @@ public:
   // height covered by <applet>
   // align covered by <applet>
   // name covered by <applet>
-  nsIDocument* GetSVGDocument()
+  nsIDocument*
+  GetSVGDocument(nsIPrincipal& aSubjectPrincipal)
   {
-    return GetContentDocument();
+    return GetContentDocument(aSubjectPrincipal);
   }
 
   /**

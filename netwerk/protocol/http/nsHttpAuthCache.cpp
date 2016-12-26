@@ -13,7 +13,6 @@
 #include "mozilla/Attributes.h"
 #include "nsString.h"
 #include "nsCRT.h"
-#include "mozIApplicationClearPrivateDataParams.h"
 #include "nsIObserverService.h"
 #include "mozilla/Services.h"
 #include "mozilla/DebugOnly.h"
@@ -60,7 +59,7 @@ nsHttpAuthCache::nsHttpAuthCache()
 {
     nsCOMPtr<nsIObserverService> obsSvc = services::GetObserverService();
     if (obsSvc) {
-        obsSvc->AddObserver(mObserver, "clear-origin-data", false);
+        obsSvc->AddObserver(mObserver, "clear-origin-attributes-data", false);
     }
 }
 
@@ -70,7 +69,7 @@ nsHttpAuthCache::~nsHttpAuthCache()
         ClearAll();
     nsCOMPtr<nsIObserverService> obsSvc = services::GetObserverService();
     if (obsSvc) {
-        obsSvc->RemoveObserver(mObserver, "clear-origin-data");
+        obsSvc->RemoveObserver(mObserver, "clear-origin-attributes-data");
         mObserver->mOwner = nullptr;
     }
 }

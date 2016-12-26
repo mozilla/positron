@@ -1,4 +1,3 @@
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
@@ -94,7 +93,8 @@ add_task(function* () {
     let item = RequestsMenu.getItemAtIndex(index);
 
     info("Verifying request #" + index);
-    yield verifyRequestItemTarget(item, request.method, request.uri, request.details);
+    yield verifyRequestItemTarget(RequestsMenu, item,
+      request.method, request.uri, request.details);
 
     index++;
   }

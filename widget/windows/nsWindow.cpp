@@ -58,6 +58,7 @@
 #include "gfxEnv.h"
 #include "gfxPlatform.h"
 #include "gfxPrefs.h"
+#include "mozilla/Logging.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/MiscEvents.h"
 #include "mozilla/MouseEvents.h"
@@ -209,12 +210,14 @@
 #include "InputData.h"
 
 #include "mozilla/Telemetry.h"
+#include "mozilla/plugins/PluginProcessParent.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::gfx;
 using namespace mozilla::layers;
 using namespace mozilla::widget;
+using namespace mozilla::plugins;
 
 /**************************************************************
  **************************************************************
@@ -270,6 +273,9 @@ int             nsWindow::sTrimOnMinimize         = 2;
 
 TriStateBool nsWindow::sHasBogusPopupsDropShadowOnMultiMonitor = TRI_UNKNOWN;
 
+WPARAM nsWindow::sMouseExitwParam = 0;
+LPARAM nsWindow::sMouseExitlParamScreen = 0;
+
 static SystemTimeConverter<DWORD>&
 TimeConverter() {
   static SystemTimeConverter<DWORD> timeConverterSingleton;
@@ -280,7 +286,7 @@ namespace mozilla {
 
 class CurrentWindowsTimeGetter {
 public:
-  CurrentWindowsTimeGetter(HWND aWnd)
+  explicit CurrentWindowsTimeGetter(HWND aWnd)
     : mWnd(aWnd)
   {
   }
@@ -326,6 +332,118 @@ private:
 Maybe<TimeStamp> CurrentWindowsTimeGetter::sBackwardsSkewStamp;
 DWORD CurrentWindowsTimeGetter::sLastPostTime = 0;
 
+#if defined(ACCESSIBILITY)
+/**
+ * Windows touchscreen code works by setting a global WH_GETMESSAGE hook and
+ * injecting tiptsf.dll. The touchscreen process then posts registered messages
+ * to our main thread. The tiptsf hook picks up those registered messages and
+ * uses them as commands, some of which call into UIA, which then calls into
+ * MSAA, which then sends WM_GETOBJECT to us.
+ *
+ * We can get ahead of this by installing our own thread-local WH_GETMESSAGE
+ * hook. Since thread-local hooks are called ahead of global hooks, we will
+ * see these registered messages before tiptsf does. At this point we can then
+ * raise a flag that blocks a11y before invoking CallNextHookEx which will then
+ * invoke the global tiptsf hook. Then when we see WM_GETOBJECT, we check the
+ * flag by calling TIPMessageHandler::IsA11yBlocked().
+ */
+class TIPMessageHandler
+{
+public:
+  ~TIPMessageHandler()
+  {
+    if (mHook) {
+      ::UnhookWindowsHookEx(mHook);
+    }
+  }
+
+  static void Initialize()
+  {
+    MOZ_ASSERT(!sInstance);
+    sInstance = new TIPMessageHandler();
+    ClearOnShutdown(&sInstance);
+  }
+
+  static bool IsA11yBlocked()
+  {
+    MOZ_ASSERT(sInstance);
+    if (!sInstance) {
+      return false;
+    }
+
+    return sInstance->mA11yBlockCount > 0;
+  }
+
+private:
+  TIPMessageHandler()
+    : mHook(nullptr)
+    , mA11yBlockCount(0)
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    // Registered messages used by tiptsf
+    mMessages[0] = ::RegisterWindowMessage(L"ImmersiveFocusNotification");
+    mMessages[1] = ::RegisterWindowMessage(L"TipCloseMenus");
+    mMessages[2] = ::RegisterWindowMessage(L"TabletInputPanelOpening");
+    mMessages[3] = ::RegisterWindowMessage(L"IHM Pen or Touch Event noticed");
+    mMessages[4] = ::RegisterWindowMessage(L"ProgrammabilityCaretVisibility");
+    mMessages[5] = ::RegisterWindowMessage(L"CaretTrackingUpdateIPHidden");
+    mMessages[6] = ::RegisterWindowMessage(L"CaretTrackingUpdateIPInfo");
+
+    mHook = ::SetWindowsHookEx(WH_GETMESSAGE, &TIPHook, nullptr,
+                               ::GetCurrentThreadId());
+    MOZ_ASSERT(mHook);
+  }
+
+  class MOZ_RAII A11yInstantiationBlocker
+  {
+  public:
+    A11yInstantiationBlocker()
+    {
+      MOZ_ASSERT(TIPMessageHandler::sInstance);
+      ++TIPMessageHandler::sInstance->mA11yBlockCount;
+    }
+
+    ~A11yInstantiationBlocker()
+    {
+      MOZ_ASSERT(TIPMessageHandler::sInstance &&
+                 TIPMessageHandler::sInstance->mA11yBlockCount > 0);
+      --TIPMessageHandler::sInstance->mA11yBlockCount;
+    }
+  };
+
+  friend class A11yInstantiationBlocker;
+
+  static LRESULT CALLBACK TIPHook(int aCode, WPARAM aWParam, LPARAM aLParam)
+  {
+    if (aCode < 0 || !sInstance) {
+      return ::CallNextHookEx(nullptr, aCode, aWParam, aLParam);
+    }
+
+    MSG* msg = reinterpret_cast<MSG*>(aLParam);
+    UINT& msgCode = msg->message;
+
+    for (uint32_t i = 0; i < ArrayLength(sInstance->mMessages); ++i) {
+      if (msgCode == sInstance->mMessages[i]) {
+        A11yInstantiationBlocker block;
+        return ::CallNextHookEx(nullptr, aCode, aWParam, aLParam);
+      }
+    }
+
+    return ::CallNextHookEx(nullptr, aCode, aWParam, aLParam);
+  }
+
+  static StaticAutoPtr<TIPMessageHandler> sInstance;
+
+  HHOOK     mHook;
+  UINT      mMessages[7];
+  uint32_t  mA11yBlockCount;
+};
+
+StaticAutoPtr<TIPMessageHandler> TIPMessageHandler::sInstance;
+
+#endif // defined(ACCESSIBILITY)
+
 } // namespace mozilla
 
 /**************************************************************
@@ -336,7 +454,7 @@ DWORD CurrentWindowsTimeGetter::sLastPostTime = 0;
 
 static const char *sScreenManagerContractID       = "@mozilla.org/gfx/screenmanager;1";
 
-extern PRLogModuleInfo* gWindowsLog;
+extern mozilla::LazyLogModule gWindowsLog;
 
 // Global used in Show window enumerations.
 static bool     gWindowsVisible                   = false;
@@ -453,6 +571,9 @@ nsWindow::nsWindow()
     // WinTaskbar.cpp for details.
     mozilla::widget::WinTaskbar::RegisterAppUserModelID();
     KeyboardLayout::GetInstance()->OnLayoutChange(::GetKeyboardLayout(0));
+#if defined(ACCESSIBILITY)
+    mozilla::TIPMessageHandler::Initialize();
+#endif // defined(ACCESSIBILITY)
     IMEHandler::Initialize();
     if (SUCCEEDED(::OleInitialize(nullptr))) {
       sIsOleInitialized = TRUE;
@@ -464,7 +585,9 @@ nsWindow::nsWindow()
     // Init theme data
     nsUXThemeData::UpdateNativeThemeInfo();
     RedirectedKeyDownMessageManager::Forget();
-    InkCollector::sInkCollector = new InkCollector();
+    if (mPointerEvents.ShouldEnableInkCollector()) {
+      InkCollector::sInkCollector = new InkCollector();
+    }
 
     Preferences::AddBoolVarCache(&gIsPointerEventsEnabled,
                                  "dom.w3c_pointer_events.enabled",
@@ -499,8 +622,10 @@ nsWindow::~nsWindow()
 
   // Global shutdown
   if (sInstanceCount == 0) {
-    InkCollector::sInkCollector->Shutdown();
-    InkCollector::sInkCollector = nullptr;
+    if (InkCollector::sInkCollector) {
+      InkCollector::sInkCollector->Shutdown();
+      InkCollector::sInkCollector = nullptr;
+    }
     IMEHandler::Terminate();
     NS_IF_RELEASE(sCursorImgContainer);
     if (sIsOleInitialized) {
@@ -1027,7 +1152,8 @@ void nsWindow::SubclassWindow(BOOL bState)
  **************************************************************/
 
 // Get and set parent widgets
-NS_IMETHODIMP nsWindow::SetParent(nsIWidget *aNewParent)
+void
+nsWindow::SetParent(nsIWidget *aNewParent)
 {
   mParent = aNewParent;
 
@@ -1039,13 +1165,12 @@ NS_IMETHODIMP nsWindow::SetParent(nsIWidget *aNewParent)
   if (aNewParent) {
     ReparentNativeWidget(aNewParent);
     aNewParent->AddChild(this);
-    return NS_OK;
+    return;
   }
   if (mWnd) {
     // If we have no parent, SetParent should return the desktop.
     VERIFY(::SetParent(mWnd, nullptr));
   }
-  return NS_OK;
 }
 
 void
@@ -1160,7 +1285,7 @@ nsWindow::EnumAllChildWindProc(HWND aWnd, LPARAM aParam)
 {
   nsWindow *wnd = WinUtils::GetNSWindowPtr(aWnd);
   if (wnd) {
-    ((nsWindow::WindowEnumCallback*)aParam)(wnd);
+    reinterpret_cast<nsTArray<nsWindow*>*>(aParam)->AppendElement(wnd);
   }
   return TRUE;
 }
@@ -1170,18 +1295,20 @@ nsWindow::EnumAllThreadWindowProc(HWND aWnd, LPARAM aParam)
 {
   nsWindow *wnd = WinUtils::GetNSWindowPtr(aWnd);
   if (wnd) {
-    ((nsWindow::WindowEnumCallback*)aParam)(wnd);
+    reinterpret_cast<nsTArray<nsWindow*>*>(aParam)->AppendElement(wnd);
   }
   EnumChildWindows(aWnd, EnumAllChildWindProc, aParam);
   return TRUE;
 }
 
-void
-nsWindow::EnumAllWindows(WindowEnumCallback aCallback)
+/* static*/ nsTArray<nsWindow*>
+nsWindow::EnumAllWindows()
 {
+  nsTArray<nsWindow*> windows;
   EnumThreadWindows(GetCurrentThreadId(),
                     EnumAllThreadWindowProc,
-                    (LPARAM)aCallback);
+                    reinterpret_cast<LPARAM>(&windows));
+  return windows;
 }
 
 static already_AddRefed<SourceSurface>
@@ -1363,7 +1490,7 @@ NS_IMETHODIMP nsWindow::Show(bool bState)
               ::ShowWindow(mWnd, SW_SHOWNORMAL);
             } else {
               ::ShowWindow(mWnd, SW_SHOWNOACTIVATE);
-              GetAttention(2);
+              Unused << GetAttention(2);
             }
             break;
         }
@@ -1555,7 +1682,8 @@ nsWindow::GetSizeConstraints()
 }
 
 // Move this component
-NS_IMETHODIMP nsWindow::Move(double aX, double aY)
+void
+nsWindow::Move(double aX, double aY)
 {
   if (mWindowType == eWindowType_toplevel ||
       mWindowType == eWindowType_dialog) {
@@ -1579,7 +1707,7 @@ NS_IMETHODIMP nsWindow::Move(double aX, double aY)
   if (mWindowType != eWindowType_popup && (mBounds.x == x) && (mBounds.y == y))
   {
     // Nothing to do, since it is already positioned correctly.
-    return NS_OK;
+    return;
   }
 
   mBounds.x = x;
@@ -1629,11 +1757,11 @@ NS_IMETHODIMP nsWindow::Move(double aX, double aY)
     SetThemeRegion();
   }
   NotifyRollupGeometryChange();
-  return NS_OK;
 }
 
 // Resize this component
-NS_IMETHODIMP nsWindow::Resize(double aWidth, double aHeight, bool aRepaint)
+void
+nsWindow::Resize(double aWidth, double aHeight, bool aRepaint)
 {
   // for top-level windows only, convert coordinates from desktop pixels
   // (the "parent" coordinate space) to the window's device pixel space
@@ -1651,7 +1779,7 @@ NS_IMETHODIMP nsWindow::Resize(double aWidth, double aHeight, bool aRepaint)
     if (aRepaint) {
       Invalidate();
     }
-    return NS_OK;
+    return;
   }
 
   // Set cached value for lightweight and printing
@@ -1679,12 +1807,12 @@ NS_IMETHODIMP nsWindow::Resize(double aWidth, double aHeight, bool aRepaint)
     Invalidate();
 
   NotifyRollupGeometryChange();
-  return NS_OK;
 }
 
 // Resize this component
-NS_IMETHODIMP nsWindow::Resize(double aX, double aY, double aWidth,
-                               double aHeight, bool aRepaint)
+void
+nsWindow::Resize(double aX, double aY, double aWidth,
+                 double aHeight, bool aRepaint)
 {
   // for top-level windows only, convert coordinates from desktop pixels
   // (the "parent" coordinate space) to the window's device pixel space
@@ -1705,7 +1833,7 @@ NS_IMETHODIMP nsWindow::Resize(double aX, double aY, double aWidth,
     if (aRepaint) {
       Invalidate();
     }
-    return NS_OK;
+    return;
   }
 
   // Set cached value for lightweight and printing
@@ -1743,10 +1871,9 @@ NS_IMETHODIMP nsWindow::Resize(double aX, double aY, double aWidth,
     Invalidate();
 
   NotifyRollupGeometryChange();
-  return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 nsWindow::BeginResizeDrag(WidgetGUIEvent* aEvent,
                           int32_t aHorizontal,
                           int32_t aVertical)
@@ -1986,12 +2113,12 @@ nsWindow::ConstrainPosition(bool aAllowSlop, int32_t *aX, int32_t *aY)
  **************************************************************/
 
 // Enable/disable this component
-NS_IMETHODIMP nsWindow::Enable(bool bState)
+void
+nsWindow::Enable(bool bState)
 {
   if (mWnd) {
     ::EnableWindow(mWnd, bState);
   }
-  return NS_OK;
 }
 
 // Return the current enable state
@@ -2932,17 +3059,18 @@ void nsWindow::UpdateGlass()
  *
  **************************************************************/
 
-NS_IMETHODIMP nsWindow::HideWindowChrome(bool aShouldHide)
+void
+nsWindow::HideWindowChrome(bool aShouldHide)
 {
   HWND hwnd = WinUtils::GetTopLevelHWND(mWnd, true);
   if (!WinUtils::GetNSWindowPtr(hwnd))
   {
     NS_WARNING("Trying to hide window decorations in an embedded context");
-    return NS_ERROR_FAILURE;
+    return;
   }
 
   if (mHideChrome == aShouldHide)
-    return NS_OK;
+    return;
 
   DWORD_PTR style, exStyle;
   mHideChrome = aShouldHide;
@@ -2973,8 +3101,6 @@ NS_IMETHODIMP nsWindow::HideWindowChrome(bool aShouldHide)
   VERIFY_WINDOW_STYLE(style);
   ::SetWindowLongPtrW(hwnd, GWL_STYLE, style);
   ::SetWindowLongPtrW(hwnd, GWL_EXSTYLE, exStyle);
-
-  return NS_OK;
 }
 
 /**************************************************************
@@ -3271,6 +3397,17 @@ nsWindow::MakeFullScreen(bool aFullScreen, nsIScreen* aTargetScreen)
     mWidgetListener->FullscreenChanged(aFullScreen);
   }
 
+  // Send a eMouseEnterIntoWidget event since Windows has already sent
+  // a WM_MOUSELEAVE that caused us to send a eMouseExitFromWidget event.
+  if (aFullScreen && !sCurrentWindow) {
+    sCurrentWindow = this;
+    LPARAM pos = sCurrentWindow->lParamToClient(sMouseExitlParamScreen);
+    sCurrentWindow->DispatchMouseEvent(eMouseEnterIntoWidget,
+                                       sMouseExitwParam, pos, false,
+                                       WidgetMouseEvent::eLeftButton,
+                                       MOUSE_INPUT_SOURCE());
+  }
+
   return NS_OK;
 }
 
@@ -3350,12 +3487,20 @@ nsWindow::SetNativeData(uint32_t aDataType, uintptr_t aVal)
 {
   switch (aDataType) {
     case NS_NATIVE_CHILD_WINDOW:
-      SetChildStyleAndParent(reinterpret_cast<HWND>(aVal), mWnd);
-      break;
     case NS_NATIVE_CHILD_OF_SHAREABLE_WINDOW:
-      SetChildStyleAndParent(reinterpret_cast<HWND>(aVal),
-                             WinUtils::GetTopLevelHWND(mWnd));
-      break;
+      {
+        HWND childHwnd = reinterpret_cast<HWND>(aVal);
+        DWORD childProc = 0;
+        GetWindowThreadProcessId(childHwnd, &childProc);
+        if (!PluginProcessParent::IsPluginProcessId(static_cast<base::ProcessId>(childProc))) {
+          MOZ_ASSERT_UNREACHABLE("SetNativeData window origin was not a plugin process.");
+          break;
+        }
+        HWND parentHwnd =
+          aDataType == NS_NATIVE_CHILD_WINDOW ? mWnd : WinUtils::GetTopLevelHWND(mWnd);
+        SetChildStyleAndParent(childHwnd, parentHwnd);
+        break;
+      }
     default:
       NS_ERROR("SetNativeData called with unsupported data type.");
   }
@@ -3401,7 +3546,8 @@ NS_IMETHODIMP nsWindow::SetTitle(const nsAString& aTitle)
  *
  **************************************************************/
 
-NS_IMETHODIMP nsWindow::SetIcon(const nsAString& aIconSpec) 
+void
+nsWindow::SetIcon(const nsAString& aIconSpec)
 {
   // Assume the given string is a local identifier for an icon file.
 
@@ -3409,7 +3555,7 @@ NS_IMETHODIMP nsWindow::SetIcon(const nsAString& aIconSpec)
   ResolveIconName(aIconSpec, NS_LITERAL_STRING(".ico"),
                   getter_AddRefs(iconFile));
   if (!iconFile)
-    return NS_OK; // not an error if icon is not found
+    return;
 
   nsAutoString iconPath;
   iconFile->GetPath(iconPath);
@@ -3459,7 +3605,6 @@ NS_IMETHODIMP nsWindow::SetIcon(const nsAString& aIconSpec)
             cPath.get(), ::GetLastError()));
   }
 #endif
-  return NS_OK;
 }
 
 /**************************************************************
@@ -3589,7 +3734,7 @@ nsWindow::CaptureRollupEvents(nsIRollupListener* aListener, bool aDoCapture)
  **************************************************************/
 
 // Draw user's attention to this window until it comes to foreground.
-NS_IMETHODIMP
+nsresult
 nsWindow::GetAttention(int32_t aCycleCount)
 {
   // Got window?
@@ -3707,8 +3852,8 @@ nsWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
  * Called after the dialog is loaded and it has a default button.
  *
  **************************************************************/
- 
-NS_IMETHODIMP
+
+nsresult
 nsWindow::OnDefaultButtonLoaded(const LayoutDeviceIntRect& aButtonRect)
 {
   if (aButtonRect.IsEmpty())
@@ -4002,7 +4147,7 @@ bool
 nsWindow::DispatchMouseEvent(EventMessage aEventMessage, WPARAM wParam,
                              LPARAM lParam, bool aIsContextMenuKey,
                              int16_t aButton, uint16_t aInputSource,
-                             uint16_t aPointerId)
+                             WinPointerInfo* aPointerInfo)
 {
   bool result = false;
 
@@ -4010,6 +4155,19 @@ nsWindow::DispatchMouseEvent(EventMessage aEventMessage, WPARAM wParam,
 
   if (!mWidgetListener) {
     return result;
+  }
+
+  LayoutDeviceIntPoint eventPoint(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+  LayoutDeviceIntPoint mpScreen = eventPoint + WidgetToScreenOffset();
+
+  // Suppress mouse moves caused by widget creation. Make sure to do this early
+  // so that we update sLastMouseMovePoint even for touch-induced mousemove events.
+  if (aEventMessage == eMouseMove) {
+    if ((sLastMouseMovePoint.x == mpScreen.x) && (sLastMouseMovePoint.y == mpScreen.y)) {
+      return result;
+    }
+    sLastMouseMovePoint.x = mpScreen.x;
+    sLastMouseMovePoint.y = mpScreen.y;
   }
 
   if (WinUtils::GetIsMouseFromTouch(aEventMessage)) {
@@ -4026,15 +4184,18 @@ nsWindow::DispatchMouseEvent(EventMessage aEventMessage, WPARAM wParam,
     }
   }
 
+  uint32_t pointerId = aPointerInfo ? aPointerInfo->pointerId :
+                                      MOUSE_POINTERID();
+
   // Since it is unclear whether a user will use the digitizer,
   // Postpone initialization until first PEN message will be found.
   if (nsIDOMMouseEvent::MOZ_SOURCE_PEN == aInputSource
       // Messages should be only at topLevel window.
       && nsWindowType::eWindowType_toplevel == mWindowType
       // Currently this scheme is used only when pointer events is enabled.
-      && gfxPrefs::PointerEventsEnabled()) {
+      && gfxPrefs::PointerEventsEnabled() && InkCollector::sInkCollector) {
     InkCollector::sInkCollector->SetTarget(mWnd);
-    InkCollector::sInkCollector->SetPointerId(aPointerId);
+    InkCollector::sInkCollector->SetPointerId(pointerId);
   }
 
   switch (aEventMessage) {
@@ -4057,8 +4218,6 @@ nsWindow::DispatchMouseEvent(EventMessage aEventMessage, WPARAM wParam,
 
   } // switch
 
-  LayoutDeviceIntPoint eventPoint(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
-
   WidgetMouseEvent event(true, aEventMessage, this, WidgetMouseEvent::eReal,
                          aIsContextMenuKey ? WidgetMouseEvent::eContextMenuKey :
                                              WidgetMouseEvent::eNormal);
@@ -4073,19 +4232,17 @@ nsWindow::DispatchMouseEvent(EventMessage aEventMessage, WPARAM wParam,
   modifierKeyState.InitInputEvent(event);
   event.button    = aButton;
   event.inputSource = aInputSource;
-  event.pointerId = aPointerId;
-  // If we get here the mouse events must be from non-touch sources, so
-  // convert it to pointer events as well
-  event.convertToPointer = true;
-
-  LayoutDeviceIntPoint mpScreen = eventPoint + WidgetToScreenOffset();
-
-  // Suppress mouse moves caused by widget creation
-  if (aEventMessage == eMouseMove) {
-    if ((sLastMouseMovePoint.x == mpScreen.x) && (sLastMouseMovePoint.y == mpScreen.y))
-      return result;
-    sLastMouseMovePoint.x = mpScreen.x;
-    sLastMouseMovePoint.y = mpScreen.y;
+  if (aPointerInfo) {
+    // Mouse events from Windows WM_POINTER*. Fill more information in
+    // WidgetMouseEvent.
+    event.AssignPointerHelperData(*aPointerInfo);
+    event.pressure = aPointerInfo->mPressure;
+    event.buttons = aPointerInfo->mButtons;
+  } else {
+    // If we get here the mouse events must be from non-touch sources, so
+    // convert it to pointer events as well
+    event.convertToPointer = true;
+    event.pointerId = pointerId;
   }
 
   bool insideMovementThreshold = (DeprecatedAbs(sLastMousePoint.x - eventPoint.x) < (short)::GetSystemMetrics(SM_CXDOUBLECLK)) &&
@@ -4235,7 +4392,7 @@ nsWindow::DispatchMouseEvent(EventMessage aEventMessage, WPARAM wParam,
             sCurrentWindow->DispatchMouseEvent(eMouseExitFromWidget,
                                                wParam, pos, false, 
                                                WidgetMouseEvent::eLeftButton,
-                                               aInputSource, aPointerId);
+                                               aInputSource, aPointerInfo);
           }
           sCurrentWindow = this;
           if (!mInDtor) {
@@ -4243,11 +4400,13 @@ nsWindow::DispatchMouseEvent(EventMessage aEventMessage, WPARAM wParam,
             sCurrentWindow->DispatchMouseEvent(eMouseEnterIntoWidget,
                                                wParam, pos, false,
                                                WidgetMouseEvent::eLeftButton,
-                                               aInputSource, aPointerId);
+                                               aInputSource, aPointerInfo);
           }
         }
       }
     } else if (aEventMessage == eMouseExitFromWidget) {
+      sMouseExitwParam = wParam;
+      sMouseExitlParamScreen = lParamToScreen(lParam);
       if (sCurrentWindow == this) {
         sCurrentWindow = nullptr;
       }
@@ -5152,7 +5311,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
 
       result = DispatchMouseEvent(eMouseMove, wParam, lParam,
                                   false, WidgetMouseEvent::eLeftButton,
-                                  MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                                  MOUSE_INPUT_SOURCE());
       if (userMovedMouse) {
         DispatchPendingEvents();
       }
@@ -5170,7 +5329,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
     {
       result = DispatchMouseEvent(eMouseDown, wParam, lParam,
                                   false, WidgetMouseEvent::eLeftButton,
-                                  MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                                  MOUSE_INPUT_SOURCE());
       DispatchPendingEvents();
     }
     break;
@@ -5179,7 +5338,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
     {
       result = DispatchMouseEvent(eMouseUp, wParam, lParam,
                                   false, WidgetMouseEvent::eLeftButton,
-                                  MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                                  MOUSE_INPUT_SOURCE());
       DispatchPendingEvents();
     }
     break;
@@ -5200,18 +5359,21 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       LPARAM pos = lParamToClient(::GetMessagePos());
       DispatchMouseEvent(eMouseExitFromWidget, mouseState, pos, false,
                          WidgetMouseEvent::eLeftButton,
-                         MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                         MOUSE_INPUT_SOURCE());
     }
     break;
 
     case MOZ_WM_PEN_LEAVES_HOVER_OF_DIGITIZER:
     {
       LPARAM pos = lParamToClient(::GetMessagePos());
+      MOZ_ASSERT(InkCollector::sInkCollector);
       uint16_t pointerId = InkCollector::sInkCollector->GetPointerId();
       if (pointerId != 0) {
+        WinPointerInfo pointerInfo;
+        pointerInfo.pointerId = pointerId;
         DispatchMouseEvent(eMouseExitFromWidget, wParam, pos, false,
                            WidgetMouseEvent::eLeftButton,
-                           nsIDOMMouseEvent::MOZ_SOURCE_PEN, pointerId);
+                           nsIDOMMouseEvent::MOZ_SOURCE_PEN, &pointerInfo);
         InkCollector::sInkCollector->ClearTarget();
         InkCollector::sInkCollector->ClearPointerId();
       }
@@ -5247,7 +5409,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
                                   contextMenukey ?
                                     WidgetMouseEvent::eLeftButton :
                                     WidgetMouseEvent::eRightButton,
-                                  MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                                  MOUSE_INPUT_SOURCE());
       if (lParam != -1 && !result && mCustomNonClient &&
           mDraggableRegion.Contains(GET_X_LPARAM(pos), GET_Y_LPARAM(pos))) {
         // Blank area hit, throw up the system menu.
@@ -5257,11 +5419,21 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
     }
     break;
 
+    case WM_POINTERLEAVE:
+    case WM_POINTERDOWN:
+    case WM_POINTERUP:
+    case WM_POINTERUPDATE:
+      result = OnPointerEvents(msg, wParam, lParam);
+      if (result) {
+        DispatchPendingEvents();
+      }
+      break;
+
     case WM_LBUTTONDBLCLK:
       result = DispatchMouseEvent(eMouseDoubleClick, wParam,
                                   lParam, false,
                                   WidgetMouseEvent::eLeftButton,
-                                  MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                                  MOUSE_INPUT_SOURCE());
       DispatchPendingEvents();
       break;
 
@@ -5269,7 +5441,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       result = DispatchMouseEvent(eMouseDown, wParam,
                                   lParam, false,
                                   WidgetMouseEvent::eMiddleButton,
-                                  MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                                  MOUSE_INPUT_SOURCE());
       DispatchPendingEvents();
       break;
 
@@ -5277,7 +5449,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       result = DispatchMouseEvent(eMouseUp, wParam,
                                   lParam, false,
                                   WidgetMouseEvent::eMiddleButton,
-                                  MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                                  MOUSE_INPUT_SOURCE());
       DispatchPendingEvents();
       break;
 
@@ -5285,7 +5457,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       result = DispatchMouseEvent(eMouseDoubleClick, wParam,
                                   lParam, false,
                                   WidgetMouseEvent::eMiddleButton,
-                                  MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                                  MOUSE_INPUT_SOURCE());
       DispatchPendingEvents();
       break;
 
@@ -5293,7 +5465,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       result = DispatchMouseEvent(eMouseDown, 0,
                                   lParamToClient(lParam), false,
                                   WidgetMouseEvent::eMiddleButton,
-                                  MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                                  MOUSE_INPUT_SOURCE());
       DispatchPendingEvents();
       break;
 
@@ -5301,7 +5473,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       result = DispatchMouseEvent(eMouseUp, 0,
                                   lParamToClient(lParam), false,
                                   WidgetMouseEvent::eMiddleButton,
-                                  MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                                  MOUSE_INPUT_SOURCE());
       DispatchPendingEvents();
       break;
 
@@ -5309,7 +5481,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       result = DispatchMouseEvent(eMouseDoubleClick, 0,
                                   lParamToClient(lParam), false,
                                   WidgetMouseEvent::eMiddleButton,
-                                  MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                                  MOUSE_INPUT_SOURCE());
       DispatchPendingEvents();
       break;
 
@@ -5317,7 +5489,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       result = DispatchMouseEvent(eMouseDown, wParam,
                                   lParam, false,
                                   WidgetMouseEvent::eRightButton,
-                                  MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                                  MOUSE_INPUT_SOURCE());
       DispatchPendingEvents();
       break;
 
@@ -5325,7 +5497,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       result = DispatchMouseEvent(eMouseUp, wParam,
                                   lParam, false,
                                   WidgetMouseEvent::eRightButton,
-                                  MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                                  MOUSE_INPUT_SOURCE());
       DispatchPendingEvents();
       break;
 
@@ -5333,7 +5505,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       result = DispatchMouseEvent(eMouseDoubleClick, wParam,
                                   lParam, false,
                                   WidgetMouseEvent::eRightButton,
-                                  MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                                  MOUSE_INPUT_SOURCE());
       DispatchPendingEvents();
       break;
 
@@ -5341,7 +5513,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       result = DispatchMouseEvent(eMouseDown, 0,
                                   lParamToClient(lParam), false,
                                   WidgetMouseEvent::eRightButton,
-                                  MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                                  MOUSE_INPUT_SOURCE());
       DispatchPendingEvents();
       break;
 
@@ -5349,7 +5521,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       result = DispatchMouseEvent(eMouseUp, 0,
                                   lParamToClient(lParam), false,
                                   WidgetMouseEvent::eRightButton,
-                                  MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                                  MOUSE_INPUT_SOURCE());
       DispatchPendingEvents();
       break;
 
@@ -5357,7 +5529,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       result = DispatchMouseEvent(eMouseDoubleClick, 0,
                                   lParamToClient(lParam), false,
                                   WidgetMouseEvent::eRightButton,
-                                  MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                                  MOUSE_INPUT_SOURCE());
       DispatchPendingEvents();
       break;
 
@@ -5438,11 +5610,11 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
     case WM_NCLBUTTONDBLCLK:
       DispatchMouseEvent(eMouseDoubleClick, 0, lParamToClient(lParam),
                          false, WidgetMouseEvent::eLeftButton,
-                         MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                         MOUSE_INPUT_SOURCE());
       result = 
         DispatchMouseEvent(eMouseUp, 0, lParamToClient(lParam),
                            false, WidgetMouseEvent::eLeftButton,
-                           MOUSE_INPUT_SOURCE(), MOUSE_POINTERID());
+                           MOUSE_INPUT_SOURCE());
       DispatchPendingEvents();
       break;
 
@@ -5580,7 +5752,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       // Do explicit casting to make it working on 64bit systems (see bug 649236
       // for details).
       int32_t objId = static_cast<DWORD>(lParam);
-      if (objId == OBJID_CLIENT) { // oleacc.dll will be loaded dynamically
+      if (!TIPMessageHandler::IsA11yBlocked() && objId == OBJID_CLIENT) { // oleacc.dll will be loaded dynamically
         a11y::Accessible* rootAccessible = GetAccessible(); // Held by a11y cache
         if (rootAccessible) {
           IAccessible *msaaAccessible = nullptr;
@@ -6037,8 +6209,7 @@ LRESULT nsWindow::ProcessCharMessage(const MSG &aMsg, bool *aEventDispatched)
   // window)
   ModifierKeyState modKeyState;
   NativeKey nativeKey(this, aMsg, modKeyState);
-  return static_cast<LRESULT>(nativeKey.HandleCharMessage(aMsg,
-                                                          aEventDispatched));
+  return static_cast<LRESULT>(nativeKey.HandleCharMessage(aEventDispatched));
 }
 
 LRESULT nsWindow::ProcessKeyUpMessage(const MSG &aMsg, bool *aEventDispatched)
@@ -6259,6 +6430,8 @@ void nsWindow::OnWindowPosChanged(WINDOWPOS* wp)
     // pre-restore attributes. Force activation now to get correct attributes.
     if (mLastSizeMode != nsSizeMode_Normal && mSizeMode == nsSizeMode_Normal)
       DispatchFocusToTopLevelWindow(true);
+
+    mLastSizeMode = mSizeMode;
 
     // Skip window size change events below on minimization.
     if (mSizeMode == nsSizeMode_Minimized)
@@ -7503,7 +7676,30 @@ nsWindow::DealWithPopups(HWND aWnd, UINT aMessage,
         break;
       }
       return false;
-
+    case WM_POINTERDOWN:
+      {
+        WinPointerEvents pointerEvents;
+        if (!pointerEvents.ShouldRollupOnPointerEvent(aWParam)) {
+          return false;
+        }
+        if (!GetPopupsToRollup(rollupListener, &popupsToRollup)) {
+          return false;
+        }
+        // Can't use EventIsInsideWindow to check whether the event is inside
+        // the popup window. It's because EventIsInsideWindow gets message
+        // coordinates by GetMessagePos, which returns physical screen
+        // coordinates at WM_POINTERDOWN.
+        POINT pt;
+        pt.x = GET_X_LPARAM(aLParam);
+        pt.y = GET_Y_LPARAM(aLParam);
+        RECT r;
+        ::GetWindowRect(popupWindow->mWnd, &r);
+        if (::PtInRect(&r, pt) != 0) {
+          // Don't roll up if the event is inside the popup window.
+          return false;
+        }
+      }
+      break;
     case WM_MOUSEWHEEL:
     case WM_MOUSEHWHEEL:
       // We need to check if the popup thinks that it should cause closing
@@ -7570,7 +7766,8 @@ nsWindow::DealWithPopups(HWND aWnd, UINT aMessage,
       } else if (LOWORD(aWParam) == WA_CLICKACTIVE) {
         // If the WM_ACTIVATE message is caused by a click in a popup,
         // we should not rollup any popups.
-        if (EventIsInsideWindow(popupWindow) ||
+        nsWindow* window = WinUtils::GetNSWindowPtr(aWnd);
+        if ((window && window->IsPopup()) ||
             !GetPopupsToRollup(rollupListener, &popupsToRollup)) {
           return false;
         }
@@ -7644,7 +7841,7 @@ nsWindow::DealWithPopups(HWND aWnd, UINT aMessage,
   // Only need to deal with the last rollup for left mouse down events.
   NS_ASSERTION(!mLastRollup, "mLastRollup is null");
 
-  if (nativeMessage == WM_LBUTTONDOWN) {
+  if (nativeMessage == WM_LBUTTONDOWN || nativeMessage == WM_POINTERDOWN) {
     POINT pt;
     pt.x = GET_X_LPARAM(aLParam);
     pt.y = GET_Y_LPARAM(aLParam);
@@ -7795,7 +7992,7 @@ void nsWindow::PickerClosed()
 }
 
 bool
-nsWindow::ComputeShouldAccelerate()
+nsWindow::WidgetTypeSupportsAcceleration()
 {
   // We don't currently support using an accelerated layer manager with
   // transparent windows so don't even try. I'm also not sure if we even
@@ -7804,12 +8001,8 @@ nsWindow::ComputeShouldAccelerate()
   // Also see bug 1150376, D3D11 composition can cause issues on some devices
   // on Windows 7 where presentation fails randomly for windows with drop
   // shadows.
-  if (mTransparencyMode == eTransparencyTransparent ||
-      (IsPopup() && DeviceManagerDx::Get()->IsWARP()))
-  {
-    return false;
-  }
-  return nsBaseWidget::ComputeShouldAccelerate();
+  return mTransparencyMode != eTransparencyTransparent &&
+         !(IsPopup() && DeviceManagerDx::Get()->IsWARP());
 }
 
 void
@@ -7890,6 +8083,107 @@ nsWindow::OnWindowedPluginKeyEvent(const NativeEventData& aKeyEventData,
       // managed in each plugin window rather than top level window.
       return NS_OK;
   }
+}
+
+bool nsWindow::OnPointerEvents(UINT msg, WPARAM aWParam, LPARAM aLParam)
+{
+  if (!mPointerEvents.ShouldFireCompatibilityMouseEventsForPen(aWParam)) {
+    // We only handle WM_POINTER* when the input source is pen. This is because
+    // we need some information (e.g. tiltX, tiltY) which can't be retrieved by
+    // WM_*BUTTONDOWN. So we fire Gecko WidgetMouseEvent when handling
+    // WM_POINTER* and consume WM_POINTER* to stop Windows fire WM_*BUTTONDOWN.
+    return false;
+  }
+
+  // When dispatching mouse events with pen, there may be some
+  // WM_POINTERUPDATE messages between WM_POINTERDOWN and WM_POINTERUP with
+  // small movements. Those events will reset sLastMousePoint and reset
+  // sLastClickCount. To prevent that, we keep the last pen down position
+  // and compare it with the subsequent WM_POINTERUPDATE. If the movement is
+  // smaller than GetSystemMetrics(SM_CXDRAG), then we suppress firing
+  // eMouseMove for WM_POINTERUPDATE.
+  static POINT sLastPointerDownPoint = {0};
+
+  // We don't support chorded buttons for pen. Keep the button at
+  // WM_POINTERDOWN.
+  static WidgetMouseEvent::buttonType sLastPenDownButton =
+    WidgetMouseEvent::eLeftButton;
+  static bool sPointerDown = false;
+
+  EventMessage message;
+  WidgetMouseEvent::buttonType button = WidgetMouseEvent::eLeftButton;
+  switch (msg) {
+  case WM_POINTERDOWN:
+    {
+      LayoutDeviceIntPoint eventPoint(GET_X_LPARAM(aLParam),
+                                      GET_Y_LPARAM(aLParam));
+      sLastPointerDownPoint.x = eventPoint.x;
+      sLastPointerDownPoint.y = eventPoint.y;
+      message = eMouseDown;
+      button = IS_POINTER_SECONDBUTTON_WPARAM(aWParam) ?
+                 WidgetMouseEvent::eRightButton : WidgetMouseEvent::eLeftButton;
+      sLastPenDownButton = button;
+      sPointerDown = true;
+    }
+    break;
+  case WM_POINTERUP:
+    message = eMouseUp;
+    MOZ_ASSERT(sPointerDown, "receive WM_POINTERUP w/o WM_POINTERDOWN");
+    button = sPointerDown ? sLastPenDownButton : WidgetMouseEvent::eLeftButton;
+    sPointerDown = false;
+    break;
+  case WM_POINTERUPDATE:
+    message = eMouseMove;
+    if (sPointerDown) {
+      LayoutDeviceIntPoint eventPoint(GET_X_LPARAM(aLParam),
+                                      GET_Y_LPARAM(aLParam));
+      int32_t movementX = sLastPointerDownPoint.x > eventPoint.x ?
+                            sLastPointerDownPoint.x - eventPoint.x :
+                            eventPoint.x - sLastPointerDownPoint.x;
+      int32_t movementY = sLastPointerDownPoint.y > eventPoint.y ?
+                            sLastPointerDownPoint.y - eventPoint.y :
+                            eventPoint.y - sLastPointerDownPoint.y;
+      bool insideMovementThreshold =
+        movementX < (int32_t)::GetSystemMetrics(SM_CXDRAG) &&
+        movementY < (int32_t)::GetSystemMetrics(SM_CYDRAG);
+
+      if (insideMovementThreshold) {
+        // Suppress firing eMouseMove for WM_POINTERUPDATE if the movement
+        // from last WM_POINTERDOWN is smaller than SM_CXDRAG / SM_CYDRAG
+        return false;
+      }
+      button = sLastPenDownButton;
+    }
+    break;
+  case WM_POINTERLEAVE:
+    message = eMouseExitFromWidget;
+    break;
+  default:
+    return false;
+  }
+  uint32_t pointerId = mPointerEvents.GetPointerId(aWParam);
+  POINTER_PEN_INFO penInfo;
+  mPointerEvents.GetPointerPenInfo(pointerId, &penInfo);
+
+  // Windows defines the pen pressure is normalized to a range between 0 and
+  // 1024. Convert it to float.
+  float pressure = penInfo.pressure ? (float)penInfo.pressure / 1024 : 0;
+  int16_t buttons =
+    sPointerDown ? button == WidgetMouseEvent::eLeftButton ?
+                     WidgetMouseEvent::eLeftButtonFlag :
+                     WidgetMouseEvent::eRightButtonFlag :
+                   WidgetMouseEvent::eNoButtonFlag;
+  WinPointerInfo pointerInfo(pointerId, penInfo.tiltX, penInfo.tiltY, pressure,
+                             buttons);
+
+  // The aLParam of WM_POINTER* is the screen location. Convert it to client
+  // location
+  LPARAM newLParam = lParamToClient(aLParam);
+  DispatchMouseEvent(message, aWParam, newLParam, false, button,
+                     nsIDOMMouseEvent::MOZ_SOURCE_PEN, &pointerInfo);
+  // Consume WM_POINTER* to stop Windows fires WM_*BUTTONDOWN / WM_*BUTTONUP
+  // WM_MOUSEMOVE.
+  return true;
 }
 
 /**************************************************************

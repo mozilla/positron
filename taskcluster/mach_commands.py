@@ -11,6 +11,7 @@ import json
 import logging
 import sys
 import traceback
+import re
 
 from mach.decorators import (
     CommandArgument,
@@ -49,6 +50,10 @@ class ShowTaskGraphSubCommand(SubCommand):
                             default="true",
                             help="do not remove tasks from the graph that are found in the "
                             "index (a.k.a. optimize the graph)"),
+            CommandArgument('--tasks-regex', '--tasks', default=None,
+                            help="only return tasks with labels matching this regular "
+                            "expression.")
+
         ]
         for arg in args:
             after = arg(after)
@@ -166,7 +171,7 @@ class MachCommands(MachCommandBase):
             sys.exit(1)
 
     @SubCommand('taskgraph', 'action-task',
-                description="Run the action task")
+                description="Run the add-tasks task. DEPRECATED! Use 'add-tasks' instead.")
     @CommandArgument('--root', '-r',
                      default='taskcluster/ci',
                      help="root of the taskgraph definition relative to topsrcdir")
@@ -184,7 +189,58 @@ class MachCommands(MachCommandBase):
         import taskgraph.action
         try:
             self.setup_logging()
-            return taskgraph.action.taskgraph_action(options)
+            return taskgraph.action.add_tasks(options['decision_id'],
+                                              options['task_labels'].split(','))
+        except Exception:
+            traceback.print_exc()
+            sys.exit(1)
+
+    @SubCommand('taskgraph', 'add-tasks',
+                description="Run the add-tasks task")
+    @CommandArgument('--root', '-r',
+                     default='taskcluster/ci',
+                     help="root of the taskgraph definition relative to topsrcdir")
+    @CommandArgument('--decision-id',
+                     required=True,
+                     help="Decision Task ID of the reference decision task")
+    @CommandArgument('--task-labels',
+                     required=True,
+                     help='Comma separated list of task labels to be scheduled')
+    def taskgraph_add_tasks(self, **options):
+        """Run the action task: Generates a task graph using the set of labels
+        provided in the task-labels parameter. It uses the full-task file of
+        the gecko decision task."""
+
+        import taskgraph.action
+        try:
+            self.setup_logging()
+            return taskgraph.action.add_tasks(options['decision_id'],
+                                              options['task_labels'].split(','))
+        except Exception:
+            traceback.print_exc()
+            sys.exit(1)
+
+    @SubCommand('taskgraph', 'backfill',
+                description="Run the backfill task")
+    @CommandArgument('--root', '-r',
+                     default='taskcluster/ci',
+                     help="root of the taskgraph definition relative to topsrcdir")
+    @CommandArgument('--project',
+                     required=True,
+                     help="Project of the jobs that need to be backfilled.")
+    @CommandArgument('--job-id',
+                     required=True,
+                     help="Id of the job to be backfilled.")
+    def taskgraph_backfill(self, **options):
+        """Run the backfill task: Given a job in a project, it will
+        add that job type to any previous revisions in treeherder
+        until either a hard limit is met or a green version of that
+        job is found."""
+
+        import taskgraph.action
+        try:
+            self.setup_logging()
+            return taskgraph.action.backfill(options['project'], options['job_id'])
         except Exception:
             traceback.print_exc()
             sys.exit(1)
@@ -217,17 +273,16 @@ class MachCommands(MachCommandBase):
         try:
             self.setup_logging(quiet=options['quiet'], verbose=options['verbose'])
             parameters = taskgraph.parameters.load_parameters_file(options)
+            parameters.check()
 
-            target_tasks_method = parameters.get('target_tasks_method', 'all_tasks')
-            target_tasks_method = taskgraph.target_tasks.get_method(target_tasks_method)
             tgg = taskgraph.generator.TaskGraphGenerator(
                 root_dir=options['root'],
-                parameters=parameters,
-                target_tasks_method=target_tasks_method)
+                parameters=parameters)
 
             tg = getattr(tgg, graph_attr)
 
             show_method = getattr(self, 'show_taskgraph_' + (options['format'] or 'labels'))
+            tg = self.get_filtered_taskgraph(tg, options["tasks_regex"])
             show_method(tg)
         except Exception:
             traceback.print_exc()
@@ -241,28 +296,57 @@ class MachCommands(MachCommandBase):
         print(json.dumps(taskgraph.to_json(),
               sort_keys=True, indent=2, separators=(',', ': ')))
 
+    def get_filtered_taskgraph(self, taskgraph, tasksregex):
+        from taskgraph.graph import Graph
+        from taskgraph.taskgraph import TaskGraph
+        """
+        This class method filters all the tasks on basis of a regular expression
+        and returns a new TaskGraph object
+        """
+        # return original taskgraph if no regular expression is passed
+        if not tasksregex:
+            return taskgraph
+        named_links_dict = taskgraph.graph.named_links_dict()
+        filteredtasks = {}
+        filterededges = set()
+        regexprogram = re.compile(tasksregex)
+
+        for key in taskgraph.graph.visit_postorder():
+            task = taskgraph.tasks[key]
+            if regexprogram.match(task.label):
+                filteredtasks[key] = task
+                for depname, dep in named_links_dict[key].iteritems():
+                    if regexprogram.match(dep):
+                        filterededges.add((key, dep, depname))
+        filtered_taskgraph = TaskGraph(filteredtasks, Graph(set(filteredtasks), filterededges))
+        return filtered_taskgraph
+
 
 @CommandProvider
 class TaskClusterImagesProvider(object):
     @Command('taskcluster-load-image', category="ci",
              description="Load a pre-built Docker image")
     @CommandArgument('--task-id',
-                     help="Load the image at public/image.tar in this task,"
+                     help="Load the image at public/image.tar.zst in this task,"
                           "rather than searching the index")
+    @CommandArgument('-t', '--tag',
+                     help="tag that the image should be loaded as. If not "
+                          "image will be loaded with tag from the tarball",
+                     metavar="name:tag")
     @CommandArgument('image_name', nargs='?',
                      help="Load the image of this name based on the current"
                           "contents of the tree (as built for mozilla-central"
                           "or mozilla-inbound)")
-    def load_image(self, image_name, task_id):
+    def load_image(self, image_name, task_id, tag):
         from taskgraph.docker import load_image_by_name, load_image_by_task_id
         if not image_name and not task_id:
             print("Specify either IMAGE-NAME or TASK-ID")
             sys.exit(1)
         try:
             if task_id:
-                ok = load_image_by_task_id(task_id)
+                ok = load_image_by_task_id(task_id, tag)
             else:
-                ok = load_image_by_name(image_name)
+                ok = load_image_by_name(image_name, tag)
             if not ok:
                 sys.exit(1)
         except Exception:
@@ -273,11 +357,17 @@ class TaskClusterImagesProvider(object):
              description='Build a Docker image')
     @CommandArgument('image_name',
                      help='Name of the image to build')
-    def build_image(self, image_name):
-        from taskgraph.docker import build_image
-
+    @CommandArgument('--context-only',
+                     help="File name the context tarball should be written to."
+                          "with this option it will only build the context.tar.",
+                     metavar='context.tar')
+    def build_image(self, image_name, context_only):
+        from taskgraph.docker import build_image, build_context
         try:
-            build_image(image_name)
+            if context_only is None:
+                build_image(image_name)
+            else:
+                build_context(image_name, context_only)
         except Exception:
             traceback.print_exc()
             sys.exit(1)

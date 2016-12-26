@@ -34,7 +34,8 @@ namespace camera {
 CamerasSingleton::CamerasSingleton()
   : mCamerasMutex("CamerasSingleton::mCamerasMutex"),
     mCameras(nullptr),
-    mCamerasChildThread(nullptr) {
+    mCamerasChildThread(nullptr),
+    mFakeDeviceChangeEventThread(nullptr) {
   LOG(("CamerasSingleton: %p", this));
 }
 
@@ -58,7 +59,7 @@ public:
 
       if (mCounter++ < FAKE_ONDEVICECHANGE_EVENT_REPEAT_COUNT) {
         RefPtr<FakeOnDeviceChangeEventRunnable> evt = new FakeOnDeviceChangeEventRunnable(mCounter);
-        CamerasSingleton::Thread()->DelayedDispatch(evt.forget(),
+        CamerasSingleton::FakeDeviceChangeEventThread()->DelayedDispatch(evt.forget(),
           FAKE_ONDEVICECHANGE_EVENT_PERIOD_IN_MS);
       }
     }
@@ -86,9 +87,10 @@ public:
       existingBackgroundChild =
         ipc::BackgroundChild::SynchronouslyCreateForCurrentThread();
       LOG(("BackgroundChild: %p", existingBackgroundChild));
+      if (!existingBackgroundChild) {
+        return NS_ERROR_FAILURE;
+      }
     }
-    // By now PBackground is guaranteed to be up
-    MOZ_RELEASE_ASSERT(existingBackgroundChild);
 
     // Create CamerasChild
     // We will be returning the resulting pointer (synchronously) to our caller.
@@ -145,7 +147,25 @@ GetCamerasChildIfExists() {
   return CamerasSingleton::Child();
 }
 
-bool
+int CamerasChild::AddDeviceChangeCallback(DeviceChangeCallback* aCallback)
+{
+  // According to the spec, if the script sets
+  // navigator.mediaDevices.ondevicechange and the permission state is
+  // "always granted", the User Agent MUST fires a devicechange event when
+  // a new media input device is made available, even the script never
+  // call getusermedia or enumerateDevices.
+
+  // In order to detect the event, we need to init the camera engine.
+  // Currently EnsureInitialized(aCapEngine) is only called when one of
+  // CamerasaParent api, e.g., RecvNumberOfCaptureDevices(), is called.
+
+  // So here we setup camera engine via EnsureInitialized(aCapEngine)
+
+  EnsureInitialized(CameraEngine);
+  return DeviceChangeCallback::AddDeviceChangeCallback(aCallback);
+}
+
+mozilla::ipc::IPCResult
 CamerasChild::RecvReplyFailure(void)
 {
   LOG((__PRETTY_FUNCTION__));
@@ -153,10 +173,10 @@ CamerasChild::RecvReplyFailure(void)
   mReceivedReply = true;
   mReplySuccess = false;
   monitor.Notify();
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 CamerasChild::RecvReplySuccess(void)
 {
   LOG((__PRETTY_FUNCTION__));
@@ -164,10 +184,10 @@ CamerasChild::RecvReplySuccess(void)
   mReceivedReply = true;
   mReplySuccess = true;
   monitor.Notify();
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 CamerasChild::RecvReplyNumberOfCapabilities(const int& numdev)
 {
   LOG((__PRETTY_FUNCTION__));
@@ -176,7 +196,7 @@ CamerasChild::RecvReplyNumberOfCapabilities(const int& numdev)
   mReplySuccess = true;
   mReplyInteger = numdev;
   monitor.Notify();
-  return true;
+  return IPC_OK();
 }
 
 // Helper function to dispatch calls to the IPC Thread and
@@ -202,7 +222,7 @@ public:
     Dispatch();
   }
 
-  const T& ReturnValue() const {
+  T ReturnValue() const {
     if (mSuccess) {
       return mSuccessValue;
     } else {
@@ -293,7 +313,7 @@ CamerasChild::NumberOfCaptureDevices(CaptureEngine aCapEngine)
   return dispatcher.ReturnValue();
 }
 
-bool
+mozilla::ipc::IPCResult
 CamerasChild::RecvReplyNumberOfCaptureDevices(const int& numdev)
 {
   LOG((__PRETTY_FUNCTION__));
@@ -302,7 +322,23 @@ CamerasChild::RecvReplyNumberOfCaptureDevices(const int& numdev)
   mReplySuccess = true;
   mReplyInteger = numdev;
   monitor.Notify();
-  return true;
+  return IPC_OK();
+}
+
+int
+CamerasChild::EnsureInitialized(CaptureEngine aCapEngine)
+{
+  LOG((__PRETTY_FUNCTION__));
+  nsCOMPtr<nsIRunnable> runnable =
+    media::NewRunnableFrom([this, aCapEngine]() -> nsresult {
+      if (this->SendEnsureInitialized(aCapEngine)) {
+        return NS_OK;
+      }
+      return NS_ERROR_FAILURE;
+    });
+  LockAndDispatch<> dispatcher(this, __func__, runnable, 0, mReplyInteger);
+  LOG(("Capture Devices: %d", dispatcher.ReturnValue()));
+  return dispatcher.ReturnValue();
 }
 
 int
@@ -327,7 +363,7 @@ CamerasChild::GetCaptureCapability(CaptureEngine aCapEngine,
   return dispatcher.ReturnValue();
 }
 
-bool
+mozilla::ipc::IPCResult
 CamerasChild::RecvReplyGetCaptureCapability(const CaptureCapability& ipcCapability)
 {
   LOG((__PRETTY_FUNCTION__));
@@ -342,7 +378,7 @@ CamerasChild::RecvReplyGetCaptureCapability(const CaptureCapability& ipcCapabili
   mReplyCapability.codecType = static_cast<webrtc::VideoCodecType>(ipcCapability.codecType());
   mReplyCapability.interlaced = ipcCapability.interlaced();
   monitor.Notify();
-  return true;
+  return IPC_OK();
 }
 
 int
@@ -350,7 +386,8 @@ CamerasChild::GetCaptureDevice(CaptureEngine aCapEngine,
                                unsigned int list_number, char* device_nameUTF8,
                                const unsigned int device_nameUTF8Length,
                                char* unique_idUTF8,
-                               const unsigned int unique_idUTF8Length)
+                               const unsigned int unique_idUTF8Length,
+                               bool* scary)
 {
   LOG((__PRETTY_FUNCTION__));
   nsCOMPtr<nsIRunnable> runnable =
@@ -364,14 +401,18 @@ CamerasChild::GetCaptureDevice(CaptureEngine aCapEngine,
   if (dispatcher.Success()) {
     base::strlcpy(device_nameUTF8, mReplyDeviceName.get(), device_nameUTF8Length);
     base::strlcpy(unique_idUTF8, mReplyDeviceID.get(), unique_idUTF8Length);
+    if (scary) {
+      *scary = mReplyScary;
+    }
     LOG(("Got %s name %s id", device_nameUTF8, unique_idUTF8));
   }
   return dispatcher.ReturnValue();
 }
 
-bool
+mozilla::ipc::IPCResult
 CamerasChild::RecvReplyGetCaptureDevice(const nsCString& device_name,
-                                        const nsCString& device_id)
+                                        const nsCString& device_id,
+                                        const bool& scary)
 {
   LOG((__PRETTY_FUNCTION__));
   MonitorAutoLock monitor(mReplyMonitor);
@@ -379,8 +420,9 @@ CamerasChild::RecvReplyGetCaptureDevice(const nsCString& device_name,
   mReplySuccess = true;
   mReplyDeviceName = device_name;
   mReplyDeviceID = device_id;
+  mReplyScary = scary;
   monitor.Notify();
-  return true;
+  return IPC_OK();
 }
 
 int
@@ -409,7 +451,7 @@ CamerasChild::AllocateCaptureDevice(CaptureEngine aCapEngine,
 }
 
 
-bool
+mozilla::ipc::IPCResult
 CamerasChild::RecvReplyAllocateCaptureDevice(const int& numdev)
 {
   LOG((__PRETTY_FUNCTION__));
@@ -418,7 +460,7 @@ CamerasChild::RecvReplyAllocateCaptureDevice(const int& numdev)
   mReplySuccess = true;
   mReplyInteger = numdev;
   monitor.Notify();
-  return true;
+  return IPC_OK();
 }
 
 int
@@ -590,9 +632,17 @@ CamerasChild::ShutdownChild()
   LOG(("Erasing sCameras & thread refs (original thread)"));
   CamerasSingleton::Child() = nullptr;
   CamerasSingleton::Thread() = nullptr;
+
+  if (CamerasSingleton::FakeDeviceChangeEventThread()) {
+    RefPtr<ShutdownRunnable> runnable =
+      new ShutdownRunnable(NewRunnableMethod(CamerasSingleton::FakeDeviceChangeEventThread(),
+                                             &nsIThread::Shutdown));
+    CamerasSingleton::FakeDeviceChangeEventThread()->Dispatch(runnable.forget(), NS_DISPATCH_NORMAL);
+  }
+  CamerasSingleton::FakeDeviceChangeEventThread() = nullptr;
 }
 
-bool
+mozilla::ipc::IPCResult
 CamerasChild::RecvDeliverFrame(const CaptureEngine& capEngine,
                                const int& capId,
                                mozilla::ipc::Shmem&& shmem,
@@ -612,14 +662,14 @@ CamerasChild::RecvDeliverFrame(const CaptureEngine& capEngine,
     LOG(("DeliverFrame called with dead callback"));
   }
   SendReleaseFrame(shmem);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 CamerasChild::RecvDeviceChange()
 {
   this->OnDeviceChange();
-  return true;
+  return IPC_OK();
 }
 
 int
@@ -627,15 +677,24 @@ CamerasChild::SetFakeDeviceChangeEvents()
 {
   CamerasSingleton::Mutex().AssertCurrentThreadOwns();
 
+  if(!CamerasSingleton::FakeDeviceChangeEventThread()) {
+    nsresult rv = NS_NewNamedThread("Fake DC Event",
+                                    getter_AddRefs(CamerasSingleton::FakeDeviceChangeEventThread()));
+    if (NS_FAILED(rv)) {
+      LOG(("Error launching Fake OnDeviceChange Event Thread"));
+      return -1;
+    }
+  }
+
   // To simulate the devicechange event in mochitest,
   // we fire a fake devicechange event in Camera IPC thread periodically
   RefPtr<FakeOnDeviceChangeEventRunnable> evt = new FakeOnDeviceChangeEventRunnable(0);
-  CamerasSingleton::Thread()->Dispatch(evt.forget(), NS_DISPATCH_NORMAL);
+  CamerasSingleton::FakeDeviceChangeEventThread()->Dispatch(evt.forget(), NS_DISPATCH_NORMAL);
 
   return 0;
 }
 
-bool
+mozilla::ipc::IPCResult
 CamerasChild::RecvFrameSizeChange(const CaptureEngine& capEngine,
                                   const int& capId,
                                   const int& w, const int& h)
@@ -647,7 +706,7 @@ CamerasChild::RecvFrameSizeChange(const CaptureEngine& capEngine,
   } else {
     LOG(("Frame size change with dead callback"));
   }
-  return true;
+  return IPC_OK();
 }
 
 void

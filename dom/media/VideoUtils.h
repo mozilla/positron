@@ -7,11 +7,13 @@
 #ifndef VideoUtils_h
 #define VideoUtils_h
 
+#include "MediaInfo.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/MozPromise.h"
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/UniquePtr.h"
 
 #include "nsAutoPtr.h"
 #include "nsIThread.h"
@@ -39,10 +41,12 @@ using mozilla::CheckedUint32;
 // mozilla::Monitor non-reentrant.
 namespace mozilla {
 
+class MediaContentType;
+
 // EME Key System String.
-static NS_NAMED_LITERAL_CSTRING(kEMEKeySystemClearkey, "org.w3.clearkey");
-static NS_NAMED_LITERAL_CSTRING(kEMEKeySystemWidevine, "com.widevine.alpha");
-static NS_NAMED_LITERAL_CSTRING(kEMEKeySystemPrimetime, "com.adobe.primetime");
+extern const nsLiteralCString kEMEKeySystemClearkey;
+extern const nsLiteralCString kEMEKeySystemWidevine;
+extern const nsLiteralCString kEMEKeySystemPrimetime;
 
 /**
  * ReentrantMonitorConditionallyEnter
@@ -284,7 +288,7 @@ RefPtr<GenericPromise> InvokeUntil(Work aWork, Condition aCondition) {
   }
 
   struct Helper {
-    static void Iteration(RefPtr<GenericPromise::Private> aPromise, Work aLocalWork, Condition aLocalCondition) {
+    static void Iteration(const RefPtr<GenericPromise::Private>& aPromise, Work aLocalWork, Condition aLocalCondition) {
       if (!aLocalWork()) {
         aPromise->Reject(NS_ERROR_FAILURE, __func__);
       } else if (aLocalCondition()) {
@@ -346,6 +350,17 @@ IsVP8CodecString(const nsAString& aCodec);
 
 bool
 IsVP9CodecString(const nsAString& aCodec);
+
+// Try and create a TrackInfo with a given codec MIME type.
+UniquePtr<TrackInfo>
+CreateTrackInfoWithMIMEType(const nsACString& aCodecMIMEType);
+
+// Try and create a TrackInfo with a given codec MIME type, and optional extra
+// parameters from a content type (its MIME type and codecs are ignored).
+UniquePtr<TrackInfo>
+CreateTrackInfoWithMIMETypeAndContentTypeExtraParameters(
+  const nsACString& aCodecMIMEType,
+  const MediaContentType& aContentType);
 
 template <typename String>
 class StringListRange

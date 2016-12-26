@@ -17,21 +17,10 @@
 #include "mozilla/layers/LayersMessages.h" // for ShmemSection
 #include "LayersTypes.h"
 
-/*
- * FIXME [bjacob] *** PURE CRAZYNESS WARNING ***
- * (I think that this doesn't apply anymore.)
- *
- * This #define is actually needed here, because subclasses of ISurfaceAllocator,
- * namely ShadowLayerForwarder, will or will not override AllocGrallocBuffer
- * depending on whether MOZ_HAVE_SURFACEDESCRIPTORGRALLOC is defined.
- */
-#ifdef MOZ_WIDGET_GONK
-#define MOZ_HAVE_SURFACEDESCRIPTORGRALLOC
-#endif
-
 namespace mozilla {
 namespace ipc {
 class Shmem;
+class IShmemAllocator;
 } // namespace ipc
 namespace gfx {
 class DataSourceSurface;
@@ -68,7 +57,7 @@ mozilla::ipc::SharedMemory::SharedMemoryType OptimalShmemType();
 
 /**
  * An interface used to create and destroy surfaces that are shared with the
- * Compositor process (using shmem, or gralloc, or other platform specific memory)
+ * Compositor process (using shmem, or other platform specific memory)
  *
  * Most of the methods here correspond to methods that are implemented by IPDL
  * actors without a common polymorphic interface.
@@ -148,8 +137,6 @@ public:
 
   virtual void SendAsyncMessage(const InfallibleTArray<AsyncParentMessageData>& aMessage) = 0;
 
-  void SendFenceHandleIfPresent(PTextureParent* aTexture);
-
   virtual void SendPendingAsyncMessages();
 
   virtual void SetAboutToSendAsyncMessages()
@@ -215,6 +202,9 @@ public:
   virtual void DestroySurfaceDescriptor(SurfaceDescriptor* aSurface) = 0;
 };
 
+bool
+IsSurfaceDescriptorValid(const SurfaceDescriptor& aSurface);
+
 already_AddRefed<gfx::DrawTarget>
 GetDrawTargetForDescriptor(const SurfaceDescriptor& aDescriptor, gfx::BackendType aBackend);
 
@@ -223,6 +213,9 @@ GetSurfaceForDescriptor(const SurfaceDescriptor& aDescriptor);
 
 uint8_t*
 GetAddressFromDescriptor(const SurfaceDescriptor& aDescriptor);
+
+void
+DestroySurfaceDescriptor(mozilla::ipc::IShmemAllocator* aAllocator, SurfaceDescriptor* aSurface);
 
 class GfxMemoryImageReporter final : public nsIMemoryReporter
 {

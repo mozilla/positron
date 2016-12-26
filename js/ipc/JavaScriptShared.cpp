@@ -33,10 +33,12 @@ IdToObjectMap::init()
 }
 
 void
-IdToObjectMap::trace(JSTracer* trc)
+IdToObjectMap::trace(JSTracer* trc, uint64_t minimimId)
 {
-    for (Table::Range r(table_.all()); !r.empty(); r.popFront())
-        JS::TraceEdge(trc, &r.front().value(), "ipc-object");
+    for (Table::Range r(table_.all()); !r.empty(); r.popFront()) {
+        if (r.front().key().serialNumber() >= minimimId)
+            JS::TraceEdge(trc, &r.front().value(), "ipc-object");
+    }
 }
 
 void
@@ -57,6 +59,15 @@ IdToObjectMap::find(ObjectId id)
     if (!p)
         return nullptr;
     return p->value();
+}
+
+JSObject*
+IdToObjectMap::findPreserveColor(ObjectId id)
+{
+    Table::Ptr p = table_.lookup(id);
+    if (!p)
+        return nullptr;
+    return p->value().unbarrieredGet();
 }
 
 bool
@@ -82,6 +93,17 @@ IdToObjectMap::empty() const
 {
     return table_.empty();
 }
+
+#ifdef DEBUG
+bool
+IdToObjectMap::has(const ObjectId& id, const JSObject* obj) const
+{
+    auto p = table_.lookup(id);
+    if (!p)
+        return false;
+    return p->value() == obj;
+}
+#endif
 
 bool
 ObjectToIdMap::init()
@@ -134,7 +156,8 @@ bool JavaScriptShared::sStackLoggingEnabled;
 
 JavaScriptShared::JavaScriptShared()
   : refcount_(1),
-    nextSerialNumber_(1)
+    nextSerialNumber_(1),
+    nextCPOWNumber_(1)
 {
     if (!sLoggingInitialized) {
         sLoggingInitialized = true;
@@ -421,7 +444,7 @@ JavaScriptShared::toSymbolVariant(JSContext* cx, JS::Symbol* symArg, SymbolVaria
 }
 
 JS::Symbol*
-JavaScriptShared::fromSymbolVariant(JSContext* cx, SymbolVariant symVar)
+JavaScriptShared::fromSymbolVariant(JSContext* cx, const SymbolVariant& symVar)
 {
     switch (symVar.type()) {
       case SymbolVariant::TWellKnownSymbol: {
@@ -616,7 +639,7 @@ JavaScriptShared::toObjectOrNullVariant(JSContext* cx, JSObject* obj, ObjectOrNu
 }
 
 JSObject*
-JavaScriptShared::fromObjectOrNullVariant(JSContext* cx, ObjectOrNullVariant objVar)
+JavaScriptShared::fromObjectOrNullVariant(JSContext* cx, const ObjectOrNullVariant& objVar)
 {
     if (objVar.type() == ObjectOrNullVariant::TNullVariant)
         return nullptr;

@@ -6,10 +6,6 @@ const TEST_MSG = "ContentSearchTest";
 const CONTENT_SEARCH_MSG = "ContentSearch";
 const TEST_CONTENT_SCRIPT_BASENAME = "contentSearch.js";
 
-// This timeout is absurdly high to avoid random failures like bug 1087120.
-// That bug was reported when the timeout was 5 seconds, so let's try 10.
-const SUGGESTIONS_TIMEOUT = 10000;
-
 var gMsgMan;
 
 add_task(function* GetState() {
@@ -114,7 +110,6 @@ add_task(function* searchInBackgroundTab() {
   // search page should be loaded in the same tab that performed the search, in
   // the background tab.
   yield addTab();
-  let searchBrowser = gBrowser.selectedBrowser;
   let engine = Services.search.currentEngine;
   let data = {
     engineName: engine.name,
@@ -193,7 +188,6 @@ add_task(function* GetSuggestions_AddFormHistoryEntry_RemoveFormHistoryEntry() {
     data: {
       engineName: engine.name,
       searchString: searchStr,
-      remoteTimeout: SUGGESTIONS_TIMEOUT,
     },
   });
 
@@ -229,7 +223,6 @@ add_task(function* GetSuggestions_AddFormHistoryEntry_RemoveFormHistoryEntry() {
     data: {
       engineName: engine.name,
       searchString: searchStr,
-      remoteTimeout: SUGGESTIONS_TIMEOUT,
     },
   });
 
@@ -322,11 +315,11 @@ function waitForNewEngine(basename, numImages) {
   let addDeferred = Promise.defer();
   let url = getRootDirectory(gTestPath) + basename;
   Services.search.addEngine(url, null, "", false, {
-    onSuccess: function (engine) {
+    onSuccess: function(engine) {
       info("Search engine added: " + basename);
       addDeferred.resolve(engine);
     },
-    onError: function (errCode) {
+    onError: function(errCode) {
       ok(false, "addEngine failed with error code " + errCode);
       addDeferred.reject();
     },

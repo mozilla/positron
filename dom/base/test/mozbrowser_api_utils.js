@@ -20,8 +20,6 @@ const METHODS = {
   getCanGoBack: {},
   getCanGoForward: {},
   getContentDimensions: {},
-  setInputMethodActive: {},
-  setNFCFocus: {},
   findAll: {},
   findNext: {},
   clearMatch: {},

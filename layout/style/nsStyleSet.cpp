@@ -103,15 +103,15 @@ nsInitialStyleRule::MapRuleInfoInto(nsRuleData* aRuleData)
             !aRuleData->mPresContext->Document()->GetMathMLEnabled()) {
           size_t index = value - value_start;
           if (index == nsCSSProps::PropertyIndexInStruct(
-                          eCSSProperty_script_level) ||
+                          eCSSProperty__moz_script_level) ||
               index == nsCSSProps::PropertyIndexInStruct(
-                          eCSSProperty_script_size_multiplier) ||
+                          eCSSProperty__moz_script_size_multiplier) ||
               index == nsCSSProps::PropertyIndexInStruct(
-                          eCSSProperty_script_min_size) ||
+                          eCSSProperty__moz_script_min_size) ||
               index == nsCSSProps::PropertyIndexInStruct(
-                          eCSSProperty_math_variant) ||
+                          eCSSProperty__moz_math_variant) ||
               index == nsCSSProps::PropertyIndexInStruct(
-                          eCSSProperty_math_display)) {
+                          eCSSProperty__moz_math_display)) {
             continue;
           }
         }
@@ -2231,7 +2231,7 @@ nsStyleSet::ReparentStyleContext(nsStyleContext* aStyleContext,
 {
   MOZ_ASSERT(aStyleContext, "aStyleContext must not be null");
 
-  // This short-circuit is OK because we don't call TryStartingTransition
+  // This short-circuit is OK because we don't call TryInitatingTransition
   // during style reresolution if the style context pointer hasn't changed.
   if (aStyleContext->GetParent() == aNewParentContext) {
     RefPtr<nsStyleContext> ret = aStyleContext;

@@ -20,7 +20,8 @@ var {getInplaceEditorForSpan: inplaceEditor} =
 const ROOT_TEST_DIR = getRootDirectory(gTestPath);
 const FRAME_SCRIPT_URL = ROOT_TEST_DIR + "doc_frame_script.js";
 
-const STYLE_INSPECTOR_L10N = new LocalizationHelper("chrome://devtools-shared/locale/styleinspector.properties");
+const STYLE_INSPECTOR_L10N
+      = new LocalizationHelper("devtools/shared/locales/styleinspector.properties");
 
 registerCleanupFunction(() => {
   Services.prefs.clearUserPref("devtools.defaultColorUnit");
@@ -476,7 +477,7 @@ function getRuleViewLinkByIndex(view, index) {
  */
 function getRuleViewLinkTextByIndex(view, index) {
   let link = getRuleViewLinkByIndex(view, index);
-  return link.querySelector(".ruleview-rule-source-label").value;
+  return link.querySelector(".ruleview-rule-source-label").textContent;
 }
 
 /**

@@ -86,9 +86,8 @@ Library::Name(JSContext* cx, unsigned argc, Value* vp)
 }
 
 JSObject*
-Library::Create(JSContext* cx, Value path_, const JSCTypesCallbacks* callbacks)
+Library::Create(JSContext* cx, HandleValue path, const JSCTypesCallbacks* callbacks)
 {
-  RootedValue path(cx, path_);
   RootedObject libraryObj(cx, JS_NewObject(cx, &sLibraryClass));
   if (!libraryObj)
     return nullptr;
@@ -151,24 +150,29 @@ Library::Create(JSContext* cx, Value path_, const JSCTypesCallbacks* callbacks)
 
   PRLibrary* library = PR_LoadLibraryWithFlags(libSpec, 0);
 
-  if (!library) {
-    char* error = (char*) JS_malloc(cx, PR_GetErrorTextLength() + 1);
-    if (error)
-      PR_GetErrorText(error);
-
-#ifdef XP_WIN
-    JS_ReportError(cx, "couldn't open library %hs: %s", pathChars, error);
-#else
-    JS_ReportError(cx, "couldn't open library %s: %s", pathBytes, error);
-    JS_free(cx, pathBytes);
-#endif
-    JS_free(cx, error);
-    return nullptr;
-  }
-
 #ifndef XP_WIN
   JS_free(cx, pathBytes);
 #endif
+
+  if (!library) {
+#define MAX_ERROR_LEN 1024
+    char error[MAX_ERROR_LEN] = "Cannot get error from NSPR.";
+    uint32_t errorLen = PR_GetErrorTextLength();
+    if (errorLen && errorLen < MAX_ERROR_LEN)
+      PR_GetErrorText(error);
+#undef MAX_ERROR_LEN
+
+    if (JS::StringIsASCII(error)) {
+      JSAutoByteString pathCharsUTF8;
+      if (pathCharsUTF8.encodeUtf8(cx, pathStr))
+        JS_ReportErrorUTF8(cx, "couldn't open library %s: %s", pathCharsUTF8.ptr(), error);
+    } else {
+      JSAutoByteString pathCharsLatin1;
+      if (pathCharsLatin1.encodeLatin1(cx, pathStr))
+        JS_ReportErrorLatin1(cx, "couldn't open library %s: %s", pathCharsLatin1.ptr(), error);
+    }
+    return nullptr;
+  }
 
   // stash the library
   JS_SetReservedSlot(libraryObj, SLOT_LIBRARY, PrivateValue(library));

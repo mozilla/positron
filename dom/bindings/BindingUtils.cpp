@@ -19,10 +19,12 @@
 
 #include "AccessCheck.h"
 #include "jsfriendapi.h"
+#include "nsContentCreatorFunctions.h"
 #include "nsContentUtils.h"
 #include "nsGlobalWindow.h"
 #include "nsIDocShell.h"
 #include "nsIDOMGlobalPropertyInitializer.h"
+#include "nsIParserService.h"
 #include "nsIPermissionManager.h"
 #include "nsIPrincipal.h"
 #include "nsIXPConnect.h"
@@ -37,6 +39,7 @@
 #include "nsGlobalWindow.h"
 
 #include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/dom/CustomElementRegistry.h"
 #include "mozilla/dom/DOMError.h"
 #include "mozilla/dom/DOMErrorBinding.h"
 #include "mozilla/dom/DOMException.h"
@@ -44,6 +47,7 @@
 #include "mozilla/dom/HTMLObjectElement.h"
 #include "mozilla/dom/HTMLObjectElementBinding.h"
 #include "mozilla/dom/HTMLSharedObjectElement.h"
+#include "mozilla/dom/HTMLElementBinding.h"
 #include "mozilla/dom/HTMLEmbedElementBinding.h"
 #include "mozilla/dom/HTMLAppletElementBinding.h"
 #include "mozilla/dom/Promise.h"
@@ -51,6 +55,7 @@
 #include "mozilla/dom/WebIDLGlobalNameHash.h"
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/WorkerScope.h"
+#include "mozilla/dom/XrayExpandoClass.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "nsDOMClassInfo.h"
 #include "ipc/ErrorIPCUtils.h"
@@ -60,6 +65,30 @@ namespace mozilla {
 namespace dom {
 
 using namespace workers;
+
+// Forward declare GetConstructorObject methods.
+#define HTML_TAG(_tag, _classname, _interfacename)                             \
+namespace HTML##_interfacename##ElementBinding {                               \
+  JSObject* GetConstructorObject(JSContext*);                                  \
+}
+#define HTML_OTHER(_tag)
+#include "nsHTMLTagList.h"
+#undef HTML_TAG
+#undef HTML_OTHER
+
+typedef JSObject* (*constructorGetterCallback)(JSContext*);
+
+// Mapping of html tag and GetConstructorObject methods.
+#define HTML_TAG(_tag, _classname, _interfacename) HTML##_interfacename##ElementBinding::GetConstructorObject,
+#define HTML_OTHER(_tag) nullptr,
+// We use eHTMLTag_foo (where foo is the tag) which is defined in nsHTMLTags.h
+// to index into this array.
+static const constructorGetterCallback sConstructorGetterCallback[] = {
+  HTMLUnknownElementBinding::GetConstructorObject,
+#include "nsHTMLTagList.h"
+#undef HTML_TAG
+#undef HTML_OTHER
+};
 
 const JSErrorFormatString ErrorFormatString[] = {
 #define MSG_DEF(_name, _argc, _exn, _str) \
@@ -92,7 +121,7 @@ binding_detail::ThrowErrorMessage(JSContext* aCx, const unsigned aErrorNumber, .
 {
   va_list ap;
   va_start(ap, aErrorNumber);
-  JS_ReportErrorNumberVA(aCx, GetErrorMessage, nullptr, aErrorNumber, ap);
+  JS_ReportErrorNumberUTF8VA(aCx, GetErrorMessage, nullptr, aErrorNumber, ap);
   va_end(ap);
 }
 
@@ -1892,7 +1921,54 @@ XrayOwnPropertyKeys(JSContext* cx, JS::Handle<JSObject*> wrapper,
                                    obj, flags, props);
 }
 
+const JSClass*
+XrayGetExpandoClass(JSContext* cx, JS::Handle<JSObject*> obj)
+{
+  DOMObjectType type;
+  const NativePropertyHooks* nativePropertyHooks =
+    GetNativePropertyHooks(cx, obj, type);
+  if (!IsInstance(type)) {
+    // Non-instances don't need any special expando classes.
+    return &DefaultXrayExpandoObjectClass;
+  }
+
+  return nativePropertyHooks->mXrayExpandoClass;
+}
+
+bool
+XrayDeleteNamedProperty(JSContext* cx, JS::Handle<JSObject*> wrapper,
+                        JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
+                        JS::ObjectOpResult& opresult)
+{
+  DOMObjectType type;
+  const NativePropertyHooks* nativePropertyHooks =
+    GetNativePropertyHooks(cx, obj, type);
+  if (!IsInstance(type) || !nativePropertyHooks->mDeleteNamedProperty) {
+    return opresult.succeed();
+  }
+  return nativePropertyHooks->mDeleteNamedProperty(cx, wrapper, obj, id,
+                                                   opresult);
+}
+
+JSObject*
+GetCachedSlotStorageObjectSlow(JSContext* cx, JS::Handle<JSObject*> obj,
+                               bool* isXray)
+{
+  if (!xpc::WrapperFactory::IsXrayWrapper(obj)) {
+    JSObject* retval = js::UncheckedUnwrap(obj, /* stopAtWindowProxy = */ false);
+    MOZ_ASSERT(IsDOMObject(retval));
+    *isXray = false;
+    return retval;
+  }
+
+  *isXray = true;
+  return xpc::EnsureXrayExpandoObject(cx, obj);;
+}
+
+DEFINE_XRAY_EXPANDO_CLASS(, DefaultXrayExpandoObjectClass, 0);
+
 NativePropertyHooks sEmptyNativePropertyHooks = {
+  nullptr,
   nullptr,
   nullptr,
   {
@@ -2254,6 +2330,26 @@ GlobalObject::GetAsSupports() const
   return nullptr;
 }
 
+nsIPrincipal*
+GlobalObject::GetSubjectPrincipal() const
+{
+  if (!NS_IsMainThread()) {
+    return nullptr;
+  }
+
+  JSCompartment* compartment = js::GetContextCompartment(mCx);
+  MOZ_ASSERT(compartment);
+  JSPrincipals* principals = JS_GetCompartmentPrincipals(compartment);
+  return nsJSPrincipals::get(principals);
+}
+
+CallerType
+GlobalObject::CallerType() const
+{
+  return nsContentUtils::ThreadsafeIsSystemCaller(mCx) ?
+    dom::CallerType::System : dom::CallerType::NonSystem;
+}
+
 static bool
 CallOrdinaryHasInstance(JSContext* cx, JS::CallArgs& args)
 {
@@ -2370,7 +2466,7 @@ GetContentGlobalForJSImplementedObject(JSContext* cx, JS::Handle<JSObject*> obj,
   // Be very careful to not get tricked here.
   MOZ_ASSERT(NS_IsMainThread());
   if (!xpc::AccessCheck::isChrome(js::GetObjectCompartment(obj))) {
-    NS_RUNTIMEABORT("Should have a chrome object here");
+    MOZ_CRASH("Should have a chrome object here");
   }
 
   // Look up the content-side object.
@@ -2645,7 +2741,8 @@ IsNonExposedGlobal(JSContext* aCx, JSObject* aGlobal,
                 GlobalNames::DedicatedWorkerGlobalScope |
                 GlobalNames::SharedWorkerGlobalScope |
                 GlobalNames::ServiceWorkerGlobalScope |
-                GlobalNames::WorkerDebuggerGlobalScope)) == 0,
+                GlobalNames::WorkerDebuggerGlobalScope |
+                GlobalNames::WorkletGlobalScope)) == 0,
              "Unknown non-exposed global type");
 
   const char* name = js::GetObjectClass(aGlobal)->name;
@@ -2680,14 +2777,19 @@ IsNonExposedGlobal(JSContext* aCx, JSObject* aGlobal,
     return true;
   }
 
+  if ((aNonExposedGlobals & GlobalNames::WorkletGlobalScope) &&
+      !strcmp(name, "WorkletGlobalScope")) {
+    return true;
+  }
+
   return false;
 }
 
 void
 HandlePrerenderingViolation(nsPIDOMWindowInner* aWindow)
 {
-  // Suspend the window and its workers, and its children too.
-  aWindow->SuspendTimeouts();
+  // Freeze the window and its workers, and its children too.
+  aWindow->Freeze();
 
   // Suspend event handling on the document
   nsCOMPtr<nsIDocument> doc = aWindow->GetExtantDoc();
@@ -2887,42 +2989,6 @@ ConvertExceptionToPromise(JSContext* cx,
                           JSObject* promiseScope,
                           JS::MutableHandle<JS::Value> rval)
 {
-#ifndef SPIDERMONKEY_PROMISE
-  GlobalObject global(cx, promiseScope);
-  if (global.Failed()) {
-    return false;
-  }
-
-  JS::Rooted<JS::Value> exn(cx);
-  if (!JS_GetPendingException(cx, &exn)) {
-    // This is very important: if there is no pending exception here but we're
-    // ending up in this code, that means the callee threw an uncatchable
-    // exception.  Just propagate that out as-is.
-    return false;
-  }
-
-  JS_ClearPendingException(cx);
-
-  nsCOMPtr<nsIGlobalObject> globalObj =
-    do_QueryInterface(global.GetAsSupports());
-  if (!globalObj) {
-    ErrorResult rv;
-    rv.Throw(NS_ERROR_UNEXPECTED);
-    return !rv.MaybeSetPendingException(cx);
-  }
-
-  ErrorResult rv;
-  RefPtr<Promise> promise = Promise::Reject(globalObj, cx, exn, rv);
-  if (rv.MaybeSetPendingException(cx)) {
-    // We just give up.  We put the exception from the ErrorResult on
-    // the JSContext just to make sure to not leak memory on the
-    // ErrorResult, but now just put the original exception back.
-    JS_SetPendingException(cx, exn);
-    return false;
-  }
-
-  return GetOrCreateDOMReflector(cx, promise, rval);
-#else // SPIDERMONKEY_PROMISE
   {
     JSAutoCompartment ac(cx, promiseScope);
 
@@ -2948,7 +3014,6 @@ ConvertExceptionToPromise(JSContext* cx,
 
   // Now make sure we rewrap promise back into the compartment we want
   return JS_WrapValue(cx, rval);
-#endif // SPIDERMONKEY_PROMISE
 }
 
 /* static */
@@ -3289,6 +3354,131 @@ GetDesiredProto(JSContext* aCx, const JS::CallArgs& aCallArgs,
 
   aDesiredProto.set(&protoVal.toObject());
   return true;
+}
+
+// https://html.spec.whatwg.org/multipage/dom.html#htmlconstructor
+already_AddRefed<nsGenericHTMLElement>
+CreateHTMLElement(const GlobalObject& aGlobal, const JS::CallArgs& aCallArgs,
+                  ErrorResult& aRv)
+{
+  // Step 1.
+  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aGlobal.GetAsSupports());
+  if (!window) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
+  nsIDocument* doc = window->GetExtantDoc();
+  if (!doc) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
+  RefPtr<mozilla::dom::CustomElementRegistry> registry(window->CustomElements());
+  if (!registry) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
+  // Step 2 is in the code output by CGClassConstructor.
+  // Step 3.
+  JSContext* cx = aGlobal.Context();
+  JS::Rooted<JSObject*> newTarget(cx, &aCallArgs.newTarget().toObject());
+  CustomElementDefinition* definition =
+    registry->LookupCustomElementDefinition(cx, newTarget);
+  if (!definition) {
+    aRv.ThrowTypeError<MSG_ILLEGAL_CONSTRUCTOR>();
+    return nullptr;
+  }
+
+  // The callee might be an Xray. Unwrap it to get actual callee.
+  JS::Rooted<JSObject*> callee(cx, js::CheckedUnwrap(&aCallArgs.callee()));
+  if (!callee) {
+    aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
+    return nullptr;
+  }
+
+  // And the actual callee might be in different compartment, so enter its
+  // compartment before getting the standard constructor object to compare to,
+  // so we get it from the same global as callee itself.
+  JSAutoCompartment ac(cx, callee);
+  int32_t tag = eHTMLTag_userdefined;
+  if (!definition->IsCustomBuiltIn()) {
+    // Step 4.
+    // If the definition is for an autonomous custom element, the active
+    // function should be HTMLElement.
+    JS::Rooted<JSObject*> constructor(cx, HTMLElementBinding::GetConstructorObject(cx));
+    if (!constructor) {
+      aRv.NoteJSContextException(cx);
+      return nullptr;
+    }
+
+    if (callee != constructor) {
+      aRv.ThrowTypeError<MSG_ILLEGAL_CONSTRUCTOR>();
+      return nullptr;
+    }
+  } else {
+    // Step 5.
+    // If the definition is for a customized built-in element, the localName
+    // should be defined in the specification.
+    nsIParserService* parserService = nsContentUtils::GetParserService();
+    if (!parserService) {
+      aRv.Throw(NS_ERROR_UNEXPECTED);
+      return nullptr;
+    }
+
+    tag = parserService->HTMLCaseSensitiveAtomTagToId(definition->mLocalName);
+    if (tag == eHTMLTag_userdefined) {
+      aRv.ThrowTypeError<MSG_ILLEGAL_CONSTRUCTOR>();
+      return nullptr;
+    }
+
+    MOZ_ASSERT(tag <= NS_HTML_TAG_MAX, "tag is out of bounds");
+
+    // If the definition is for a customized built-in element, the active
+    // function should be the localname's element interface.
+    constructorGetterCallback cb = sConstructorGetterCallback[tag];
+    if (!cb) {
+      aRv.ThrowTypeError<MSG_ILLEGAL_CONSTRUCTOR>();
+      return nullptr;
+    }
+
+    JS::Rooted<JSObject*> constructor(cx, cb(cx));
+    if (!constructor) {
+      aRv.NoteJSContextException(cx);
+      return nullptr;
+    }
+
+    if (callee != constructor) {
+      aRv.ThrowTypeError<MSG_ILLEGAL_CONSTRUCTOR>();
+      return nullptr;
+    }
+  }
+
+  RefPtr<mozilla::dom::NodeInfo> nodeInfo =
+    doc->NodeInfoManager()->GetNodeInfo(definition->mLocalName,
+                                        nullptr,
+                                        kNameSpaceID_XHTML,
+                                        nsIDOMNode::ELEMENT_NODE);
+  if (!nodeInfo) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
+  // Step 6 and Step 7 are in the code output by CGClassConstructor.
+  // Step 8.
+  // Construction stack will be implemented in bug 1287348. So we always run
+  // "construction stack is empty" case for now.
+  RefPtr<nsGenericHTMLElement> element;
+  if (tag == eHTMLTag_userdefined) {
+    // Autonomous custom element.
+    element = NS_NewHTMLElement(nodeInfo.forget());
+  } else {
+    // Customized built-in element.
+    element = CreateHTMLElement(tag, nodeInfo.forget(), NOT_FROM_PARSER);
+  }
+
+  return element.forget();
 }
 
 #ifdef DEBUG

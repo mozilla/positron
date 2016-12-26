@@ -43,11 +43,11 @@ VsyncBridgeParent::Open(Endpoint<PVsyncBridgeParent>&& aEndpoint)
   mOpen = true;
 }
 
-bool
+mozilla::ipc::IPCResult
 VsyncBridgeParent::RecvNotifyVsync(const TimeStamp& aTimeStamp, const uint64_t& aLayersId)
 {
   CompositorBridgeParent::NotifyVsync(aTimeStamp, aLayersId);
-  return true;
+  return IPC_OK();
 }
 
 void
@@ -55,10 +55,16 @@ VsyncBridgeParent::Shutdown()
 {
   MessageLoop* ccloop = CompositorThreadHolder::Loop();
   if (MessageLoop::current() != ccloop) {
-    ccloop->PostTask(NewRunnableMethod(this, &VsyncBridgeParent::Shutdown));
+    ccloop->PostTask(NewRunnableMethod(this, &VsyncBridgeParent::ShutdownImpl));
     return;
   }
 
+  ShutdownImpl();
+}
+
+void
+VsyncBridgeParent::ShutdownImpl()
+{
   if (mOpen) {
     Close();
     mOpen = false;

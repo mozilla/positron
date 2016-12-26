@@ -1,22 +1,20 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 "use strict";
 
 const promise = require("promise");
 const EventEmitter = require("devtools/shared/event-emitter");
 const { Task } = require("devtools/shared/task");
+const { localizeMarkup } = require("devtools/shared/l10n");
 
 function NetMonitorPanel(iframeWindow, toolbox) {
   this.panelWin = iframeWindow;
+  this.panelDoc = iframeWindow.document;
   this._toolbox = toolbox;
 
-  this._view = this.panelWin.NetMonitorView;
-  this._controller = this.panelWin.NetMonitorController;
-  this._controller._target = this.target;
-  this._controller._toolbox = this._toolbox;
+  this._netmonitor = new iframeWindow.Netmonitor(toolbox);
 
   EventEmitter.decorate(this);
 }
@@ -34,6 +32,9 @@ NetMonitorPanel.prototype = {
     if (this._opening) {
       return this._opening;
     }
+    // Localize all the nodes containing a data-localization attribute.
+    localizeMarkup(this.panelDoc);
+
     let deferred = promise.defer();
     this._opening = deferred.promise;
 
@@ -42,7 +43,8 @@ NetMonitorPanel.prototype = {
       yield this.target.makeRemote();
     }
 
-    yield this._controller.startupNetMonitor();
+    yield this._netmonitor.init();
+
     this.isReady = true;
     this.emit("ready");
 
@@ -63,7 +65,7 @@ NetMonitorPanel.prototype = {
     let deferred = promise.defer();
     this._destroying = deferred.promise;
 
-    yield this._controller.shutdownNetMonitor();
+    yield this._netmonitor.destroy();
     this.emit("destroyed");
 
     deferred.resolve();

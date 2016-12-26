@@ -61,7 +61,7 @@
 #include "nsXULPrototypeCache.h"
 #endif
 
-#include "nsIMediaList.h"
+#include "nsMediaList.h"
 #include "nsIDOMStyleSheet.h"
 #include "nsError.h"
 
@@ -1300,7 +1300,7 @@ Loader::PrepareSheet(StyleSheet* aSheet,
 
     // We have aMediaString only when linked from link elements, style
     // elements, or PIs, so pass true.
-    mediumParser.ParseMediaList(aMediaString, nullptr, 0, mediaList, true);
+    mediumParser.ParseMediaList(aMediaString, nullptr, 0, mediaList);
   }
 
   sheet->SetMedia(mediaList);
@@ -1814,6 +1814,10 @@ void
 Loader::SheetComplete(SheetLoadData* aLoadData, nsresult aStatus)
 {
   LOG(("css::Loader::SheetComplete"));
+
+  if (aLoadData->mSheet->IsServo() && NS_FAILED(aStatus)) {
+    aLoadData->mSheet->AsServo()->LoadFailed();
+  }
 
   // 8 is probably big enough for all our common cases.  It's not likely that
   // imports will nest more than 8 deep, and multiple sheets with the same URI

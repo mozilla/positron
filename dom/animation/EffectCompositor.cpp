@@ -9,14 +9,15 @@
 #include "mozilla/dom/Animation.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/KeyframeEffectReadOnly.h"
+#include "mozilla/AnimationComparator.h"
 #include "mozilla/AnimationPerformanceWarning.h"
 #include "mozilla/AnimationTarget.h"
 #include "mozilla/AnimationUtils.h"
 #include "mozilla/EffectSet.h"
-#include "mozilla/InitializerList.h"
 #include "mozilla/LayerAnimationInfo.h"
 #include "mozilla/RestyleManagerHandle.h"
 #include "mozilla/RestyleManagerHandleInlines.h"
+#include "mozilla/StyleAnimationValue.h"
 #include "nsComputedDOMStyle.h" // nsComputedDOMStyle::GetPresShellForContent
 #include "nsCSSPropertyIDSet.h"
 #include "nsCSSProps.h"
@@ -25,6 +26,8 @@
 #include "nsRuleNode.h" // For nsRuleNode::ComputePropertiesOverridingAnimation
 #include "nsRuleProcessorData.h" // For ElementRuleProcessorData etc.
 #include "nsTArray.h"
+#include <bitset>
+#include <initializer_list>
 
 using mozilla::dom::Animation;
 using mozilla::dom::Element;
@@ -53,6 +56,56 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(EffectCompositor, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(EffectCompositor, Release)
 
+namespace {
+enum class MatchForCompositor {
+  // This animation matches and should run on the compositor if possible.
+  Yes,
+  // This (not currently playing) animation matches and can be run on the
+  // compositor if there are other animations for this property that return
+  // 'Yes'.
+  IfNeeded,
+  // This animation does not match or can't be run on the compositor.
+  No,
+  // This animation does not match or can't be run on the compositor and,
+  // furthermore, its presence means we should not run any animations for this
+  // property on the compositor.
+  NoAndBlockThisProperty
+};
+}
+
+static MatchForCompositor
+IsMatchForCompositor(const KeyframeEffectReadOnly& aEffect,
+                     nsCSSPropertyID aProperty,
+                     const nsIFrame* aFrame)
+{
+  const Animation* animation = aEffect.GetAnimation();
+  MOZ_ASSERT(animation);
+
+  if (!animation->IsRelevant()) {
+    return MatchForCompositor::No;
+  }
+
+  AnimationPerformanceWarning::Type warningType;
+  if (animation->ShouldBeSynchronizedWithMainThread(aProperty, aFrame,
+                                                    warningType)) {
+    EffectCompositor::SetPerformanceWarning(
+      aFrame, aProperty,
+      AnimationPerformanceWarning(warningType));
+    // For a given |aFrame|, we don't want some animations of |aProperty| to
+    // run on the compositor and others to run on the main thread, so if any
+    // need to be synchronized with the main thread, run them all there.
+    return MatchForCompositor::NoAndBlockThisProperty;
+  }
+
+  if (!aEffect.HasEffectiveAnimationOfProperty(aProperty)) {
+    return MatchForCompositor::No;
+  }
+
+  return animation->IsPlaying()
+         ? MatchForCompositor::Yes
+         : MatchForCompositor::IfNeeded;
+}
+
 // Helper function to factor out the common logic from
 // GetAnimationsForCompositor and HasAnimationsForCompositor.
 //
@@ -72,7 +125,32 @@ FindAnimationsForCompositor(const nsIFrame* aFrame,
     return false;
   }
 
+  // First check for newly-started transform animations that should be
+  // synchronized with geometric animations. We need to do this before any
+  // other early returns (the one above is ok) since we can only check this
+  // state when the animation is newly-started.
+  if (aProperty == eCSSProperty_transform) {
+    PendingAnimationTracker* tracker =
+      aFrame->PresContext()->Document()->GetPendingAnimationTracker();
+    if (tracker) {
+      tracker->MarkAnimationsThatMightNeedSynchronization();
+    }
+  }
+
+  // If the property will be added to the animations level of the cascade but
+  // there is an !important rule for that property in the cascade then the
+  // animation will not be applied since the !important rule overrides it.
+  if (effects->PropertiesWithImportantRules().HasProperty(aProperty) &&
+      effects->PropertiesForAnimationsLevel().HasProperty(aProperty)) {
+    return false;
+  }
+
   if (aFrame->RefusedAsyncAnimation()) {
+    return false;
+  }
+
+  if (aFrame->StyleContext()->StyleSource().IsServoComputedValues()) {
+    NS_ERROR("stylo: cannot handle compositor-driven animations yet");
     return false;
   }
 
@@ -116,41 +194,48 @@ FindAnimationsForCompositor(const nsIFrame* aFrame,
     content = content->GetParent();
   }
 
-  bool foundSome = false;
+  bool foundRunningAnimations = false;
   for (KeyframeEffectReadOnly* effect : *effects) {
-    MOZ_ASSERT(effect && effect->GetAnimation());
-    Animation* animation = effect->GetAnimation();
+    MatchForCompositor matchResult =
+      IsMatchForCompositor(*effect, aProperty, aFrame);
 
-    if (!animation->IsPlaying()) {
-      continue;
-    }
-
-    AnimationPerformanceWarning::Type warningType;
-    if (aProperty == eCSSProperty_transform &&
-        effect->ShouldBlockAsyncTransformAnimations(aFrame,
-                                                    warningType)) {
+    if (matchResult == MatchForCompositor::NoAndBlockThisProperty) {
+      // For a given |aFrame|, we don't want some animations of |aProperty| to
+      // run on the compositor and others to run on the main thread, so if any
+      // need to be synchronized with the main thread, run them all there.
       if (aMatches) {
         aMatches->Clear();
       }
-      EffectCompositor::SetPerformanceWarning(
-        aFrame, aProperty,
-        AnimationPerformanceWarning(warningType));
       return false;
     }
 
-    if (!effect->HasAnimationOfProperty(aProperty)) {
+    if (matchResult == MatchForCompositor::No) {
       continue;
     }
 
     if (aMatches) {
-      aMatches->AppendElement(animation);
+      aMatches->AppendElement(effect->GetAnimation());
     }
-    foundSome = true;
+
+    if (matchResult == MatchForCompositor::Yes) {
+      foundRunningAnimations = true;
+    }
   }
 
-  MOZ_ASSERT(!foundSome || !aMatches || !aMatches->IsEmpty(),
+  // If all animations we added were not currently playing animations, don't
+  // send them to the compositor.
+  if (aMatches && !foundRunningAnimations) {
+    aMatches->Clear();
+  }
+
+  MOZ_ASSERT(!foundRunningAnimations || !aMatches || !aMatches->IsEmpty(),
              "If return value is true, matches array should be non-empty");
-  return foundSome;
+
+  if (aMatches && foundRunningAnimations) {
+    aMatches->Sort(AnimationPtrComparator<RefPtr<dom::Animation>>());
+  }
+
+  return foundRunningAnimations;
 }
 
 void
@@ -161,6 +246,11 @@ EffectCompositor::RequestRestyle(dom::Element* aElement,
 {
   if (!mPresContext) {
     // Pres context will be null after the effect compositor is disconnected.
+    return;
+  }
+
+  // Ignore animations on orphaned elements.
+  if (!aElement->IsInComposedDoc()) {
     return;
   }
 
@@ -184,9 +274,11 @@ EffectCompositor::RequestRestyle(dom::Element* aElement,
 
   if (aRestyleType == RestyleType::Layer) {
     // Prompt layers to re-sync their animations.
-    MOZ_ASSERT(mPresContext->RestyleManager()->IsGecko(),
-               "stylo: Servo-backed style system should not be using "
+    if (mPresContext->RestyleManager()->IsServo()) {
+      NS_ERROR("stylo: Servo-backed style system should not be using "
                "EffectCompositor");
+      return;
+    }
     mPresContext->RestyleManager()->AsGecko()->IncrementAnimationGeneration();
     EffectSet* effectSet =
       EffectSet::GetEffectSet(aElement, aPseudoType);
@@ -250,6 +342,8 @@ EffectCompositor::UpdateEffectProperties(nsStyleContext* aStyleContext,
   // Style context change might cause CSS cascade level,
   // e.g removing !important, so we should update the cascading result.
   effectSet->MarkCascadeNeedsUpdate();
+
+  ClearBaseStyles(*aElement, aPseudoType);
 
   for (KeyframeEffectReadOnly* effect : *effectSet) {
     effect->UpdateProperties(aStyleContext);
@@ -403,7 +497,11 @@ EffectCompositor::AddStyleUpdatesTo(RestyleTracker& aTracker)
     nsTArray<PseudoElementHashEntry::KeyType> elementsToRestyle(
       elementSet.Count());
     for (auto iter = elementSet.Iter(); !iter.Done(); iter.Next()) {
-      elementsToRestyle.AppendElement(iter.Key());
+      // Skip animations on elements that have been orphaned since they
+      // requested a restyle.
+      if (iter.Key().mElement->IsInComposedDoc()) {
+        elementsToRestyle.AppendElement(iter.Key());
+      }
     }
 
     for (auto& pseudoElem : elementsToRestyle) {
@@ -580,13 +678,10 @@ EffectCompositor::ComposeAnimationRule(dom::Element* aElement,
   MOZ_ASSERT(!effects->CascadeNeedsUpdate(),
              "Animation cascade out of date when composing animation rule");
 
-  // Get a list of effects for the current level sorted by composite order.
-  nsTArray<KeyframeEffectReadOnly*> sortedEffectList;
+  // Get a list of effects sorted by composite order.
+  nsTArray<KeyframeEffectReadOnly*> sortedEffectList(effects->Count());
   for (KeyframeEffectReadOnly* effect : *effects) {
-    MOZ_ASSERT(effect->GetAnimation());
-    if (effect->GetAnimation()->CascadeLevel() == aCascadeLevel) {
-      sortedEffectList.AppendElement(effect);
-    }
+    sortedEffectList.AppendElement(effect);
   }
   sortedEffectList.Sort(EffectCompositeOrderComparator());
 
@@ -594,14 +689,15 @@ EffectCompositor::ComposeAnimationRule(dom::Element* aElement,
     effects->AnimationRule(aCascadeLevel);
   animationRule = nullptr;
 
-  // If multiple animations specify behavior for the same property the
-  // animation with the *highest* composite order wins.
-  // As a result, we iterate from last animation to first and, if a
-  // property has already been set, we don't change it.
-  nsCSSPropertyIDSet properties;
-
-  for (KeyframeEffectReadOnly* effect : Reversed(sortedEffectList)) {
-    effect->GetAnimation()->ComposeStyle(animationRule, properties);
+  // If multiple animations affect the same property, animations with higher
+  // composite order (priority) override or add or animations with lower
+  // priority except properties in propertiesToSkip.
+  const nsCSSPropertyIDSet& propertiesToSkip =
+    aCascadeLevel == CascadeLevel::Animations
+    ? effects->PropertiesForAnimationsLevel().Invert()
+    : effects->PropertiesForAnimationsLevel();
+  for (KeyframeEffectReadOnly* effect : sortedEffectList) {
+    effect->GetAnimation()->ComposeStyle(animationRule, propertiesToSkip);
   }
 
   MOZ_ASSERT(effects == EffectSet::GetEffectSet(aElement, aPseudoType),
@@ -659,7 +755,7 @@ EffectCompositor::UpdateCascadeResults(EffectSet& aEffectSet,
   }
 
   // Get a list of effects sorted by composite order.
-  nsTArray<KeyframeEffectReadOnly*> sortedEffectList;
+  nsTArray<KeyframeEffectReadOnly*> sortedEffectList(aEffectSet.Count());
   for (KeyframeEffectReadOnly* effect : aEffectSet) {
     sortedEffectList.AppendElement(effect);
   }
@@ -675,62 +771,89 @@ EffectCompositor::UpdateCascadeResults(EffectSet& aEffectSet,
     GetOverriddenProperties(aStyleContext, aEffectSet, overriddenProperties);
   }
 
-  bool changed = false;
-  nsCSSPropertyIDSet animatedProperties;
+  // Returns a bitset the represents which properties from
+  // LayerAnimationInfo::sRecords are present in |aPropertySet|.
+  auto compositorPropertiesInSet =
+    [](nsCSSPropertyIDSet& aPropertySet) ->
+      std::bitset<LayerAnimationInfo::kRecords> {
+        std::bitset<LayerAnimationInfo::kRecords> result;
+        for (size_t i = 0; i < LayerAnimationInfo::kRecords; i++) {
+          if (aPropertySet.HasProperty(
+                LayerAnimationInfo::sRecords[i].mProperty)) {
+            result.set(i);
+          }
+        }
+      return result;
+    };
 
-  // Iterate from highest to lowest composite order.
-  for (KeyframeEffectReadOnly* effect : Reversed(sortedEffectList)) {
+  nsCSSPropertyIDSet& propertiesWithImportantRules =
+    aEffectSet.PropertiesWithImportantRules();
+  nsCSSPropertyIDSet& propertiesForAnimationsLevel =
+    aEffectSet.PropertiesForAnimationsLevel();
+
+  // Record which compositor-animatable properties were originally set so we can
+  // compare for changes later.
+  std::bitset<LayerAnimationInfo::kRecords>
+    prevCompositorPropertiesWithImportantRules =
+      compositorPropertiesInSet(propertiesWithImportantRules);
+  std::bitset<LayerAnimationInfo::kRecords>
+    prevCompositorPropertiesForAnimationsLevel =
+      compositorPropertiesInSet(propertiesForAnimationsLevel);
+
+  propertiesWithImportantRules.Empty();
+  propertiesForAnimationsLevel.Empty();
+
+  bool hasCompositorPropertiesForTransition = false;
+
+  for (const KeyframeEffectReadOnly* effect : sortedEffectList) {
     MOZ_ASSERT(effect->GetAnimation(),
                "Effects on a target element should have an Animation");
-    bool inEffect = effect->IsInEffect();
-    for (AnimationProperty& prop : effect->Properties()) {
+    CascadeLevel cascadeLevel = effect->GetAnimation()->CascadeLevel();
 
-      bool winsInCascade = !animatedProperties.HasProperty(prop.mProperty) &&
-                           inEffect;
-
-      // If this property wins in the cascade, add it to the set of animated
-      // properties. We need to do this even if the property is overridden
-      // (in which case we set winsInCascade to false below) since we don't
-      // want to fire transitions on these properties.
-      if (winsInCascade) {
-        animatedProperties.AddProperty(prop.mProperty);
+    for (const AnimationProperty& prop : effect->Properties()) {
+      if (overriddenProperties.HasProperty(prop.mProperty)) {
+        propertiesWithImportantRules.AddProperty(prop.mProperty);
+      }
+      if (cascadeLevel == EffectCompositor::CascadeLevel::Animations) {
+        propertiesForAnimationsLevel.AddProperty(prop.mProperty);
       }
 
-      // For effects that will be applied to the animations level of the
-      // cascade, we need to check that the property isn't being set by
-      // something with higher priority in the cascade.
-      //
-      // We only do this, however, for properties that can be animated on
-      // the compositor. For properties animated on the main thread the usual
-      // cascade ensures these animations will be correctly overridden.
-      if (winsInCascade &&
-          effect->GetAnimation()->CascadeLevel() == CascadeLevel::Animations &&
-          overriddenProperties.HasProperty(prop.mProperty)) {
-        winsInCascade = false;
+      if (nsCSSProps::PropHasFlags(prop.mProperty,
+                                   CSS_PROPERTY_CAN_ANIMATE_ON_COMPOSITOR) &&
+          cascadeLevel == EffectCompositor::CascadeLevel::Transitions) {
+        hasCompositorPropertiesForTransition = true;
       }
-
-      if (winsInCascade != prop.mWinsInCascade) {
-        changed = true;
-      }
-      prop.mWinsInCascade = winsInCascade;
     }
   }
 
   aEffectSet.MarkCascadeUpdated();
 
-  // If there is any change in the cascade result, update animations on
-  // layers with the winning animations.
   nsPresContext* presContext = GetPresContext(aElement);
-  if (changed && presContext) {
-    // Update both transitions and animations. We could detect *which* levels
-    // actually changed and only update them, but that's probably unnecessary.
-    for (auto level : { CascadeLevel::Animations,
-                        CascadeLevel::Transitions }) {
-      presContext->EffectCompositor()->RequestRestyle(aElement,
-                                                      aPseudoType,
-                                                      RestyleType::Layer,
-                                                      level);
-    }
+  if (!presContext) {
+    return;
+  }
+
+  // If properties for compositor are newly overridden by !important rules, or
+  // released from being overridden by !important rules, we need to update
+  // layers for animations level because it's a trigger to send animations to
+  // the compositor or pull animations back from the compositor.
+  if (prevCompositorPropertiesWithImportantRules !=
+        compositorPropertiesInSet(propertiesWithImportantRules)) {
+    presContext->EffectCompositor()->
+      RequestRestyle(aElement, aPseudoType,
+                     EffectCompositor::RestyleType::Layer,
+                     EffectCompositor::CascadeLevel::Animations);
+  }
+  // If we have transition properties for compositor and if the same propery
+  // for animations level is newly added or removed, we need to update layers
+  // for transitions level because composite order has been changed now.
+  if (hasCompositorPropertiesForTransition &&
+      prevCompositorPropertiesForAnimationsLevel !=
+        compositorPropertiesInSet(propertiesForAnimationsLevel)) {
+    presContext->EffectCompositor()->
+      RequestRestyle(aElement, aPseudoType,
+                     EffectCompositor::RestyleType::Layer,
+                     EffectCompositor::CascadeLevel::Transitions);
   }
 }
 
@@ -759,6 +882,79 @@ EffectCompositor::SetPerformanceWarning(
   for (KeyframeEffectReadOnly* effect : *effects) {
     effect->SetPerformanceWarning(aProperty, aWarning);
   }
+}
+
+/* static */ StyleAnimationValue
+EffectCompositor::GetBaseStyle(nsCSSPropertyID aProperty,
+                               nsStyleContext* aStyleContext,
+                               dom::Element& aElement,
+                               CSSPseudoElementType aPseudoType)
+{
+  MOZ_ASSERT(aStyleContext, "Need style context to resolve the base value");
+  MOZ_ASSERT(!aStyleContext->StyleSource().IsServoComputedValues(),
+             "Bug 1311257: Servo backend does not support the base value yet");
+
+  StyleAnimationValue result;
+
+  EffectSet* effectSet =
+    EffectSet::GetEffectSet(&aElement, aPseudoType);
+  if (!effectSet) {
+    return result;
+  }
+
+  // Check whether there is a cached style.
+  result = effectSet->GetBaseStyle(aProperty);
+  if (!result.IsNull()) {
+    return result;
+  }
+
+  RefPtr<nsStyleContext> styleContextWithoutAnimation =
+    aStyleContext->PresContext()->StyleSet()->AsGecko()->
+      ResolveStyleWithoutAnimation(&aElement, aStyleContext,
+                                   eRestyle_AllHintsWithAnimations);
+
+  DebugOnly<bool> success =
+    StyleAnimationValue::ExtractComputedValue(aProperty,
+                                              styleContextWithoutAnimation,
+                                              result);
+  MOZ_ASSERT(success, "Should be able to extract computed animation value");
+  MOZ_ASSERT(!result.IsNull(), "Should have a valid StyleAnimationValue");
+
+  effectSet->PutBaseStyle(aProperty, result);
+
+  return result;
+}
+
+/* static */ StyleAnimationValue
+EffectCompositor::GetBaseStyle(nsCSSPropertyID aProperty,
+                               const nsIFrame* aFrame)
+{
+  MOZ_ASSERT(aFrame->StyleContext(),
+             "The frame should have a valid style context");
+
+  Maybe<NonOwningAnimationTarget> pseudoElement =
+    EffectCompositor::GetAnimationElementAndPseudoForFrame(aFrame);
+
+  MOZ_ASSERT(pseudoElement && pseudoElement->mElement,
+             "The frame should have an associated element");
+
+  return EffectCompositor::GetBaseStyle(aProperty,
+                                        aFrame->StyleContext(),
+                                        *pseudoElement->mElement,
+                                        pseudoElement->mPseudoType);
+}
+
+/* static */ void
+EffectCompositor::ClearBaseStyles(dom::Element& aElement,
+                                  CSSPseudoElementType aPseudoType)
+{
+  EffectSet* effectSet =
+    EffectSet::GetEffectSet(&aElement, aPseudoType);
+  if (!effectSet) {
+    return;
+  }
+
+  effectSet->ClearBaseStyles();
 }
 
 // ---------------------------------------------------------

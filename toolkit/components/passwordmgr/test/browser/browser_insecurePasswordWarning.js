@@ -13,21 +13,21 @@ const WARNING_PATTERN = [{
 add_task(function* testInsecurePasswordWarning() {
   let warningPatternHandler;
 
-  function messageHandler(msg) {
+  function messageHandler(msgObj) {
     function findWarningPattern(msg) {
       return WARNING_PATTERN.find(patternPair => {
         return msg.indexOf(patternPair.msg) !== -1;
       });
     }
 
-    let warning = findWarningPattern(msg.message);
+    let warning = findWarningPattern(msgObj.message);
 
     // Only handle the insecure password related warning messages.
     if (warning) {
       // Prevent any unexpected or redundant matched warning message coming after
       // the test case is ended.
       ok(warningPatternHandler, "Invoke a valid warning message handler");
-      warningPatternHandler(warning, msg.message);
+      warningPatternHandler(warning, msgObj.message);
     }
   }
   Services.console.registerListener(messageHandler);
@@ -60,7 +60,7 @@ add_task(function* testInsecurePasswordWarning() {
   ]) {
     let testURL = origin + TEST_URL_PATH + testFile;
     let promiseConsoleMessages = new Promise(resolve => {
-      warningPatternHandler = function (warning, originMessage) {
+      warningPatternHandler = function(warning, originMessage) {
         ok(warning, "Handling a warning pattern");
         let fullMessage = `[${warning.msg} {file: "${testURL}" line: 0 column: 0 source: "0"}]`;
         is(originMessage, fullMessage, "Message full matched:" + originMessage);

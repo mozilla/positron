@@ -22,6 +22,7 @@ Cu.import("chrome://marionette/content/error.js");
 Cu.import("chrome://marionette/content/evaluate.js");
 Cu.import("chrome://marionette/content/event.js");
 Cu.import("chrome://marionette/content/interaction.js");
+Cu.import("chrome://marionette/content/legacyaction.js");
 Cu.import("chrome://marionette/content/logging.js");
 Cu.import("chrome://marionette/content/navigate.js");
 Cu.import("chrome://marionette/content/proxy.js");
@@ -59,7 +60,7 @@ var SUPPORTED_STRATEGIES = new Set([
 
 var capabilities = {};
 
-var actions = new action.Chain(checkForInterrupted);
+var legacyactions = new legacyaction.Chain(checkForInterrupted);
 
 // the unload handler
 var onunload;
@@ -123,11 +124,10 @@ function registerSelf() {
   if (register[0]) {
     let {id, remotenessChange} = register[0][0];
     capabilities = register[0][2];
-    isB2G = capabilities.platformName == "b2g";
     listenerId = id;
     if (typeof id != "undefined") {
       // check if we're the main process
-      if (register[0][1] == true) {
+      if (register[0][1]) {
         addMessageListener("MarionetteMainListener:emitTouchEvent", emitTouchEventForIFrame);
       }
       startListeners();
@@ -142,7 +142,7 @@ function registerSelf() {
 
 function emitTouchEventForIFrame(message) {
   message = message.json;
-  let identifier = actions.nextTouchId;
+  let identifier = legacyactions.nextTouchId;
 
   let domWindowUtils = curContainer.frame.
     QueryInterface(Components.interfaces.nsIInterfaceRequestor).
@@ -179,7 +179,7 @@ function dispatch(fn) {
     throw new TypeError("Provided dispatch handler is not a function");
   }
 
-  return function(msg) {
+  return function (msg) {
     let id = msg.json.command_id;
 
     let req = Task.spawn(function*() {
@@ -240,6 +240,8 @@ var getCookiesFn = dispatch(getCookies);
 var singleTapFn = dispatch(singleTap);
 var takeScreenshotFn = dispatch(takeScreenshot);
 var getScreenshotHashFn = dispatch(getScreenshotHash);
+var performActionsFn = dispatch(performActions);
+var releaseActionsFn = dispatch(releaseActions);
 var actionChainFn = dispatch(actionChain);
 var multiActionFn = dispatch(multiAction);
 var addCookieFn = dispatch(addCookie);
@@ -259,6 +261,8 @@ function startListeners() {
   addMessageListenerId("Marionette:executeInSandbox", executeInSandboxFn);
   addMessageListenerId("Marionette:executeSimpleTest", executeSimpleTestFn);
   addMessageListenerId("Marionette:singleTap", singleTapFn);
+  addMessageListenerId("Marionette:performActions", performActionsFn);
+  addMessageListenerId("Marionette:releaseActions", releaseActionsFn);
   addMessageListenerId("Marionette:actionChain", actionChainFn);
   addMessageListenerId("Marionette:multiAction", multiActionFn);
   addMessageListenerId("Marionette:get", get);
@@ -329,7 +333,7 @@ function newSession(msg) {
     // events being the result of a physical mouse action.
     // This is especially important for the touch event shim,
     // in order to prevent creating touch event for these fake mouse events.
-    actions.inputSource = Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH;
+    legacyactions.inputSource = Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH;
   }
 }
 
@@ -363,6 +367,8 @@ function deleteSession(msg) {
   removeMessageListenerId("Marionette:executeInSandbox", executeInSandboxFn);
   removeMessageListenerId("Marionette:executeSimpleTest", executeSimpleTestFn);
   removeMessageListenerId("Marionette:singleTap", singleTapFn);
+  removeMessageListenerId("Marionette:performActions", performActionsFn);
+  removeMessageListenerId("Marionette:releaseActions", releaseActionsFn);
   removeMessageListenerId("Marionette:actionChain", actionChainFn);
   removeMessageListenerId("Marionette:multiAction", multiActionFn);
   removeMessageListenerId("Marionette:get", get);
@@ -409,7 +415,13 @@ function deleteSession(msg) {
   // reset container frame to the top-most frame
   curContainer = { frame: content, shadowRoot: null };
   curContainer.frame.focus();
-  actions.touchIds = {};
+  legacyactions.touchIds = {};
+  if (action.inputStateMap !== undefined) {
+    action.inputStateMap.clear();
+  }
+  if (action.inputsToCancel !== undefined) {
+    action.inputsToCancel.length = 0;
+  }
 }
 
 /**
@@ -477,7 +489,9 @@ function sendLog(msg) {
 function resetValues() {
   sandboxes.clear();
   curContainer = {frame: content, shadowRoot: null};
-  actions.mouseEventsOnly = false;
+  legacyactions.mouseEventsOnly = false;
+  action.inputStateMap = new Map();
+  action.inputsToCancel = [];
 }
 
 /**
@@ -507,7 +521,7 @@ function checkForInterrupted() {
     if (wasInterrupted()) {
       if (previousContainer) {
         // if previousContainer is set, then we're in a single process environment
-        curContainer = actions.container = previousContainer;
+        curContainer = legacyactions.container = previousContainer;
         previousContainer = null;
       }
       else {
@@ -596,7 +610,7 @@ function emitTouchEvent(type, touch) {
                    QueryInterface(Components.interfaces.nsIInterfaceRequestor).
                    getInterface(Components.interfaces.nsIWebNavigation).
                    QueryInterface(Components.interfaces.nsIDocShell);
-    if (docShell.asyncPanZoomEnabled && actions.scrolling) {
+    if (docShell.asyncPanZoomEnabled && legacyactions.scrolling) {
       // if we're in APZ and we're scrolling, we must use sendNativeTouchPoint to dispatch our touchmove events
       let index = sendSyncMessage("MarionetteFrame:getCurrentFrameId");
       // only call emitTouchEventForIFrame if we're inside an iframe.
@@ -635,21 +649,21 @@ function singleTap(id, corx, cory) {
     throw new ElementNotVisibleError("Element is not currently visible and may not be manipulated");
   }
 
-  let a11y = accessibility.get(capabilities.raisesAccessibilityExceptions);
+  let a11y = accessibility.get(capabilities["moz:accessibilityChecks"]);
   return a11y.getAccessible(el, true).then(acc => {
     a11y.assertVisible(acc, el, visible);
     a11y.assertActionable(acc, el);
     if (!curContainer.frame.document.createTouch) {
-      actions.mouseEventsOnly = true;
+      legacyactions.mouseEventsOnly = true;
     }
     let c = element.coordinates(el, corx, cory);
-    if (!actions.mouseEventsOnly) {
-      let touchId = actions.nextTouchId++;
+    if (!legacyactions.mouseEventsOnly) {
+      let touchId = legacyactions.nextTouchId++;
       let touch = createATouch(el, c.x, c.y, touchId);
       emitTouchEvent('touchstart', touch);
       emitTouchEvent('touchend', touch);
     }
-    actions.mouseTap(el.ownerDocument, c.x, c.y);
+    legacyactions.mouseTap(el.ownerDocument, c.x, c.y);
   });
 }
 
@@ -661,9 +675,33 @@ function createATouch(el, corx, cory, touchId) {
   let doc = el.ownerDocument;
   let win = doc.defaultView;
   let [clientX, clientY, pageX, pageY, screenX, screenY] =
-    actions.getCoordinateInfo(el, corx, cory);
+   legacyactions.getCoordinateInfo(el, corx, cory);
   let atouch = doc.createTouch(win, el, touchId, pageX, pageY, screenX, screenY, clientX, clientY);
   return atouch;
+}
+
+/**
+ * Perform a series of grouped actions at the specified points in time.
+ *
+ * @param {obj} msg
+ *      Object with an |actions| attribute that is an Array of objects
+ *      each of which represents an action sequence.
+ */
+function performActions(msg) {
+  let chain = action.Chain.fromJson(msg.actions);
+  action.dispatch(chain, seenEls, curContainer);
+}
+
+/**
+ * The Release Actions command is used to release all the keys and pointer
+ * buttons that are currently depressed. This causes events to be fired as if
+ * the state was released by an explicit series of actions. It also clears all
+ * the internal state of the virtual devices.
+ */
+function releaseActions() {
+  action.dispatchTickActions(action.inputsToCancel.reverse(), 0, seenEls, curContainer);
+  action.inputsToCancel.length = 0;
+  action.inputStateMap.clear();
 }
 
 /**
@@ -674,7 +712,7 @@ function actionChain(chain, touchId) {
   touchProvider.createATouch = createATouch;
   touchProvider.emitTouchEvent = emitTouchEvent;
 
-  return actions.dispatchActions(
+  return legacyactions.dispatchActions(
       chain,
       touchId,
       curContainer,
@@ -691,11 +729,11 @@ function emitMultiEvents(type, touch, touches) {
   let doc = target.ownerDocument;
   let win = doc.defaultView;
   // touches that are in the same document
-  let documentTouches = doc.createTouchList(touches.filter(function(t) {
+  let documentTouches = doc.createTouchList(touches.filter(function (t) {
     return ((t.target.ownerDocument === doc) && (type != 'touchcancel'));
   }));
   // touches on the same target
-  let targetTouches = doc.createTouchList(touches.filter(function(t) {
+  let targetTouches = doc.createTouchList(touches.filter(function (t) {
     return ((t.target === target) && ((type != 'touchcancel') || (type != 'touchend')));
   }));
   // Create changed touches
@@ -864,7 +902,7 @@ function pollForReadyState(msg, start = undefined, callback = undefined) {
     callback = () => {};
   }
 
-  let checkLoad = function() {
+  let checkLoad = () => {
     navTimer.cancel();
 
     let doc = curContainer.frame.document;
@@ -875,10 +913,15 @@ function pollForReadyState(msg, start = undefined, callback = undefined) {
         callback();
         sendOk(command_id);
 
+      // document with an insecure cert
+      } else if (doc.readyState == "interactive" &&
+          doc.baseURI.startsWith("about:certerror")) {
+        callback();
+        sendError(new InsecureCertificateError(), command_id);
+
       // we have reached an error url without requesting it
       } else if (doc.readyState == "interactive" &&
-          /about:.+(error)\?/.exec(doc.baseURI) &&
-          !doc.baseURI.startsWith(url)) {
+          /about:.+(error)\?/.exec(doc.baseURI)) {
         callback();
         sendError(new UnknownError("Reached error page: " + doc.baseURI), command_id);
 
@@ -908,7 +951,7 @@ function pollForReadyState(msg, start = undefined, callback = undefined) {
  */
 function get(msg) {
   let start = new Date().getTime();
-  let command_id = msg.json.command_id;
+  let {pageTimeout, url, command_id} = msg.json;
 
   let docShell = curContainer.frame
       .document
@@ -923,7 +966,7 @@ function get(msg) {
   let requestedURL;
   let loadEventExpected = false;
   try {
-    requestedURL = new URL(msg.json.url).toString();
+    requestedURL = new URL(url).toString();
     let curURL = curContainer.frame.location;
     loadEventExpected = navigate.isLoadEventExpected(curURL, requestedURL);
   } catch (e) {
@@ -977,41 +1020,42 @@ function get(msg) {
   // Prevent DOMContentLoaded events from frames from invoking this
   // code, unless the event is coming from the frame associated with
   // the current window (i.e. someone has used switch_to_frame).
-  onDOMContentLoaded = function onDOMContentLoaded(event) {
-    let frameEl = event.originalTarget.defaultView.frameElement;
+  onDOMContentLoaded = ev => {
+    let frameEl = ev.originalTarget.defaultView.frameElement;
     let correctFrame = !frameEl || frameEl == curContainer.frame.frameElement;
 
-    // If the page we're at fired DOMContentLoaded and appears
-    // to be the one we asked to load, then we definitely
-    // saw the load occur. We need this because for error
-    // pages, like about:neterror for unsupported protocols,
-    // we don't end up opening a channel that our
-    // WebProgressListener can monitor.
+    // If the page we're at fired DOMContentLoaded and appears to
+    // be the one we asked to load, then we definitely saw the load
+    // occur. We need this because for error pages, like about:neterror
+    // for unsupported protocols, we don't end up opening a channel that
+    // our WebProgressListener can monitor.
     if (curContainer.frame.location == requestedURL) {
       sawLoad = true;
     }
 
-    // We also need to make sure that the DOMContentLoaded we saw isn't
-    // for the initial about:blank of a newly created docShell.
-    let loadedNonAboutBlank = docShell.hasLoadedNonBlankURI;
+    // We also need to make sure that if the requested URL is not
+    // about:blank the DOMContentLoaded we saw isn't for the initial
+    // about:blank of a newly created docShell.
+    let loadedRequestedURI = (requestedURL == "about:blank") ||
+        docShell.hasLoadedNonBlankURI;
 
-    if (correctFrame && sawLoad && loadedNonAboutBlank) {
-      webProgress.removeProgressListener(loadListener);
+    if (correctFrame && sawLoad && loadedRequestedURI) {
       pollForReadyState(msg, start, () => {
+        webProgress.removeProgressListener(loadListener);
         removeEventListener("DOMContentLoaded", onDOMContentLoaded, false);
       });
     }
   };
 
-  if (msg.json.pageTimeout) {
-    let onTimeout = function() {
+  if (typeof pageTimeout != "undefined") {
+    let onTimeout = () => {
       if (loadEventExpected) {
         removeEventListener("DOMContentLoaded", onDOMContentLoaded, false);
       }
       webProgress.removeProgressListener(loadListener);
       sendError(new TimeoutError("Error loading page, timed out (onDOMContentLoaded)"), command_id);
-    }
-    navTimer.initWithCallback(onTimeout, msg.json.pageTimeout, Ci.nsITimer.TYPE_ONE_SHOT);
+    };
+    navTimer.initWithCallback(onTimeout, pageTimeout, Ci.nsITimer.TYPE_ONE_SHOT);
   }
 
   // in Firefox we need to move to the top frame before navigating
@@ -1063,9 +1107,7 @@ function getTitle() {
  * Get source of the current browsing context's DOM.
  */
 function getPageSource() {
-  let XMLSerializer = curContainer.frame.XMLSerializer;
-  let source = new XMLSerializer().serializeToString(curContainer.frame.document);
-  return source;
+  return curContainer.frame.document.documentElement.outerHTML;
 }
 
 /**
@@ -1153,7 +1195,7 @@ function clickElement(id) {
   let el = seenEls.get(id, curContainer);
   return interaction.clickElement(
       el,
-      !!capabilities.raisesAccessibilityExceptions,
+      !!capabilities["moz:accessibilityChecks"],
       capabilities.specificationLevel >= 1);
 }
 
@@ -1212,7 +1254,7 @@ function getElementTagName(id) {
 function isElementDisplayed(id) {
   let el = seenEls.get(id, curContainer);
   return interaction.isElementDisplayed(
-      el, capabilities.raisesAccessibilityExceptions);
+      el, capabilities["moz:accessibilityChecks"]);
 }
 
 /**
@@ -1265,7 +1307,7 @@ function getElementRect(id) {
 function isElementEnabled(id) {
   let el = seenEls.get(id, curContainer);
   return interaction.isElementEnabled(
-      el, capabilities.raisesAccessibilityExceptions);
+      el, capabilities["moz:accessibilityChecks"]);
 }
 
 /**
@@ -1277,7 +1319,7 @@ function isElementEnabled(id) {
 function isElementSelected(id) {
   let el = seenEls.get(id, curContainer);
   return interaction.isElementSelected(
-      el, capabilities.raisesAccessibilityExceptions);
+      el, capabilities["moz:accessibilityChecks"]);
 }
 
 function* sendKeysToElement(id, val) {
@@ -1287,7 +1329,7 @@ function* sendKeysToElement(id, val) {
     yield interaction.uploadFile(el, path);
   } else {
     yield interaction.sendKeysToElement(
-        el, val, false, capabilities.raisesAccessibilityExceptions);
+        el, val, false, capabilities["moz:accessibilityChecks"]);
   }
 }
 

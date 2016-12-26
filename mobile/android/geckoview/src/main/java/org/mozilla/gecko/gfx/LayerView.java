@@ -11,9 +11,6 @@ import java.nio.IntBuffer;
 import org.mozilla.gecko.AndroidGamepadManager;
 import org.mozilla.gecko.annotation.RobocopTarget;
 import org.mozilla.gecko.annotation.WrapForJNI;
-import org.mozilla.gecko.AppConstants;
-import org.mozilla.gecko.AppConstants.Versions;
-import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.GeckoAccessibility;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoThread;
@@ -160,19 +157,15 @@ public class LayerView extends FrameLayout {
         mPaintState = PAINT_START;
         mFullScreenState = FullScreenState.NONE;
 
-        if (Versions.feature14Plus) {
-            mOverscroll = new OverscrollEdgeEffect(this);
-        } else {
-            mOverscroll = null;
-        }
+        mOverscroll = new OverscrollEdgeEffect(this);
     }
 
     public LayerView(Context context) {
         this(context, null);
     }
 
-    public void initializeView(EventDispatcher eventDispatcher) {
-        mLayerClient = new GeckoLayerClient(getContext(), this, eventDispatcher);
+    public void initializeView() {
+        mLayerClient = new GeckoLayerClient(getContext(), this);
         if (mOverscroll != null) {
             mLayerClient.setOverscrollHandler(mOverscroll);
         }
@@ -352,10 +345,6 @@ public class LayerView extends FrameLayout {
 
     public ImmutableViewportMetrics getViewportMetrics() {
         return mLayerClient.getViewportMetrics();
-    }
-
-    public PointF convertViewPointToLayerPoint(PointF viewPoint) {
-        return mLayerClient.convertViewPointToLayerPoint(viewPoint);
     }
 
     public Matrix getMatrixForLayerRectToViewRect() {
@@ -674,10 +663,6 @@ public class LayerView extends FrameLayout {
 
     public boolean isFullScreen() {
         return mFullScreenState != FullScreenState.NONE;
-    }
-
-    public FullScreenState getFullScreenState() {
-        return mFullScreenState;
     }
 
     public void setMaxTranslation(float aMaxTranslation) {

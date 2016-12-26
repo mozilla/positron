@@ -462,6 +462,49 @@ MacroAssembler::PushRegsInMask(LiveRegisterSet set)
 }
 
 void
+MacroAssembler::storeRegsInMask(LiveRegisterSet set, Address dest, Register scratch)
+{
+    // We don't use |scratch| here, but assert this for other platforms.
+    MOZ_ASSERT(!set.has(scratch));
+
+    FloatRegisterSet fpuSet(set.fpus().reduceSetForPush());
+    unsigned numFpu = fpuSet.size();
+    int32_t diffF = fpuSet.getPushSizeInBytes();
+    int32_t diffG = set.gprs().size() * sizeof(intptr_t);
+
+    MOZ_ASSERT(dest.offset >= diffG + diffF);
+
+    // On x86, always use push to push the integer registers, as it's fast
+    // on modern hardware and it's a small instruction.
+    for (GeneralRegisterBackwardIterator iter(set.gprs()); iter.more(); ++iter) {
+        diffG -= sizeof(intptr_t);
+        dest.offset -= sizeof(intptr_t);
+        storePtr(*iter, dest);
+    }
+    MOZ_ASSERT(diffG == 0);
+
+    for (FloatRegisterBackwardIterator iter(fpuSet); iter.more(); ++iter) {
+        FloatRegister reg = *iter;
+        diffF -= reg.size();
+        numFpu -= 1;
+        dest.offset -= reg.size();
+        if (reg.isDouble())
+            storeDouble(reg, dest);
+        else if (reg.isSingle())
+            storeFloat32(reg, dest);
+        else if (reg.isSimd128())
+            storeUnalignedSimd128Float(reg, dest);
+        else
+            MOZ_CRASH("Unknown register type.");
+    }
+    MOZ_ASSERT(numFpu == 0);
+    // x64 padding to keep the stack aligned on uintptr_t. Keep in sync with
+    // GetPushBytesInSize.
+    diffF -= diffF % sizeof(uintptr_t);
+    MOZ_ASSERT(diffF == 0);
+}
+
+void
 MacroAssembler::PopRegsInMaskIgnore(LiveRegisterSet set, LiveRegisterSet ignore)
 {
     FloatRegisterSet fpuSet(set.fpus().reduceSetForPush());
@@ -647,22 +690,37 @@ MacroAssembler::patchCall(uint32_t callerOffset, uint32_t calleeOffset)
     Assembler::patchCall(callerOffset, calleeOffset);
 }
 
+void
+MacroAssembler::callAndPushReturnAddress(Register reg)
+{
+    call(reg);
+}
+
+void
+MacroAssembler::callAndPushReturnAddress(Label* label)
+{
+    call(label);
+}
+
+// ===============================================================
+// Patchable near/far jumps.
+
 CodeOffset
-MacroAssembler::thunkWithPatch()
+MacroAssembler::farJumpWithPatch()
 {
-    return Assembler::thunkWithPatch();
+    return Assembler::farJumpWithPatch();
 }
 
 void
-MacroAssembler::patchThunk(uint32_t thunkOffset, uint32_t targetOffset)
+MacroAssembler::patchFarJump(CodeOffset farJump, uint32_t targetOffset)
 {
-    Assembler::patchThunk(thunkOffset, targetOffset);
+    Assembler::patchFarJump(farJump, targetOffset);
 }
 
 void
-MacroAssembler::repatchThunk(uint8_t* code, uint32_t thunkOffset, uint32_t targetOffset)
+MacroAssembler::repatchFarJump(uint8_t* code, uint32_t farJumpOffset, uint32_t targetOffset)
 {
-    Assembler::repatchThunk(code, thunkOffset, targetOffset);
+    Assembler::repatchFarJump(code, farJumpOffset, targetOffset);
 }
 
 CodeOffset
@@ -681,18 +739,6 @@ void
 MacroAssembler::patchNearJumpToNop(uint8_t* jump)
 {
     Assembler::patchJumpToTwoByteNop(jump);
-}
-
-void
-MacroAssembler::callAndPushReturnAddress(Register reg)
-{
-    call(reg);
-}
-
-void
-MacroAssembler::callAndPushReturnAddress(Label* label)
-{
-    call(label);
 }
 
 // ===============================================================
@@ -721,18 +767,19 @@ struct MOZ_RAII AutoHandleWasmTruncateToIntErrors
     MacroAssembler& masm;
     Label inputIsNaN;
     Label fail;
+    wasm::TrapOffset off;
 
-    explicit AutoHandleWasmTruncateToIntErrors(MacroAssembler& masm)
-      : masm(masm)
+    explicit AutoHandleWasmTruncateToIntErrors(MacroAssembler& masm, wasm::TrapOffset off)
+      : masm(masm), off(off)
     { }
 
     ~AutoHandleWasmTruncateToIntErrors() {
         // Handle errors.
         masm.bind(&fail);
-        masm.jump(wasm::JumpTarget::IntegerOverflow);
+        masm.jump(wasm::TrapDesc(off, wasm::Trap::IntegerOverflow, masm.framePushed()));
 
         masm.bind(&inputIsNaN);
-        masm.jump(wasm::JumpTarget::InvalidConversionToInteger);
+        masm.jump(wasm::TrapDesc(off, wasm::Trap::InvalidConversionToInteger, masm.framePushed()));
     }
 };
 
@@ -754,9 +801,9 @@ MacroAssembler::wasmTruncateFloat32ToInt32(FloatRegister input, Register output,
 
 void
 MacroAssembler::outOfLineWasmTruncateDoubleToInt32(FloatRegister input, bool isUnsigned,
-                                                   Label* rejoin)
+                                                   wasm::TrapOffset off, Label* rejoin)
 {
-    AutoHandleWasmTruncateToIntErrors traps(*this);
+    AutoHandleWasmTruncateToIntErrors traps(*this, off);
 
     // Eagerly take care of NaNs.
     branchDouble(Assembler::DoubleUnordered, input, input, &traps.inputIsNaN);
@@ -777,9 +824,9 @@ MacroAssembler::outOfLineWasmTruncateDoubleToInt32(FloatRegister input, bool isU
 
 void
 MacroAssembler::outOfLineWasmTruncateFloat32ToInt32(FloatRegister input, bool isUnsigned,
-                                                    Label* rejoin)
+                                                    wasm::TrapOffset off, Label* rejoin)
 {
-    AutoHandleWasmTruncateToIntErrors traps(*this);
+    AutoHandleWasmTruncateToIntErrors traps(*this, off);
 
     // Eagerly take care of NaNs.
     branchFloat(Assembler::DoubleUnordered, input, input, &traps.inputIsNaN);
@@ -798,9 +845,9 @@ MacroAssembler::outOfLineWasmTruncateFloat32ToInt32(FloatRegister input, bool is
 
 void
 MacroAssembler::outOfLineWasmTruncateDoubleToInt64(FloatRegister input, bool isUnsigned,
-                                                   Label* rejoin)
+                                                   wasm::TrapOffset off, Label* rejoin)
 {
-    AutoHandleWasmTruncateToIntErrors traps(*this);
+    AutoHandleWasmTruncateToIntErrors traps(*this, off);
 
     // Eagerly take care of NaNs.
     branchDouble(Assembler::DoubleUnordered, input, input, &traps.inputIsNaN);
@@ -825,9 +872,9 @@ MacroAssembler::outOfLineWasmTruncateDoubleToInt64(FloatRegister input, bool isU
 
 void
 MacroAssembler::outOfLineWasmTruncateFloat32ToInt64(FloatRegister input, bool isUnsigned,
-                                                    Label* rejoin)
+                                                    wasm::TrapOffset off, Label* rejoin)
 {
-    AutoHandleWasmTruncateToIntErrors traps(*this);
+    AutoHandleWasmTruncateToIntErrors traps(*this, off);
 
     // Eagerly take care of NaNs.
     branchFloat(Assembler::DoubleUnordered, input, input, &traps.inputIsNaN);

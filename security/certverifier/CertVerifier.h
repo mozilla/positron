@@ -15,6 +15,17 @@
 #include "mozilla/UniquePtr.h"
 #include "pkix/pkixtypes.h"
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+// Silence "RootingAPI.h(718): warning C4324: 'js::DispatchWrapper<T>':
+// structure was padded due to alignment specifier with [ T=void * ]"
+#pragma warning(disable:4324)
+#endif /* defined(_MSC_VER) */
+#include "mozilla/BasePrincipal.h"
+#if defined(_MSC_VER)
+#pragma warning(pop) /* popping the pragma in this file */
+#endif /* defined(_MSC_VER) */
+
 namespace mozilla { namespace ct {
 
 // Including MultiLogCTVerifier.h would bring along all of its dependent
@@ -25,6 +36,8 @@ class MultiLogCTVerifier;
 } } // namespace mozilla::ct
 
 namespace mozilla { namespace psm {
+
+typedef mozilla::pkix::Result Result;
 
 // These values correspond to the CERT_CHAIN_KEY_SIZE_STATUS telemetry.
 enum class KeySizeStatus {
@@ -97,23 +110,26 @@ public:
 
   // *evOidPolicy == SEC_OID_UNKNOWN means the cert is NOT EV
   // Only one usage per verification is supported.
-  SECStatus VerifyCert(CERTCertificate* cert,
-                       SECCertificateUsage usage,
-                       mozilla::pkix::Time time,
-                       void* pinArg,
-                       const char* hostname,
-               /*out*/ UniqueCERTCertList& builtChain,
-                       Flags flags = 0,
-       /*optional in*/ const SECItem* stapledOCSPResponse = nullptr,
-       /*optional in*/ const SECItem* sctsFromTLS = nullptr,
-      /*optional out*/ SECOidTag* evOidPolicy = nullptr,
-      /*optional out*/ OCSPStaplingStatus* ocspStaplingStatus = nullptr,
-      /*optional out*/ KeySizeStatus* keySizeStatus = nullptr,
-      /*optional out*/ SHA1ModeResult* sha1ModeResult = nullptr,
-      /*optional out*/ PinningTelemetryInfo* pinningTelemetryInfo = nullptr,
-      /*optional out*/ CertificateTransparencyInfo* ctInfo = nullptr);
+  mozilla::pkix::Result VerifyCert(
+                    CERTCertificate* cert,
+                    SECCertificateUsage usage,
+                    mozilla::pkix::Time time,
+                    void* pinArg,
+                    const char* hostname,
+            /*out*/ UniqueCERTCertList& builtChain,
+                    Flags flags = 0,
+    /*optional in*/ const SECItem* stapledOCSPResponse = nullptr,
+    /*optional in*/ const SECItem* sctsFromTLS = nullptr,
+    /*optional in*/ const NeckoOriginAttributes& originAttributes =
+                      NeckoOriginAttributes(),
+   /*optional out*/ SECOidTag* evOidPolicy = nullptr,
+   /*optional out*/ OCSPStaplingStatus* ocspStaplingStatus = nullptr,
+   /*optional out*/ KeySizeStatus* keySizeStatus = nullptr,
+   /*optional out*/ SHA1ModeResult* sha1ModeResult = nullptr,
+   /*optional out*/ PinningTelemetryInfo* pinningTelemetryInfo = nullptr,
+   /*optional out*/ CertificateTransparencyInfo* ctInfo = nullptr);
 
-  SECStatus VerifySSLServerCert(
+  mozilla::pkix::Result VerifySSLServerCert(
                     const UniqueCERTCertificate& peerCert,
        /*optional*/ const SECItem* stapledOCSPResponse,
        /*optional*/ const SECItem* sctsFromTLS,
@@ -123,6 +139,8 @@ public:
             /*out*/ UniqueCERTCertList& builtChain,
        /*optional*/ bool saveIntermediatesInPermanentDatabase = false,
        /*optional*/ Flags flags = 0,
+       /*optional*/ const NeckoOriginAttributes& originAttributes =
+                      NeckoOriginAttributes(),
    /*optional out*/ SECOidTag* evOidPolicy = nullptr,
    /*optional out*/ OCSPStaplingStatus* ocspStaplingStatus = nullptr,
    /*optional out*/ KeySizeStatus* keySizeStatus = nullptr,

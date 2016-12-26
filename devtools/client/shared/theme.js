@@ -10,13 +10,13 @@
  */
 
 const Services = require("Services");
-const { gDevTools } = require("devtools/client/framework/devtools");
 
 const variableFileContents = require("raw!devtools/client/themes/variables.css");
 
 const THEME_SELECTOR_STRINGS = {
   light: ":root.theme-light {",
-  dark: ":root.theme-dark {"
+  dark: ":root.theme-dark {",
+  firebug: ":root.theme-firebug {"
 };
 
 /**
@@ -66,18 +66,9 @@ const getColor = exports.getColor = (type, theme) => {
 };
 
 /**
- * Mimics selecting the theme selector in the toolbox;
- * sets the preference and emits an event on gDevTools to trigger
- * the themeing.
+ * Set the theme preference.
  */
 const setTheme = exports.setTheme = (newTheme) => {
-  let oldTheme = getTheme();
-
   Services.prefs.setCharPref("devtools.theme", newTheme);
-  gDevTools.emit("pref-changed", {
-    pref: "devtools.theme",
-    newValue: newTheme,
-    oldValue: oldTheme
-  });
 };
 /* eslint-enable */

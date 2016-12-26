@@ -68,7 +68,7 @@ var gTests = [
     Preferences.set("datareporting.healthreport.about.reportUrl",
                     HTTPS_BASE + "healthreport_testRemoteCommands.html");
   }),
-  run: function (iframe)
+  run: function(iframe)
   {
     let deferred = Promise.defer();
     let results = 0;
@@ -104,13 +104,13 @@ function test()
   requestLongerTimeout(10);
 
   Task.spawn(function* () {
-    for (let test of gTests) {
-      info(test.desc);
-      yield test.setup();
+    for (let testCase of gTests) {
+      info(testCase.desc);
+      yield testCase.setup();
 
       let iframe = yield promiseNewTabLoadEvent("about:healthreport");
 
-      yield test.run(iframe);
+      yield testCase.run(iframe);
 
       gBrowser.removeCurrentTab();
     }
@@ -119,7 +119,7 @@ function test()
   });
 }
 
-function promiseNewTabLoadEvent(aUrl, aEventType="load")
+function promiseNewTabLoadEvent(aUrl, aEventType = "load")
 {
   let deferred = Promise.defer();
   let tab = gBrowser.selectedTab = gBrowser.addTab(aUrl);

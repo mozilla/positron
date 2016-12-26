@@ -120,7 +120,9 @@ class JitTest:
         self.test_join = [] # List of other configurations to test with all existing variants.
         self.expect_error = '' # Errors to expect and consider passing
         self.expect_status = 0 # Exit status to expect from shell
+        self.expect_crash = False # Exit status or error output.
         self.is_module = False
+        self.need_for_each = False # Enable for-each syntax
         self.test_reflect_stringify = None  # Reflect.stringify implementation to test
 
         # Expected by the test runner. Always true for jit-tests.
@@ -141,9 +143,11 @@ class JitTest:
         t.test_join = self.test_join
         t.expect_error = self.expect_error
         t.expect_status = self.expect_status
+        t.expect_crash = self.expect_crash
         t.test_reflect_stringify = self.test_reflect_stringify
         t.enable = True
         t.is_module = self.is_module
+        t.need_for_each = self.need_for_each
         return t
 
     def copy_and_extend_jitflags(self, variant):
@@ -167,15 +171,40 @@ class JitTest:
 
     COOKIE = '|jit-test|'
     CacheDir = JS_CACHE_DIR
+    Directives = {}
+
+    @classmethod
+    def find_directives(cls, file_name):
+        meta = ''
+        line = open(file_name).readline()
+        i = line.find(cls.COOKIE)
+        if i != -1:
+            meta = ';' + line[i + len(cls.COOKIE):].strip('\n')
+        return meta
 
     @classmethod
     def from_file(cls, path, options):
         test = cls(path)
 
-        line = open(path).readline()
-        i = line.find(cls.COOKIE)
-        if i != -1:
-            meta = line[i + len(cls.COOKIE):].strip('\n')
+        # If directives.txt exists in the test's directory then it may
+        # contain metainformation that will be catenated with
+        # whatever's in the test file.  The form of the directive in
+        # the directive file is the same as in the test file.  Only
+        # the first line is considered, just as for the test file.
+
+        dir_meta = ''
+        dir_name = os.path.dirname(path)
+        if dir_name in cls.Directives:
+            dir_meta = cls.Directives[dir_name]
+        else:
+            meta_file_name = os.path.join(dir_name, "directives.txt")
+            if os.path.exists(meta_file_name):
+                dir_meta = cls.find_directives(meta_file_name)
+            cls.Directives[dir_name] = dir_meta
+
+        meta = cls.find_directives(path)
+        if meta != '' or dir_meta != '':
+            meta = meta + dir_meta
             parts = meta.split(';')
             for part in parts:
                 part = part.strip()
@@ -216,24 +245,27 @@ class JitTest:
                     elif name == 'tz-pacific':
                         test.tz_pacific = True
                     elif name == 'test-also-noasmjs':
-                        if options.can_test_also_noasmjs:
+                        if options.asmjs_enabled:
                             test.test_also.append(['--no-asmjs'])
-                            # test-also-noasmjs is a sure indicator that the file contains asm.js code;
-                            # in that case we want to test the wasm baseline compiler too, as asm.js
-                            # is translated to wasm
-                            test.test_also.append(['--wasm-always-baseline'])
                     elif name == 'test-also-wasm-baseline':
-                        if options.can_test_also_wasm_baseline:
+                        if options.wasm_enabled:
                             test.test_also.append(['--wasm-always-baseline'])
+                    elif name == 'test-also-wasm-check-bce':
+                        if options.wasm_enabled:
+                            test.test_also.append(['--wasm-check-bce'])
                     elif name.startswith('test-also='):
                         test.test_also.append([name[len('test-also='):]])
                     elif name.startswith('test-join='):
                         test.test_join.append([name[len('test-join='):]])
                     elif name == 'module':
                         test.is_module = True
+                    elif name == 'crash':
+                        test.expect_crash = True
                     elif name.startswith('--'):
                         # // |jit-test| --ion-gvn=off; --no-sse4
                         test.jitflags.append(name)
+                    elif name == 'need-for-each':
+                        test.need_for_each = True
                     else:
                         print('{}: warning: unrecognized |jit-test| attribute'
                               ' {}'.format(path, part))
@@ -268,6 +300,9 @@ class JitTest:
             js_quote(quotechar, sys.platform),
             js_quote(quotechar, libdir),
             js_quote(quotechar, scriptdir_var))
+
+        if self.need_for_each:
+            expr += "; enableForEach()"
 
         # We may have specified '-a' or '-d' twice: once via --jitflags, once
         # via the "|jit-test|" line.  Remove dups because they are toggles.
@@ -369,6 +404,19 @@ def check_output(out, err, rc, timed_out, test, options):
     for line in err.split('\n'):
         if 'Assertion failed:' in line:
             return False
+
+    if test.expect_crash:
+        if sys.platform == 'win32' and rc == 3 - 2 ** 31:
+            return True
+
+        if sys.platform != 'win32' and rc == -11:
+            return True
+
+        # When building with ASan enabled, ASan will convert the -11 returned
+        # value to 1. As a work-around we look for the error output which
+        # includes the crash reason.
+        if rc == 1 and ("Hit MOZ_CRASH" in err or "Assertion failure:" in err):
+            return True
 
     if rc != test.expect_status:
         # Tests which expect a timeout check for exit code 6.

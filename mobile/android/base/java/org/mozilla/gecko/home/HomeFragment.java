@@ -77,7 +77,7 @@ public abstract class HomeFragment extends Fragment {
     protected OnUrlOpenListener mUrlOpenListener;
 
     // Helper for opening a tab in the background.
-    private OnUrlOpenInBackgroundListener mUrlOpenInBackgroundListener;
+    protected OnUrlOpenInBackgroundListener mUrlOpenInBackgroundListener;
 
     protected PanelStateChangeListener mPanelStateChangeListener = null;
 
@@ -263,6 +263,7 @@ public abstract class HomeFragment extends Fragment {
                 }
             });
 
+            Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.CONTEXT_MENU, "home_add_to_launcher");
             return true;
         }
 

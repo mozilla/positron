@@ -20,7 +20,7 @@ var global = this;
 
 
 // Lazily load the finder code
-addMessageListener("Finder:Initialize", function () {
+addMessageListener("Finder:Initialize", function() {
   let {RemoteFinderListener} = Cu.import("resource://gre/modules/RemoteFinder.jsm", {});
   new RemoteFinderListener(global);
 });
@@ -215,12 +215,11 @@ var ClickEventHandler = {
     const kAutoscroll = 15;  // defined in mozilla/layers/ScrollInputMethods.h
     Services.telemetry.getHistogramById("SCROLL_INPUT_METHODS").add(kAutoscroll);
 
-    if (this._scrollable instanceof content.Window) {
-      this._scrollable.scrollBy(actualScrollX, actualScrollY);
-    } else { // an element with overflow
-      this._scrollable.scrollLeft += actualScrollX;
-      this._scrollable.scrollTop += actualScrollY;
-    }
+    this._scrollable.scrollBy({
+      left: actualScrollX,
+      top: actualScrollY,
+      behavior: "instant"
+    });
     content.requestAnimationFrame(this.autoscrollLoop);
   },
 
@@ -439,7 +438,6 @@ var Printing = {
   },
 
   receiveMessage(message) {
-    let objects = message.objects;
     let data = message.data;
     switch (message.name) {
       case "Printing:Preview:Enter": {
@@ -502,7 +500,41 @@ var Printing = {
     // By using ReaderMode primitives, we parse given document and place the
     // resulting JS object into the DOM of current browser.
     let articlePromise = ReaderMode.parseDocument(contentWindow.document).catch(Cu.reportError);
-    articlePromise.then(function (article) {
+    articlePromise.then(function(article) {
+      // We make use of a web progress listener in order to know when the content we inject
+      // into the DOM has finished rendering. If our layout engine is still painting, we
+      // will wait for MozAfterPaint event to be fired.
+      let webProgressListener = {
+        onStateChange: function(webProgress, req, flags, status) {
+          if (flags & Ci.nsIWebProgressListener.STATE_STOP) {
+            webProgress.removeProgressListener(webProgressListener);
+            let domUtils = content.QueryInterface(Ci.nsIInterfaceRequestor)
+                                  .getInterface(Ci.nsIDOMWindowUtils);
+            // Here we tell the parent that we have parsed the document successfully
+            // using ReaderMode primitives and we are able to enter on preview mode.
+            if (domUtils.isMozAfterPaintPending) {
+              addEventListener("MozAfterPaint", function onPaint() {
+                removeEventListener("MozAfterPaint", onPaint);
+                sendAsyncMessage("Printing:Preview:ReaderModeReady");
+              });
+            } else {
+              sendAsyncMessage("Printing:Preview:ReaderModeReady");
+            }
+          }
+        },
+
+        QueryInterface: XPCOMUtils.generateQI([
+          Ci.nsIWebProgressListener,
+          Ci.nsISupportsWeakReference,
+          Ci.nsIObserver,
+        ]),
+      };
+
+      // Here we QI the docShell into a nsIWebProgress passing our web progress listener in.
+      let webProgress =  docShell.QueryInterface(Ci.nsIInterfaceRequestor)
+                                 .getInterface(Ci.nsIWebProgress);
+      webProgress.addProgressListener(webProgressListener, Ci.nsIWebProgress.NOTIFY_STATE_REQUEST);
+
       content.document.head.innerHTML = "";
 
       // Set title of document
@@ -522,6 +554,13 @@ var Printing = {
       headStyleElement.setAttribute("type", "text/css");
       content.document.head.appendChild(headStyleElement);
 
+      // Create link element referencing simplifyMode.css and append it to head
+      headStyleElement = content.document.createElement("link");
+      headStyleElement.setAttribute("rel", "stylesheet");
+      headStyleElement.setAttribute("href", "chrome://global/content/simplifyMode.css");
+      headStyleElement.setAttribute("type", "text/css");
+      content.document.head.appendChild(headStyleElement);
+
       content.document.body.innerHTML = "";
 
       // Create container div (main element) and append it to body
@@ -534,12 +573,6 @@ var Printing = {
       headerElement.setAttribute("id", "reader-header");
       headerElement.setAttribute("class", "header");
       containerElement.appendChild(headerElement);
-
-      // Create style element for header div and import simplifyMode.css
-      let controlHeaderStyle = content.document.createElement("style");
-      controlHeaderStyle.setAttribute("scoped", "");
-      controlHeaderStyle.textContent = "@import url(\"chrome://global/content/simplifyMode.css\");";
-      headerElement.appendChild(controlHeaderStyle);
 
       // Jam the article's title and byline into header div
       let titleElement = content.document.createElement("h1");
@@ -582,10 +615,6 @@ var Printing = {
 
       // Display reader content element
       readerContent.style.display = "block";
-
-      // Here we tell the parent that we have parsed the document successfully
-      // using ReaderMode primitives and we are able to enter on preview mode.
-      sendAsyncMessage("Printing:Preview:ReaderModeReady");
     });
   },
 
@@ -635,7 +664,6 @@ var Printing = {
 
   print(contentWindow, simplifiedMode) {
     let printSettings = this.getPrintSettings();
-    let rv = Cr.NS_OK;
 
     // If we happen to be on simplified mode, we need to set docURL in order
     // to generate header/footer content correctly, since simplified tab has
@@ -647,17 +675,23 @@ var Printing = {
     try {
       let print = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
                                .getInterface(Ci.nsIWebBrowserPrint);
+
+      if (print.doingPrintPreview) {
+        this.logKeyedTelemetry("PRINT_DIALOG_OPENED_COUNT", "FROM_PREVIEW");
+      } else {
+        this.logKeyedTelemetry("PRINT_DIALOG_OPENED_COUNT", "FROM_PAGE");
+      }
+
       print.print(printSettings, null);
 
-      let histogram = Services.telemetry.getKeyedHistogramById("PRINT_COUNT");
       if (print.doingPrintPreview) {
         if (simplifiedMode) {
-          histogram.add("SIMPLIFIED");
+          this.logKeyedTelemetry("PRINT_COUNT", "SIMPLIFIED");
         } else {
-          histogram.add("WITH_PREVIEW");
+          this.logKeyedTelemetry("PRINT_COUNT", "WITH_PREVIEW");
         }
       } else {
-        histogram.add("WITHOUT_PREVIEW");
+        this.logKeyedTelemetry("PRINT_COUNT", "WITHOUT_PREVIEW");
       }
     } catch (e) {
       // Pressing cancel is expressed as an NS_ERROR_ABORT return value,
@@ -681,6 +715,11 @@ var Printing = {
       PSSVC.savePrintSettingsToPrefs(printSettings, false,
                                      printSettings.kInitSavePrinterName);
     }
+  },
+
+  logKeyedTelemetry(id, key) {
+    let histogram = Services.telemetry.getKeyedHistogramById(id);
+    histogram.add(key);
   },
 
   updatePageCount() {
@@ -777,7 +816,7 @@ var FindBar = {
     let should = false;
     let can = BrowserUtils.canFastFind(content);
     if (can) {
-      //XXXgijs: why all these shenanigans? Why not use the event's target?
+      // XXXgijs: why all these shenanigans? Why not use the event's target?
       let focusedWindow = {};
       let elt = Services.focus.getFocusedElementForWindow(content, true, focusedWindow);
       let win = focusedWindow.value;
@@ -860,7 +899,9 @@ let WebChannelMessageToChromeListener = {
     if (e.detail) {
       if (typeof e.detail != 'string') {
         // Check if the principal is one of the ones that's allowed to send
-        // non-string values for e.detail.
+        // non-string values for e.detail.  They're whitelisted by site origin,
+        // so we compare on originNoSuffix in order to avoid other origin attributes
+        // that are not relevant here, such as containers or private browsing.
         let objectsAllowed = this._getWhitelistedPrincipals().some(whitelisted =>
           principal.originNoSuffix == whitelisted.originNoSuffix);
         if (!objectsAllowed) {
@@ -879,7 +920,7 @@ WebChannelMessageToChromeListener.init();
 
 // This should be kept in sync with /browser/base/content.js.
 // Add message listener for "WebChannelMessageToContent" messages from chrome scripts.
-addMessageListener("WebChannelMessageToContent", function (e) {
+addMessageListener("WebChannelMessageToContent", function(e) {
   if (e.data) {
     // e.objects.eventTarget will be defined if sending a response to
     // a WebChannelMessageToChrome event. An unsolicited send
@@ -973,7 +1014,11 @@ var AudioPlaybackListener = {
     if (topic === "audio-playback") {
       if (subject && subject.top == global.content) {
         let name = "AudioPlayback:";
-        name += (data === "active") ? "Start" : "Stop";
+        if (data === "block") {
+          name += "Block";
+        } else {
+          name += (data === "active") ? "Start" : "Stop";
+        }
         sendAsyncMessage(name);
       }
     } else if (topic == "AudioFocusChanged" || topic == "MediaControl") {
@@ -1014,7 +1059,7 @@ addMessageListener("Browser:PurgeSessionHistory", function BrowserPurgeHistory()
 });
 
 var ViewSelectionSource = {
-  init: function () {
+  init: function() {
     addMessageListener("ViewSource:GetSelection", this);
   },
 
@@ -1056,7 +1101,7 @@ var ViewSelectionSource = {
     return path;
   },
 
-  getSelection: function () {
+  getSelection: function() {
     // These are markers used to delimit the selection during processing. They
     // are removed from the final rendering.
     // We use noncharacter Unicode codepoints to minimize the risk of clashing
@@ -1116,10 +1161,10 @@ var ViewSelectionSource = {
     var tmpNode;
     if (canDrawSelection) {
       var i;
-      for (i = startPath ? startPath.length-1 : -1; i >= 0; i--) {
+      for (i = startPath ? startPath.length - 1 : -1; i >= 0; i--) {
         startContainer = startContainer.childNodes.item(startPath[i]);
       }
-      for (i = endPath ? endPath.length-1 : -1; i >= 0; i--) {
+      for (i = endPath ? endPath.length - 1 : -1; i >= 0; i--) {
         endContainer = endContainer.childNodes.item(endPath[i]);
       }
 
@@ -1229,7 +1274,7 @@ var ViewSelectionSource = {
     + '</style>'
     + '</head>'
     + '<body id="viewsource"' + wrapClass
-    +        ' onload="document.title=\''+title+'\'; document.getElementById(\'target\').scrollIntoView(true)">'
+    +        ' onload="document.title=\'' + title + '\'; document.getElementById(\'target\').scrollIntoView(true)">'
     + '<pre>'
     + this.getOuterMarkup(topNode, 0)
     + '</pre></body></html>'
@@ -1387,54 +1432,104 @@ let AutoCompletePopup = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIAutoCompletePopup]),
 
   _connected: false,
+
+  MESSAGES: [
+    "FormAutoComplete:HandleEnter",
+    "FormAutoComplete:PopupClosed",
+    "FormAutoComplete:PopupOpened",
+    "FormAutoComplete:RequestFocus",
+  ],
+
   init: function() {
-    // We need to wait for a content viewer to be available
-    // before we can attach our AutoCompletePopup handler,
-    // since nsFormFillController assumes one will exist
-    // when we call attachToBrowser.
-    let onDCL = () => {
-      removeEventListener("DOMContentLoaded", onDCL);
-      // Hook up the form fill autocomplete controller.
-      let controller = Cc["@mozilla.org/satchel/form-fill-controller;1"]
-                         .getService(Ci.nsIFormFillController);
-      controller.attachToBrowser(docShell,
-                                 this.QueryInterface(Ci.nsIAutoCompletePopup));
-      this._connected = true;
-    };
-    addEventListener("DOMContentLoaded", onDCL);
+    addEventListener("unload", this);
+    addEventListener("DOMContentLoaded", this);
+
+    for (let messageName of this.MESSAGES) {
+      addMessageListener(messageName, this);
+    }
 
     this._input = null;
     this._popupOpen = false;
-
-    addMessageListener("FormAutoComplete:HandleEnter", message => {
-      this.selectedIndex = message.data.selectedIndex;
-
-      let controller = Components.classes["@mozilla.org/autocomplete/controller;1"].
-                  getService(Components.interfaces.nsIAutoCompleteController);
-      controller.handleEnter(message.data.isPopupSelection);
-    });
-
-    addEventListener("unload", function() {
-      AutoCompletePopup.destroy();
-    });
   },
 
   destroy: function() {
     if (this._connected) {
       let controller = Cc["@mozilla.org/satchel/form-fill-controller;1"]
                          .getService(Ci.nsIFormFillController);
-
       controller.detachFromBrowser(docShell);
       this._connected = false;
     }
+
+    removeEventListener("unload", this);
+    removeEventListener("DOMContentLoaded", this);
+
+    for (let messageName of this.MESSAGES) {
+      removeMessageListener(messageName, this);
+    }
   },
 
-  get input () { return this._input; },
-  get overrideValue () { return null; },
-  set selectedIndex (index) {
+  handleEvent(event) {
+    switch (event.type) {
+      case "DOMContentLoaded": {
+        removeEventListener("DOMContentLoaded", this);
+
+        // We need to wait for a content viewer to be available
+        // before we can attach our AutoCompletePopup handler,
+        // since nsFormFillController assumes one will exist
+        // when we call attachToBrowser.
+
+        // Hook up the form fill autocomplete controller.
+        let controller = Cc["@mozilla.org/satchel/form-fill-controller;1"]
+                           .getService(Ci.nsIFormFillController);
+        controller.attachToBrowser(docShell,
+                                   this.QueryInterface(Ci.nsIAutoCompletePopup));
+        this._connected = true;
+        break;
+      }
+
+      case "unload": {
+        this.destroy();
+        break;
+      }
+    }
+  },
+
+  receiveMessage(message) {
+    switch (message.name) {
+      case "FormAutoComplete:HandleEnter": {
+        this.selectedIndex = message.data.selectedIndex;
+
+        let controller = Cc["@mozilla.org/autocomplete/controller;1"]
+                           .getService(Ci.nsIAutoCompleteController);
+        controller.handleEnter(message.data.isPopupSelection);
+        break;
+      }
+
+      case "FormAutoComplete:PopupClosed": {
+        this._popupOpen = false;
+        break;
+      }
+
+      case "FormAutoComplete:PopupOpened": {
+        this._popupOpen = true;
+        break;
+      }
+
+      case "FormAutoComplete:RequestFocus": {
+        if (this._input) {
+          this._input.focus();
+        }
+        break;
+      }
+    }
+  },
+
+  get input() { return this._input; },
+  get overrideValue() { return null; },
+  set selectedIndex(index) {
     sendAsyncMessage("FormAutoComplete:SetSelectedIndex", { index });
   },
-  get selectedIndex () {
+  get selectedIndex() {
     // selectedIndex getter must be synchronous because we need the
     // correct value when the controller is in controller::HandleEnter.
     // We can't easily just let the parent inform us the new value every
@@ -1443,11 +1538,11 @@ let AutoCompletePopup = {
     // list).
     return sendSyncMessage("FormAutoComplete:GetSelectedIndex", {});
   },
-  get popupOpen () {
+  get popupOpen() {
     return this._popupOpen;
   },
 
-  openAutocompletePopup: function (input, element) {
+  openAutocompletePopup: function(input, element) {
     if (this._popupOpen || !input) {
       return;
     }
@@ -1460,15 +1555,18 @@ let AutoCompletePopup = {
     sendAsyncMessage("FormAutoComplete:MaybeOpenPopup",
                      { results, rect, dir });
     this._input = input;
-    this._popupOpen = true;
   },
 
-  closePopup: function () {
+  closePopup: function() {
+    // We set this here instead of just waiting for the
+    // PopupClosed message to do it so that we don't end
+    // up in a state where the content thinks that a popup
+    // is open when it isn't (or soon won't be).
     this._popupOpen = false;
     sendAsyncMessage("FormAutoComplete:ClosePopup", {});
   },
 
-  invalidate: function () {
+  invalidate: function() {
     if (this._popupOpen) {
       let results = this.getResultsFromController(this._input);
       sendAsyncMessage("FormAutoComplete:Invalidate", { results });
@@ -1505,7 +1603,161 @@ let AutoCompletePopup = {
     }
 
     return results;
-  }
+  },
 }
 
 AutoCompletePopup.init();
+
+/**
+ * DateTimePickerListener is the communication channel between the input box
+ * (content) for date/time input types and its picker (chrome).
+ */
+let DateTimePickerListener = {
+  /**
+   * On init, just listen for the event to open the picker, once the picker is
+   * opened, we'll listen for update and close events.
+   */
+  init: function() {
+    addEventListener("MozOpenDateTimePicker", this);
+    this._inputElement = null;
+
+    addEventListener("unload", () => {
+      this.uninit();
+    });
+  },
+
+  uninit: function() {
+    removeEventListener("MozOpenDateTimePicker", this);
+    this._inputElement = null;
+  },
+
+  /**
+   * Cleanup function called when picker is closed.
+   */
+  close: function() {
+    this.removeListeners();
+    this._inputElement.setDateTimePickerState(false);
+    this._inputElement = null;
+  },
+
+  /**
+   * Called after picker is opened to start listening for input box update
+   * events.
+   */
+  addListeners: function() {
+    addEventListener("MozUpdateDateTimePicker", this);
+    addEventListener("MozCloseDateTimePicker", this);
+    addEventListener("pagehide", this);
+
+    addMessageListener("FormDateTime:PickerValueChanged", this);
+    addMessageListener("FormDateTime:PickerClosed", this);
+  },
+
+  /**
+   * Stop listeneing for events when picker is closed.
+   */
+  removeListeners: function() {
+    removeEventListener("MozUpdateDateTimePicker", this);
+    removeEventListener("MozCloseDateTimePicker", this);
+    removeEventListener("pagehide", this);
+
+    removeMessageListener("FormDateTime:PickerValueChanged", this);
+    removeMessageListener("FormDateTime:PickerClosed", this);
+  },
+
+  /**
+   * Helper function that returns the CSS direction property of the element.
+   */
+  getComputedDirection: function(aElement) {
+    return aElement.ownerDocument.defaultView.getComputedStyle(aElement)
+      .getPropertyValue("direction");
+  },
+
+  /**
+   * Helper function that returns the rect of the element, which is the position
+   * relative to the left/top of the content area.
+   */
+  getBoundingContentRect: function(aElement) {
+    return BrowserUtils.getElementBoundingRect(aElement);
+  },
+
+  getTimePickerPref: function() {
+    return Services.prefs.getBoolPref("dom.forms.datetime.timepicker");
+  },
+
+  /**
+   * nsIMessageListener.
+   */
+  receiveMessage: function(aMessage) {
+    switch (aMessage.name) {
+      case "FormDateTime:PickerClosed": {
+        this.close();
+        break;
+      }
+      case "FormDateTime:PickerValueChanged": {
+        this._inputElement.updateDateTimeInputBox(aMessage.data);
+        break;
+      }
+      default:
+        break;
+    }
+  },
+
+  /**
+   * nsIDOMEventListener, for chrome events sent by the input element and other
+   * DOM events.
+   */
+  handleEvent: function(aEvent) {
+    switch (aEvent.type) {
+      case "MozOpenDateTimePicker": {
+        // Time picker is disabled when preffed off
+        if (!(aEvent.originalTarget instanceof content.HTMLInputElement) ||
+            (aEvent.originalTarget.type == "time" && !this.getTimePickerPref())) {
+          return;
+        }
+        this._inputElement = aEvent.originalTarget;
+        this._inputElement.setDateTimePickerState(true);
+        this.addListeners();
+
+        let value = this._inputElement.getDateTimeInputBoxValue();
+        sendAsyncMessage("FormDateTime:OpenPicker", {
+          rect: this.getBoundingContentRect(this._inputElement),
+          dir: this.getComputedDirection(this._inputElement),
+          type: this._inputElement.type,
+          detail: {
+            // Pass partial value if it's available, otherwise pass input
+            // element's value.
+            value: Object.keys(value).length > 0 ? value
+                                                 : this._inputElement.value,
+            step: this._inputElement.step,
+            min: this._inputElement.min,
+            max: this._inputElement.max,
+          },
+        });
+        break;
+      }
+      case "MozUpdateDateTimePicker": {
+        let value = this._inputElement.getDateTimeInputBoxValue();
+        sendAsyncMessage("FormDateTime:UpdatePicker", { value });
+        break;
+      }
+      case "MozCloseDateTimePicker": {
+        sendAsyncMessage("FormDateTime:ClosePicker");
+        this.close();
+        break;
+      }
+      case "pagehide": {
+        if (this._inputElement &&
+            this._inputElement.ownerDocument == aEvent.target) {
+          sendAsyncMessage("FormDateTime:ClosePicker");
+          this.close();
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  },
+}
+
+DateTimePickerListener.init();

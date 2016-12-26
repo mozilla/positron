@@ -68,7 +68,11 @@ IPDL_SOURCES = [
     'PVsyncBridge.ipdl',
 ]
 
-LOCAL_INCLUDES += ['/dom/ipc']
+LOCAL_INCLUDES += [
+    '/dom/ipc',
+    '/toolkit/crashreporter',
+    '/xpcom/threads',
+]
 
 include('/ipc/chromium/chromium-config.mozbuild')
 

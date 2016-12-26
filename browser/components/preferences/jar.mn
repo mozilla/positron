@@ -20,10 +20,16 @@ browser.jar:
 *   content/browser/preferences/languages.xul
     content/browser/preferences/languages.js
     content/browser/preferences/permissions.xul
+    content/browser/preferences/containers.xul
+    content/browser/preferences/containers.js
     content/browser/preferences/permissions.js
     content/browser/preferences/sanitize.xul
     content/browser/preferences/sanitize.js
     content/browser/preferences/selectBookmark.xul
     content/browser/preferences/selectBookmark.js
+    content/browser/preferences/siteDataSettings.xul
+    content/browser/preferences/siteDataSettings.js
+    content/browser/preferences/siteDataSettings.css
+    content/browser/preferences/siteListItem.xml
     content/browser/preferences/translation.xul
     content/browser/preferences/translation.js

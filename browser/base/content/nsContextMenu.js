@@ -57,6 +57,7 @@ nsContextMenu.prototype = {
         onAudio: this.onAudio,
         onCanvas: this.onCanvas,
         onEditableArea: this.onEditableArea,
+        onPassword: this.onPassword,
         srcUrl: this.mediaURL,
         frameUrl: gContextMenuContentData ? gContextMenuContentData.docLocation : undefined,
         pageUrl: this.browser ? this.browser.currentURI.spec : undefined,
@@ -368,10 +369,11 @@ nsContextMenu.prototype = {
     var canSpell = InlineSpellCheckerUI.canSpellCheck &&
                    !InlineSpellCheckerUI.initialSpellCheckPending &&
                    this.canSpellCheck;
+    let showDictionaries = canSpell && InlineSpellCheckerUI.enabled;
     var onMisspelling = InlineSpellCheckerUI.overMisspelling;
     var showUndo = canSpell && InlineSpellCheckerUI.canUndo();
     this.showItem("spell-check-enabled", canSpell);
-    this.showItem("spell-separator", canSpell || this.onEditableArea);
+    this.showItem("spell-separator", canSpell);
     document.getElementById("spell-check-enabled")
             .setAttribute("checked", canSpell && InlineSpellCheckerUI.enabled);
 
@@ -392,7 +394,7 @@ nsContextMenu.prototype = {
       this.showItem("spell-no-suggestions", false);
 
     // dictionary list
-    this.showItem("spell-dictionaries", canSpell && InlineSpellCheckerUI.enabled);
+    this.showItem("spell-dictionaries", showDictionaries);
     if (canSpell) {
       var dictMenu = document.getElementById("spell-dictionaries-menu");
       var dictSep = document.getElementById("spell-language-separator");
@@ -404,7 +406,8 @@ nsContextMenu.prototype = {
       // when there is no spellchecker but we might be able to spellcheck
       // add the add to dictionaries item. This will ensure that people
       // with no dictionaries will be able to download them
-      this.showItem("spell-add-dictionaries-main", true);
+      this.showItem("spell-language-separator", showDictionaries);
+      this.showItem("spell-add-dictionaries-main", showDictionaries);
     }
     else
       this.showItem("spell-add-dictionaries-main", false);
@@ -564,28 +567,10 @@ nsContextMenu.prototype = {
   },
 
   inspectNode: function() {
-    let {devtools} = Cu.import("resource://devtools/shared/Loader.jsm", {});
     let gBrowser = this.browser.ownerGlobal.gBrowser;
-    let target = devtools.TargetFactory.forTab(gBrowser.selectedTab);
-
-    return gDevTools.showToolbox(target, "inspector").then(toolbox => {
-      let inspector = toolbox.getCurrentPanel();
-
-      // new-node-front tells us when the node has been selected, whether the
-      // browser is remote or not.
-      let onNewNode = inspector.selection.once("new-node-front");
-
-      this.browser.messageManager.sendAsyncMessage("debug:inspect", {}, {node: this.target});
-      inspector.walker.findInspectingNode().then(nodeFront => {
-        inspector.selection.setNodeFront(nodeFront, "browser-context-menu");
-      });
-
-      return onNewNode.then(() => {
-        // Now that the node has been selected, wait until the inspector is
-        // fully updated.
-        return inspector.once("inspector-updated");
-      });
-    });
+    let { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
+    let { gDevToolsBrowser } = require("devtools/client/framework/devtools-browser");
+    return gDevToolsBrowser.inspectNode(gBrowser.selectedTab, this.target);
   },
 
   // Set various context menu attributes based on the state of the world.
@@ -1865,7 +1850,10 @@ nsContextMenu.prototype = {
   },
 
   createContainerMenu: function(aEvent) {
-    return createUserContextMenu(aEvent, false,
-                                 gContextMenuContentData.userContextId);
+    let createMenuOptions = {
+      isContextMenu: true,
+      excludeUserContextId: gContextMenuContentData.userContextId,
+    };
+    return createUserContextMenu(aEvent, createMenuOptions);
   },
 };

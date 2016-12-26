@@ -175,7 +175,7 @@ XPCCallContext::GetRetVal() const
 }
 
 inline void
-XPCCallContext::SetRetVal(JS::Value val)
+XPCCallContext::SetRetVal(const JS::Value& val)
 {
     CHECK_STATE(HAVE_ARGS);
     if (mRetVal)
@@ -451,17 +451,13 @@ XPCNativeSet::MatchesSetUpToInterface(const XPCNativeSet* other,
 inline
 JSObject* XPCWrappedNativeTearOff::GetJSObjectPreserveColor() const
 {
-    return mJSObject.getPtr();
+    return mJSObject.unbarrieredGetPtr();
 }
 
 inline
 JSObject* XPCWrappedNativeTearOff::GetJSObject()
 {
-    JSObject* obj = GetJSObjectPreserveColor();
-    if (obj) {
-      JS::ExposeObjectToActiveJS(obj);
-    }
-    return obj;
+    return mJSObject;
 }
 
 inline

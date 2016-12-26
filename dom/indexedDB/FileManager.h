@@ -50,6 +50,9 @@ public:
   static already_AddRefed<nsIFile>
   GetFileForId(nsIFile* aDirectory, int64_t aId);
 
+  static already_AddRefed<nsIFile>
+  GetCheckedFileForId(nsIFile* aDirectory, int64_t aId);
+
   static nsresult
   InitDirectory(nsIFile* aDirectory,
                 nsIFile* aDatabaseFile,
@@ -120,6 +123,9 @@ public:
   GetDirectory();
 
   already_AddRefed<nsIFile>
+  GetCheckedDirectory();
+
+  already_AddRefed<nsIFile>
   GetJournalDirectory();
 
   already_AddRefed<nsIFile>
@@ -134,7 +140,7 @@ public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(FileManager)
 
 private:
-  ~FileManager();
+  ~FileManager() = default;
 };
 
 } // namespace indexedDB

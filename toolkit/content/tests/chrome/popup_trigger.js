@@ -51,7 +51,7 @@ var popupTests = [
     gExpectedTriggerNode = gIsMenu ? "notset" : gTrigger;
     synthesizeMouse(gTrigger, 4, 4, { });
   },
-  result: function (testname) {
+  result: function(testname) {
     gExpectedTriggerNode = null;
     // menus are the anchor but non-menus are opened at screen coordinates
     is(gMenuPopup.anchorNode, gIsMenu ? gTrigger : null, testname + " anchorNode");
@@ -88,16 +88,20 @@ var popupTests = [
 {
   // check that pressing cursor up wraps and highlights the last item
   testname: "cursor up wrap",
-  events: [ "DOMMenuItemInactive item1", "DOMMenuItemActive last" ],
+  events: function() {
+    // No wrapping on menus on Mac
+    return platformIsMac() ? [] : [ "DOMMenuItemInactive item1", "DOMMenuItemActive last" ]
+  },
   test: function() { synthesizeKey("VK_UP", { }); },
   result: function(testname) {
-    checkActive(gMenuPopup, "last", testname);
+    checkActive(gMenuPopup, platformIsMac() ? "item1" : "last", testname);
   }
 },
 {
   // check that pressing cursor down wraps and highlights the first item
   testname: "cursor down wrap",
-  events: [ "DOMMenuItemInactive last", "DOMMenuItemActive item1" ],
+  condition: function() { return !platformIsMac() },
+  events: ["DOMMenuItemInactive last", "DOMMenuItemActive item1" ],
   test: function() { synthesizeKey("VK_DOWN", { }); },
   result: function(testname) { checkActive(gMenuPopup, "item1", testname); }
 },
@@ -305,7 +309,7 @@ var popupTests = [
   test: function() {
     gMenuPopup.openPopup(gTrigger, "other", 0, 0, false, false);
   },
-  result: function (testname) {
+  result: function(testname) {
     var triggerrect = gMenuPopup.getBoundingClientRect();
     var popuprect = gMenuPopup.getBoundingClientRect();
     is(Math.round(popuprect.left), triggerrect.left, testname + " x position ");

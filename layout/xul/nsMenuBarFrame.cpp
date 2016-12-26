@@ -54,6 +54,7 @@ nsMenuBarFrame::nsMenuBarFrame(nsStyleContext* aContext):
   nsBoxFrame(aContext),
     mStayActive(false),
     mIsActive(false),
+    mActiveByKeyboard(false),
     mCurrentMenu(nullptr),
     mTarget(nullptr)
 {
@@ -147,7 +148,7 @@ nsMenuBarFrame::ToggleMenuActiveState()
     // Set the active menu to be the top left item (e.g., the File menu).
     // We use an attribute called "menuactive" to track the current 
     // active menu.
-    nsMenuFrame* firstFrame = nsXULPopupManager::GetNextMenuItem(this, nullptr, false);
+    nsMenuFrame* firstFrame = nsXULPopupManager::GetNextMenuItem(this, nullptr, false, false);
     if (firstFrame) {
       // Activate the menu bar
       SetActive(true);

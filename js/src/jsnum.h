@@ -173,7 +173,7 @@ ToNumber(JSContext* cx, JS::MutableHandleValue vp)
     if (vp.isNumber())
         return true;
     double d;
-    extern JS_PUBLIC_API(bool) ToNumberSlow(JSContext* cx, Value v, double* dp);
+    extern JS_PUBLIC_API(bool) ToNumberSlow(JSContext* cx, HandleValue v, double* dp);
     if (!ToNumberSlow(cx, vp, &d))
         return false;
 
@@ -258,7 +258,7 @@ ToInteger(JSContext* cx, HandleValue v, double* dp)
     if (v.isDouble()) {
         *dp = v.toDouble();
     } else {
-        extern JS_PUBLIC_API(bool) ToNumberSlow(JSContext* cx, Value v, double* dp);
+        extern JS_PUBLIC_API(bool) ToNumberSlow(JSContext* cx, HandleValue v, double* dp);
         if (!ToNumberSlow(cx, v, dp))
             return false;
     }
@@ -275,7 +275,7 @@ ToInteger(JSContext* cx, HandleValue v, double* dp)
 template<typename T>
 MOZ_MUST_USE bool ToLengthClamped(T* cx, HandleValue v, uint32_t* out, bool* overflow);
 
-/* Convert and range check an index value as for DataView, SIMD, and Atomics
+/* Non-standard convert and range check an index value as for SIMD, and Atomics
  * operations, eg ES7 24.2.1.1, DataView's GetViewValue():
  *
  *   1. numericIndex = ToNumber(argument)            (may throw TypeError)
@@ -293,7 +293,16 @@ MOZ_MUST_USE bool ToLengthClamped(T* cx, HandleValue v, uint32_t* out, bool* ove
  *
  * The returned index will always be in the range 0 <= *index <= 2^53.
  */
-MOZ_MUST_USE bool ToIntegerIndex(JSContext* cx, JS::HandleValue v, uint64_t* index);
+MOZ_MUST_USE bool NonStandardToIndex(JSContext* cx, JS::HandleValue v, uint64_t* index);
+
+/* ES2017 draft 7.1.17 ToIndex
+ *
+ * Return true and set |*index| to the integer value if |v| is a valid
+ * integer index value. Otherwise report a RangeError and return false.
+ *
+ * The returned index will always be in the range 0 <= *index <= 2^53-1.
+ */
+MOZ_MUST_USE bool ToIndex(JSContext* cx, JS::HandleValue v, uint64_t* index);
 
 MOZ_MUST_USE inline bool
 SafeAdd(int32_t one, int32_t two, int32_t* res)
@@ -335,12 +344,12 @@ SafeMul(int32_t one, int32_t two, int32_t* res)
 }
 
 extern MOZ_MUST_USE bool
-ToNumberSlow(ExclusiveContext* cx, Value v, double* dp);
+ToNumberSlow(ExclusiveContext* cx, HandleValue v, double* dp);
 
 // Variant of ToNumber which takes an ExclusiveContext instead of a JSContext.
 // ToNumber is part of the API and can't use ExclusiveContext directly.
 MOZ_ALWAYS_INLINE MOZ_MUST_USE bool
-ToNumber(ExclusiveContext* cx, const Value& v, double* out)
+ToNumber(ExclusiveContext* cx, HandleValue v, double* out)
 {
     if (v.isNumber()) {
         *out = v.toNumber();

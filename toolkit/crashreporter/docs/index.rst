@@ -32,6 +32,12 @@ Crash Reporter Client
    to handle dump files. This application optionally submits crashes to
    Mozilla (or the configured server).
 
+Minidump Analyzer
+   The minidump analyzer is a standalone executable that is launched by the
+   crash reporter client or by the browser itself to extract stack traces from
+   the dump files generated during a crash. It appends the stack traces to the
+   .extra file associated with the crash dump.
+
 How Main-Process Crash Handling Works
 =====================================
 
@@ -83,8 +89,11 @@ argument.
 
 The *crash reporter client* performs a number of roles. There's a lot going
 on, so you may want to look at ``main()`` in ``crashreporter.cpp``. First,
-it verifies the dump data is sane. If it isn't (e.g. required metadata is
-missing), the dump data is ignored. If dump data looks sane, the dump data
+stack traces are extracted from the dump via the *minidump analyzer* tool.
+The resulting traces are appended to the .extra file of the crash. Then, the
+*crash reporter client* verifies that the dump data is sane. If it isn't
+(e.g. required metadata is missing), the dump data is ignored. If dump data
+looks sane, the dump data
 is moved into the *pending* directory for the configured data directory
 (defined via the ``MOZ_CRASHREPORTER_DATA_DIRECTORY`` environment variable
 or from the UI). Once this is done, the main crash reporter UI is displayed
@@ -120,6 +129,15 @@ is responsible for calling
 appropriate crash annotations specific to the crash. All child-process
 crashes are annotated with a ``ProcessType`` annotation, such as "content" or
 "plugin".
+
+Once the minidump file has been generated the
+``mozilla::dom::CrashReporterHost`` is notified of the crash. It will first
+try to extract the stack traces from the minidump file using the
+*minidump analyzer*. Then the stack traces will be stored in the extra file
+together with the rest of the crash annotations and finally the crash will be
+recorded by calling ```CrashService.addCrash()```. This last step adds the
+crash to the ```CrashManager``` database and automatically sends a crash ping
+with information about the crash.
 
 Submission of child process crashes is handled by application code. This
 code prompts the user to submit crashes in context-appropriate UI and then

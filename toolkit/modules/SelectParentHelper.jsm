@@ -8,6 +8,9 @@ this.EXPORTED_SYMBOLS = [
   "SelectParentHelper"
 ];
 
+const {utils: Cu} = Components;
+const {AppConstants} = Cu.import("resource://gre/modules/AppConstants.jsm");
+
 // Maximum number of rows to display in the select dropdown.
 const MAX_ROWS = 20;
 
@@ -25,7 +28,7 @@ this.SelectParentHelper = {
     populateChildren(menulist, items, selectedIndex, zoom);
   },
 
-  open: function(browser, menulist, rect) {
+  open: function(browser, menulist, rect, isOpenedViaTouch) {
     menulist.hidden = false;
     currentBrowser = browser;
     closedWithEnter = false;
@@ -50,12 +53,14 @@ this.SelectParentHelper = {
       menupopup.style.maxHeight = (itemHeight * MAX_ROWS + bpHeight) + "px";
     }
 
+    menupopup.classList.toggle("isOpenedViaTouch", isOpenedViaTouch);
+
     let constraintRect = browser.getBoundingClientRect();
     constraintRect = new win.DOMRect(constraintRect.left + win.mozInnerScreenX,
                                      constraintRect.top + win.mozInnerScreenY,
                                      constraintRect.width, constraintRect.height);
     menupopup.setConstraintRect(constraintRect);
-    menupopup.openPopupAtScreenRect("after_start", rect.left, rect.top, rect.width, rect.height, false, false);
+    menupopup.openPopupAtScreenRect(AppConstants.platform == "macosx" ? "selection" : "after_start", rect.left, rect.top, rect.width, rect.height, false, false);
   },
 
   hide: function(menulist, browser) {
@@ -66,6 +71,10 @@ this.SelectParentHelper = {
 
   handleEvent: function(event) {
     switch (event.type) {
+      case "mouseup":
+        currentBrowser.messageManager.sendAsyncMessage("Forms:MouseUp", {});
+        break;
+
       case "mouseover":
         currentBrowser.messageManager.sendAsyncMessage("Forms:MouseOver", {});
         break;
@@ -82,8 +91,6 @@ this.SelectParentHelper = {
 
       case "command":
         if (event.target.hasAttribute("value")) {
-          let win = currentBrowser.ownerDocument.defaultView;
-
           currentBrowser.messageManager.sendAsyncMessage("Forms:SelectDropDownItem", {
             value: event.target.value,
             closedWithEnter: closedWithEnter
@@ -128,6 +135,7 @@ this.SelectParentHelper = {
     popup.addEventListener("popuphidden", this);
     popup.addEventListener("mouseover", this);
     popup.addEventListener("mouseout", this);
+    browser.ownerDocument.defaultView.addEventListener("mouseup", this, true);
     browser.ownerDocument.defaultView.addEventListener("keydown", this, true);
     browser.ownerDocument.defaultView.addEventListener("fullscreen", this, true);
     browser.messageManager.addMessageListener("Forms:UpdateDropDown", this);
@@ -138,6 +146,7 @@ this.SelectParentHelper = {
     popup.removeEventListener("popuphidden", this);
     popup.removeEventListener("mouseover", this);
     popup.removeEventListener("mouseout", this);
+    browser.ownerDocument.defaultView.removeEventListener("mouseup", this, true);
     browser.ownerDocument.defaultView.removeEventListener("keydown", this, true);
     browser.ownerDocument.defaultView.removeEventListener("fullscreen", this, true);
     browser.messageManager.removeMessageListener("Forms:UpdateDropDown", this);

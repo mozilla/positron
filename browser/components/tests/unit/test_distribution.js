@@ -5,16 +5,11 @@
  * Tests that preferences are properly set by distribution.ini
  */
 
-var Ci = Components.interfaces;
-var Cc = Components.classes;
-var Cr = Components.results;
-var Cu = Components.utils;
-
-Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/LoadContextInfo.jsm");
 
 // Import common head.
 var commonFile = do_get_file("../../../../toolkit/components/places/tests/head_common.js", false);
+/* import-globals-from ../../../../toolkit/components/places/tests/head_common.js */
 if (commonFile) {
   let uri = Services.io.newFileURI(commonFile);
   Services.scriptloader.loadSubScript(uri.spec, this);
@@ -30,8 +25,6 @@ const TOPIC_BROWSERGLUE_TEST = "browser-glue-test";
  */
 function installDistributionEngine() {
   const XRE_APP_DISTRIBUTION_DIR = "XREAppDist";
-
-  const gProfD = do_get_profile().QueryInterface(Ci.nsILocalFile);
 
   let dir = gProfD.clone();
   dir.append("distribution");
@@ -86,7 +79,7 @@ function run_test() {
   run_next_test();
 }
 
-do_register_cleanup(function () {
+do_register_cleanup(function() {
   // Remove the distribution dir, even if the test failed, otherwise all
   // next tests will use it.
   let distDir = gProfD.clone();

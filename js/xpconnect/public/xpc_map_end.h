@@ -4,6 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// If you include this file you must also include xpc_make_class.h at the top
+// of the file doing the including.
 
 #ifndef XPC_MAP_CLASSNAME
 #error "Must #define XPC_MAP_CLASSNAME before #including xpc_map_end.h"
@@ -33,9 +35,6 @@ XPC_MAP_CLASSNAME::GetScriptableFlags()
     return
 #ifdef XPC_MAP_WANT_PRECREATE
     nsIXPCScriptable::WANT_PRECREATE |
-#endif
-#ifdef XPC_MAP_WANT_ADDPROPERTY
-    nsIXPCScriptable::WANT_ADDPROPERTY |
 #endif
 #ifdef XPC_MAP_WANT_GETPROPERTY
     nsIXPCScriptable::WANT_GETPROPERTY |
@@ -70,15 +69,22 @@ XPC_MAP_CLASSNAME::GetScriptableFlags()
     0;
 }
 
+// virtual
+const js::Class*
+XPC_MAP_CLASSNAME::GetClass()
+{
+    static const js::ClassOps classOps =
+        XPC_MAKE_CLASS_OPS(GetScriptableFlags());
+    static const js::Class klass =
+        XPC_MAKE_CLASS(XPC_MAP_QUOTED_CLASSNAME, GetScriptableFlags(),
+                       &classOps);
+    return &klass;
+}
+
 /**************************************************************/
 
 #ifndef XPC_MAP_WANT_PRECREATE
 NS_IMETHODIMP XPC_MAP_CLASSNAME::PreCreate(nsISupports* nativeObj, JSContext * cx, JSObject * globalObj, JSObject * *parentObj)
-    {NS_ERROR("never called"); return NS_ERROR_NOT_IMPLEMENTED;}
-#endif
-
-#ifndef XPC_MAP_WANT_ADDPROPERTY
-NS_IMETHODIMP XPC_MAP_CLASSNAME::AddProperty(nsIXPConnectWrappedNative* wrapper, JSContext * cx, JSObject * obj, jsid id, JS::HandleValue val, bool* _retval)
     {NS_ERROR("never called"); return NS_ERROR_NOT_IMPLEMENTED;}
 #endif
 
@@ -127,10 +133,8 @@ NS_IMETHODIMP XPC_MAP_CLASSNAME::HasInstance(nsIXPConnectWrappedNative* wrapper,
     {NS_ERROR("never called"); return NS_ERROR_NOT_IMPLEMENTED;}
 #endif
 
-#ifndef XPC_MAP_WANT_POST_CREATE_PROTOTYPE
 NS_IMETHODIMP XPC_MAP_CLASSNAME::PostCreatePrototype(JSContext* cx, JSObject* proto)
     {return NS_OK;}
-#endif
 
 /**************************************************************/
 
@@ -139,10 +143,6 @@ NS_IMETHODIMP XPC_MAP_CLASSNAME::PostCreatePrototype(JSContext* cx, JSObject* pr
 
 #ifdef XPC_MAP_WANT_PRECREATE
 #undef XPC_MAP_WANT_PRECREATE
-#endif
-
-#ifdef XPC_MAP_WANT_ADDPROPERTY
-#undef XPC_MAP_WANT_ADDPROPERTY
 #endif
 
 #ifdef XPC_MAP_WANT_GETPROPERTY
@@ -179,10 +179,6 @@ NS_IMETHODIMP XPC_MAP_CLASSNAME::PostCreatePrototype(JSContext* cx, JSObject* pr
 
 #ifdef XPC_MAP_WANT_HASINSTANCE
 #undef XPC_MAP_WANT_HASINSTANCE
-#endif
-
-#ifdef XPC_MAP_WANT_POST_CREATE_PROTOTYPE
-#undef XPC_MAP_WANT_POST_CREATE_PROTOTYPE
 #endif
 
 #ifdef XPC_MAP_FLAGS

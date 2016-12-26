@@ -8,10 +8,10 @@
 '''
 
 import distutils.version
+import errno
 import os
 import subprocess
 import sys
-import time
 import json
 import socket
 import traceback
@@ -22,7 +22,7 @@ from mozharness.base.script import (
     PostScriptAction,
     PostScriptRun,
     PreScriptAction,
-    PreScriptRun,
+    ScriptMixin,
 )
 from mozharness.base.errors import VirtualenvErrorList
 from mozharness.base.log import WARNING, FATAL
@@ -280,7 +280,8 @@ class VirtualenvMixin(object):
             if parsed.scheme != 'https':
                 trusted_hosts.add(parsed.hostname)
 
-        if self.pip_version >= distutils.version.LooseVersion('6.0'):
+        if (install_method != 'easy_install' and
+                    self.pip_version >= distutils.version.LooseVersion('6.0')):
             for host in sorted(trusted_hosts):
                 command.extend(['--trusted-host', host])
 
@@ -494,7 +495,45 @@ class VirtualenvMixin(object):
         execfile(activate, dict(__file__=activate))
 
 
-class ResourceMonitoringMixin(object):
+# This is (sadly) a mixin for logging methods.
+class PerfherderResourceOptionsMixin(ScriptMixin):
+    def perfherder_resource_options(self):
+        """Obtain a list of extraOptions values to identify the env."""
+        opts = []
+
+        if 'TASKCLUSTER_INSTANCE_TYPE' in os.environ:
+            # Include the instance type so results can be grouped.
+            opts.append('taskcluster-%s' % os.environ['TASKCLUSTER_INSTANCE_TYPE'])
+        else:
+            # We assume !taskcluster => buildbot.
+            instance = 'unknown'
+
+            # Try to load EC2 instance type from metadata file. This file
+            # may not exist in many scenarios (including when inside a chroot).
+            # So treat it as optional.
+            try:
+                # This file should exist on Linux in EC2.
+                with open('/etc/instance_metadata.json', 'rb') as fh:
+                    im = json.load(fh)
+                    instance = im.get('aws_instance_type', u'unknown').encode('ascii')
+            except IOError as e:
+                if e.errno != errno.ENOENT:
+                    raise
+                self.info('instance_metadata.json not found; unable to '
+                          'determine instance type')
+            except Exception:
+                self.warning('error reading instance_metadata: %s' %
+                             traceback.format_exc())
+
+            opts.append('buildbot-%s' % instance)
+
+        # Allow configs to specify their own values.
+        opts.extend(self.config.get('perfherder_extra_options', []))
+
+        return opts
+
+
+class ResourceMonitoringMixin(PerfherderResourceOptionsMixin):
     """Provides resource monitoring capabilities to scripts.
 
     When this class is in the inheritance chain, resource usage stats of the
@@ -662,7 +701,7 @@ class ResourceMonitoringMixin(object):
 
             suites.append({
                 'name': '%s.overall' % perfherder_name,
-                'extraOptions': perfherder_options,
+                'extraOptions': perfherder_options + self.perfherder_resource_options(),
                 'subtests': overall,
 
             })
@@ -754,220 +793,6 @@ class ResourceMonitoringMixin(object):
 
     def _tinderbox_print(self, message):
         self.info('TinderboxPrint: %s' % message)
-
-
-class InfluxRecordingMixin(object):
-    """Provides InfluxDB stat recording to scripts.
-
-    This class records stats to an InfluxDB server, if enabled. Stat recording
-    is enabled in a script by inheriting from this class, and adding an
-    influxdb_credentials line to the influx_credentials_file (usually oauth.txt
-    in automation).  This line should look something like:
-
-        influxdb_credentials = 'http://goldiewilson-onepointtwentyone-1.c.influxdb.com:8086/db/DBNAME/series?u=DBUSERNAME&p=DBPASSWORD'
-
-    Where DBNAME, DBUSERNAME, and DBPASSWORD correspond to the database name,
-    and user/pw credentials for recording to the database. The stats from
-    mozharness are recorded in the 'mozharness' table.
-    """
-
-    @PreScriptRun
-    def influxdb_recording_init(self):
-        self.recording = False
-        self.post = None
-        self.posturl = None
-        self.build_metrics_summary = None
-        self.res_props = self.config.get('build_resources_path') % self.query_abs_dirs()
-        self.info("build_resources.json path: %s" % self.res_props)
-        if self.res_props:
-            self.rmtree(self.res_props)
-
-        try:
-            site_packages_path = self.query_python_site_packages_path()
-            if site_packages_path not in sys.path:
-                sys.path.append(site_packages_path)
-
-            self.post = get_tlsv1_post()
-
-            auth = os.path.join(os.getcwd(), self.config['influx_credentials_file'])
-            if not os.path.exists(auth):
-                self.warning("Unable to start influxdb recording: %s not found" % (auth,))
-                return
-            credentials = {}
-            execfile(auth, credentials)
-            if 'influxdb_credentials' in credentials:
-                self.posturl = credentials['influxdb_credentials']
-                self.recording = True
-            else:
-                self.warning("Unable to start influxdb recording: no credentials")
-                return
-
-        except Exception:
-            # The exact reason for failing to start stats doesn't really matter.
-            # If anything fails, we just won't record stats for this job.
-            self.warning("Unable to start influxdb recording: %s" %
-                         traceback.format_exc())
-            return
-
-    @PreScriptAction
-    def influxdb_recording_pre_action(self, action):
-        if not self.recording:
-            return
-
-        self.start_time = time.time()
-
-    @PostScriptAction
-    def influxdb_recording_post_action(self, action, success=None):
-        if not self.recording:
-            return
-
-        elapsed_time = time.time() - self.start_time
-
-        c = {}
-        p = {}
-        if self.buildbot_config:
-            c = self.buildbot_config.get('properties', {})
-        if self.buildbot_properties:
-            p = self.buildbot_properties
-        self.record_influx_stat([{
-            "points": [[
-                action,
-                elapsed_time,
-                c.get('buildername'),
-                c.get('product'),
-                c.get('platform'),
-                c.get('branch'),
-                c.get('slavename'),
-                c.get('revision'),
-                p.get('gaia_revision'),
-                c.get('buildid'),
-            ]],
-            "name": "mozharness",
-            "columns": [
-                "action",
-                "runtime",
-                "buildername",
-                "product",
-                "platform",
-                "branch",
-                "slavename",
-                "gecko_revision",
-                "gaia_revision",
-                "buildid",
-            ],
-        }])
-
-    def _get_resource_usage(self, res, name, iolen, cpulen):
-        c = {}
-        p = {}
-        if self.buildbot_config:
-            c = self.buildbot_config.get('properties', {})
-        if self.buildbot_properties:
-            p = self.buildbot_properties
-
-        data = [
-            # Build properties
-            c.get('buildername'),
-            c.get('product'),
-            c.get('platform'),
-            c.get('branch'),
-            c.get('slavename'),
-            c.get('revision'),
-            p.get('gaia_revision'),
-            c.get('buildid'),
-
-            # Mach step properties
-            name,
-            res.get('start'),
-            res.get('end'),
-            res.get('duration'),
-            res.get('cpu_percent'),
-        ]
-        # The io and cpu_times fields are arrays, though they aren't always
-        # present if a step completes before resource utilization is measured.
-        # We add the arrays if they exist, otherwise we just do an array of None
-        # to fill up the stat point.
-        data.extend(res.get('io', [None] * iolen))
-        data.extend(res.get('cpu_times', [None] * cpulen))
-        return data
-
-    @PostScriptAction('build')
-    def record_mach_stats(self, action, success=None):
-        if not os.path.exists(self.res_props):
-            self.info('No build_resources.json found, not logging stats')
-            return
-        with open(self.res_props) as fh:
-            resources = json.load(fh)
-            data = {
-                "points": [
-                ],
-                "name": "mach",
-                "columns": [
-                    # Build properties
-                    "buildername",
-                    "product",
-                    "platform",
-                    "branch",
-                    "slavename",
-                    "gecko_revision",
-                    "gaia_revision",
-                    "buildid",
-
-                    # Mach step properties
-                    "name",
-                    "start",
-                    "end",
-                    "duration",
-                    "cpu_percent",
-                ],
-            }
-
-            # The io and cpu_times fields aren't static - they may vary based
-            # on the specific platform being measured. Mach records the field
-            # names, which we use as the column names here.
-            data['columns'].extend(resources['io_fields'])
-            data['columns'].extend(resources['cpu_times_fields'])
-            iolen = len(resources['io_fields'])
-            cpulen = len(resources['cpu_times_fields'])
-
-            if 'duration' in resources:
-                self.build_metrics_summary = {
-                    'name': 'build times',
-                    'value': resources['duration'],
-                    'subtests': [],
-                }
-
-            # The top-level data has the overall resource usage, which we record
-            # under the name 'TOTAL' to separate it from the individual phases.
-            data['points'].append(self._get_resource_usage(resources, 'TOTAL', iolen, cpulen))
-
-            # Each phases also has the same resource stats as the top-level.
-            for phase in resources['phases']:
-                data['points'].append(self._get_resource_usage(phase, phase['name'], iolen, cpulen))
-                if 'duration' not in phase:
-                    self.build_metrics_summary = None
-                elif self.build_metrics_summary:
-                    self.build_metrics_summary['subtests'].append({
-                        'name': phase['name'],
-                        'value': phase['duration'],
-                    })
-
-            self.record_influx_stat([data])
-
-    def record_influx_stat(self, json_data):
-        if not self.recording:
-            return
-        try:
-            r = self.post(self.posturl, data=json.dumps(json_data), timeout=5)
-            if r.status_code != 200:
-                self.warning("Failed to log stats. Return code = %i, stats = %s" % (r.status_code, json_data))
-
-                # Disable recording for the rest of this job. Even if it's just
-                # intermittent, we don't want to keep the build from progressing.
-                self.recording = False
-        except Exception, e:
-            self.warning('Failed to log stats. Exception = %s' % str(e))
-            self.recording = False
 
 
 # __main__ {{{1

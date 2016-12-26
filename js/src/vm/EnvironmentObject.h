@@ -515,6 +515,7 @@ class LexicalEnvironmentObject : public EnvironmentObject
 class NamedLambdaObject : public LexicalEnvironmentObject
 {
     static NamedLambdaObject* create(JSContext* cx, HandleFunction callee,
+                                     HandleFunction replacement,
                                      HandleObject enclosing, gc::InitialHeap heap);
 
   public:
@@ -522,6 +523,8 @@ class NamedLambdaObject : public LexicalEnvironmentObject
                                                    gc::InitialHeap heap);
 
     static NamedLambdaObject* create(JSContext* cx, AbstractFramePtr frame);
+    static NamedLambdaObject* create(JSContext* cx, AbstractFramePtr frame,
+                                     HandleFunction replacement);
 
     // For JITs.
     static size_t lambdaSlot();
@@ -924,7 +927,7 @@ class DebugEnvironments
     static void onPopGeneric(JSContext* cx, const EnvironmentIter& ei);
 
   public:
-    void mark(JSTracer* trc);
+    void trace(JSTracer* trc);
     void sweep(JSRuntime* rt);
     void finish();
 #ifdef JS_GC_ZEAL
@@ -933,7 +936,7 @@ class DebugEnvironments
 
     // If a live frame has a synthesized entry in missingEnvs, make sure it's not
     // collected.
-    void markLiveFrame(JSTracer* trc, AbstractFramePtr frame);
+    void traceLiveFrame(JSTracer* trc, AbstractFramePtr frame);
 
     static DebugEnvironmentProxy* hasDebugEnvironment(JSContext* cx, EnvironmentObject& env);
     static bool addDebugEnvironment(JSContext* cx, Handle<EnvironmentObject*> env,

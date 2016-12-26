@@ -226,7 +226,7 @@ public class UpdateService extends IntentService {
         int interval;
         if (isRetry) {
             interval = INTERVAL_RETRY;
-        } else if (!AppConstants.RELEASE_BUILD) {
+        } else if (!AppConstants.RELEASE_OR_BETA) {
             interval = INTERVAL_SHORT;
         } else {
             interval = INTERVAL_LONG;
@@ -662,7 +662,10 @@ public class UpdateService extends IntentService {
         if (updatePath == null) {
             updatePath = getLastFileName();
         }
-        applyUpdate(new File(updatePath));
+
+        if (updatePath != null) {
+            applyUpdate(new File(updatePath));
+        }
     }
 
     private void applyUpdate(File updateFile) {

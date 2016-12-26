@@ -13,7 +13,7 @@
  */
 
 // http://www.whatwg.org/specs/web-apps/current-work/#the-object-element
-[NeedResolve, UnsafeInPrerendering]
+[HTMLConstructor, NeedResolve, UnsafeInPrerendering]
 interface HTMLObjectElement : HTMLElement {
   [Pure, SetterThrows]
            attribute DOMString data;
@@ -32,8 +32,10 @@ interface HTMLObjectElement : HTMLElement {
   [Pure, SetterThrows]
            attribute DOMString height;
   // Not pure: can trigger about:blank instantiation
+  [NeedsSubjectPrincipal]
   readonly attribute Document? contentDocument;
   // Not pure: can trigger about:blank instantiation
+  [NeedsSubjectPrincipal]
   readonly attribute WindowProxy? contentWindow;
 
   readonly attribute boolean willValidate;
@@ -42,9 +44,6 @@ interface HTMLObjectElement : HTMLElement {
   boolean checkValidity();
   boolean reportValidity();
   void setCustomValidity(DOMString error);
-
-  [Throws]
-  legacycaller any (any... arguments);
 };
 
 // http://www.whatwg.org/specs/web-apps/current-work/#HTMLObjectElement-partial
@@ -74,6 +73,7 @@ partial interface HTMLObjectElement {
 
 partial interface HTMLObjectElement {
   // GetSVGDocument
+  [NeedsSubjectPrincipal]
   Document? getSVGDocument();
 };
 

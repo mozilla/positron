@@ -366,9 +366,8 @@ appUpdater.prototype =
       this.removeDownloadListener();
       if (this.backgroundUpdateEnabled) {
         this.selectPanel("applying");
-        let update = this.um.activeUpdate;
         let self = this;
-        Services.obs.addObserver(function (aSubject, aTopic, aData) {
+        Services.obs.addObserver(function(aSubject, aTopic, aData) {
           // Update the UI when the background updater is finished
           let status = aData;
           if (status == "applied" || status == "applied-service" ||

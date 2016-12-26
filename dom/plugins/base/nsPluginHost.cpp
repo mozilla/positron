@@ -146,28 +146,7 @@ static const char *kPrefJavaMIME = "plugin.java.mime";
 static const char *kPrefUnloadPluginTimeoutSecs = "dom.ipc.plugins.unloadTimeoutSecs";
 static const uint32_t kDefaultPluginUnloadingTimeout = 30;
 
-// Version of cached plugin info
-// 0.01 first implementation
-// 0.02 added caching of CanUnload to fix bug 105935
-// 0.03 changed name, description and mime desc from string to bytes, bug 108246
-// 0.04 added new mime entry point on Mac, bug 113464
-// 0.05 added new entry point check for the default plugin, bug 132430
-// 0.06 strip off suffixes in mime description strings, bug 53895
-// 0.07 changed nsIRegistry to flat file support for caching plugins info
-// 0.08 mime entry point on MachO, bug 137535
-// 0.09 the file encoding is changed to UTF-8, bug 420285
-// 0.10 added plugin versions on appropriate platforms, bug 427743
-// 0.11 file name and full path fields now store expected values on all platforms, bug 488181
-// 0.12 force refresh due to quicktime pdf claim fix, bug 611197
-// 0.13 add architecture and list of invalid plugins, bug 616271
-// 0.14 force refresh due to locale comparison fix, bug 611296
-// 0.15 force refresh due to bug in reading Java plist MIME data, bug 638171
-// 0.16 version bump to avoid importing the plugin flags in newer versions
-// 0.17 added flag on whether plugin is loaded from an XPI
-// The current plugin registry version (and the maximum version we know how to read)
-static const char *kPluginRegistryVersion = "0.17";
-// The minimum registry version we know how to read
-static const char *kMinimumRegistryVersion = "0.9";
+static const char *kPluginRegistryVersion = "0.18";
 
 static const char kDirectoryServiceContractID[] = "@mozilla.org/file/directory_service;1";
 
@@ -227,8 +206,7 @@ nsInvalidPluginTag::nsInvalidPluginTag(const char* aFullPath, int64_t aLastModif
   mSeen(false)
 {}
 
-nsInvalidPluginTag::~nsInvalidPluginTag()
-{}
+nsInvalidPluginTag::~nsInvalidPluginTag() = default;
 
 // Helper to check for a MIME in a comma-delimited preference
 static bool
@@ -296,6 +274,12 @@ nsPluginHost::nsPluginHost()
   // this manually.
   if (XRE_IsParentProcess()) {
     IncrementChromeEpoch();
+  } else {
+    // When NPAPI requests the proxy setting by calling |FindProxyForURL|,
+    // the service is requested and initialized asynchronously, but
+    // |FindProxyForURL| is synchronous, so we should initialize this earlier.
+    nsCOMPtr<nsIProtocolProxyService> proxyService =
+      do_GetService(NS_PROTOCOLPROXYSERVICE_CONTRACTID);
   }
 
   // check to see if pref is set at startup to let plugins take over in
@@ -1692,7 +1676,7 @@ public:
   nsPluginHost* host;
   NS_DECLARE_STATIC_IID_ACCESSOR(ClearDataFromSitesClosure_CID)
   private:
-  virtual ~ClearDataFromSitesClosure() {}
+  virtual ~ClearDataFromSitesClosure() = default;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(ClearDataFromSitesClosure, ClearDataFromSitesClosure_CID)
@@ -1798,8 +1782,7 @@ public:
   nsresult retVal;
   NS_DECLARE_STATIC_IID_ACCESSOR(GetSitesClosure_CID)
   private:
-  virtual ~GetSitesClosure() {
-  }
+  virtual ~GetSitesClosure() = default;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(GetSitesClosure, GetSitesClosure_CID)
@@ -1858,25 +1841,6 @@ nsPluginHost::GetSpecialType(const nsACString & aMIMEType)
       aMIMEType.LowerCaseEqualsASCII("application/futuresplash") ||
       aMIMEType.LowerCaseEqualsASCII("application/x-shockwave-flash-test")) {
     return eSpecialType_Flash;
-  }
-
-  if (aMIMEType.LowerCaseEqualsASCII("application/x-silverlight") ||
-      aMIMEType.LowerCaseEqualsASCII("application/x-silverlight-2") ||
-      aMIMEType.LowerCaseEqualsASCII("application/x-silverlight-test")) {
-    return eSpecialType_Silverlight;
-  }
-
-  if (aMIMEType.LowerCaseEqualsASCII("audio/x-pn-realaudio-plugin")) {
-    NS_WARNING("You are loading RealPlayer");
-    return eSpecialType_RealPlayer;
-  }
-
-  if (aMIMEType.LowerCaseEqualsASCII("application/pdf")) {
-    return eSpecialType_PDF;
-  }
-
-  if (aMIMEType.LowerCaseEqualsASCII("application/vnd.unity")) {
-    return eSpecialType_Unity;
   }
 
   // Java registers variants of its MIME with parameters, e.g.
@@ -2043,19 +2007,14 @@ bool
 nsPluginHost::ShouldAddPlugin(nsPluginTag* aPluginTag)
 {
 #if defined(XP_WIN) && (defined(__x86_64__) || defined(_M_X64))
-  // On 64-bit windows, the only plugins we should load are flash and
-  // silverlight. Use library filename and MIME type to check.
+  // On 64-bit Windows, the only plugin we should load is Flash. Use library
+  // filename and MIME type to check.
   if (StringBeginsWith(aPluginTag->FileName(), NS_LITERAL_CSTRING("NPSWF"), nsCaseInsensitiveCStringComparator()) &&
       (aPluginTag->HasMimeType(NS_LITERAL_CSTRING("application/x-shockwave-flash")) ||
        aPluginTag->HasMimeType(NS_LITERAL_CSTRING("application/x-shockwave-flash-test")))) {
     return true;
   }
-  if (StringBeginsWith(aPluginTag->FileName(), NS_LITERAL_CSTRING("npctrl"), nsCaseInsensitiveCStringComparator()) &&
-      (aPluginTag->HasMimeType(NS_LITERAL_CSTRING("application/x-silverlight-test")) ||
-       aPluginTag->HasMimeType(NS_LITERAL_CSTRING("application/x-silverlight-2")) ||
-       aPluginTag->HasMimeType(NS_LITERAL_CSTRING("application/x-silverlight")))) {
-    return true;
-  }
+
   // Accept the test plugin MIME types, so mochitests still work.
   if (aPluginTag->HasMimeType(NS_LITERAL_CSTRING("application/x-test")) ||
       aPluginTag->HasMimeType(NS_LITERAL_CSTRING("application/x-Second-Test")) ||
@@ -2093,6 +2052,22 @@ nsPluginHost::AddPluginTag(nsPluginTag* aPluginTag)
   }
 }
 
+static bool
+PluginInfoIsFlash(const nsPluginInfo& info)
+{
+  if (!info.fName || strcmp(info.fName, "Shockwave Flash") != 0) {
+    return false;
+  }
+  for (uint32_t i = 0; i < info.fVariantCount; ++i) {
+    if (info.fMimeTypeArray[i] &&
+        (!strcmp(info.fMimeTypeArray[i], "application/x-shockwave-flash") ||
+         !strcmp(info.fMimeTypeArray[i], "application/x-shockwave-flash-test"))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 typedef NS_NPAPIPLUGIN_CALLBACK(char *, NP_GETMIMEDESCRIPTION)(void);
 
 nsresult nsPluginHost::ScanPluginsDirectory(nsIFile *pluginsDir,
@@ -2112,6 +2087,8 @@ nsresult nsPluginHost::ScanPluginsDirectory(nsIFile *pluginsDir,
   PLUGIN_LOG(PLUGIN_LOG_BASIC,
   ("nsPluginHost::ScanPluginsDirectory dir=%s\n", dirPath.get()));
 #endif
+
+  bool flashOnly = Preferences::GetBool("plugin.load_flash_only", true);
 
   nsCOMPtr<nsISimpleEnumerator> iter;
   rv = pluginsDir->GetDirectoryEntries(getter_AddRefs(iter));
@@ -2215,7 +2192,8 @@ nsresult nsPluginHost::ScanPluginsDirectory(nsIFile *pluginsDir,
         res = pluginFile.GetPluginInfo(info, &library);
       }
       // if we don't have mime type don't proceed, this is not a plugin
-      if (NS_FAILED(res) || !info.fMimeTypeArray) {
+      if (NS_FAILED(res) || !info.fMimeTypeArray ||
+          (flashOnly && !PluginInfoIsFlash(info))) {
         RefPtr<nsInvalidPluginTag> invalidTag = new nsInvalidPluginTag(filePath.get(),
                                                                          fileModTime);
         pluginFile.FreePluginInfo(info);
@@ -2361,7 +2339,7 @@ WatchRegKey(uint32_t aRoot, nsCOMPtr<nsIWindowsRegKey>& aKey)
   nsresult rv = aKey->Open(aRoot,
                            NS_LITERAL_STRING("Software\\MozillaPlugins"),
                            nsIWindowsRegKey::ACCESS_READ | nsIWindowsRegKey::ACCESS_NOTIFY);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
+  if (NS_FAILED(rv)) {
     aKey = nullptr;
     return;
   }
@@ -2537,39 +2515,6 @@ nsresult nsPluginHost::FindPlugins(bool aCreatePluginList, bool * aPluginsChange
     rv = mPrivateDirServiceProvider->GetPLIDDirectories(getter_AddRefs(dirList));
     if (NS_SUCCEEDED(rv)) {
       ScanPluginsDirectoryList(dirList, aCreatePluginList, &pluginschanged);
-
-      if (pluginschanged)
-        *aPluginsChanged = true;
-
-      // if we are just looking for possible changes,
-      // no need to proceed if changes are detected
-      if (!aCreatePluginList && *aPluginsChanged) {
-        NS_ITERATIVE_UNREF_LIST(RefPtr<nsPluginTag>, mCachedPlugins, mNext);
-        NS_ITERATIVE_UNREF_LIST(RefPtr<nsInvalidPluginTag>, mInvalidPlugins, mNext);
-        return NS_OK;
-      }
-    }
-  }
-
-
-  // Scan the installation paths of our popular plugins if the prefs are enabled
-
-  // This table controls the order of scanning
-  const char* const prefs[] = {NS_WIN_ACROBAT_SCAN_KEY,
-                               NS_WIN_QUICKTIME_SCAN_KEY,
-                               NS_WIN_WMP_SCAN_KEY};
-
-  uint32_t size = sizeof(prefs) / sizeof(prefs[0]);
-
-  for (uint32_t i = 0; i < size; i+=1) {
-    nsCOMPtr<nsIFile> dirToScan;
-    bool bExists;
-    if (NS_SUCCEEDED(dirService->Get(prefs[i], NS_GET_IID(nsIFile), getter_AddRefs(dirToScan))) &&
-        dirToScan &&
-        NS_SUCCEEDED(dirToScan->Exists(&bExists)) &&
-        bExists) {
-
-      ScanPluginsDirectory(dirToScan, aCreatePluginList, &pluginschanged);
 
       if (pluginschanged)
         *aPluginsChanged = true;
@@ -2971,10 +2916,6 @@ nsPluginHost::ReadPluginInfo()
   const long PLUGIN_REG_MIMETYPES_ARRAY_SIZE = 12;
   const long PLUGIN_REG_MAX_MIMETYPES = 1000;
 
-  // we need to import the legacy flags from the plugin registry once
-  const bool pluginStateImported =
-    Preferences::GetDefaultBool("plugin.importedState", false);
-
   nsresult rv;
 
   nsCOMPtr<nsIProperties> directoryService(do_GetService(NS_DIRECTORY_SERVICE_CONTRACTID,&rv));
@@ -3066,128 +3007,68 @@ nsPluginHost::ReadPluginInfo()
   if (PL_strcmp(values[0], "Version"))
     return rv;
 
-  // kPluginRegistryVersion
-  int32_t vdiff = mozilla::CompareVersions(values[1], kPluginRegistryVersion);
-  mozilla::Version version(values[1]);
-  // If this is a registry from some future version then don't attempt to read it
-  if (vdiff > 0)
+  // If we're reading an old registry, ignore it
+  if (strcmp(values[1], kPluginRegistryVersion) != 0) {
     return rv;
-  // If this is a registry from before the minimum then don't attempt to read it
-  if (version < kMinimumRegistryVersion)
-    return rv;
-
-  // Registry v0.10 and upwards includes the plugin version field
-  bool regHasVersion = (version >= "0.10");
-
-  // Registry v0.13 and upwards includes the architecture
-  if (version >= "0.13") {
-    char* archValues[6];
-
-    if (!reader.NextLine()) {
-      return rv;
-    }
-
-    // ArchLiteral, Architecture
-    if (2 != reader.ParseLine(archValues, 2)) {
-      return rv;
-    }
-
-    // ArchLiteral
-    if (PL_strcmp(archValues[0], "Arch")) {
-      return rv;
-    }
-
-    nsCOMPtr<nsIXULRuntime> runtime = do_GetService("@mozilla.org/xre/runtime;1");
-    if (!runtime) {
-      return rv;
-    }
-
-    nsAutoCString arch;
-    if (NS_FAILED(runtime->GetXPCOMABI(arch))) {
-      return rv;
-    }
-
-    // If this is a registry from a different architecture then don't attempt to read it
-    if (PL_strcmp(archValues[1], arch.get())) {
-      return rv;
-    }
   }
 
-  // Registry v0.13 and upwards includes the list of invalid plugins
-  const bool hasInvalidPlugins = (version >= "0.13");
+  char* archValues[6];
+  if (!reader.NextLine()) {
+    return rv;
+  }
 
-  // Registry v0.16 and upwards always have 0 for their plugin flags, prefs are used instead
-  const bool hasValidFlags = (version < "0.16");
+  // ArchLiteral, Architecture
+  if (2 != reader.ParseLine(archValues, 2)) {
+    return rv;
+  }
 
-  // Registry v0.17 and upwards store whether the plugin comes from an XPI.
-  const bool hasFromExtension = (version >= "0.17");
+  // ArchLiteral
+  if (PL_strcmp(archValues[0], "Arch")) {
+    return rv;
+  }
 
-#if defined(XP_MACOSX)
-  const bool hasFullPathInFileNameField = false;
-#else
-  const bool hasFullPathInFileNameField = (version < "0.11");
-#endif
+  nsCOMPtr<nsIXULRuntime> runtime = do_GetService("@mozilla.org/xre/runtime;1");
+  if (!runtime) {
+    return rv;
+  }
+
+  nsAutoCString arch;
+  if (NS_FAILED(runtime->GetXPCOMABI(arch))) {
+    return rv;
+  }
+
+  // If this is a registry from a different architecture then don't attempt to read it
+  if (PL_strcmp(archValues[1], arch.get())) {
+    return rv;
+  }
 
   if (!ReadSectionHeader(reader, "PLUGINS"))
     return rv;
 
   while (reader.NextLine()) {
-    const char *filename;
-    const char *fullpath;
-    nsAutoCString derivedFileName;
-
-    if (hasInvalidPlugins && *reader.LinePtr() == '[') {
+    if (*reader.LinePtr() == '[') {
       break;
     }
 
-    if (hasFullPathInFileNameField) {
-      fullpath = reader.LinePtr();
-      if (!reader.NextLine())
-        return rv;
-      // try to derive a file name from the full path
-      if (fullpath) {
-        nsCOMPtr<nsIFile> file = do_CreateInstance("@mozilla.org/file/local;1");
-        file->InitWithNativePath(nsDependentCString(fullpath));
-        file->GetNativeLeafName(derivedFileName);
-        filename = derivedFileName.get();
-      } else {
-        filename = nullptr;
-      }
-
-      // skip the next line, useless in this version
-      if (!reader.NextLine())
-        return rv;
-    } else {
-      filename = reader.LinePtr();
-      if (!reader.NextLine())
-        return rv;
-
-      fullpath = reader.LinePtr();
-      if (!reader.NextLine())
-        return rv;
-    }
-
-    const char *version;
-    if (regHasVersion) {
-      version = reader.LinePtr();
-      if (!reader.NextLine())
-        return rv;
-    } else {
-      version = "0";
-    }
-
-    // lastModifiedTimeStamp|canUnload|tag.mFlag|fromExtension
-    const int count = hasFromExtension ? 4 : 3;
-    if (reader.ParseLine(values, count) != count)
+    const char* filename = reader.LinePtr();
+    if (!reader.NextLine())
       return rv;
 
-    // If this is an old plugin registry mark this plugin tag to be refreshed
-    int64_t lastmod = (vdiff == 0) ? nsCRT::atoll(values[0]) : -1;
-    uint32_t tagflag = atoi(values[2]);
-    bool fromExtension = false;
-    if (hasFromExtension) {
-      fromExtension = atoi(values[3]);
-    }
+    const char* fullpath = reader.LinePtr();
+    if (!reader.NextLine())
+      return rv;
+
+    const char *version;
+    version = reader.LinePtr();
+    if (!reader.NextLine())
+      return rv;
+
+    // lastModifiedTimeStamp|canUnload|tag.mFlag|fromExtension
+    if (4 != reader.ParseLine(values, 4))
+      return rv;
+
+    int64_t lastmod = nsCRT::atoll(values[0]);
+    bool fromExtension = atoi(values[3]);
     if (!reader.NextLine())
       return rv;
 
@@ -3263,10 +3144,6 @@ nsPluginHost::ReadPluginInfo()
       delete [] heapalloced;
 
     // Import flags from registry into prefs for old registry versions
-    if (hasValidFlags && !pluginStateImported) {
-      tag->ImportFlagsToPrefs(tagflag);
-    }
-
     MOZ_LOG(nsPluginLogging::gPluginLog, PLUGIN_LOG_BASIC,
       ("LoadCachedPluginsInfo : Loading Cached plugininfo for %s\n", tag->FileName().get()));
 
@@ -3280,33 +3157,28 @@ nsPluginHost::ReadPluginInfo()
 
 // On Android we always want to try to load a plugin again (Flash). Bug 935676.
 #ifndef MOZ_WIDGET_ANDROID
-  if (hasInvalidPlugins) {
-    if (!ReadSectionHeader(reader, "INVALID")) {
+  if (!ReadSectionHeader(reader, "INVALID")) {
+    return rv;
+  }
+
+  while (reader.NextLine()) {
+    const char *fullpath = reader.LinePtr();
+    if (!reader.NextLine()) {
       return rv;
     }
 
-    while (reader.NextLine()) {
-      const char *fullpath = reader.LinePtr();
-      if (!reader.NextLine()) {
-        return rv;
-      }
+    const char *lastModifiedTimeStamp = reader.LinePtr();
+    int64_t lastmod = nsCRT::atoll(lastModifiedTimeStamp);
 
-      const char *lastModifiedTimeStamp = reader.LinePtr();
-      int64_t lastmod = (vdiff == 0) ? nsCRT::atoll(lastModifiedTimeStamp) : -1;
+    RefPtr<nsInvalidPluginTag> invalidTag = new nsInvalidPluginTag(fullpath, lastmod);
 
-      RefPtr<nsInvalidPluginTag> invalidTag = new nsInvalidPluginTag(fullpath, lastmod);
-
-      invalidTag->mNext = mInvalidPlugins;
-      if (mInvalidPlugins) {
-        mInvalidPlugins->mPrev = invalidTag;
-      }
-      mInvalidPlugins = invalidTag;
+    invalidTag->mNext = mInvalidPlugins;
+    if (mInvalidPlugins) {
+      mInvalidPlugins->mPrev = invalidTag;
     }
+    mInvalidPlugins = invalidTag;
   }
 #endif
-
-  // flip the pref so we don't import the legacy flags again
-  Preferences::SetBool("plugin.importedState", true);
 
   return NS_OK;
 }
@@ -3868,7 +3740,7 @@ nsPluginHost::CreateTempFileToPost(const char *aPostDataURL, nsIFile **aTmpFile)
     char buf[1024];
     uint32_t br, bw;
     bool firstRead = true;
-    while (1) {
+    while (true) {
       // Read() mallocs if buffer is null
       rv = inStream->Read(buf, 1024, &br);
       if (NS_FAILED(rv) || (int32_t)br <= 0)
@@ -4182,7 +4054,7 @@ public:
     PR_APPEND_LINK(this, &sRunnableListHead);
   }
 
-  virtual ~nsPluginDestroyRunnable()
+  ~nsPluginDestroyRunnable() override
   {
     PR_REMOVE_LINK(this);
   }

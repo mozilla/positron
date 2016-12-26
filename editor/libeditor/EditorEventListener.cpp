@@ -37,7 +37,6 @@
 #include "nsIDOMNode.h"                 // for nsIDOMNode
 #include "nsIDocument.h"                // for nsIDocument
 #include "nsIEditor.h"                  // for EditorBase::GetSelection, etc.
-#include "nsIEditorIMESupport.h"
 #include "nsIEditorMailSupport.h"       // for nsIEditorMailSupport
 #include "nsIFocusManager.h"            // for nsIFocusManager
 #include "nsIFormControl.h"             // for nsIFormControl, etc.
@@ -934,19 +933,16 @@ EditorEventListener::CanDrop(nsIDOMDragEvent* aEvent)
   nsCOMPtr<DataTransfer> dataTransfer = do_QueryInterface(domDataTransfer);
   NS_ENSURE_TRUE(dataTransfer, false);
 
-  ErrorResult err;
-  RefPtr<DOMStringList> types = dataTransfer->GetTypes(err);
-  if (NS_WARN_IF(err.Failed())) {
-    return false;
-  }
+  nsTArray<nsString> types;
+  dataTransfer->GetTypes(types, CallerType::System);
 
   // Plaintext editors only support dropping text. Otherwise, HTML and files
   // can be dropped as well.
-  if (!types->Contains(NS_LITERAL_STRING(kTextMime)) &&
-      !types->Contains(NS_LITERAL_STRING(kMozTextInternal)) &&
+  if (!types.Contains(NS_LITERAL_STRING(kTextMime)) &&
+      !types.Contains(NS_LITERAL_STRING(kMozTextInternal)) &&
       (mEditorBase->IsPlaintextEditor() ||
-       (!types->Contains(NS_LITERAL_STRING(kHTMLMime)) &&
-        !types->Contains(NS_LITERAL_STRING(kFileMime))))) {
+       (!types.Contains(NS_LITERAL_STRING(kHTMLMime)) &&
+        !types.Contains(NS_LITERAL_STRING(kFileMime))))) {
     return false;
   }
 
@@ -1091,7 +1087,21 @@ EditorEventListener::Focus(nsIDOMEvent* aEvent)
 
       nsCOMPtr<nsIDOMElement> element;
       fm->GetFocusedElement(getter_AddRefs(element));
-      if (!SameCOMIdentity(element, target)) {
+      if (!element) {
+        return NS_OK;
+      }
+
+      nsCOMPtr<nsIDOMEventTarget> originalTarget;
+      aEvent->GetOriginalTarget(getter_AddRefs(originalTarget));
+
+      nsCOMPtr<nsIContent> originalTargetAsContent =
+        do_QueryInterface(originalTarget);
+      nsCOMPtr<nsIContent> focusedElementAsContent =
+        do_QueryInterface(element);
+
+      if (!SameCOMIdentity(
+            focusedElementAsContent->FindFirstNonChromeOnlyAccessContent(),
+            originalTargetAsContent->FindFirstNonChromeOnlyAccessContent())) {
         return NS_OK;
       }
     }

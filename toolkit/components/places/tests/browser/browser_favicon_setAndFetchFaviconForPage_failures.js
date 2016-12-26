@@ -22,7 +22,6 @@ function test() {
   let favIconErrorPageURI =
     NetUtil.newURI("chrome://global/skin/icons/warning-16.png");
   let favIconsResultCount = 0;
-  let pageURI;
 
   function testOnWindow(aOptions, aCallback) {
     whenNewWindowLoaded(aOptions, function(aWin) {
@@ -42,7 +41,7 @@ function test() {
     let stmt = DBConn().createAsyncStatement("SELECT url FROM moz_favicons");
     stmt.executeAsync({
       handleResult: function final_handleResult(aResultSet) {
-        for (let row; (row = aResultSet.getNextRow()); ) {
+        while (aResultSet.getNextRow()) {
           favIconsResultCount++;
         }
       },
@@ -50,7 +49,7 @@ function test() {
         throw ("Unexpected error (" + aError.result + "): " + aError.message);
       },
       handleCompletion: function final_handleCompletion(aReason) {
-        //begin testing
+        // begin testing
         info("Previous records in moz_favicons: " + favIconsResultCount);
         if (aCallback) {
           aCallback();
@@ -107,7 +106,7 @@ function test() {
   function testPrivateBrowsingNonBookmarkedURI(aWindow, aCallback) {
     let pageURI = NetUtil.newURI("http://example.com/privateBrowsing");
     addVisits({ uri: pageURI, transitionType: TRANSITION_TYPED }, aWindow,
-      function () {
+      function() {
         aWindow.PlacesUtils.favicons.setAndFetchFaviconForPage(pageURI,
           favIcon16URI, true,
           aWindow.PlacesUtils.favicons.FAVICON_LOAD_PRIVATE, null,
@@ -122,7 +121,7 @@ function test() {
   function testDisabledHistory(aWindow, aCallback) {
     let pageURI = NetUtil.newURI("http://example.com/disabledHistory");
     addVisits({ uri: pageURI, transition: TRANSITION_TYPED }, aWindow,
-      function () {
+      function() {
         aWindow.Services.prefs.setBoolPref("places.history.enabled", false);
 
         aWindow.PlacesUtils.favicons.setAndFetchFaviconForPage(pageURI,
@@ -143,9 +142,8 @@ function test() {
 
   function testErrorIcon(aWindow, aCallback) {
     let pageURI = NetUtil.newURI("http://example.com/errorIcon");
-    let places = [{ uri: pageURI, transition: TRANSITION_TYPED }];
     addVisits({ uri: pageURI, transition: TRANSITION_TYPED }, aWindow,
-      function () {
+      function() {
         aWindow.PlacesUtils.favicons.setAndFetchFaviconForPage(pageURI,
           favIconErrorPageURI, true,
           aWindow.PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE, null,
@@ -217,7 +215,7 @@ function test() {
     // callback to be invoked.  In turn, the callback will invoke
     // finish() causing the tests to finish.
     addVisits({ uri: lastPageURI, transition: TRANSITION_TYPED }, aWindow,
-      function () {
+      function() {
         aWindow.PlacesUtils.favicons.setAndFetchFaviconForPage(lastPageURI,
           favIcon32URI, true,
           aWindow.PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE, null,
@@ -225,23 +223,23 @@ function test() {
     });
   }
 
-  checkFavIconsDBCount(function () {
+  checkFavIconsDBCount(function() {
     testOnWindow({}, function(aWin) {
-      testNullPageURI(aWin, function () {
-        testOnWindow({}, function(aWin) {
-          testNullFavIconURI(aWin, function() {
-            testOnWindow({}, function(aWin) {
-              testAboutURI(aWin, function() {
-                testOnWindow({private: true}, function(aWin) {
-                  testPrivateBrowsingNonBookmarkedURI(aWin, function () {
-                    testOnWindow({}, function(aWin) {
-                      testDisabledHistory(aWin, function () {
-                        testOnWindow({}, function(aWin) {
-                          testErrorIcon(aWin, function() {
-                            testOnWindow({}, function(aWin) {
-                              testNonExistingPage(aWin, function() {
-                                testOnWindow({}, function(aWin) {
-                                  testFinalVerification(aWin, function() {
+      testNullPageURI(aWin, function() {
+        testOnWindow({}, function(aWin2) {
+          testNullFavIconURI(aWin2, function() {
+            testOnWindow({}, function(aWin3) {
+              testAboutURI(aWin3, function() {
+                testOnWindow({private: true}, function(aWin4) {
+                  testPrivateBrowsingNonBookmarkedURI(aWin4, function() {
+                    testOnWindow({}, function(aWin5) {
+                      testDisabledHistory(aWin5, function() {
+                        testOnWindow({}, function(aWin6) {
+                          testErrorIcon(aWin6, function() {
+                            testOnWindow({}, function(aWin7) {
+                              testNonExistingPage(aWin7, function() {
+                                testOnWindow({}, function(aWin8) {
+                                  testFinalVerification(aWin8, function() {
                                     finish();
                                   });
                                 });

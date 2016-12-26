@@ -2,7 +2,7 @@ requestLongerTimeout(2);
 add_task(function* ()
 {
   function pushPref(name, value) {
-    return new Promise(resolve => SpecialPowers.pushPrefEnv({"set": [[name, value]]}, resolve));
+    return SpecialPowers.pushPrefEnv({"set": [[name, value]]});
   }
 
   yield pushPref("general.autoScroll", true);
@@ -45,6 +45,13 @@ add_task(function* ()
       <iframe id="iframe" style="display: none;"></iframe>\
       </body></html>'},
     {elem: 'j', expected: expectScrollVert},  // bug 914251
+    {dataUri: 'data:text/html,<html><head><meta charset="utf-8">\
+<style>\
+body > div {scroll-behavior: smooth;width: 300px;height: 300px;overflow: scroll;}\
+body > div > div {width: 1000px;height: 1000px;}\
+</style>\
+</head><body><div id="t"><div></div></div></body></html>'},
+    {elem: 't', expected: expectScrollBoth}, // bug 1308775
     {dataUri: 'data:text/html,<html><head><meta charset="utf-8"></head><body>\
 <div id="k" style="height: 150px;  width: 200px; overflow: scroll; border: 1px solid black;">\
 <iframe style="height: 200px; width: 300px;"></iframe>\
@@ -120,7 +127,7 @@ add_task(function* ()
                                            gBrowser.selectedBrowser);
 
     if (prefsChanged) {
-      yield new Promise(resolve => SpecialPowers.popPrefEnv(resolve));
+      yield SpecialPowers.popPrefEnv();
     }
 
     // Start checking for the scroll.

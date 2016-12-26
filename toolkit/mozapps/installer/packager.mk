@@ -54,7 +54,7 @@ stage-package: $(MOZ_PKG_MANIFEST) $(MOZ_PKG_MANIFEST_DEPS)
 		$(addprefix --unify ,$(UNIFY_DIST)) \
 		$(MOZ_PKG_MANIFEST) $(DIST) $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR)$(if $(MOZ_PKG_MANIFEST),,$(_BINPATH)) \
 		$(if $(filter omni,$(MOZ_PACKAGER_FORMAT)),$(if $(NON_OMNIJAR_FILES),--non-resource $(NON_OMNIJAR_FILES)))
-	$(PYTHON) $(MOZILLA_DIR)/toolkit/mozapps/installer/find-dupes.py $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR)
+	$(PYTHON) $(MOZILLA_DIR)/toolkit/mozapps/installer/find-dupes.py $(MOZ_PKG_DUPEFLAGS) $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR)
 ifndef MOZ_THUNDERBIRD
 	# Package mozharness
 	$(call py_action,test_archive, \
@@ -67,6 +67,12 @@ ifdef MOZ_PACKAGE_JSSHELL
 	$(RM) $(PKG_JSSHELL)
 	$(MAKE_JSSHELL)
 endif # MOZ_PACKAGE_JSSHELL
+ifdef MOZ_ARTIFACT_BUILD_SYMBOLS
+	@echo 'Packaging existing crashreporter symbols from artifact build...'
+	$(NSINSTALL) -D $(DIST)/$(PKG_PATH)
+	cd $(DIST)/crashreporter-symbols && \
+          zip -r5D '../$(PKG_PATH)$(SYMBOL_ARCHIVE_BASENAME).zip' . -i '*.sym' -i '*.txt'
+endif # MOZ_ARTIFACT_BUILD_SYMBOLS
 ifdef MOZ_CODE_COVERAGE
 	# Package code coverage gcno tree
 	@echo 'Packaging code coverage data...'
@@ -222,7 +228,17 @@ upload: checksum
 # source-package creates a source tarball from the files in MOZ_PKG_SRCDIR,
 # which is either set to a clean checkout or defaults to $topsrcdir
 source-package:
+	@echo 'Generate the sourcestamp file'
+	# Make sure to have repository information available and then generate the
+	# sourcestamp file.
+	$(MAKE) -C $(DEPTH) 'source-repo.h'
+	$(MAKE) make-sourcestamp-file
 	@echo 'Packaging source tarball...'
+	# We want to include the sourcestamp file in the source tarball, so copy it
+	# in the root source directory. This is useful to enable telemetry submissions
+	# from builds made from the source package with the correct revision information.
+	# Don't bother removing it as this is only used by automation.
+	@cp $(MOZ_SOURCESTAMP_FILE) '$(MOZ_PKG_SRCDIR)/sourcestamp.txt'
 	$(MKDIR) -p $(DIST)/$(PKG_SRCPACK_PATH)
 	(cd $(MOZ_PKG_SRCDIR) && $(CREATE_SOURCE_TAR) - ./ ) | xz -9e > $(SOURCE_TAR)
 

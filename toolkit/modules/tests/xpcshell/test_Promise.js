@@ -10,8 +10,7 @@ Components.utils.import("resource://testing-common/PromiseTestUtils.jsm");
 // Prevent test failures due to the unhandled rejections in this test file.
 PromiseTestUtils.disableUncaughtRejectionObserverForSelfTest();
 
-////////////////////////////////////////////////////////////////////////////////
-//// Test runner
+// Test runner
 
 var run_promise_tests = function run_promise_tests(tests, cb) {
   let loop = function loop(index) {
@@ -79,8 +78,7 @@ var make_promise_test = function(test) {
   };
 };
 
-////////////////////////////////////////////////////////////////////////////////
-//// Tests
+// Tests
 
 var tests = [];
 
@@ -125,7 +123,7 @@ tests.push(make_promise_test(
 
     // Install a number of observers before resolving
     let i;
-    for (i = 0; i < SIZE/2; ++i) {
+    for (i = 0; i < SIZE / 2; ++i) {
       install_observer(i);
     }
 
@@ -253,7 +251,7 @@ tests.push(make_promise_test(
 
     // Install a number of observers before resolving
     let i;
-    for (i = 0; i < SIZE/2; ++i) {
+    for (i = 0; i < SIZE / 2; ++i) {
       install_observer(i);
     }
 
@@ -289,7 +287,7 @@ tests.push(
         throw exception_content;
       });
 
-    let observer_2 = source.promise.then(
+    source.promise.then(
       function onResolve() {
         do_check_true(exception_thrown, "Second observer called after first observer has thrown");
       }
@@ -962,7 +960,6 @@ function wait_for_uncaught(aMustAppear, aTimeout = undefined) {
   }
   let deferred = Promise.defer();
   let print = do_print;
-  let execute_soon = do_execute_soon;
   let observer = function({message, stack}) {
     let data = message + stack;
     print("Observing " + message + ", looking for " + aMustAppear.join(", "));

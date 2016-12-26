@@ -19,12 +19,12 @@ const {
 } = require("devtools/client/webconsole/new-console-output/constants");
 
 const componentMap = new Map([
-  ["ConsoleApiCall", require("./message-types/console-api-call").ConsoleApiCall],
-  ["ConsoleCommand", require("./message-types/console-command").ConsoleCommand],
-  ["DefaultRenderer", require("./message-types/default-renderer").DefaultRenderer],
-  ["EvaluationResult", require("./message-types/evaluation-result").EvaluationResult],
-  ["NetworkEventMessage", require("./message-types/network-event-message").NetworkEventMessage],
-  ["PageError", require("./message-types/page-error").PageError]
+  ["ConsoleApiCall", require("./message-types/console-api-call")],
+  ["ConsoleCommand", require("./message-types/console-command")],
+  ["DefaultRenderer", require("./message-types/default-renderer")],
+  ["EvaluationResult", require("./message-types/evaluation-result")],
+  ["NetworkEventMessage", require("./message-types/network-event-message")],
+  ["PageError", require("./message-types/page-error")]
 ]);
 
 const MessageContainer = createClass({
@@ -32,17 +32,16 @@ const MessageContainer = createClass({
 
   propTypes: {
     message: PropTypes.object.isRequired,
-    sourceMapService: PropTypes.object,
-    onViewSourceInDebugger: PropTypes.func.isRequired,
-    openNetworkPanel: PropTypes.func.isRequired,
-    openLink: PropTypes.func.isRequired,
     open: PropTypes.bool.isRequired,
-    hudProxyClient: PropTypes.object.isRequired,
+    serviceContainer: PropTypes.object.isRequired,
+    autoscroll: PropTypes.bool.isRequired,
+    indent: PropTypes.number.isRequired,
   },
 
   getDefaultProps: function () {
     return {
-      open: false
+      open: false,
+      indent: 0,
     };
   },
 
@@ -54,30 +53,10 @@ const MessageContainer = createClass({
   },
 
   render() {
-    const {
-      dispatch,
-      message,
-      sourceMapService,
-      onViewSourceInDebugger,
-      openNetworkPanel,
-      openLink,
-      open,
-      tableData,
-      hudProxyClient,
-    } = this.props;
+    const { message } = this.props;
 
     let MessageComponent = createFactory(getMessageComponent(message));
-    return MessageComponent({
-      dispatch,
-      message,
-      sourceMapService,
-      onViewSourceInDebugger,
-      openNetworkPanel,
-      openLink,
-      open,
-      tableData,
-      hudProxyClient,
-    });
+    return MessageComponent(this.props);
   }
 });
 
@@ -87,6 +66,7 @@ function getMessageComponent(message) {
       return componentMap.get("ConsoleApiCall");
     case MESSAGE_SOURCE.NETWORK:
       return componentMap.get("NetworkEventMessage");
+    case MESSAGE_SOURCE.CSS:
     case MESSAGE_SOURCE.JAVASCRIPT:
       switch (message.type) {
         case MESSAGE_TYPE.COMMAND:

@@ -2,15 +2,15 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from firefox_puppeteer import PuppeteerMixin
 from marionette_driver import Wait
+from marionette_harness import MarionetteTestCase
 
-from firefox_ui_harness.testcases import FirefoxTestCase
 
-
-class TestDVCertificate(FirefoxTestCase):
+class TestDVCertificate(PuppeteerMixin, MarionetteTestCase):
 
     def setUp(self):
-        FirefoxTestCase.setUp(self)
+        super(TestDVCertificate, self).setUp()
 
         self.locationbar = self.browser.navbar.locationbar
         self.identity_popup = self.browser.navbar.locationbar.identity_popup
@@ -21,17 +21,13 @@ class TestDVCertificate(FirefoxTestCase):
         try:
             self.browser.switch_to()
             self.identity_popup.close(force=True)
-            self.windows.close_all([self.browser])
+            self.puppeteer.windows.close_all([self.browser])
         finally:
-            FirefoxTestCase.tearDown(self)
+            super(TestDVCertificate, self).tearDown()
 
     def test_dv_cert(self):
         with self.marionette.using_context('content'):
             self.marionette.navigate(self.url)
-
-        # The lock icon should be shown
-        self.assertIn('identity-secure',
-                      self.locationbar.connection_icon.value_of_css_property('list-style-image'))
 
         self.assertEqual(self.locationbar.identity_box.get_attribute('className'),
                          'verifiedDomain')
@@ -65,7 +61,7 @@ class TestDVCertificate(FirefoxTestCase):
         insecure_label = self.identity_popup.view.security.insecure_connection_label
         self.assertEqual(insecure_label.value_of_css_property('display'), 'none')
 
-        verifier_label = self.browser.get_property('identity.identified.verifier')
+        verifier_label = self.browser.localize_property('identity.identified.verifier')
         self.assertEqual(self.identity_popup.view.security.verifier.get_attribute('textContent'),
                          verifier_label.replace("%S", cert['issuerOrganization']))
 
@@ -81,7 +77,7 @@ class TestDVCertificate(FirefoxTestCase):
                          cert['commonName'])
 
         self.assertEqual(deck.security.owner.get_attribute('value'),
-                         page_info_window.get_property('securityNoOwner'))
+                         page_info_window.localize_property('securityNoOwner'))
 
         self.assertEqual(deck.security.verifier.get_attribute('value'),
                          cert['issuerOrganization'])

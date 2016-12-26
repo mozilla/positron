@@ -402,57 +402,6 @@ SpecialPowersObserverAPI.prototype = {
         return oldEnabledState;
       }
 
-      case "SPWebAppService": {
-        let Webapps = {};
-        Components.utils.import("resource://gre/modules/Webapps.jsm", Webapps);
-        switch (aMessage.json.op) {
-          case "allow-unsigned-addons":
-            {
-              let utils = {};
-              Components.utils.import("resource://gre/modules/AppsUtils.jsm", utils);
-              utils.AppsUtils.allowUnsignedAddons = true;
-              return;
-            }
-          case "debug-customizations":
-            {
-              let scope = {};
-              Components.utils.import("resource://gre/modules/UserCustomizations.jsm", scope);
-              scope.UserCustomizations._debug = aMessage.json.value;
-              return;
-            }
-          case "inject-app":
-            {
-              let aAppId = aMessage.json.appId;
-              let aApp   = aMessage.json.app;
-
-              let keys = Object.keys(Webapps.DOMApplicationRegistry.webapps);
-              let exists = keys.indexOf(aAppId) !== -1;
-              if (exists) {
-                return false;
-              }
-
-              Webapps.DOMApplicationRegistry.webapps[aAppId] = aApp;
-              return true;
-            }
-          case "reject-app":
-            {
-              let aAppId = aMessage.json.appId;
-
-              let keys = Object.keys(Webapps.DOMApplicationRegistry.webapps);
-              let exists = keys.indexOf(aAppId) !== -1;
-              if (!exists) {
-                return false;
-              }
-
-              delete Webapps.DOMApplicationRegistry.webapps[aAppId];
-              return true;
-            }
-          default:
-            throw new SpecialPowersError("Invalid operation for SPWebAppsService");
-        }
-        return undefined;	// See comment at the beginning of this function.
-      }
-
       case "SPObserverService": {
         let topic = aMessage.json.observerTopic;
         switch (aMessage.json.op) {
@@ -611,12 +560,20 @@ SpecialPowersObserverAPI.prototype = {
         // they're run on a bare archive rather than a running instance,
         // as the add-on manager runs them.
         let extensionData = new ExtensionData(extension.rootURI);
-        extensionData.readManifest().then(() => {
-          return extensionData.initAllLocales();
-        }).then(() => {
-          if (extensionData.errors.length) {
-            return Promise.reject("Extension contains packaging errors");
+        extensionData.readManifest().then(
+          () => {
+            return extensionData.initAllLocales().then(() => {
+              if (extensionData.errors.length) {
+                return Promise.reject("Extension contains packaging errors");
+              }
+            });
+          },
+          () => {
+            // readManifest() will throw if we're loading an embedded
+            // extension, so don't worry about locale errors in that
+            // case.
           }
+        ).then(() => {
           return extension.startup();
         }).then(() => {
           this._sendReply(aMessage, "SPExtensionMessage", {id, type: "extensionStarted", args: []});
@@ -641,28 +598,6 @@ SpecialPowersObserverAPI.prototype = {
         this._extensions.delete(id);
         extension.shutdown();
         this._sendReply(aMessage, "SPExtensionMessage", {id, type: "extensionUnloaded", args: []});
-        return undefined;
-      }
-
-      case "SPClearAppPrivateData": {
-        let appId = aMessage.data.appId;
-        let browserOnly = aMessage.data.browserOnly;
-
-        let attributes = { appId: appId };
-        if (browserOnly) {
-          attributes.inIsolatedMozBrowser = true;
-        }
-        this._notifyCategoryAndObservers(null,
-                                         "clear-origin-data",
-                                         JSON.stringify(attributes));
-
-        let subject = {
-          appId: appId,
-          browserOnly: browserOnly,
-          QueryInterface: XPCOMUtils.generateQI([Ci.mozIApplicationClearPrivateDataParams])
-        };
-        this._notifyCategoryAndObservers(subject, "webapps-clear-data", null);
-
         return undefined;
       }
 

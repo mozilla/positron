@@ -44,9 +44,11 @@
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/WindowBinding.h"
+#include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/ProcessHangMonitor.h"
+#include "mozilla/Sprintf.h"
 #include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/Unused.h"
 #include "AccessCheck.h"
@@ -1317,7 +1319,13 @@ XPCJSContext::InterruptCallback(JSContext* cx)
         return true;
     }
 
-    MOZ_ASSERT(!win->IsDying());
+    if (win->IsDying()) {
+        // The window is being torn down. When that happens we try to prevent
+        // the dispatch of new runnables, so it also makes sense to kill any
+        // long-running script. The user is primarily interested in this page
+        // going away.
+        return false;
+    }
 
     if (win->GetIsPrerendered()) {
         // We cannot display a dialog if the page is being prerendered, so
@@ -1543,9 +1551,6 @@ XPCJSContext::~XPCJSContext()
 
     delete mThisTranslatorMap;
     mThisTranslatorMap = nullptr;
-
-    delete mNativeScriptableSharedMap;
-    mNativeScriptableSharedMap = nullptr;
 
     delete mDyingWrappedNativeProtoMap;
     mDyingWrappedNativeProtoMap = nullptr;
@@ -2374,6 +2379,10 @@ ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats& rtStats,
         KIND_HEAP, rtStats.runtime.sharedImmutableStringsCache,
         "Immutable strings (such as JS scripts' source text) shared across all JSRuntimes.");
 
+    RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/shared-intl-data"),
+        KIND_HEAP, rtStats.runtime.sharedIntlData,
+        "Shared internationalization data.");
+
     RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/uncompressed-source-cache"),
         KIND_HEAP, rtStats.runtime.uncompressedSourceCache,
         "The uncompressed source code cache.");
@@ -3033,11 +3042,17 @@ AccumulateTelemetryCallback(int id, uint32_t sample, const char* key)
       case JS_TELEMETRY_GC_RESET:
         Telemetry::Accumulate(Telemetry::GC_RESET, sample);
         break;
+      case JS_TELEMETRY_GC_RESET_REASON:
+        Telemetry::Accumulate(Telemetry::GC_RESET_REASON, sample);
+        break;
       case JS_TELEMETRY_GC_INCREMENTAL_DISABLED:
         Telemetry::Accumulate(Telemetry::GC_INCREMENTAL_DISABLED, sample);
         break;
       case JS_TELEMETRY_GC_NON_INCREMENTAL:
         Telemetry::Accumulate(Telemetry::GC_NON_INCREMENTAL, sample);
+        break;
+      case JS_TELEMETRY_GC_NON_INCREMENTAL_REASON:
+        Telemetry::Accumulate(Telemetry::GC_NON_INCREMENTAL_REASON, sample);
         break;
       case JS_TELEMETRY_GC_SCC_SWEEP_TOTAL_MS:
         Telemetry::Accumulate(Telemetry::GC_SCC_SWEEP_TOTAL_MS, sample);
@@ -3226,7 +3241,6 @@ XPCJSContext::XPCJSContext()
    mClassInfo2NativeSetMap(ClassInfo2NativeSetMap::newMap(XPC_NATIVE_SET_MAP_LENGTH)),
    mNativeSetMap(NativeSetMap::newMap(XPC_NATIVE_SET_MAP_LENGTH)),
    mThisTranslatorMap(IID2ThisTranslatorMap::newMap(XPC_THIS_TRANSLATOR_MAP_LENGTH)),
-   mNativeScriptableSharedMap(XPCNativeScriptableSharedMap::newMap(XPC_NATIVE_JSCLASS_MAP_LENGTH)),
    mDyingWrappedNativeProtoMap(XPCWrappedNativeProtoMap::newMap(XPC_DYING_NATIVE_PROTO_MAP_LENGTH)),
    mGCIsRunning(false),
    mNativesToReleaseArray(),
@@ -3472,7 +3486,6 @@ XPCJSContext::newXPCJSContext()
         self->GetClassInfo2NativeSetMap()       &&
         self->GetNativeSetMap()                 &&
         self->GetThisTranslatorMap()            &&
-        self->GetNativeScriptableSharedMap()    &&
         self->GetDyingWrappedNativeProtoMap()   &&
         self->mWatchdogManager) {
         return self;
@@ -3528,7 +3541,7 @@ XPCJSContext::DescribeCustomObjects(JSObject* obj, const js::Class* clasp,
         return false;
     }
 
-    snprintf(name, sizeof(name), "JS Object (%s - %s)", clasp->name, si->GetJSClass()->name);
+    SprintfLiteral(name, "JS Object (%s - %s)", clasp->name, si->GetJSClass()->name);
     return true;
 }
 
@@ -3599,6 +3612,8 @@ XPCJSContext::AfterProcessTask(uint32_t aNewRecursionDepth)
     // Now that we are certain that the event is complete,
     // we can flush any ongoing performance measurement.
     js::FlushPerformanceMonitoring(Get()->Context());
+
+    mozilla::jsipc::AfterProcessTask();
 }
 
 /***************************************************************************/

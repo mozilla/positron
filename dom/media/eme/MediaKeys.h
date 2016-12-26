@@ -16,6 +16,7 @@
 #include "nsRefPtrHashtable.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/MediaKeysBinding.h"
+#include "mozilla/dom/MediaKeySystemAccessBinding.h"
 #include "mozIGeckoMediaPluginService.h"
 #include "mozilla/DetailedPromise.h"
 #include "mozilla/WeakPtr.h"
@@ -33,6 +34,7 @@ class HTMLMediaElement;
 typedef nsRefPtrHashtable<nsStringHashKey, MediaKeySession> KeySessionHashMap;
 typedef nsRefPtrHashtable<nsUint32HashKey, dom::DetailedPromise> PromiseHashMap;
 typedef nsRefPtrHashtable<nsUint32HashKey, MediaKeySession> PendingKeySessionsHashMap;
+typedef nsDataHashtable<nsUint32HashKey, uint32_t> PendingPromiseIdTokenHashMap;
 typedef uint32_t PromiseId;
 
 // This class is used on the main thread only.
@@ -50,9 +52,7 @@ public:
 
   MediaKeys(nsPIDOMWindowInner* aParentWindow,
             const nsAString& aKeySystem,
-            const nsAString& aCDMVersion,
-            bool aDistinctiveIdentifierRequired,
-            bool aPersistentStateRequired);
+            const MediaKeySystemConfiguration& aConfig);
 
   already_AddRefed<DetailedPromise> Init(ErrorResult& aRv);
 
@@ -83,8 +83,7 @@ public:
   already_AddRefed<MediaKeySession> GetPendingSession(uint32_t aToken);
 
   // Called once a Init() operation succeeds.
-  void OnCDMCreated(PromiseId aId,
-                    const nsACString& aNodeId, const uint32_t aPluginId);
+  void OnCDMCreated(PromiseId aId, const uint32_t aPluginId);
 
   // Called once the CDM generates a sessionId while servicing a
   // MediaKeySession.generateRequest() or MediaKeySession.load() call,
@@ -107,13 +106,18 @@ public:
   // promises to be resolved.
   PromiseId StorePromise(DetailedPromise* aPromise);
 
+  // Stores a map from promise id to pending session token. Using this
+  // mapping, when a promise is rejected via its ID, we can check if the
+  // promise corresponds to a pending session and retrieve that session
+  // via the mapped-to token, and remove the pending session from the
+  // list of sessions awaiting a session id.
+  void ConnectPendingPromiseIdWithToken(PromiseId aId, uint32_t aToken);
+
   // Reject promise with DOMException corresponding to aExceptionCode.
   void RejectPromise(PromiseId aId, nsresult aExceptionCode,
                      const nsCString& aReason);
   // Resolves promise with "undefined".
   void ResolvePromise(PromiseId aId);
-
-  const nsCString& GetNodeId() const;
 
   void Shutdown();
 
@@ -126,7 +130,9 @@ public:
 
 private:
 
-  bool IsInPrivateBrowsing();
+  // Instantiate CDMProxy instance.
+  // It could be MediaDrmCDMProxy (Widevine on Fennec) or GMPCDMProxy (the rest).
+  already_AddRefed<CDMProxy> CreateCDMProxy();
 
   // Removes promise from mPromises, and returns it.
   already_AddRefed<DetailedPromise> RetrievePromise(PromiseId aId);
@@ -139,8 +145,6 @@ private:
 
   nsCOMPtr<nsPIDOMWindowInner> mParent;
   const nsString mKeySystem;
-  const nsString mCDMVersion;
-  nsCString mNodeId;
   KeySessionHashMap mKeySessions;
   PromiseHashMap mPromises;
   PendingKeySessionsHashMap mPendingSessions;
@@ -149,8 +153,9 @@ private:
   RefPtr<nsIPrincipal> mPrincipal;
   RefPtr<nsIPrincipal> mTopLevelPrincipal;
 
-  const bool mDistinctiveIdentifierRequired;
-  const bool mPersistentStateRequired;
+  const MediaKeySystemConfiguration mConfig;
+
+  PendingPromiseIdTokenHashMap mPromiseIdToken;
 };
 
 } // namespace dom

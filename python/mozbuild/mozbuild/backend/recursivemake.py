@@ -48,6 +48,7 @@ from ..frontend.data import (
     HostDefines,
     HostLibrary,
     HostProgram,
+    HostRustProgram,
     HostSimpleProgram,
     HostSources,
     InstallationTarget,
@@ -60,6 +61,7 @@ from ..frontend.data import (
     PerSourceFlag,
     Program,
     RustLibrary,
+    RustProgram,
     SharedLibrary,
     SimpleProgram,
     Sources,
@@ -120,7 +122,6 @@ MOZBUILD_VARIABLES = [
     b'PARALLEL_DIRS',
     b'PREF_JS_EXPORTS',
     b'PROGRAM',
-    b'PYTHON_UNIT_TESTS',
     b'RESOURCE_FILES',
     b'SDK_HEADERS',
     b'SDK_LIBRARY',
@@ -527,7 +528,7 @@ class RecursiveMakeBackend(CommonBackend):
 """.format(output=first_output,
            dep_file=dep_file,
            inputs=' ' + ' '.join([self._pretty_path(f, backend_file) for f in obj.inputs]) if obj.inputs else '',
-           flags=' ' + ' '.join(obj.flags) if obj.flags else '',
+           flags=' ' + ' '.join(shell_quote(f) for f in obj.flags) if obj.flags else '',
            backend=' backend.mk' if obj.flags else '',
            script=obj.script,
            method=obj.method))
@@ -535,6 +536,15 @@ class RecursiveMakeBackend(CommonBackend):
         elif isinstance(obj, JARManifest):
             self._no_skip['libs'].add(backend_file.relobjdir)
             backend_file.write('JAR_MANIFEST := %s\n' % obj.path.full_path)
+
+        elif isinstance(obj, RustProgram):
+            # Note that for these and host Rust programs, we don't need to
+            # bother with linked libraries, because Cargo will take care of
+            # all of that for us.
+            self._process_rust_program(obj, backend_file)
+
+        elif isinstance(obj, HostRustProgram):
+            self._process_host_rust_program(obj, backend_file)
 
         elif isinstance(obj, Program):
             self._process_program(obj.program, backend_file)
@@ -592,17 +602,17 @@ class RecursiveMakeBackend(CommonBackend):
             self._process_host_library(obj, backend_file)
             self._process_linked_libraries(obj, backend_file)
 
-        elif isinstance(obj, FinalTargetFiles):
-            self._process_final_target_files(obj, obj.files, backend_file)
-
-        elif isinstance(obj, FinalTargetPreprocessedFiles):
-            self._process_final_target_pp_files(obj, obj.files, backend_file, 'DIST_FILES')
-
         elif isinstance(obj, ObjdirFiles):
             self._process_objdir_files(obj, obj.files, backend_file)
 
         elif isinstance(obj, ObjdirPreprocessedFiles):
             self._process_final_target_pp_files(obj, obj.files, backend_file, 'OBJDIR_PP_FILES')
+
+        elif isinstance(obj, FinalTargetFiles):
+            self._process_final_target_files(obj, obj.files, backend_file)
+
+        elif isinstance(obj, FinalTargetPreprocessedFiles):
+            self._process_final_target_pp_files(obj, obj.files, backend_file, 'DIST_FILES')
 
         elif isinstance(obj, AndroidResDirs):
             # Order matters.
@@ -1035,6 +1045,23 @@ class RecursiveMakeBackend(CommonBackend):
     def _process_host_program(self, program, backend_file):
         backend_file.write('HOST_PROGRAM = %s\n' % program)
 
+    def _process_rust_program_base(self, obj, backend_file,
+                                   target_variable,
+                                   target_cargo_variable):
+        backend_file.write_once('CARGO_FILE := %s\n' % obj.cargo_file)
+        backend_file.write('%s += %s\n' % (target_variable, obj.location))
+        backend_file.write('%s += %s\n' % (target_cargo_variable, obj.name))
+
+    def _process_rust_program(self, obj, backend_file):
+        self._process_rust_program_base(obj, backend_file,
+                                        'RUST_PROGRAMS',
+                                        'RUST_CARGO_PROGRAMS')
+
+    def _process_host_rust_program(self, obj, backend_file):
+        self._process_rust_program_base(obj, backend_file,
+                                        'HOST_RUST_PROGRAMS',
+                                        'HOST_RUST_CARGO_PROGRAMS')
+
     def _process_simple_program(self, obj, backend_file):
         if obj.is_unit_test:
             backend_file.write('CPP_UNIT_TESTS += %s\n' % obj.program)
@@ -1046,8 +1073,9 @@ class RecursiveMakeBackend(CommonBackend):
 
     def _process_test_manifest(self, obj, backend_file):
         # Much of the logic in this function could be moved to CommonBackend.
-        self.backend_input_files.add(mozpath.join(obj.topsrcdir,
-            obj.manifest_relpath))
+        for source in obj.source_relpaths:
+            self.backend_input_files.add(mozpath.join(obj.topsrcdir,
+                source))
 
         # Don't allow files to be defined multiple times unless it is allowed.
         # We currently allow duplicates for non-test files or test files if
@@ -1117,7 +1145,7 @@ class RecursiveMakeBackend(CommonBackend):
                 (target, ' '.join(jar.sources)))
         if jar.generated_sources:
             backend_file.write('%s_PP_JAVAFILES := %s\n' %
-                (target, ' '.join(mozpath.join('generated', f) for f in jar.generated_sources)))
+                (target, ' '.join(jar.generated_sources)))
         if jar.extra_jars:
             backend_file.write('%s_EXTRA_JARS := %s\n' %
                 (target, ' '.join(sorted(set(jar.extra_jars)))))
@@ -1174,7 +1202,9 @@ class RecursiveMakeBackend(CommonBackend):
 
     def _process_rust_library(self, libdef, backend_file):
         backend_file.write_once('RUST_LIBRARY_FILE := %s\n' % libdef.import_name)
-        backend_file.write('CARGO_FILE := $(srcdir)/Cargo.toml')
+        backend_file.write('CARGO_FILE := $(srcdir)/Cargo.toml\n')
+        if libdef.features:
+            backend_file.write('RUST_LIBRARY_FEATURES := %s\n' % ' '.join(libdef.features))
 
     def _process_host_library(self, libdef, backend_file):
         backend_file.write('HOST_LIBRARY_NAME = %s\n' % libdef.basename)
@@ -1238,49 +1268,8 @@ class RecursiveMakeBackend(CommonBackend):
         # We have to link any Rust libraries after all intermediate static
         # libraries have been listed to ensure that the Rust libraries are
         # searched after the C/C++ objects that might reference Rust symbols.
-
-        def find_rlibs(obj):
-            if isinstance(obj, RustLibrary):
-                yield obj
-            elif isinstance(obj, StaticLibrary) and not obj.no_expand_lib:
-                for l in obj.linked_libraries:
-                    for rlib in find_rlibs(l):
-                        yield rlib
-
-        # Check if we have any rust libraries to prelink and include in our
-        # final library. If we do, write out the RUST_PRELINK information
-        rlibs = []
-        if isinstance(obj, (SharedLibrary, StaticLibrary)):
-            for l in obj.linked_libraries:
-                rlibs += find_rlibs(l)
-        if rlibs:
-            prelink_libname = '%s/%s%s-rs-prelink%s' \
-                              % (relpath,
-                                 obj.config.lib_prefix,
-                                 obj.basename,
-                                 obj.config.lib_suffix)
-            backend_file.write('RUST_PRELINK := %s\n' % prelink_libname)
-            backend_file.write_once('STATIC_LIBS += %s\n' % prelink_libname)
-
-            extern_crate_file = mozpath.join(
-                obj.objdir, '%s-rs-prelink.rs' % obj.basename)
-            with self._write_file(extern_crate_file) as f:
-                f.write('// AUTOMATICALLY GENERATED.  DO NOT EDIT.\n\n')
-                for rlib in rlibs:
-                    f.write('extern crate %s;\n'
-                            % rlib.basename.replace('-', '_'))
-            backend_file.write('RUST_PRELINK_SRC := %s\n' % extern_crate_file)
-
-            backend_file.write('RUST_PRELINK_FLAGS :=\n')
-            backend_file.write('RUST_PRELINK_DEPS :=\n')
-            for rlib in rlibs:
-                rlib_relpath = pretty_relpath(rlib)
-                backend_file.write('RUST_PRELINK_FLAGS += --extern %s=%s/%s\n'
-                                   % (rlib.basename.replace('-', '_'), rlib_relpath, rlib.import_name))
-                backend_file.write('RUST_PRELINK_FLAGS += -L %s/%s\n'
-                                   % (rlib_relpath, rlib.deps_path))
-                backend_file.write('RUST_PRELINK_DEPS += %s/%s\n'
-                                   % (rlib_relpath, rlib.import_name))
+        if isinstance(obj, SharedLibrary):
+            self._process_rust_libraries(obj, backend_file, pretty_relpath)
 
         for lib in obj.linked_system_libs:
             if obj.KIND == 'target':
@@ -1290,6 +1279,23 @@ class RecursiveMakeBackend(CommonBackend):
 
         # Process library-based defines
         self._process_defines(obj.lib_defines, backend_file)
+
+    def _process_rust_libraries(self, obj, backend_file, pretty_relpath):
+        assert isinstance(obj, SharedLibrary)
+
+        # If this library does not depend on any Rust libraries, then we are done.
+        direct_linked = [l for l in obj.linked_libraries if isinstance(l, RustLibrary)]
+        if not direct_linked:
+            return
+
+        # We should have already checked this in Linkable.link_library.
+        assert len(direct_linked) == 1
+
+        # TODO: see bug 1310063 for checking dependencies are set up correctly.
+
+        direct_linked = direct_linked[0]
+        backend_file.write('RUST_STATIC_LIB_FOR_SHARED_LIB := %s/%s\n' %
+                           (pretty_relpath(direct_linked), direct_linked.import_name))
 
     def _process_final_target_files(self, obj, files, backend_file):
         target = obj.install_target

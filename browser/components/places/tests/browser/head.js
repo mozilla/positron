@@ -5,6 +5,11 @@ XPCOMUtils.defineLazyModuleGetter(this, "Promise",
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesTestUtils",
   "resource://testing-common/PlacesTestUtils.jsm");
 
+// Imported via PlacesOverlay.xul
+/* global doGetPlacesControllerForCommand:false, PlacesControllerDragHelper:false,
+          PlacesUIUtils:false
+*/
+
 // We need to cache this before test runs...
 var cachedLeftPaneFolderIdGetter;
 var getter = PlacesUIUtils.__lookupGetter__("leftPaneFolderId");
@@ -14,8 +19,8 @@ if (!cachedLeftPaneFolderIdGetter && typeof(getter) == "function") {
 
 // ...And restore it when test ends.
 registerCleanupFunction(function() {
-  let getter = PlacesUIUtils.__lookupGetter__("leftPaneFolderId");
-  if (cachedLeftPaneFolderIdGetter && typeof(getter) != "function") {
+  let updatedGetter = PlacesUIUtils.__lookupGetter__("leftPaneFolderId");
+  if (cachedLeftPaneFolderIdGetter && typeof(updatedGetter) != "function") {
     PlacesUIUtils.__defineGetter__("leftPaneFolderId", cachedLeftPaneFolderIdGetter);
   }
 });
@@ -24,7 +29,7 @@ function openLibrary(callback, aLeftPaneRoot) {
   let library = window.openDialog("chrome://browser/content/places/places.xul",
                                   "", "chrome,toolbar=yes,dialog=no,resizable",
                                   aLeftPaneRoot);
-  waitForFocus(function () {
+  waitForFocus(function() {
     callback(library);
   }, library);
 
@@ -150,7 +155,7 @@ function synthesizeClickOnSelectedTreeCell(aTree, aOptions) {
 function promiseIsURIVisited(aURI) {
   let deferred = Promise.defer();
 
-  PlacesUtils.asyncHistory.isURIVisited(aURI, function(aURI, aIsVisited) {
+  PlacesUtils.asyncHistory.isURIVisited(aURI, function(unused, aIsVisited) {
     deferred.resolve(aIsVisited);
   });
 
@@ -159,7 +164,7 @@ function promiseIsURIVisited(aURI) {
 
 function promiseBookmarksNotification(notification, conditionFn) {
   info(`promiseBookmarksNotification: waiting for ${notification}`);
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     let proxifiedObserver = new Proxy({}, {
       get: (target, name) => {
         if (name == "QueryInterface")
@@ -168,7 +173,6 @@ function promiseBookmarksNotification(notification, conditionFn) {
         if (name == notification)
           return (...args) => {
             if (conditionFn.apply(this, args)) {
-              clearTimeout(timeout);
               PlacesUtils.bookmarks.removeObserver(proxifiedObserver, false);
               executeSoon(resolve);
             } else {
@@ -179,16 +183,12 @@ function promiseBookmarksNotification(notification, conditionFn) {
       }
     });
     PlacesUtils.bookmarks.addObserver(proxifiedObserver, false);
-    let timeout = setTimeout(() => {
-      PlacesUtils.bookmarks.removeObserver(proxifiedObserver, false);
-      reject(new Error("Timed out while waiting for bookmarks notification"));
-    }, 2000);
   });
 }
 
 function promiseHistoryNotification(notification, conditionFn) {
   info(`Waiting for ${notification}`);
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     let proxifiedObserver = new Proxy({}, {
       get: (target, name) => {
         if (name == "QueryInterface")
@@ -196,7 +196,6 @@ function promiseHistoryNotification(notification, conditionFn) {
         if (name == notification)
           return (...args) => {
             if (conditionFn.apply(this, args)) {
-              clearTimeout(timeout);
               PlacesUtils.history.removeObserver(proxifiedObserver, false);
               executeSoon(resolve);
             }
@@ -205,10 +204,6 @@ function promiseHistoryNotification(notification, conditionFn) {
       }
     });
     PlacesUtils.history.addObserver(proxifiedObserver, false);
-    let timeout = setTimeout(() => {
-      PlacesUtils.history.removeObserver(proxifiedObserver, false);
-      reject(new Error("Timed out while waiting for history notification"));
-    }, 2000);
   });
 }
 

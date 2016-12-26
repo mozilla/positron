@@ -145,7 +145,14 @@ public:
      * Skip native anonymous content created for placeholder of HTML input,
      * used in conjunction with eAllChildren or eAllButXBL.
      */
-    eSkipPlaceholderContent = 2
+    eSkipPlaceholderContent = 2,
+
+    /**
+     * Skip native anonymous content created by ancestor frames of the root
+     * element's primary frame, such as scrollbar elements created by the root
+     * scroll frame.
+     */
+    eSkipDocumentLevelNativeAnonymousContent = 4,
   };
 
   /**
@@ -247,7 +254,7 @@ public:
   /**
    * Returns true if in a chrome document
    */
-  virtual bool IsInChromeDocument();
+  virtual bool IsInChromeDocument() const;
 
   /**
    * Get the namespace that this element's tag is defined in
@@ -724,10 +731,9 @@ public:
    */
   inline nsIContent *GetFlattenedTreeParent() const;
 
-  /**
-   * Helper method, which we leave public so that it's accessible from nsINode.
-   */
-  nsINode *GetFlattenedTreeParentNodeInternal() const;
+  // Helper method, which we leave public so that it's accessible from nsINode.
+  enum FlattenedParentType { eNotForStyle, eForStyle };
+  nsINode* GetFlattenedTreeParentNodeInternal(FlattenedParentType aType) const;
 
   /**
    * Gets the custom element data used by web components custom element.
@@ -938,14 +944,6 @@ public:
    */
   mozilla::dom::Element* GetEditingHost();
 
-
-  /**
-   * Set NODE_HAS_DIRTY_DESCENDANTS_FOR_SERVO all the way up the flattened
-   * parent chain to the document. If an ancestor is found with the bit already
-   * set, this method asserts that all of its ancestors also have the bit set.
-   */
-  void MarkAncestorsAsHavingDirtyDescendantsForServo();
-
   /**
    * Determining language. Look at the nearest ancestor element that has a lang
    * attribute in the XML namespace or is an HTML/SVG element and has a lang in
@@ -976,7 +974,7 @@ public:
   // Overloaded from nsINode
   virtual already_AddRefed<nsIURI> GetBaseURI(bool aTryUseXHRDocBaseURI = false) const override;
 
-  virtual nsresult PreHandleEvent(
+  virtual nsresult GetEventTargetParent(
                      mozilla::EventChainPreVisitor& aVisitor) override;
 
   virtual bool IsPurple() = 0;
@@ -1023,7 +1021,7 @@ public:
   }
 
   enum ETabFocusType {
-  //eTabFocus_textControlsMask = (1<<0),  // unused - textboxes always tabbable
+    eTabFocus_textControlsMask = (1<<0),  // textboxes and lists always tabbable
     eTabFocus_formElementsMask = (1<<1),  // non-text form elements
     eTabFocus_linksMask = (1<<2),         // links
     eTabFocus_any = 1 + (1<<1) + (1<<2)   // everything that can be focused

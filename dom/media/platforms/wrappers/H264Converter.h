@@ -39,6 +39,13 @@ public:
     return "H264Converter decoder (pending)";
   }
   void SetSeekThreshold(const media::TimeUnit& aTime) override;
+  bool SupportDecoderRecycling() const override
+  {
+    if (mDecoder) {
+      return mDecoder->SupportDecoderRecycling();
+    }
+    return false;
+  }
 
   nsresult GetLastError() const { return mLastError; }
 
@@ -56,7 +63,7 @@ private:
 
   RefPtr<PlatformDecoderModule> mPDM;
   VideoInfo mCurrentConfig;
-  layers::LayersBackend mLayersBackend;
+  RefPtr<layers::KnowsCompositor> mKnowsCompositor;
   RefPtr<layers::ImageContainer> mImageContainer;
   const RefPtr<TaskQueue> mTaskQueue;
   nsTArray<RefPtr<MediaRawData>> mMediaRawSamples;

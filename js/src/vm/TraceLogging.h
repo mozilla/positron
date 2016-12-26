@@ -14,8 +14,8 @@
 #include "js/HashTable.h"
 #include "js/TypeDecls.h"
 #include "js/Vector.h"
-#include "threading/Mutex.h"
 #include "threading/Thread.h"
+#include "vm/MutexIDs.h"
 #include "vm/TraceLoggingGraph.h"
 #include "vm/TraceLoggingTypes.h"
 
@@ -260,7 +260,14 @@ class TraceLoggerThread
         return true;
     }
 
-    const char* eventText(uint32_t id);
+  private:
+    const char* maybeEventText(uint32_t id);
+  public:
+    const char* eventText(uint32_t id) {
+        const char* text = maybeEventText(id);
+        MOZ_ASSERT(text);
+        return text;
+    };
     bool textIdIsScriptEvent(uint32_t id);
 
     // The createTextId functions map a unique input to a logger ID.
@@ -335,7 +342,8 @@ class TraceLoggerThreadState
         mainThreadEnabled(false),
         offThreadEnabled(false),
         graphSpewingEnabled(false),
-        spewErrors(false)
+        spewErrors(false),
+        lock(js::mutexid::TraceLoggerThreadState)
     { }
 
     bool init();

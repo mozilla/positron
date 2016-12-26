@@ -16,7 +16,6 @@ import random
 import re
 import shutil
 import signal
-import subprocess
 import sys
 import tempfile
 import time
@@ -24,7 +23,6 @@ import traceback
 
 from collections import deque, namedtuple
 from distutils import dir_util
-from distutils.version import LooseVersion
 from multiprocessing import cpu_count
 from argparse import ArgumentParser
 from subprocess import Popen, PIPE, STDOUT
@@ -42,7 +40,6 @@ try:
 except Exception:
     HAVE_PSUTIL = False
 
-from automation import Automation
 from xpcshellcommandline import parser_desktop
 
 SCRIPT_DIR = os.path.abspath(os.path.realpath(os.path.dirname(__file__)))
@@ -71,6 +68,7 @@ from manifestparser import TestManifest
 from manifestparser.filters import chunk_by_slice, tags, pathprefix
 from mozlog import commandline
 import mozcrash
+import mozfile
 import mozinfo
 from mozrunner.utils import get_stack_fixer_function
 
@@ -118,6 +116,7 @@ class XPCShellTestThread(Thread):
 
         self.appPath = kwargs.get('appPath')
         self.xrePath = kwargs.get('xrePath')
+        self.utility_path = kwargs.get('utility_path')
         self.testingModulesDir = kwargs.get('testingModulesDir')
         self.debuggerInfo = kwargs.get('debuggerInfo')
         self.jsDebuggerInfo = kwargs.get('jsDebuggerInfo')
@@ -193,7 +192,7 @@ class XPCShellTestThread(Thread):
           Simple wrapper to remove (recursively) a given directory.
           On a remote system, we need to overload this to work on the remote filesystem.
         """
-        shutil.rmtree(dirname)
+        mozfile.remove(dirname)
 
     def poll(self, proc):
         """
@@ -242,7 +241,7 @@ class XPCShellTestThread(Thread):
           Simple wrapper to launch a process.
           On a remote system, this is more complex and we need to overload this function.
         """
-        # timeout is needed by remote and b2g xpcshell to extend the
+        # timeout is needed by remote xpcshell to extend the
         # devicemanager.shell() timeout. It is not used in this function.
         if HAVE_PSUTIL:
             popen_func = psutil.Popen
@@ -272,9 +271,7 @@ class XPCShellTestThread(Thread):
         self.log.info("%s | environment: %s" % (name, list(changedEnv)))
 
     def killTimeout(self, proc):
-        Automation().killAndGetStackNoScreenshot(proc.pid,
-                                                 self.appPath,
-                                                 self.debuggerInfo)
+        mozcrash.kill_and_get_minidump(proc.pid, self.tempDir, utility_path=self.utility_path)
 
     def postCheck(self, proc):
         """Checks for a still-running test process, kills it and fails the test if found.
@@ -282,7 +279,13 @@ class XPCShellTestThread(Thread):
         cause removeDir() to fail - so check for the process and kill it if needed.
         """
         if proc and self.poll(proc) is None:
-            self.kill(proc)
+            if HAVE_PSUTIL:
+                try:
+                    self.kill(proc)
+                except psutil.NoSuchProcess:
+                    pass
+            else:
+                self.kill(proc)
             message = "%s | Process still running after test!" % self.test_object['id']
             if self.retry:
                 self.log.info(message)
@@ -989,28 +992,16 @@ class XPCShellTests(object):
         """
           Run node for HTTP/2 tests, if available, and updates mozinfo as appropriate.
         """
-        nodeMozInfo = {'hasNode': False} # Assume the worst
         nodeBin = None
 
         # We try to find the node executable in the path given to us by the user in
         # the MOZ_NODE_PATH environment variable
         localPath = os.getenv('MOZ_NODE_PATH', None)
         if localPath and os.path.exists(localPath) and os.path.isfile(localPath):
-            try:
-                version_str = subprocess.check_output([localPath, "--version"],
-                                                      stderr=subprocess.STDOUT)
-                # nodejs prefixes its version strings with "v"
-                version = LooseVersion(version_str.lstrip('v'))
-                # Use node only if node version is >=5.0.0 because
-                # node did not support ALPN until this version.
-                if version >= LooseVersion("5.0.0"):
-                    nodeBin = localPath
-            except (subprocess.CalledProcessError, OSError), e:
-                self.log.error('Could not retrieve node version: %s' % str(e))
+            nodeBin = localPath
 
         if os.getenv('MOZ_ASSUME_NODE_RUNNING', None):
             self.log.info('Assuming required node servers are already running')
-            nodeMozInfo['hasNode'] = True
         elif nodeBin:
             self.log.info('Found node at %s' % (nodeBin,))
 
@@ -1029,7 +1020,6 @@ class XPCShellTests(object):
                         # tell us it's started
                         msg = process.stdout.readline()
                         if 'server listening' in msg:
-                            nodeMozInfo['hasNode'] = True
                             searchObj = re.search( r'HTTP2 server listening on port (.*)', msg, 0)
                             if searchObj:
                               self.env["MOZHTTP2_PORT"] = searchObj.group(1)
@@ -1039,8 +1029,6 @@ class XPCShellTests(object):
 
             myDir = os.path.split(os.path.abspath(__file__))[0]
             startServer('moz-http2', os.path.join(myDir, 'moz-http2', 'moz-http2.js'))
-
-        mozinfo.update(nodeMozInfo)
 
     def shutdownNode(self):
         """
@@ -1181,6 +1169,7 @@ class XPCShellTests(object):
 
         self.xpcshell = xpcshell
         self.xrePath = xrePath
+        self.utility_path = utility_path
         self.appPath = appPath
         self.symbolsPath = symbolsPath
         self.tempDir = os.path.normpath(tempDir or tempfile.gettempdir())
@@ -1231,8 +1220,8 @@ class XPCShellTests(object):
         mozinfo.update(self.mozInfo)
 
         self.stack_fixer_function = None
-        if utility_path and os.path.exists(utility_path):
-            self.stack_fixer_function = get_stack_fixer_function(utility_path, self.symbolsPath)
+        if self.utility_path and os.path.exists(self.utility_path):
+            self.stack_fixer_function = get_stack_fixer_function(self.utility_path, self.symbolsPath)
 
         # buildEnvironment() needs mozInfo, so we call it after mozInfo is initialized.
         self.buildEnvironment()
@@ -1264,6 +1253,7 @@ class XPCShellTests(object):
         kwargs = {
             'appPath': self.appPath,
             'xrePath': self.xrePath,
+            'utility_path': self.utility_path,
             'testingModulesDir': self.testingModulesDir,
             'debuggerInfo': self.debuggerInfo,
             'jsDebuggerInfo': self.jsDebuggerInfo,

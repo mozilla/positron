@@ -2,14 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+"use strict";
+
 const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 Cu.import("resource://gre/modules/AppConstants.jsm");
-Cu.import("resource://gre/modules/osfile.jsm");
+Cu.import("resource://gre/modules/osfile.jsm"); /* globals OS */
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource:///modules/MigrationUtils.jsm");
+Cu.import("resource:///modules/MigrationUtils.jsm"); /* globals MigratorPrototype */
 Cu.import("resource:///modules/MSMigrationUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
                                   "resource://gre/modules/PlacesUtils.jsm");
@@ -57,7 +59,7 @@ XPCOMUtils.defineLazyGetter(this, "gEdgeDatabase", function() {
  *                                      the main Edge database.
  * @returns {Array} An array of row objects.
  */
-function readTableFromEdgeDB(tableName, columns, filterFn, dbFile=gEdgeDatabase) {
+function readTableFromEdgeDB(tableName, columns, filterFn, dbFile = gEdgeDatabase) {
   let database;
   let rows = [];
   try {
@@ -106,7 +108,6 @@ EdgeTypedURLMigrator.prototype = {
   },
 
   migrate: function(aCallback) {
-    let rv = true;
     let typedURLs = this._typedURLs;
     let places = [];
     for (let [urlString, time] of typedURLs) {
@@ -137,7 +138,7 @@ EdgeTypedURLMigrator.prototype = {
       return;
     }
 
-    PlacesUtils.asyncHistory.updatePlaces(places, {
+    MigrationUtils.insertVisitsWrapper(places, {
       _success: false,
       handleResult: function() {
         // Importing any entry is considered a successful import.
@@ -149,7 +150,7 @@ EdgeTypedURLMigrator.prototype = {
       }
     });
   },
-}
+};
 
 function EdgeReadingListMigrator() {
 }
@@ -200,7 +201,7 @@ EdgeReadingListMigrator.prototype = {
     let exceptionThrown;
     for (let item of readingListItems) {
       let dateAdded = item.AddedDate || new Date();
-      yield PlacesUtils.bookmarks.insert({
+      yield MigrationUtils.insertBookmarkWrapper({
         parentGuid: destFolderGuid, url: item.URL, title: item.Title, dateAdded
       }).catch(ex => {
         if (!exceptionThrown) {
@@ -218,7 +219,7 @@ EdgeReadingListMigrator.prototype = {
     if (!this.__readingListFolderGuid) {
       let folderTitle = MigrationUtils.getLocalizedString("importedEdgeReadingList");
       let folderSpec = {type: PlacesUtils.bookmarks.TYPE_FOLDER, parentGuid, title: folderTitle};
-      this.__readingListFolderGuid = (yield PlacesUtils.bookmarks.insert(folderSpec)).guid;
+      this.__readingListFolderGuid = (yield MigrationUtils.insertBookmarkWrapper(folderSpec)).guid;
     }
     return this.__readingListFolderGuid;
   }),
@@ -231,15 +232,15 @@ function EdgeBookmarksMigrator(dbOverride) {
 EdgeBookmarksMigrator.prototype = {
   type: MigrationUtils.resourceTypes.BOOKMARKS,
 
-  get db() { return this.dbOverride || gEdgeDatabase; },
+  get db() { return this.dbOverride || gEdgeDatabase },
 
   get TABLE_NAME() { return "Favorites" },
 
   get exists() {
-    if ("_exists" in this) {
-      return this._exists;
+    if (!("_exists" in this)) {
+      this._exists = !!this.db && this._checkTableExists();
     }
-    return this._exists = (!!this.db && this._checkTableExists());
+    return this._exists;
   },
 
   _checkTableExists() {
@@ -319,9 +320,9 @@ EdgeBookmarksMigrator.prototype = {
         url: bookmark.URL,
         dateAdded: bookmark.DateUpdated || new Date(),
         title: bookmark.Title,
-      }
+      };
 
-      yield PlacesUtils.bookmarks.insert(placesInfo).catch(ex => {
+      yield MigrationUtils.insertBookmarkWrapper(placesInfo).catch(ex => {
         if (!exceptionThrown) {
           exceptionThrown = ex;
         }
@@ -353,7 +354,7 @@ EdgeBookmarksMigrator.prototype = {
         folderMap.set(row.ItemId, row);
       }
       return true;
-    }
+    };
     let bookmarks = readTableFromEdgeDB(this.TABLE_NAME, columns, filterFn, this.db);
     return {bookmarks, folderMap};
   },
@@ -377,7 +378,8 @@ EdgeBookmarksMigrator.prototype = {
         toolbarGuid =
           yield MigrationUtils.createImportedBookmarksFolder("Edge", toolbarGuid);
       }
-      return folder._guid = toolbarGuid;
+      folder._guid = toolbarGuid;
+      return folder._guid;
     }
     // Otherwise, get the right parent guid recursively:
     let parentGuid = yield this._getGuidForFolder(folder.ParentId, folderMap, rootGuid);
@@ -388,10 +390,11 @@ EdgeBookmarksMigrator.prototype = {
       parentGuid,
     };
     // and add ourselves as a kid, and return the guid we got.
-    let parentBM = yield PlacesUtils.bookmarks.insert(folderInfo);
-    return folder._guid = parentBM.guid;
+    let parentBM = yield MigrationUtils.insertBookmarkWrapper(folderInfo);
+    folder._guid = parentBM.guid;
+    return folder._guid;
   }),
-}
+};
 
 function EdgeProfileMigrator() {
   this.wrappedJSObject = this;
@@ -431,8 +434,8 @@ EdgeProfileMigrator.prototype.getLastUsedDate = function() {
   let dbPath = gEdgeDatabase.path;
   let cookieMigrator = MSMigrationUtils.getCookiesMigrator(MSMigrationUtils.MIGRATION_TYPE_EDGE);
   let cookiePaths = cookieMigrator._cookiesFolders.map(f => f.path);
-  let datePromises = [logFilePath, dbPath, ... cookiePaths].map(path => {
-    return OS.File.stat(path).catch(_ => null).then(info => {
+  let datePromises = [logFilePath, dbPath, ...cookiePaths].map(path => {
+    return OS.File.stat(path).catch(() => null).then(info => {
       return info ? info.lastModificationDate : 0;
     });
   });
@@ -441,7 +444,7 @@ EdgeProfileMigrator.prototype.getLastUsedDate = function() {
     try {
       typedURLs = MSMigrationUtils.getTypedURLs(kEdgeRegistryRoot);
     } catch (ex) {}
-    let times = [0, ... typedURLs.values()];
+    let times = [0, ...typedURLs.values()];
     resolve(Math.max.apply(Math, times));
   }));
   return Promise.all(datePromises).then(dates => {
@@ -460,8 +463,8 @@ EdgeProfileMigrator.prototype.__defineGetter__("sourceProfiles", function() {
 });
 
 EdgeProfileMigrator.prototype.__defineGetter__("sourceLocked", function() {
-    // There is an exclusive lock on some databases. Assume they are locked for now.
-    return true;
+  // There is an exclusive lock on some databases. Assume they are locked for now.
+  return true;
 });
 
 

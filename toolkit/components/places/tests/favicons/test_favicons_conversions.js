@@ -5,8 +5,7 @@
  * This file tests the image conversions done by the favicon service.
  */
 
-////////////////////////////////////////////////////////////////////////////////
-/// Globals
+// Globals
 
 // The pixel values we get on Windows are sometimes +/- 1 value compared to
 // other platforms, so we need to skip some image content tests.
@@ -35,7 +34,7 @@ function checkFaviconDataConversion(aFileName, aFileMimeType, aFileLength,
                                     aCallback) {
   let pageURI = NetUtil.newURI("http://places.test/page/" + aFileName);
   PlacesTestUtils.addVisits({ uri: pageURI, transition: TRANSITION_TYPED }).then(
-    function () {
+    function() {
       let faviconURI = NetUtil.newURI("http://places.test/icon/" + aFileName);
       let fileData = readFileOfLength(aFileName, aFileLength);
 
@@ -60,8 +59,7 @@ function checkFaviconDataConversion(aFileName, aFileMimeType, aFileLength,
     });
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Tests
+// Tests
 
 function run_test() {
   run_next_test();

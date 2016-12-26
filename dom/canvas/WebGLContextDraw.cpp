@@ -19,6 +19,8 @@
 #include "WebGLVertexArray.h"
 #include "WebGLVertexAttribData.h"
 
+#include <algorithm>
+
 namespace mozilla {
 
 // For a Tegra workaround.
@@ -268,11 +270,11 @@ WebGLContext::DrawArrays_check(const char* funcName, GLenum mode, GLint first,
 
     if (IsWebGL2() && !gl->IsSupported(gl::GLFeature::prim_restart_fixed)) {
         MOZ_ASSERT(gl->IsSupported(gl::GLFeature::prim_restart));
-        if (mPrimRestartTypeBytes != 4) {
-            mPrimRestartTypeBytes = 4;
+        if (mPrimRestartTypeBytes != 0) {
+            mPrimRestartTypeBytes = 0;
 
-            // OSX has issues leaving this as 0.
-            gl->fPrimitiveRestartIndex(UINT32_MAX);
+            // OSX appears to have severe perf issues with leaving this enabled.
+            gl->fDisable(LOCAL_GL_PRIMITIVE_RESTART);
         }
     }
 
@@ -299,6 +301,16 @@ WebGLContext::DrawArrays_check(const char* funcName, GLenum mode, GLint first,
 }
 
 ////////////////////////////////////////
+
+template<typename T>
+static bool
+DoSetsIntersect(const std::set<T>& a, const std::set<T>& b)
+{
+    std::vector<T> intersection;
+    std::set_intersection(a.begin(), a.end(), b.begin(), b.end(),
+                          std::back_inserter(intersection));
+    return bool(intersection.size());
+}
 
 class ScopedDrawHelper final
 {
@@ -343,7 +355,7 @@ public:
         ////
         // Check UBO sizes.
 
-        const auto& linkInfo = webgl->mActiveProgramLinkInfo;
+        const auto& linkInfo = mWebGL->mActiveProgramLinkInfo;
         for (const auto& cur : linkInfo->uniformBlocks) {
             const auto& dataSize = cur->mDataSize;
             const auto& binding = cur->mBinding;
@@ -358,6 +370,22 @@ public:
             if (dataSize > availByteCount) {
                 mWebGL->ErrorInvalidOperation("%s: Buffer for uniform block is smaller"
                                               " than UNIFORM_BLOCK_DATA_SIZE.",
+                                              funcName);
+                *out_error = true;
+                return;
+            }
+        }
+
+        ////
+
+        const auto& tfo = mWebGL->mBoundTransformFeedback;
+        if (tfo) {
+            const auto& buffersForTF = tfo->BuffersForTF();
+            const auto& buffersForUB = mWebGL->BuffersForUB();
+            if (DoSetsIntersect(buffersForTF, buffersForUB)) {
+                mWebGL->ErrorInvalidOperation("%s: At least one WebGLBuffer is bound for"
+                                              " both transform feedback and as a uniform"
+                                              " buffer.",
                                               funcName);
                 *out_error = true;
                 return;
@@ -601,7 +629,8 @@ WebGLContext::DrawElements_check(const char* funcName, GLenum mode, GLsizei vert
         if (mPrimRestartTypeBytes != bytesPerElem) {
             mPrimRestartTypeBytes = bytesPerElem;
 
-            const uint32_t ones = UINT32_MAX >> (4 - mPrimRestartTypeBytes);
+            const uint32_t ones = UINT32_MAX >> (32 - 8*mPrimRestartTypeBytes);
+            gl->fEnable(LOCAL_GL_PRIMITIVE_RESTART);
             gl->fPrimitiveRestartIndex(ones);
         }
     }
@@ -818,10 +847,10 @@ WebGLContext::ValidateBufferFetching(const char* info)
     for (const auto& vd : mBoundVertexArray->mAttribs) {
         // If the attrib array isn't enabled, there's nothing to check;
         // it's a static value.
-        if (!vd.enabled)
+        if (!vd.mEnabled)
             continue;
 
-        if (vd.buf == nullptr) {
+        if (!vd.mBuf) {
             ErrorInvalidOperation("%s: no VBO bound to enabled vertex attrib index %du!",
                                   info, i);
             return false;
@@ -843,52 +872,39 @@ WebGLContext::ValidateBufferFetching(const char* info)
         }
 
         const auto& vd = mBoundVertexArray->mAttribs[attribLoc];
-        if (!vd.enabled)
+        if (!vd.mEnabled)
             continue;
 
-        // the base offset
-        CheckedUint32 checked_byteLength = CheckedUint32(vd.buf->ByteLength()) - vd.byteOffset;
-        CheckedUint32 checked_sizeOfLastElement = CheckedUint32(vd.componentSize()) * vd.size;
-
-        if (!checked_byteLength.isValid() ||
-            !checked_sizeOfLastElement.isValid())
-        {
-            ErrorInvalidOperation("%s: Integer overflow occured while checking vertex"
-                                  " attrib %u.",
-                                  info, attribLoc);
-            return false;
-        }
-
-        if (checked_byteLength.value() < checked_sizeOfLastElement.value()) {
+        const auto& bufByteLen = vd.mBuf->ByteLength();
+        if (vd.ByteOffset() > bufByteLen) {
             maxVertices = 0;
             maxInstances = 0;
             break;
         }
 
-        CheckedUint32 checked_maxAllowedCount = ((checked_byteLength - checked_sizeOfLastElement) / vd.actualStride()) + 1;
-
-        if (!checked_maxAllowedCount.isValid()) {
-            ErrorInvalidOperation("%s: Integer overflow occured while checking vertex"
-                                  " attrib %u.",
-                                  info, attribLoc);
-            return false;
+        size_t availBytes = bufByteLen - vd.ByteOffset();
+        if (vd.BytesPerVertex() > availBytes) {
+            maxVertices = 0;
+            maxInstances = 0;
+            break;
         }
+        availBytes -= vd.BytesPerVertex();
+        const size_t vertCapacity = 1 + availBytes / vd.ExplicitStride();
 
-        if (vd.divisor == 0) {
-            maxVertices = std::min(maxVertices, checked_maxAllowedCount.value());
+        if (vd.mDivisor == 0) {
+            if (vertCapacity < maxVertices) {
+                maxVertices = vertCapacity;
+            }
             hasPerVertex = true;
         } else {
-            CheckedUint32 checked_curMaxInstances = checked_maxAllowedCount * vd.divisor;
-
-            uint32_t curMaxInstances = UINT32_MAX;
-            // If this isn't valid, it's because we overflowed our
-            // uint32 above. Just leave this as UINT32_MAX, since
-            // sizeof(uint32) becomes our limiting factor.
-            if (checked_curMaxInstances.isValid()) {
-                curMaxInstances = checked_curMaxInstances.value();
+            const auto curMaxInstances = CheckedInt<size_t>(vertCapacity) * vd.mDivisor;
+            // If this isn't valid, it's because we overflowed, which means we can support
+            // *too much*. Don't update maxInstances in this case.
+            if (curMaxInstances.isValid() &&
+                curMaxInstances.value() < maxInstances)
+            {
+                maxInstances = curMaxInstances.value();
             }
-
-            maxInstances = std::min(maxInstances, curMaxInstances);
         }
     }
 
@@ -1025,23 +1041,10 @@ WebGLContext::UndoFakeVertexAttrib0()
     if (MOZ_LIKELY(whatDoesAttrib0Need == WebGLVertexAttrib0Status::Default))
         return;
 
-    if (mBoundVertexArray->HasAttrib(0) && mBoundVertexArray->mAttribs[0].buf) {
+    if (mBoundVertexArray->HasAttrib(0) && mBoundVertexArray->mAttribs[0].mBuf) {
         const WebGLVertexAttribData& attrib0 = mBoundVertexArray->mAttribs[0];
-        gl->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, attrib0.buf->mGLName);
-        if (attrib0.integer) {
-            gl->fVertexAttribIPointer(0,
-                                      attrib0.size,
-                                      attrib0.type,
-                                      attrib0.stride,
-                                      reinterpret_cast<const GLvoid*>(attrib0.byteOffset));
-        } else {
-            gl->fVertexAttribPointer(0,
-                                     attrib0.size,
-                                     attrib0.type,
-                                     attrib0.normalized,
-                                     attrib0.stride,
-                                     reinterpret_cast<const GLvoid*>(attrib0.byteOffset));
-        }
+        gl->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, attrib0.mBuf->mGLName);
+        attrib0.DoVertexAttribPointer(gl, 0);
     } else {
         gl->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, 0);
     }

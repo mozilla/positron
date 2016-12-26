@@ -29,7 +29,6 @@
 
 #ifdef MOZ_WIDGET_GONK
 #include "nsJSUtils.h"
-#include "SpeakerManagerService.h"
 #endif
 
 #include "mozilla/Preferences.h"
@@ -247,9 +246,6 @@ AudioChannelService::Shutdown()
     gAudioChannelService->mWindows.Clear();
     gAudioChannelService->mPlayingChildren.Clear();
     gAudioChannelService->mTabParents.Clear();
-#ifdef MOZ_WIDGET_GONK
-    gAudioChannelService->mSpeakerManager.Clear();
-#endif
 
     gAudioChannelService = nullptr;
   }
@@ -338,13 +334,6 @@ AudioChannelService::UnregisterAudioChannelAgent(AudioChannelAgent* aAgent)
   // released in their callback.
   RefPtr<AudioChannelAgent> kungFuDeathGrip(aAgent);
   winData->RemoveAgent(aAgent);
-
-#ifdef MOZ_WIDGET_GONK
-  bool active = AnyAudioChannelIsActive();
-  for (uint32_t i = 0; i < mSpeakerManager.Length(); i++) {
-    mSpeakerManager[i]->SetAudioChannelActive(active);
-  }
-#endif
 
   MaybeSendStatusUpdate();
 }
@@ -571,12 +560,6 @@ AudioChannelService::Observe(nsISupports* aSubject, const char* aTopic,
       }
     }
 
-#ifdef MOZ_WIDGET_GONK
-    bool active = AnyAudioChannelIsActive();
-    for (uint32_t i = 0; i < mSpeakerManager.Length(); i++) {
-      mSpeakerManager[i]->SetAudioChannelActive(active);
-    }
-#endif
   } else if (!strcmp(aTopic, "ipc:content-shutdown")) {
     nsCOMPtr<nsIPropertyBag2> props = do_QueryInterface(aSubject);
     if (!props) {
@@ -630,7 +613,7 @@ AudioChannelService::RefreshAgentsVolumeAndPropagate(AudioChannel aAudioChannel,
 
 void
 AudioChannelService::RefreshAgents(nsPIDOMWindowOuter* aWindow,
-                                   mozilla::function<void(AudioChannelAgent*)> aFunc)
+                                   std::function<void(AudioChannelAgent*)> aFunc)
 {
   MOZ_ASSERT(aWindow);
   MOZ_ASSERT(aWindow->IsOuterWindow());
@@ -1071,6 +1054,11 @@ AudioChannelService::AudioChannelWindow::RequestAudioFocus(AudioChannelAgent* aA
 {
   MOZ_ASSERT(aAgent);
 
+  // Don't need to check audio focus for window-less agent.
+  if (!aAgent->Window()) {
+    return;
+  }
+
   // We already have the audio focus. No operation is needed.
   if (mOwningAudioFocus) {
     return;
@@ -1244,11 +1232,12 @@ AudioChannelService::AudioChannelWindow::AppendAgent(AudioChannelAgent* aAgent,
   RequestAudioFocus(aAgent);
   AppendAgentAndIncreaseAgentsNum(aAgent);
   AudioCapturedChanged(aAgent, AudioCaptureState::eCapturing);
-  if (aAudible) {
+  if (aAudible == AudibleState::eAudible) {
     AudioAudibleChanged(aAgent,
                         AudibleState::eAudible,
                         AudibleChangedReasons::eDataAudibleChanged);
-  } else if (IsEnableAudioCompetingForAllAgents() && !aAudible) {
+  } else if (IsEnableAudioCompetingForAllAgents() &&
+             aAudible != AudibleState::eAudible) {
     NotifyAudioCompetingChanged(aAgent, true);
   }
 }
@@ -1321,13 +1310,16 @@ AudioChannelService::AudioChannelWindow::AudioAudibleChanged(AudioChannelAgent* 
 {
   MOZ_ASSERT(aAgent);
 
-  if (aAudible) {
+  if (aAudible == AudibleState::eAudible) {
     AppendAudibleAgentIfNotContained(aAgent, aReason);
   } else {
     RemoveAudibleAgentIfContained(aAgent, aReason);
   }
 
-  NotifyAudioCompetingChanged(aAgent, aAudible);
+  NotifyAudioCompetingChanged(aAgent, aAudible == AudibleState::eAudible);
+  if (aAudible != AudibleState::eNotAudible) {
+    MaybeNotifyMediaBlocked(aAgent);
+  }
 }
 
 void
@@ -1384,7 +1376,9 @@ AudioChannelService::AudioChannelWindow::NotifyAudioAudibleChanged(nsPIDOMWindow
                                                                    AudibleChangedReasons aReason)
 {
   RefPtr<AudioPlaybackRunnable> runnable =
-    new AudioPlaybackRunnable(aWindow, aAudible, aReason);
+    new AudioPlaybackRunnable(aWindow,
+                              aAudible == AudibleState::eAudible,
+                              aReason);
   DebugOnly<nsresult> rv = NS_DispatchToCurrentThread(runnable);
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "NS_DispatchToCurrentThread failed");
 }
@@ -1398,4 +1392,31 @@ AudioChannelService::AudioChannelWindow::NotifyChannelActive(uint64_t aWindowID,
     new NotifyChannelActiveRunnable(aWindowID, aChannel, aActive);
   DebugOnly<nsresult> rv = NS_DispatchToCurrentThread(runnable);
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "NS_DispatchToCurrentThread failed");
+}
+
+void
+AudioChannelService::AudioChannelWindow::MaybeNotifyMediaBlocked(AudioChannelAgent* aAgent)
+{
+  nsCOMPtr<nsPIDOMWindowOuter> window = aAgent->Window();
+  if (!window) {
+    return;
+  }
+
+  MOZ_ASSERT(window->IsOuterWindow());
+  if (window->GetMediaSuspend() != nsISuspendedTypes::SUSPENDED_BLOCK) {
+    return;
+  }
+
+  NS_DispatchToCurrentThread(NS_NewRunnableFunction([window] () -> void {
+      nsCOMPtr<nsIObserverService> observerService =
+        services::GetObserverService();
+      if (NS_WARN_IF(!observerService)) {
+        return;
+      }
+
+      observerService->NotifyObservers(ToSupports(window),
+                                       "audio-playback",
+                                       u"block");
+    })
+  );
 }

@@ -45,7 +45,7 @@ class BaselineInspector
 {
   private:
     JSScript* script;
-    ICEntry* prevLookedUpEntry;
+    BaselineICEntry* prevLookedUpEntry;
 
   public:
     explicit BaselineInspector(JSScript* script)
@@ -69,10 +69,11 @@ class BaselineInspector
     }
 #endif
 
-    ICEntry& icEntryFromPC(jsbytecode* pc) {
+    BaselineICEntry& icEntryFromPC(jsbytecode* pc) {
         MOZ_ASSERT(hasBaselineScript());
         MOZ_ASSERT(isValidPC(pc));
-        ICEntry& ent = baselineScript()->icEntryFromPCOffset(script->pcToOffset(pc), prevLookedUpEntry);
+        BaselineICEntry& ent =
+            baselineScript()->icEntryFromPCOffset(script->pcToOffset(pc), prevLookedUpEntry);
         MOZ_ASSERT(ent.isForOp());
         prevLookedUpEntry = &ent;
         return ent;
@@ -80,7 +81,7 @@ class BaselineInspector
 
     template <typename ICInspectorType>
     ICInspectorType makeICInspector(jsbytecode* pc, ICStub::Kind expectedFallbackKind) {
-        ICEntry* ent = nullptr;
+        BaselineICEntry* ent = nullptr;
         if (hasBaselineScript()) {
             ent = &icEntryFromPC(pc);
             MOZ_ASSERT(ent->fallbackStub()->kind() == expectedFallbackKind);
@@ -128,10 +129,16 @@ class BaselineInspector
     LexicalEnvironmentObject* templateNamedLambdaObject();
     CallObject* templateCallObject();
 
-    MOZ_MUST_USE bool commonGetPropFunction(jsbytecode* pc, JSObject** holder, Shape** holderShape,
+    // If |innerized| is true, we're doing a GETPROP on a WindowProxy and
+    // IonBuilder unwrapped/innerized it to do the lookup on the Window (the
+    // global object) instead. In this case we should only look for Baseline
+    // stubs that performed the same optimization.
+    MOZ_MUST_USE bool commonGetPropFunction(jsbytecode* pc, bool innerized,
+                                            JSObject** holder, Shape** holderShape,
                                             JSFunction** commonGetter, Shape** globalShape,
                                             bool* isOwnProperty, ReceiverVector& receivers,
                                             ObjectGroupVector& convertUnboxedGroups);
+
     MOZ_MUST_USE bool commonSetPropFunction(jsbytecode* pc, JSObject** holder, Shape** holderShape,
                                             JSFunction** commonSetter, bool* isOwnProperty,
                                             ReceiverVector& receivers,

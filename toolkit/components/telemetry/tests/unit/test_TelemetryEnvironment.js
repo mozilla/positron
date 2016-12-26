@@ -11,6 +11,10 @@ Cu.import("resource://testing-common/httpd.js");
 Cu.import("resource://testing-common/MockRegistrar.jsm", this);
 Cu.import("resource://gre/modules/FileUtils.jsm");
 
+// AttributionCode is only needed for Firefox
+XPCOMUtils.defineLazyModuleGetter(this, "AttributionCode",
+                                  "resource:///modules/AttributionCode.jsm");
+
 // Lazy load |LightweightThemeManager|, we won't be using it on Gonk.
 XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
                                   "resource://gre/modules/LightweightThemeManager.jsm");
@@ -24,9 +28,6 @@ var gHttpServer = null;
 var gHttpRoot = null;
 // The URL of the data directory, on the webserver.
 var gDataRoot = null;
-
-var gNow = new Date(2010, 1, 1, 12, 0, 0);
-fakeNow(gNow);
 
 const PLATFORM_VERSION = "1.9.2";
 const APP_VERSION = "1";
@@ -70,6 +71,9 @@ const PLUGIN_UPDATED_TOPIC     = "plugins-list-updated";
 
 // system add-ons are enabled at startup, so record date when the test starts
 const SYSTEM_ADDON_INSTALL_DATE = Date.now();
+
+// Valid attribution code to write so that settings.attribution can be tested.
+const ATTRIBUTION_CODE = "source%3Dgoogle.com";
 
 /**
  * Used to mock plugin tags in our fake plugin host.
@@ -123,6 +127,38 @@ var PluginHost = {
 
 function registerFakePluginHost() {
   MockRegistrar.register("@mozilla.org/plugin/host;1", PluginHost);
+}
+
+var SysInfo = {
+  overrides: {},
+
+  getProperty(name) {
+    // Assert.ok(false, "Mock SysInfo: " + name + ", " + JSON.stringify(this.overrides));
+    if (name in this.overrides) {
+      return this.overrides[name];
+    }
+    try {
+      return this._genuine.getProperty(name);
+    } catch (ex) {
+      throw ex;
+    }
+  },
+
+  get(name) {
+    return this._genuine.get(name);
+  },
+
+  QueryInterface(iid) {
+    if (iid.equals(Ci.nsIPropertyBag2)
+     || iid.equals(Ci.nsISupports))
+      return this;
+
+    throw Cr.NS_ERROR_NO_INTERFACE;
+  }
+};
+
+function registerFakeSysInfo() {
+  MockRegistrar.register("@mozilla.org/system-info;1", SysInfo);
 }
 
 function MockAddonWrapper(aAddon) {
@@ -207,7 +243,7 @@ function createMockAddonProvider(aName) {
       AddonManagerPrivate.callAddonListeners("onInstalled", new MockAddonWrapper(aAddon));
     },
 
-    getAddonsByTypes: function (aTypes, aCallback) {
+    getAddonsByTypes: function(aTypes, aCallback) {
       aCallback(this._addons.map(a => new MockAddonWrapper(a)));
     },
 
@@ -265,6 +301,28 @@ function spoofPartnerInfo() {
   // Spoof the preferences.
   for (let pref in prefsToSpoof) {
     Preferences.set(pref, prefsToSpoof[pref]);
+  }
+}
+
+function getAttributionFile() {
+  return FileUtils.getFile("LocalAppData", ["mozilla", AppConstants.MOZ_APP_NAME, "postSigningData"]);
+}
+
+function spoofAttributionData() {
+  if (gIsWindows) {
+    AttributionCode._clearCache();
+    let stream = Cc["@mozilla.org/network/file-output-stream;1"].
+                 createInstance(Ci.nsIFileOutputStream);
+    stream.init(getAttributionFile(), -1, -1, 0);
+    stream.write(ATTRIBUTION_CODE, ATTRIBUTION_CODE.length);
+    stream.close();
+  }
+}
+
+function cleanupAttributionData() {
+  if (gIsWindows) {
+    getAttributionFile().remove(false);
+    AttributionCode._clearCache();
   }
 }
 
@@ -381,6 +439,11 @@ function checkSettingsSection(data) {
   if ("defaultSearchEngine" in data.settings) {
     checkString(data.settings.defaultSearchEngine);
     Assert.equal(typeof data.settings.defaultSearchEngineData, "object");
+  }
+
+  if ("attribution" in data.settings) {
+    Assert.equal(typeof data.settings.attribution, "object");
+    Assert.equal(data.settings.attribution.source, "google.com");
   }
 }
 
@@ -536,12 +599,12 @@ function checkSystemSection(data) {
   Assert.ok("DWriteEnabled" in gfxData);
   // DWriteVersion is disabled due to main thread jank and will be enabled
   // again as part of bug 1154500.
-  //Assert.ok("DWriteVersion" in gfxData);
+  // Assert.ok("DWriteVersion" in gfxData);
   if (gIsWindows) {
     Assert.equal(typeof gfxData.D2DEnabled, "boolean");
     Assert.equal(typeof gfxData.DWriteEnabled, "boolean");
     // As above, will be enabled again as part of bug 1154500.
-    //Assert.ok(checkString(gfxData.DWriteVersion));
+    // Assert.ok(checkString(gfxData.DWriteVersion));
   }
 
   Assert.ok("adapters" in gfxData);
@@ -569,6 +632,9 @@ function checkSystemSection(data) {
   Assert.equal(typeof gfxData.features, "object");
   Assert.equal(typeof gfxData.features.compositor, "string");
 
+  Assert.equal(typeof gfxData.features.gpuProcess, "object");
+  Assert.equal(typeof gfxData.features.gpuProcess.status, "string");
+
   try {
     // If we've not got nsIGfxInfoDebug, then this will throw and stop us doing
     // this test.
@@ -581,6 +647,7 @@ function checkSystemSection(data) {
 
     let features = gfxInfo.getFeatures();
     Assert.equal(features.compositor, gfxData.features.compositor);
+    Assert.equal(features.gpuProcess.status, gfxData.features.gpuProcess.status);
     Assert.equal(features.opengl, gfxData.features.opengl);
     Assert.equal(features.webgl, gfxData.features.webgl);
   }
@@ -732,10 +799,10 @@ function checkEnvironmentData(data, isInitial = false, expectBrokenAddons = fals
   checkAddonsSection(data, expectBrokenAddons);
 }
 
-function run_test() {
+add_task(function* setup() {
   // Load a custom manifest to provide search engine loading from JAR files.
   do_load_manifest("chrome.manifest");
-  do_test_pending();
+  registerFakeSysInfo();
   spoofGfxAdapter();
   do_get_profile();
 
@@ -767,16 +834,13 @@ function run_test() {
   // Spoof the the hotfixVersion
   Preferences.set("extensions.hotfix.lastVersion", APP_HOTFIX_VERSION);
 
-  run_next_test();
-}
+  // Create the attribution data file, so that settings.attribution will exist.
+  // The attribution functionality only exists in Firefox.
+  if (AppConstants.MOZ_BUILD_APP == "browser") {
+    spoofAttributionData();
+    do_register_cleanup(cleanupAttributionData);
+  }
 
-function isRejected(promise) {
-  return new Promise((resolve, reject) => {
-    promise.then(() => resolve(false), () => resolve(true));
-  });
-}
-
-add_task(function* asyncSetup() {
   yield spoofProfileReset();
   TelemetryEnvironment.delayedInit();
 });
@@ -801,8 +865,6 @@ add_task(function* test_prefWatchPolicies() {
 
   const expectedValue = "some-test-value";
   const unexpectedValue = "unexpected-test-value";
-  gNow = futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE);
-  fakeNow(gNow);
 
   const PREFS_TO_WATCH = new Map([
     [PREF_TEST_1, {what: TelemetryEnvironment.RECORD_PREF_VALUE}],
@@ -860,9 +922,6 @@ add_task(function* test_prefWatch_prefReset() {
   // Set the preference to a non-default value.
   Preferences.set(PREF_TEST, false);
 
-  gNow = futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE);
-  fakeNow(gNow);
-
   // Set the Environment preferences to watch.
   TelemetryEnvironment.testWatchPreferences(PREFS_TO_WATCH);
   let deferred = PromiseUtils.defer();
@@ -886,12 +945,9 @@ add_task(function* test_addonsWatch_InterestingChange() {
   // We only expect a single notification for each install, uninstall, enable, disable.
   const EXPECTED_NOTIFICATIONS = 4;
 
-  let deferred = PromiseUtils.defer();
   let receivedNotifications = 0;
 
   let registerCheckpointPromise = (aExpected) => {
-    gNow = futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE);
-    fakeNow(gNow);
     return new Promise(resolve => TelemetryEnvironment.registerChangeListener(
       "testWatchAddons_Changes" + aExpected, (reason, data) => {
         Assert.equal(reason, "addons-changed");
@@ -941,9 +997,6 @@ add_task(function* test_pluginsWatch_Add() {
     return;
   }
 
-  gNow = futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE);
-  fakeNow(gNow);
-
   Assert.equal(TelemetryEnvironment.currentEnvironment.addons.activePlugins.length, 1);
 
   let newPlugin = new PluginTag(PLUGIN2_NAME, PLUGIN2_DESC, PLUGIN2_VERSION, true);
@@ -974,11 +1027,8 @@ add_task(function* test_pluginsWatch_Remove() {
     return;
   }
 
-  gNow = futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE);
-  fakeNow(gNow);
-
   // Find the test plugin.
-  let plugin = gInstalledPlugins.find(plugin => (plugin.name == PLUGIN2_NAME));
+  let plugin = gInstalledPlugins.find(p => (p.name == PLUGIN2_NAME));
   Assert.ok(plugin, "The test plugin must exist.");
 
   // Remove it from the PluginHost.
@@ -1004,9 +1054,6 @@ add_task(function* test_addonsWatch_NotInterestingChange() {
   // We are not interested to dictionary addons changes.
   const DICTIONARY_ADDON_INSTALL_URL = gDataRoot + "dictionary.xpi";
   const INTERESTING_ADDON_INSTALL_URL = gDataRoot + "restartless.xpi";
-
-  gNow = futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE);
-  fakeNow(gNow);
 
   let receivedNotification = false;
   let deferred = PromiseUtils.defer();
@@ -1140,8 +1187,6 @@ add_task(function* test_signedAddon() {
     signedState: mozinfo.addon_signing ? AddonManager.SIGNEDSTATE_SIGNED : AddonManager.SIGNEDSTATE_NOT_REQUIRED,
   };
 
-  // Set the clock in the future so our changes don't get throttled.
-  gNow = fakeNow(futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE));
   let deferred = PromiseUtils.defer();
   TelemetryEnvironment.registerChangeListener("test_signedAddon", deferred.resolve);
 
@@ -1166,9 +1211,6 @@ add_task(function* test_signedAddon() {
 add_task(function* test_addonsFieldsLimit() {
   const ADDON_INSTALL_URL = gDataRoot + "long-fields.xpi";
   const ADDON_ID = "tel-longfields-xpi@tests.mozilla.org";
-
-  // Set the clock in the future so our changes don't get throttled.
-  gNow = fakeNow(futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE));
 
   // Install the addon and wait for the TelemetryEnvironment to pick it up.
   let deferred = PromiseUtils.defer();
@@ -1224,12 +1266,9 @@ add_task(function* test_collectionWithbrokenAddonData() {
                                          AddonManager.SIGNEDSTATE_NOT_REQUIRED,
   };
 
-  let deferred = PromiseUtils.defer();
   let receivedNotifications = 0;
 
   let registerCheckpointPromise = (aExpected) => {
-    gNow = futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE);
-    fakeNow(gNow);
     return new Promise(resolve => TelemetryEnvironment.registerChangeListener(
       "testBrokenAddon_collection" + aExpected, (reason, data) => {
         Assert.equal(reason, "addons-changed");
@@ -1251,8 +1290,6 @@ add_task(function* test_collectionWithbrokenAddonData() {
   yield checkpointPromise;
   assertCheckpoint(1);
 
-  // Set the clock in the future so our changes don't get throttled.
-  gNow = fakeNow(futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE));
   // Now install an addon which returns the correct information.
   checkpointPromise = registerCheckpointPromise(2);
   yield AddonManagerTesting.installXPIFromURL(ADDON_INSTALL_URL);
@@ -1279,46 +1316,6 @@ add_task(function* test_collectionWithbrokenAddonData() {
 
   // Uninstall the valid addon.
   yield AddonManagerTesting.uninstallAddonByID(ADDON_ID);
-});
-
-add_task(function* test_changeThrottling() {
-  const PREF_TEST = "toolkit.telemetry.test.pref1";
-  const PREFS_TO_WATCH = new Map([
-    [PREF_TEST, {what: TelemetryEnvironment.RECORD_PREF_STATE}],
-  ]);
-  Preferences.reset(PREF_TEST);
-
-  gNow = futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE);
-  fakeNow(gNow);
-
-  // Set the Environment preferences to watch.
-  TelemetryEnvironment.testWatchPreferences(PREFS_TO_WATCH);
-  let deferred = PromiseUtils.defer();
-  let changeCount = 0;
-  TelemetryEnvironment.registerChangeListener("testWatchPrefs_throttling", () => {
-    ++changeCount;
-    deferred.resolve();
-  });
-
-  // The first pref change should trigger a notification.
-  Preferences.set(PREF_TEST, 1);
-  yield deferred.promise;
-  Assert.equal(changeCount, 1);
-
-  // We should only get a change notification for second of the following changes.
-  deferred = PromiseUtils.defer();
-  gNow = futureDate(gNow, MILLISECONDS_PER_MINUTE);
-  fakeNow(gNow);
-  Preferences.set(PREF_TEST, 2);
-  gNow = futureDate(gNow, 5 * MILLISECONDS_PER_MINUTE);
-  fakeNow(gNow);
-  Preferences.set(PREF_TEST, 3);
-  yield deferred.promise;
-
-  Assert.equal(changeCount, 2);
-
-  // Unregister the listener.
-  TelemetryEnvironment.unregisterChangeListener("testWatchPrefs_throttling");
 });
 
 add_task(function* test_defaultSearchEngine() {
@@ -1373,8 +1370,6 @@ add_task(function* test_defaultSearchEngine() {
   const SEARCH_ENGINE_URL = "http://www.example.org/?search={searchTerms}";
   Services.search.addEngineWithDetails(SEARCH_ENGINE_ID, "", null, "", "get", SEARCH_ENGINE_URL);
 
-  // Set the clock in the future so our changes don't get throttled.
-  gNow = fakeNow(futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE));
   // Register a new change listener and then wait for the search engine change to be notified.
   let deferred = PromiseUtils.defer();
   TelemetryEnvironment.registerChangeListener("testWatch_SearchDefault", deferred.resolve);
@@ -1397,21 +1392,20 @@ add_task(function* test_defaultSearchEngine() {
 
   // Cleanly install an engine from an xml file, and check if origin is
   // recorded as "verified".
-  gNow = fakeNow(futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE));
   let promise = new Promise(resolve => {
     TelemetryEnvironment.registerChangeListener("testWatch_SearchDefault", resolve);
   });
   let engine = yield new Promise((resolve, reject) => {
-    Services.obs.addObserver(function obs(subject, topic, data) {
+    Services.obs.addObserver(function obs(obsSubject, obsTopic, obsData) {
       try {
-        let engine = subject.QueryInterface(Ci.nsISearchEngine);
-        do_print("Observed " + data + " for " + engine.name);
-        if (data != "engine-added" || engine.name != "engine-telemetry") {
+        let searchEngine = obsSubject.QueryInterface(Ci.nsISearchEngine);
+        do_print("Observed " + obsData + " for " + searchEngine.name);
+        if (obsData != "engine-added" || searchEngine.name != "engine-telemetry") {
           return;
         }
 
         Services.obs.removeObserver(obs, "browser-search-engine-modified");
-        resolve(engine);
+        resolve(searchEngine);
       } catch (ex) {
         reject(ex);
       }
@@ -1428,7 +1422,6 @@ add_task(function* test_defaultSearchEngine() {
                    {"name":"engine-telemetry", "loadPath":"[other]/engine.xml", "origin":"verified"});
 
   // Now break this engine's load path hash.
-  gNow = fakeNow(futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE));
   promise = new Promise(resolve => {
     TelemetryEnvironment.registerChangeListener("testWatch_SearchDefault", resolve);
   });
@@ -1447,8 +1440,6 @@ add_task(function* test_defaultSearchEngine() {
   ]);
   Preferences.reset(PREF_TEST);
 
-  // Set the clock in the future so our changes don't get throttled.
-  gNow = fakeNow(futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE));
   // Watch the test preference.
   TelemetryEnvironment.testWatchPreferences(PREFS_TO_WATCH);
   deferred = PromiseUtils.defer();
@@ -1473,6 +1464,47 @@ add_task(function* test_defaultSearchEngine() {
   Assert.equal(data.settings.searchCohort, "testcohort");
 });
 
+add_task(function* test_osstrings() {
+  // First test that numbers in sysinfo properties are converted to string fields
+  // in system.os.
+  SysInfo.overrides = {
+    version: 1,
+    name: 2,
+    kernel_version: 3,
+  };
+
+  yield TelemetryEnvironment.testCleanRestart().onInitialized();
+  let data = TelemetryEnvironment.currentEnvironment;
+  checkEnvironmentData(data);
+
+  Assert.equal(data.system.os.version, "1");
+  Assert.equal(data.system.os.name, "2");
+  if (AppConstants.platform == "android") {
+    Assert.equal(data.system.os.kernelVersion, "3");
+  }
+
+  // Check that null values are also handled.
+  SysInfo.overrides = {
+    version: null,
+    name: null,
+    kernel_version: null,
+  };
+
+  yield TelemetryEnvironment.testCleanRestart().onInitialized();
+  data = TelemetryEnvironment.currentEnvironment;
+  checkEnvironmentData(data);
+
+  Assert.equal(data.system.os.version, null);
+  Assert.equal(data.system.os.name, null);
+  if (AppConstants.platform == "android") {
+    Assert.equal(data.system.os.kernelVersion, null);
+  }
+
+  // Clean up.
+  SysInfo.overrides = {};
+  yield TelemetryEnvironment.testCleanRestart().onInitialized();
+});
+
 add_task(function* test_environmentShutdown() {
   // Define and reset the test preference.
   const PREF_TEST = "toolkit.telemetry.test.pref1";
@@ -1480,8 +1512,6 @@ add_task(function* test_environmentShutdown() {
     [PREF_TEST, {what: TelemetryEnvironment.RECORD_PREF_STATE}],
   ]);
   Preferences.reset(PREF_TEST);
-  gNow = futureDate(gNow, 10 * MILLISECONDS_PER_MINUTE);
-  fakeNow(gNow);
 
   // Set up the preferences and listener, then the trigger shutdown
   TelemetryEnvironment.testWatchPreferences(PREFS_TO_WATCH);
@@ -1496,8 +1526,4 @@ add_task(function* test_environmentShutdown() {
 
   // Unregister the listener.
   TelemetryEnvironment.unregisterChangeListener("test_environmentShutdownChange");
-});
-
-add_task(function*() {
-  do_test_finished();
 });

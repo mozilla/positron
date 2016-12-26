@@ -537,7 +537,7 @@ WebGLFBAttachPoint::GetParameter(const char* funcName, WebGLContext* webgl, JSCo
 
         if (format->componentType == webgl::ComponentType::Special) {
             // Special format is used for DS mixed format(e.g. D24S8 and D32FS8).
-            MOZ_ASSERT(format->unsizedFormat == webgl::UnsizedFormat::DS);
+            MOZ_ASSERT(format->unsizedFormat == webgl::UnsizedFormat::DEPTH_STENCIL);
             MOZ_ASSERT(attachment == LOCAL_GL_DEPTH_ATTACHMENT ||
                        attachment == LOCAL_GL_STENCIL_ATTACHMENT);
 
@@ -604,7 +604,7 @@ WebGLFBAttachPoint::GetParameter(const char* funcName, WebGLContext* webgl, JSCo
 // WebGLFramebuffer
 
 WebGLFramebuffer::WebGLFramebuffer(WebGLContext* webgl, GLuint fbo)
-    : WebGLContextBoundObject(webgl)
+    : WebGLRefCountedObject(webgl)
     , mGLName(fbo)
 #ifdef ANDROID
     , mIsFB(false)
@@ -1049,6 +1049,7 @@ WebGLFramebuffer::ResolvedData::ResolvedData(const WebGLFramebuffer& parent)
 
     ////
 
+    colorDrawBuffers.reserve(parent.mColorDrawBuffers.size());
     texDrawBuffers.reserve(parent.mColorDrawBuffers.size() + 2); // +2 for depth+stencil.
 
     const auto fnCommon = [&](const WebGLFBAttachPoint& attach) {
@@ -1065,15 +1066,6 @@ WebGLFramebuffer::ResolvedData::ResolvedData(const WebGLFramebuffer& parent)
 
     ////
 
-    const auto fnColor = [&](const WebGLFBAttachPoint& attach,
-                             decltype(drawSet)* const out_destSet)
-    {
-        if (!fnCommon(attach))
-            return;
-
-        out_destSet->insert(WebGLFBAttachPoint::Ordered(attach));
-    };
-
     const auto fnDepthStencil = [&](const WebGLFBAttachPoint& attach) {
         if (!fnCommon(attach))
             return;
@@ -1082,18 +1074,27 @@ WebGLFramebuffer::ResolvedData::ResolvedData(const WebGLFramebuffer& parent)
         readSet.insert(WebGLFBAttachPoint::Ordered(attach));
     };
 
-    ////
-
     fnDepthStencil(parent.mDepthAttachment);
     fnDepthStencil(parent.mStencilAttachment);
     fnDepthStencil(parent.mDepthStencilAttachment);
 
-    for (const auto& attach : parent.mColorDrawBuffers) {
-        fnColor(*attach, &drawSet);
+    ////
+
+    for (const auto& pAttach : parent.mColorDrawBuffers) {
+        const auto& attach = *pAttach;
+        if (!fnCommon(attach))
+            return;
+
+        drawSet.insert(WebGLFBAttachPoint::Ordered(attach));
+        colorDrawBuffers.push_back(&attach);
     }
 
     if (parent.mColorReadBuffer) {
-        fnColor(*(parent.mColorReadBuffer), &readSet);
+        const auto& attach = *parent.mColorReadBuffer;
+        if (!fnCommon(attach))
+            return;
+
+        readSet.insert(WebGLFBAttachPoint::Ordered(attach));
     }
 }
 
@@ -1288,7 +1289,7 @@ WebGLFramebuffer::FramebufferRenderbuffer(const char* funcName, GLenum attachEnu
 
     // `attachment`
     const auto maybeAttach = GetAttachPoint(attachEnum);
-    if (!maybeAttach) {
+    if (!maybeAttach || !maybeAttach.value()) {
         mContext->ErrorInvalidEnum("%s: Bad `attachment`: 0x%x.", funcName, attachEnum);
         return;
     }
@@ -1301,7 +1302,7 @@ WebGLFramebuffer::FramebufferRenderbuffer(const char* funcName, GLenum attachEnu
     }
 
     // `rb`
-    if (!mContext->ValidateObjectAllowNull("framebufferRenderbuffer: rb", rb))
+    if (rb && !mContext->ValidateObject("framebufferRenderbuffer: rb", *rb))
         return;
 
     // End of validation.
@@ -1326,7 +1327,7 @@ WebGLFramebuffer::FramebufferTexture2D(const char* funcName, GLenum attachEnum,
 
     // `attachment`
     const auto maybeAttach = GetAttachPoint(attachEnum);
-    if (!maybeAttach) {
+    if (!maybeAttach || !maybeAttach.value()) {
         mContext->ErrorInvalidEnum("%s: Bad `attachment`: 0x%x.", funcName, attachEnum);
         return;
     }
@@ -1343,10 +1344,10 @@ WebGLFramebuffer::FramebufferTexture2D(const char* funcName, GLenum attachEnum,
     }
 
     // `texture`
-    if (!mContext->ValidateObjectAllowNull("framebufferTexture2D: texture", tex))
-        return;
-
     if (tex) {
+        if (!mContext->ValidateObject("framebufferTexture2D: texture", *tex))
+            return;
+
         if (!tex->HasEverBeenBound()) {
             mContext->ErrorInvalidOperation("%s: `texture` has never been bound.",
                                             funcName);
@@ -1413,20 +1414,11 @@ WebGLFramebuffer::FramebufferTextureLayer(const char* funcName, GLenum attachEnu
 
     // `attachment`
     const auto maybeAttach = GetAttachPoint(attachEnum);
-    if (!maybeAttach) {
+    if (!maybeAttach || !maybeAttach.value()) {
         mContext->ErrorInvalidEnum("%s: Bad `attachment`: 0x%x.", funcName, attachEnum);
         return;
     }
     const auto& attach = maybeAttach.value();
-
-    // `texture`
-    if (!mContext->ValidateObjectAllowNull("framebufferTextureLayer: texture", tex))
-        return;
-
-    if (tex && !tex->HasEverBeenBound()) {
-        mContext->ErrorInvalidOperation("%s: `texture` has never been bound.", funcName);
-        return;
-    }
 
     // `level`, `layer`
     if (layer < 0)
@@ -1435,8 +1427,18 @@ WebGLFramebuffer::FramebufferTextureLayer(const char* funcName, GLenum attachEnu
     if (level < 0)
         return mContext->ErrorInvalidValue("%s: `level` must be >= 0.", funcName);
 
+    // `texture`
     TexImageTarget texImageTarget = LOCAL_GL_TEXTURE_3D;
     if (tex) {
+        if (!mContext->ValidateObject("framebufferTextureLayer: texture", *tex))
+            return;
+
+        if (!tex->HasEverBeenBound()) {
+            mContext->ErrorInvalidOperation("%s: `texture` has never been bound.",
+                                            funcName);
+            return;
+        }
+
         texImageTarget = tex->Target().get();
         switch (texImageTarget.get()) {
         case LOCAL_GL_TEXTURE_3D:
@@ -1609,10 +1611,23 @@ WebGLFramebuffer::BlitFramebuffer(WebGLContext* webgl,
     bool colorFormatsMatch = true;
     bool colorTypesMatch = true;
 
+    const auto fnNarrowComponentType = [&](const webgl::FormatInfo* format) {
+        switch (format->componentType) {
+        case webgl::ComponentType::NormInt:
+        case webgl::ComponentType::NormUInt:
+            return webgl::ComponentType::Float;
+
+        default:
+            return format->componentType;
+        }
+    };
+
     const auto fnCheckColorFormat = [&](const webgl::FormatInfo* dstFormat) {
+        MOZ_ASSERT(dstFormat->r || dstFormat->g || dstFormat->b || dstFormat->a);
         dstHasColor = true;
         colorFormatsMatch &= (dstFormat == srcColorFormat);
-        colorTypesMatch &= (dstFormat->componentType == srcColorFormat->componentType);
+        colorTypesMatch &= ( fnNarrowComponentType(dstFormat) ==
+                             fnNarrowComponentType(srcColorFormat) );
     };
 
     if (dstFB) {
@@ -1621,8 +1636,8 @@ WebGLFramebuffer::BlitFramebuffer(WebGLContext* webgl,
         dstDepthFormat = fnGetFormat(dstFB->mResolvedCompleteData->depthBuffer);
         dstStencilFormat = fnGetFormat(dstFB->mResolvedCompleteData->stencilBuffer);
 
-        for (const auto& drawBuffer : dstFB->mColorDrawBuffers) {
-            fnCheckColorFormat(drawBuffer->Format()->format);
+        for (const auto& cur : dstFB->mResolvedCompleteData->colorDrawBuffers) {
+            fnCheckColorFormat(cur->Format()->format);
         }
     } else {
         dstSampleBuffers = bool(gl->Screen()->Samples());

@@ -33,7 +33,7 @@ function testtag_tree(treeid, treerowinfoid, seltype, columnstype, testid)
   var tree = document.getElementById(treeid);
   var treerowinfo = document.getElementById(treerowinfoid);
   var rowInfo;
-  if (testid =="tree view")
+  if (testid == "tree view")
     rowInfo = getCustomTreeViewCellInfo();
   else
     rowInfo = convertDOMtoTreeRowInfo(treerowinfo, 0, { value: -1 });
@@ -114,7 +114,7 @@ function testtag_tree(treeid, treerowinfoid, seltype, columnstype, testid)
 
   // do the sorting tests last as it will cause the rows to rearrange
   // skip them for the custom tree view
-  if (testid !="tree view")
+  if (testid != "tree view")
     testtag_tree_TreeView_rows_sort(tree, testid, rowInfo);
 
   testtag_tree_wheel(tree);
@@ -625,7 +625,6 @@ function testtag_tree_UI_editing(tree, testid, rowInfo)
   // check editing UI
   var ecolumn = tree.columns[0];
   var rowIndex = 2;
-  var inputField = tree.inputField;
 
   // temporary make the tree editable to test mouse double click
   var wasEditable = tree.editable;
@@ -923,7 +922,6 @@ function testtag_tree_TreeView_rows(tree, testid, rowInfo, startRow)
 
   var failedMethods = { };
   var checkMethod, actual, expected;
-  var containerInfo = null;
   var toggleOpenStateOK = true;
 
   for (r = startRow; r < length; r++) {
@@ -1103,7 +1101,7 @@ function testtag_tree_column_reorder()
   var numColumns = tree.columns.count;
 
   var reference = [];
-  for (var i = 0; i < numColumns; i++) {
+  for (let i = 0; i < numColumns; i++) {
     reference.push("col_" + i);
   }
 
@@ -1281,17 +1279,17 @@ function arrayMove(aArray, aFrom, aTo, aAfter)
 function getSortedColumnArray(aTree)
 {
   var columns = aTree.columns;
-  var a = [];
-  for (var i = 0; i < columns.length; i++) {
-    a.push(columns.getColumnAt(i));
+  var array = [];
+  for (let i = 0; i < columns.length; i++) {
+    array.push(columns.getColumnAt(i));
   }
 
-  a.sort(function(a, b) {
+  array.sort(function(a, b) {
     var o1 = parseInt(a.element.getAttribute("ordinal"));
     var o2 = parseInt(b.element.getAttribute("ordinal"));
     return o1 - o2;
   });
-  return a;
+  return array;
 }
 
 function checkColumns(aTree, aReference, aMessage)
@@ -1318,7 +1316,7 @@ function mouseClickOnColumnHeader(aColumns, aColumnIndex, aButton, aClickCount)
   var columnWidth = columnHeaderRect.right - columnHeaderRect.left;
   // For multiple click we send separate click events, with increasing
   // clickCount.  This simulates the common behavior of multiple clicks.
-  for (var i = 1; i <= aClickCount; i++) {
+  for (let i = 1; i <= aClickCount; i++) {
     // Target the middle of the column header.
     synthesizeMouse(columnHeader, columnWidth / 2, 3,
                     { button: aButton,
@@ -1344,7 +1342,7 @@ function compareArrays(arr1, arr2)
   if (arr1.length != arr2.length)
     return false;
 
-  for (var i = 0; i < arr1.length; i++) {
+  for (let i = 0; i < arr1.length; i++) {
     if (arr1[i] != arr2[i])
       return false;
   }
@@ -1356,7 +1354,7 @@ function convertProperties(arr)
 {
   var results = [];
   var count = arr.Count();
-  for (var i = 0; i < count; i++)
+  for (let i = 0; i < count; i++)
     results.push(arr.GetElementAt(i).QueryInterface(Components.interfaces.nsIAtom).toString());
 
   results.sort();

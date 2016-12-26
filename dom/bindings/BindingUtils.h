@@ -42,6 +42,7 @@
 
 #include "nsWrapperCacheInlines.h"
 
+class nsGenericHTMLElement;
 class nsIJSID;
 
 namespace mozilla {
@@ -236,50 +237,10 @@ UnwrapObject(JSObject* obj, U& value)
                          PrototypeTraits<PrototypeID>::Depth);
 }
 
-inline bool
-IsNotDateOrRegExp(JSContext* cx, JS::Handle<JSObject*> obj,
-                  bool* notDateOrRegExp)
-{
-  MOZ_ASSERT(obj);
-
-  js::ESClass cls;
-  if (!js::GetBuiltinClass(cx, obj, &cls)) {
-    return false;
-  }
-
-  *notDateOrRegExp = cls != js::ESClass::Date && cls != js::ESClass::RegExp;
-  return true;
-}
-
 MOZ_ALWAYS_INLINE bool
-IsObjectValueConvertibleToDictionary(JSContext* cx,
-                                     JS::Handle<JS::Value> objVal,
-                                     bool* convertible)
+IsConvertibleToDictionary(JS::Handle<JS::Value> val)
 {
-  JS::Rooted<JSObject*> obj(cx, &objVal.toObject());
-  return IsNotDateOrRegExp(cx, obj, convertible);
-}
-
-MOZ_ALWAYS_INLINE bool
-IsConvertibleToDictionary(JSContext* cx, JS::Handle<JS::Value> val,
-                          bool* convertible)
-{
-  if (val.isNullOrUndefined()) {
-    *convertible = true;
-    return true;
-  }
-  if (!val.isObject()) {
-    *convertible = false;
-    return true;
-  }
-  return IsObjectValueConvertibleToDictionary(cx, val, convertible);
-}
-
-MOZ_ALWAYS_INLINE bool
-IsConvertibleToCallbackInterface(JSContext* cx, JS::Handle<JSObject*> obj,
-                                 bool* convertible)
-{
-  return IsNotDateOrRegExp(cx, obj, convertible);
+  return val.isNullOrUndefined() || val.isObject();
 }
 
 // The items in the protoAndIfaceCache are indexed by the prototypes::id::ID,
@@ -937,6 +898,7 @@ DoGetOrCreateDOMReflector(JSContext* cx, T* value,
                           JS::MutableHandle<JS::Value> rval)
 {
   MOZ_ASSERT(value);
+  MOZ_ASSERT_IF(givenProto, js::IsObjectInContextCompartment(givenProto, cx));
   // We can get rid of this when we remove support for hasXPConnectImpls.
   bool couldBeDOMBinding = CouldBeDOMBinding(value);
   JSObject* obj = value->GetWrapper();
@@ -1103,7 +1065,7 @@ WrapNewBindingNonWrapperCachedObject(JSContext* cx,
   // We do a runtime check on value, because otherwise we might in
   // fact end up wrapping a null and invoking methods on it later.
   if (!value) {
-    NS_RUNTIMEABORT("Don't try to wrap null objects");
+    MOZ_CRASH("Don't try to wrap null objects");
   }
   // We try to wrap in the compartment of the underlying object of "scope"
   JS::Rooted<JSObject*> obj(cx);
@@ -1228,15 +1190,12 @@ HandleNewBindingWrappingFailure(JSContext* cx, JS::Handle<JSObject*> scope,
 
 template<bool Fatal>
 inline bool
-EnumValueNotFound(JSContext* cx, JSString* str, const char* type,
-                  const char* sourceDescription)
-{
-  return false;
-}
+EnumValueNotFound(JSContext* cx, JS::HandleString str, const char* type,
+                  const char* sourceDescription);
 
 template<>
 inline bool
-EnumValueNotFound<false>(JSContext* cx, JSString* str, const char* type,
+EnumValueNotFound<false>(JSContext* cx, JS::HandleString str, const char* type,
                          const char* sourceDescription)
 {
   // TODO: Log a warning to the console.
@@ -1245,11 +1204,11 @@ EnumValueNotFound<false>(JSContext* cx, JSString* str, const char* type,
 
 template<>
 inline bool
-EnumValueNotFound<true>(JSContext* cx, JSString* str, const char* type,
+EnumValueNotFound<true>(JSContext* cx, JS::HandleString str, const char* type,
                         const char* sourceDescription)
 {
-  JSAutoByteString deflated(cx, str);
-  if (!deflated) {
+  JSAutoByteString deflated;
+  if (!deflated.encodeUtf8(cx, str)) {
     return false;
   }
   return ThrowErrorMessage(cx, MSG_INVALID_ENUM_VALUE, sourceDescription,
@@ -1284,46 +1243,40 @@ FindEnumStringIndexImpl(const CharT* chars, size_t length, const EnumEntry* valu
 }
 
 template<bool InvalidValueFatal>
-inline int
+inline bool
 FindEnumStringIndex(JSContext* cx, JS::Handle<JS::Value> v, const EnumEntry* values,
-                    const char* type, const char* sourceDescription, bool* ok)
+                    const char* type, const char* sourceDescription, int* index)
 {
   // JS_StringEqualsAscii is slow as molasses, so don't use it here.
-  JSString* str = JS::ToString(cx, v);
+  JS::RootedString str(cx, JS::ToString(cx, v));
   if (!str) {
-    *ok = false;
-    return 0;
+    return false;
   }
 
   {
-    int index;
     size_t length;
     JS::AutoCheckCannotGC nogc;
     if (js::StringHasLatin1Chars(str)) {
       const JS::Latin1Char* chars = JS_GetLatin1StringCharsAndLength(cx, nogc, str,
                                                                      &length);
       if (!chars) {
-        *ok = false;
-        return 0;
+        return false;
       }
-      index = FindEnumStringIndexImpl(chars, length, values);
+      *index = FindEnumStringIndexImpl(chars, length, values);
     } else {
       const char16_t* chars = JS_GetTwoByteStringCharsAndLength(cx, nogc, str,
                                                                 &length);
       if (!chars) {
-        *ok = false;
-        return 0;
+        return false;
       }
-      index = FindEnumStringIndexImpl(chars, length, values);
+      *index = FindEnumStringIndexImpl(chars, length, values);
     }
-    if (index >= 0) {
-      *ok = true;
-      return index;
+    if (*index >= 0) {
+      return true;
     }
   }
 
-  *ok = EnumValueNotFound<InvalidValueFatal>(cx, str, type, sourceDescription);
-  return -1;
+  return EnumValueNotFound<InvalidValueFatal>(cx, str, type, sourceDescription);
 }
 
 inline nsWrapperCache*
@@ -2318,6 +2271,22 @@ AddStringToIDVector(JSContext* cx, JS::AutoIdVector& vector, const char* name)
          AtomizeAndPinJSString(cx, *(vector[vector.length() - 1]).address(), name);
 }
 
+// We use one constructor JSNative to represent all DOM interface objects (so
+// we can easily detect when we need to wrap them in an Xray wrapper). We store
+// the real JSNative in the mNative member of a JSNativeHolder in the
+// CONSTRUCTOR_NATIVE_HOLDER_RESERVED_SLOT slot of the JSFunction object for a
+// specific interface object. We also store the NativeProperties in the
+// JSNativeHolder.
+// Note that some interface objects are not yet a JSFunction but a normal
+// JSObject with a DOMJSClass, those do not use these slots.
+
+enum {
+  CONSTRUCTOR_NATIVE_HOLDER_RESERVED_SLOT = 0
+};
+
+bool
+Constructor(JSContext* cx, unsigned argc, JS::Value* vp);
+
 // Implementation of the bits that XrayWrapper needs
 
 /**
@@ -2391,6 +2360,9 @@ XrayGetNativeProto(JSContext* cx, JS::Handle<JSObject*> obj,
       } else {
         protop.set(JS::GetRealmObjectPrototype(cx));
       }
+    } else if (JS_ObjectIsFunction(cx, obj)) {
+      MOZ_ASSERT(JS_IsNativeFunction(obj, Constructor));
+      protop.set(JS::GetRealmFunctionPrototype(cx));
     } else {
       const js::Class* clasp = js::GetObjectClass(obj);
       MOZ_ASSERT(IsDOMIfaceAndProtoClass(clasp));
@@ -2403,27 +2375,59 @@ XrayGetNativeProto(JSContext* cx, JS::Handle<JSObject*> obj,
   return JS_WrapObject(cx, protop);
 }
 
+/**
+ * Get the Xray expando class to use for the given DOM object.
+ */
+const JSClass*
+XrayGetExpandoClass(JSContext* cx, JS::Handle<JSObject*> obj);
+
+/**
+ * Delete a named property, if any.  Return value is false if exception thrown,
+ * true otherwise.  The caller should not do any more work after calling this
+ * function, because it has no way whether a deletion was performed and hence
+ * opresult already has state set on it.  If callers ever need to change that,
+ * add a "bool* found" argument and change the generated DeleteNamedProperty to
+ * use it instead of a local variable.
+ */
+bool
+XrayDeleteNamedProperty(JSContext* cx, JS::Handle<JSObject*> wrapper,
+                        JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
+                        JS::ObjectOpResult& opresult);
+
+/**
+ * Get the object which should be used to cache the return value of a property
+ * getter in the case of a [Cached] or [StoreInSlot] property.  `obj` is the
+ * `this` value for our property getter that we're working with.
+ *
+ * This function can return null on failure to allocate the object, throwing on
+ * the JSContext in the process.
+ *
+ * The isXray outparam will be set to true if obj is an Xray and false
+ * otherwise.
+ *
+ * Note that the Slow version should only be called from
+ * GetCachedSlotStorageObject.
+ */
+JSObject*
+GetCachedSlotStorageObjectSlow(JSContext* cx, JS::Handle<JSObject*> obj,
+                               bool* isXray);
+
+inline JSObject*
+GetCachedSlotStorageObject(JSContext* cx, JS::Handle<JSObject*> obj,
+                           bool* isXray) {
+  if (IsDOMObject(obj)) {
+    *isXray = false;
+    return obj;
+  }
+
+  return GetCachedSlotStorageObjectSlow(cx, obj, isXray);
+}
+
 extern NativePropertyHooks sEmptyNativePropertyHooks;
 
 extern const js::ClassOps sBoringInterfaceObjectClassClassOps;
 
 extern const js::ObjectOps sInterfaceObjectClassObjectOps;
-
-// We use one constructor JSNative to represent all DOM interface objects (so
-// we can easily detect when we need to wrap them in an Xray wrapper). We store
-// the real JSNative in the mNative member of a JSNativeHolder in the
-// CONSTRUCTOR_NATIVE_HOLDER_RESERVED_SLOT slot of the JSFunction object for a
-// specific interface object. We also store the NativeProperties in the
-// JSNativeHolder.
-// Note that some interface objects are not yet a JSFunction but a normal
-// JSObject with a DOMJSClass, those do not use these slots.
-
-enum {
-  CONSTRUCTOR_NATIVE_HOLDER_RESERVED_SLOT = 0
-};
-
-bool
-Constructor(JSContext* cx, unsigned argc, JS::Value* vp);
 
 inline bool
 UseDOMXray(JSObject* obj)
@@ -2441,7 +2445,7 @@ HasConstructor(JSObject* obj)
   return JS_IsNativeFunction(obj, Constructor) ||
          js::GetObjectClass(obj)->getConstruct();
 }
- #endif
+#endif
 
 // Helpers for creating a const version of a type.
 template<typename T>
@@ -3176,6 +3180,13 @@ bool GetSetlikeBackingObject(JSContext* aCx, JS::Handle<JSObject*> aObj,
 bool
 GetDesiredProto(JSContext* aCx, const JS::CallArgs& aCallArgs,
                 JS::MutableHandle<JSObject*> aDesiredProto);
+
+// This function is expected to be called from the constructor function for an
+// HTML element interface; the global/callargs need to be whatever was passed to
+// that constructor function.
+already_AddRefed<nsGenericHTMLElement>
+CreateHTMLElement(const GlobalObject& aGlobal, const JS::CallArgs& aCallArgs,
+                  ErrorResult& aRv);
 
 void
 SetDocumentAndPageUseCounter(JSContext* aCx, JSObject* aObject,

@@ -2,7 +2,7 @@
 PKT_SIGNUP_OVERLAY is the view itself and contains all of the methods to manipute the overlay and messaging.
 It does not contain any logic for saving or communication with the extension or server.
 */
-var PKT_SIGNUP_OVERLAY = function (options)
+var PKT_SIGNUP_OVERLAY = function(options)
 {
     var myself = this;
     this.inited = false;
@@ -49,7 +49,7 @@ var PKT_SIGNUP_OVERLAY = function (options)
         {
             return '';
         }
-        return String(s).replace(/[&<>"']/g, function (str) {
+        return String(s).replace(/[&<>"']/g, function(str) {
             return sanitizeMap[str];
         });
     };
@@ -63,8 +63,6 @@ var PKT_SIGNUP_OVERLAY = function (options)
 PKT_SIGNUP_OVERLAY.prototype = {
     create : function()
     {
-        var myself = this;
-
         var controlvariant = window.location.href.match(/controlvariant=([\w|\.]*)&?/);
         if (controlvariant && controlvariant.length > 1)
         {
@@ -144,10 +142,10 @@ PKT_SIGNUP_OVERLAY.prototype = {
 
 
 // Layer between Bookmarklet and Extensions
-var PKT_SIGNUP = function () {};
+var PKT_SIGNUP = function() {};
 
 PKT_SIGNUP.prototype = {
-    init: function () {
+    init: function() {
         if (this.inited) {
             return;
         }
@@ -185,12 +183,11 @@ $(function()
     // send an async message to get string data
     thePKT_SIGNUP.sendMessage("initL10N", {
             tos: [
-                'https://'+ pocketHost +'/tos?s=ffi&t=tos&tv=panel_tryit',
-                'https://'+ pocketHost +'/privacy?s=ffi&t=privacypolicy&tv=panel_tryit'
+                'https://' + pocketHost + '/tos?s=ffi&t=tos&tv=panel_tryit',
+                'https://' + pocketHost + '/privacy?s=ffi&t=privacypolicy&tv=panel_tryit'
             ]
         }, function(resp) {
         window.pocketStrings = resp.strings;
         window.thePKT_SIGNUP.create();
     });
 });
-

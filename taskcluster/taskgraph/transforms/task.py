@@ -86,31 +86,17 @@ task_description_schema = Schema({
     # if omitted, the build will not be indexed.
     Optional('index'): {
         # the name of the product this build produces
-        'product': Any('firefox', 'mobile', 'b2g'),
+        'product': Any('firefox', 'mobile'),
 
         # the names to use for this job in the TaskCluster index
-        'job-name': Any(
-            # Assuming the job is named "normally", this is the v2 job name,
-            # and the v1 and buildbot routes will be determined appropriately.
-            basestring,
-
-            # otherwise, give separate names for each of the legacy index
-            # routes; if a name is omitted, no corresponding route will be
-            # created.
-            {
-                # the name as it appears in buildbot routes
-                Optional('buildbot'): basestring,
-                Optional('gecko-v1'): basestring,
-                Required('gecko-v2'): basestring,
-            }
-        ),
+        'job-name': basestring,
 
         # The rank that the task will receive in the TaskCluster
         # index.  A newly completed task supercedes the currently
         # indexed task iff it has a higher rank.  If unspecified,
         # 'by-tier' behavior will be used.
         'rank': Any(
-            # Rank is equal the timestamp of the pushdate for tier-1
+            # Rank is equal the timestamp of the build_date for tier-1
             # tasks, and zero for non-tier-1.  This sorts tier-{2,3}
             # builds below tier-1 in the index.
             'by-tier',
@@ -119,10 +105,10 @@ task_description_schema = Schema({
             # sure a task is last in the index).
             int,
 
-            # Rank is equal to the timestamp of the pushdate.  This
+            # Rank is equal to the timestamp of the build_date.  This
             # option can be used to override the 'by-tier' behavior
             # for non-tier-1 tasks.
-            'pushdate',
+            'build_date',
         ),
     },
 
@@ -141,6 +127,9 @@ task_description_schema = Schema({
     #  {level} -- the scm level of this push
     'worker-type': basestring,
 
+    # Whether the job should use sccache compiler caching.
+    Required('needs-sccache', default=False): bool,
+
     # information specific to the worker implementation that will run this task
     'worker': Any({
         Required('implementation'): Any('docker-worker', 'docker-engine'),
@@ -152,12 +141,13 @@ task_description_schema = Schema({
         Required('docker-image'): Any(
             # a raw Docker image path (repo/image:tag)
             basestring,
-            # an in-tree generated docker image (from `testing/docker/<name>`)
+            # an in-tree generated docker image (from `taskcluster/docker/<name>`)
             {'in-tree': basestring}
         ),
 
         # worker features that should be enabled
         Required('relengapi-proxy', default=False): bool,
+        Required('chain-of-trust', default=False): bool,
         Required('taskcluster-proxy', default=False): bool,
         Required('allow-ptrace', default=False): bool,
         Required('loopback-video', default=False): bool,
@@ -197,11 +187,15 @@ task_description_schema = Schema({
 
         # the maximum time to run, in seconds
         'max-run-time': int,
+
+        # the exit status code that indicates the task should be retried
+        Optional('retry-exit-status'): int,
+
     }, {
         Required('implementation'): 'generic-worker',
 
         # command is a list of commands to run, sequentially
-        'command': [basestring],
+        'command': [taskref_or_string],
 
         # artifacts to extract from the task image after completion; note that artifacts
         # for the generic worker cannot have names
@@ -213,11 +207,23 @@ task_description_schema = Schema({
             'path': basestring,
         }],
 
+        # directories and/or files to be mounted
+        Optional('mounts'): [{
+            # a unique name for the cache volume
+            'cache-name': basestring,
+
+            # task image path for the cache
+            'path': basestring,
+        }],
+
         # environment variables
         Required('env', default={}): {basestring: taskref_or_string},
 
         # the maximum time to run, in seconds
         'max-run-time': int,
+
+        # os user groups for test task workers
+        Optional('os-groups', default=[]): [basestring],
     }, {
         Required('implementation'): 'buildbot-bridge',
 
@@ -234,6 +240,30 @@ task_description_schema = Schema({
             'product': basestring,
             Extra: basestring,  # additional properties are allowed
         },
+    }, {
+        'implementation': 'macosx-engine',
+
+        # A link for an executable to download
+        Optional('link'): basestring,
+
+        # the command to run
+        Required('command'): [taskref_or_string],
+
+        # environment variables
+        Optional('env'): {basestring: taskref_or_string},
+
+        # artifacts to extract from the task image after completion
+        Optional('artifacts'): [{
+            # type of artifact -- simple file, or recursive directory
+            Required('type'): Any('file', 'directory'),
+
+            # task image path from which to read artifact
+            Required('path'): basestring,
+
+            # name of the produced artifact (root of the names for
+            # type=directory)
+            Required('name'): basestring,
+        }],
     }),
 
     # The "when" section contains descriptions of the circumstances
@@ -256,14 +286,16 @@ GROUP_NAMES = {
     'tc-Fxfn-r-e10s': 'Firefox functional tests (remote) executed by TaskCluster with e10s',
     'tc-M': 'Mochitests executed by TaskCluster',
     'tc-M-e10s': 'Mochitests executed by TaskCluster with e10s',
+    'tc-M-V': 'Mochitests on Valgrind executed by TaskCluster',
     'tc-R': 'Reftests executed by TaskCluster',
     'tc-R-e10s': 'Reftests executed by TaskCluster with e10s',
+    'tc-T': 'Talos performance tests executed by TaskCluster',
+    'tc-T-e10s': 'Talos performance tests executed by TaskCluster with e10s',
     'tc-VP': 'VideoPuppeteer tests executed by TaskCluster',
     'tc-W': 'Web platform tests executed by TaskCluster',
     'tc-W-e10s': 'Web platform tests executed by TaskCluster with e10s',
     'tc-X': 'Xpcshell tests executed by TaskCluster',
     'tc-X-e10s': 'Xpcshell tests executed by TaskCluster with e10s',
-    'tc-Sim': 'Mulet simulator runs',
     'Aries': 'Aries Device Image',
     'Nexus 5-L': 'Nexus 5-L Device Image',
     'Cc': 'Toolchain builds',
@@ -271,20 +303,10 @@ GROUP_NAMES = {
 }
 UNKNOWN_GROUP_NAME = "Treeherder group {} has no name; add it to " + __file__
 
-BUILDBOT_ROUTE_TEMPLATES = [
-    "index.buildbot.branches.{project}.{job-name-buildbot}",
-    "index.buildbot.revisions.{head_rev}.{project}.{job-name-buildbot}",
-]
-
-V1_ROUTE_TEMPLATES = [
-    "index.gecko.v1.{project}.latest.linux.{job-name-gecko-v1}",
-    "index.gecko.v1.{project}.revision.linux.{head_rev}.{job-name-gecko-v1}",
-]
-
 V2_ROUTE_TEMPLATES = [
-    "index.gecko.v2.{project}.latest.{product}.{job-name-gecko-v2}",
-    "index.gecko.v2.{project}.pushdate.{pushdate_long}.{product}.{job-name-gecko-v2}",
-    "index.gecko.v2.{project}.revision.{head_rev}.{product}.{job-name-gecko-v2}",
+    "index.gecko.v2.{project}.latest.{product}.{job-name}",
+    "index.gecko.v2.{project}.pushdate.{build_date_long}.{product}.{job-name}",
+    "index.gecko.v2.{project}.revision.{head_rev}.{product}.{job-name}",
 ]
 
 # the roots of the treeherder routes, keyed by treeherder environment
@@ -315,7 +337,7 @@ def build_docker_worker_payload(config, task, task_def):
         docker_image_task = 'build-docker-image-' + image['in-tree']
         task.setdefault('dependencies', {})['docker-image'] = docker_image_task
         image = {
-            "path": "public/image.tar",
+            "path": "public/image.tar.zst",
             "taskId": {"task-reference": "<docker-image>"},
             "type": "task-image",
         }
@@ -331,6 +353,17 @@ def build_docker_worker_payload(config, task, task_def):
     if worker.get('allow-ptrace'):
         features['allowPtrace'] = True
         task_def['scopes'].append('docker-worker:feature:allowPtrace')
+
+    if worker.get('chain-of-trust'):
+        features['chainOfTrust'] = True
+
+    if task.get('needs-sccache'):
+        features['taskclusterProxy'] = True
+        task_def['scopes'].append(
+            'assume:project:taskcluster:level-{level}-sccache-buckets'.format(
+                level=config.params['level'])
+        )
+        worker['env']['USE_SCCACHE'] = '1'
 
     capabilities = {}
 
@@ -349,6 +382,9 @@ def build_docker_worker_payload(config, task, task_def):
 
     if 'max-run-time' in worker:
         payload['maxRunTime'] = worker['max-run-time']
+
+    if 'retry-exit-status' in worker:
+        payload['onExitStatus'] = {'retry': [worker['retry-exit-status']]}
 
     if 'artifacts' in worker:
         artifacts = {}
@@ -393,11 +429,57 @@ def build_generic_worker_payload(config, task, task_def):
             'expires': task_def['expires'],  # always expire with the task
         })
 
+    mounts = []
+
+    for mount in worker.get('mounts', []):
+        mounts.append({
+            'cacheName': mount['cache-name'],
+            'directory': mount['path']
+        })
+
     task_def['payload'] = {
         'command': worker['command'],
         'artifacts': artifacts,
-        'env': worker['env'],
+        'env': worker.get('env', {}),
+        'mounts': mounts,
         'maxRunTime': worker['max-run-time'],
+        'osGroups': worker.get('os-groups', []),
+    }
+
+    # needs-sccache is handled in mozharness_on_windows
+
+    if 'retry-exit-status' in worker:
+        raise Exception("retry-exit-status not supported in generic-worker")
+
+
+@payload_builder('macosx-engine')
+def build_macosx_engine_payload(config, task, task_def):
+    worker = task['worker']
+    artifacts = map(lambda artifact: {
+        'name': artifact['name'],
+        'path': artifact['path'],
+        'type': artifact['type'],
+        'expires': task_def['expires'],
+    }, worker['artifacts'])
+
+    task_def['payload'] = {
+        'link': worker['link'],
+        'command': worker['command'],
+        'env': worker['env'],
+        'artifacts': artifacts,
+    }
+
+    if task.get('needs-sccache'):
+        raise Exception('needs-sccache not supported in macosx-engine')
+
+
+@payload_builder('buildbot-bridge')
+def build_buildbot_bridge_payload(config, task, task_def):
+    worker = task['worker']
+    task_def['payload'] = {
+        'buildername': worker['buildername'],
+        'sourcestamp': worker['sourcestamp'],
+        'properties': worker['properties'],
     }
 
 
@@ -423,35 +505,17 @@ def add_index_routes(config, tasks):
             continue
 
         job_name = index['job-name']
-        # unpack the v2 name to v1 and buildbot names
-        if isinstance(job_name, basestring):
-            base_name, type_name = job_name.rsplit('-', 1)
-            job_name = {
-                'buildbot': base_name,
-                'gecko-v1': '{}.{}'.format(base_name, type_name),
-                'gecko-v2': '{}-{}'.format(base_name, type_name),
-            }
-
-        if job_name['gecko-v2'] not in JOB_NAME_WHITELIST:
-            raise Exception(JOB_NAME_WHITELIST_ERROR.format(job_name['gecko-v2']))
+        if job_name not in JOB_NAME_WHITELIST:
+            raise Exception(JOB_NAME_WHITELIST_ERROR.format(job_name))
 
         subs = config.params.copy()
-        for n in job_name:
-            subs['job-name-' + n] = job_name[n]
-        subs['pushdate_long'] = time.strftime(
-            "%Y.%m.%d.%Y%m%d%H%M%S",
-            time.gmtime(config.params['pushdate']))
+        subs['job-name'] = job_name
+        subs['build_date_long'] = time.strftime("%Y.%m.%d.%Y%m%d%H%M%S",
+                                                time.gmtime(config.params['build_date']))
         subs['product'] = index['product']
 
-        if 'buildbot' in job_name:
-            for tpl in BUILDBOT_ROUTE_TEMPLATES:
-                routes.append(tpl.format(**subs))
-        if 'gecko-v1' in job_name:
-            for tpl in V1_ROUTE_TEMPLATES:
-                routes.append(tpl.format(**subs))
-        if 'gecko-v2' in job_name:
-            for tpl in V2_ROUTE_TEMPLATES:
-                routes.append(tpl.format(**subs))
+        for tpl in V2_ROUTE_TEMPLATES:
+            routes.append(tpl.format(**subs))
 
         # The default behavior is to rank tasks according to their tier
         extra_index = task.setdefault('extra', {}).setdefault('index', {})
@@ -461,9 +525,9 @@ def add_index_routes(config, tasks):
             # rank is zero for non-tier-1 tasks and based on pushid for others;
             # this sorts tier-{2,3} builds below tier-1 in the index
             tier = task.get('treeherder', {}).get('tier', 3)
-            extra_index['rank'] = 0 if tier > 1 else int(config.params['pushdate'])
-        elif rank == 'pushdate':
-            extra_index['rank'] = int(config.params['pushdate'])
+            extra_index['rank'] = 0 if tier > 1 else int(config.params['build_date'])
+        elif rank == 'build_date':
+            extra_index['rank'] = int(config.params['build_date'])
         else:
             extra_index['rank'] = rank
 
@@ -511,7 +575,7 @@ def build_task(config, tasks):
             ])
 
         if 'expires-after' not in task:
-            task['expires-after'] = '14 days' if config.params['project'] == 'try' else '1 year'
+            task['expires-after'] = '28 days' if config.params['project'] == 'try' else '1 year'
 
         if 'deadline-after' not in task:
             task['deadline-after'] = '1 day'
@@ -572,8 +636,8 @@ def check_v2_routes():
     for mh, tg in [
             ('{index}', 'index'),
             ('{build_product}', '{product}'),
-            ('{build_name}-{build_type}', '{job-name-gecko-v2}'),
-            ('{year}.{month}.{day}.{pushdate}', '{pushdate_long}')]:
+            ('{build_name}-{build_type}', '{job-name}'),
+            ('{year}.{month}.{day}.{pushdate}', '{build_date_long}')]:
         routes = [r.replace(mh, tg) for r in routes]
 
     if sorted(routes) != sorted(V2_ROUTE_TEMPLATES):

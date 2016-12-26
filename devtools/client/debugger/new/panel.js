@@ -4,14 +4,19 @@
 "use strict";
 
 const { Task } = require("devtools/shared/task");
+var {LocalizationHelper} = require("devtools/shared/l10n");
+
+const DBG_STRINGS_URI = "devtools/client/locales/debugger.properties";
+var L10N = new LocalizationHelper(DBG_STRINGS_URI);
 
 function DebuggerPanel(iframeWindow, toolbox) {
   this.panelWin = iframeWindow;
+  this.panelWin.L10N = L10N;
   this.toolbox = toolbox;
 }
 
 DebuggerPanel.prototype = {
-  open: Task.async(function*() {
+  open: Task.async(function* () {
     if (!this.toolbox.target.isRemote) {
       yield this.toolbox.target.makeRemote();
     }
@@ -25,31 +30,31 @@ DebuggerPanel.prototype = {
     return this;
   }),
 
-  _store: function() {
+  _store: function () {
     return this.panelWin.Debugger.store;
   },
 
-  _getState: function() {
+  _getState: function () {
     return this._store().getState();
   },
 
-  _actions: function() {
+  _actions: function () {
     return this.panelWin.Debugger.actions;
   },
 
-  _selectors: function() {
+  _selectors: function () {
     return this.panelWin.Debugger.selectors;
   },
 
-  getFrames: function() {
+  getFrames: function () {
     let frames = this._selectors().getFrames(this._getState());
 
-    // frames is an empty array when the debugger is not paused
-    if (!frames.toJS) {
+    // Frames is null when the debugger is not paused.
+    if (!frames) {
       return {
         frames: [],
         selected: -1
-      }
+      };
     }
 
     frames = frames.toJS();
@@ -63,7 +68,7 @@ DebuggerPanel.prototype = {
     return { frames, selected };
   },
 
-  destroy: function() {
+  destroy: function () {
     this.panelWin.Debugger.destroy();
     this.emit("destroyed");
   }

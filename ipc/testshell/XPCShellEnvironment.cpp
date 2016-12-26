@@ -150,7 +150,10 @@ Load(JSContext *cx,
             return false;
         FILE *file = fopen(filename.ptr(), "r");
         if (!file) {
-            JS_ReportError(cx, "cannot open file '%s' for reading", filename.ptr());
+            filename.clear();
+            if (!filename.encodeUtf8(cx, str))
+                return false;
+            JS_ReportErrorUTF8(cx, "cannot open file '%s' for reading", filename.ptr());
             return false;
         }
         JS::CompileOptions options(cx);
@@ -375,7 +378,7 @@ XPCShellEnvironment::ProcessFile(JSContext *cx,
 XPCShellEnvironment*
 XPCShellEnvironment::CreateEnvironment()
 {
-    XPCShellEnvironment* env = new XPCShellEnvironment();
+    auto* env = new XPCShellEnvironment();
     if (env && !env->Init()) {
         delete env;
         env = nullptr;

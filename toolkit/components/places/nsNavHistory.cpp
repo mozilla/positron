@@ -677,7 +677,7 @@ void nsNavHistory::expireNowTimerCallback(nsITimer* aTimer, void* aClosure)
   nsNavHistory *history = static_cast<nsNavHistory *>(aClosure);
   if (history) {
     history->mCachedNow = 0;
-    history->mExpireNowTimer = 0;
+    history->mExpireNowTimer = nullptr;
   }
 }
 
@@ -949,10 +949,6 @@ nsresult // static
 nsNavHistory::AsciiHostNameFromHostString(const nsACString& aHostName,
                                           nsACString& aAscii)
 {
-  aAscii.Truncate();
-  if (aHostName.IsEmpty()) {
-    return NS_OK;
-  }
   // To properly generate a uri we must provide a protocol.
   nsAutoCString fakeURL("http://");
   fakeURL.Append(aHostName);
@@ -3265,7 +3261,8 @@ nsNavHistory::QueryToSelectClause(nsNavHistoryQuery* aQuery, // const
 
   // URI
   if (NS_SUCCEEDED(aQuery->GetHasUri(&hasIt)) && hasIt) {
-    clause.Condition("h.url =").Param(":uri");
+    clause.Condition("h.url_hash = hash(").Param(":uri").Str(")")
+          .Condition("h.url =").Param(":uri");
   }
 
   // annotation

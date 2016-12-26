@@ -12,8 +12,6 @@
 #include "nsClassHashtable.h"
 #include "nsIXPConnect.h"
 #include "nsContentUtils.h"
-#include "nsIConsoleService.h"
-#include "nsIScriptError.h"
 #include "nsThreadUtils.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/Unused.h"
@@ -28,6 +26,7 @@ using mozilla::Telemetry::Common::AutoHashtable;
 using mozilla::Telemetry::Common::IsExpiredVersion;
 using mozilla::Telemetry::Common::CanRecordDataset;
 using mozilla::Telemetry::Common::IsInDataset;
+using mozilla::Telemetry::Common::LogToBrowserConsole;
 
 ////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////
@@ -155,7 +154,7 @@ ScalarInfo::expiration() const
 class ScalarBase
 {
 public:
-  virtual ~ScalarBase() {};
+  virtual ~ScalarBase() = default;
 
   // Set, Add and SetMaximum functions as described in the Telemetry IDL.
   virtual ScalarResult SetValue(nsIVariant* aValue) = 0;
@@ -195,7 +194,7 @@ public:
   using ScalarBase::SetValue;
 
   ScalarUnsigned() : mStorage(0) {};
-  ~ScalarUnsigned() {};
+  ~ScalarUnsigned() override = default;
 
   ScalarResult SetValue(nsIVariant* aValue) final;
   void SetValue(uint32_t aValue) final;
@@ -335,7 +334,7 @@ public:
   using ScalarBase::SetValue;
 
   ScalarString() : mStorage(EmptyString()) {};
-  ~ScalarString() {};
+  ~ScalarString() override = default;
 
   ScalarResult SetValue(nsIVariant* aValue) final;
   ScalarResult SetValue(const nsAString& aValue) final;
@@ -416,7 +415,7 @@ public:
   using ScalarBase::SetValue;
 
   ScalarBoolean() : mStorage(false) {};
-  ~ScalarBoolean() {};
+  ~ScalarBoolean() override = default;
 
   ScalarResult SetValue(nsIVariant* aValue) final;
   void SetValue(bool aValue) final;
@@ -515,7 +514,7 @@ public:
   typedef mozilla::Pair<nsCString, nsCOMPtr<nsIVariant>> KeyValuePair;
 
   explicit KeyedScalar(uint32_t aScalarKind) : mScalarKind(aScalarKind) {};
-  ~KeyedScalar() {};
+  ~KeyedScalar() = default;
 
   // Set, Add and SetMaximum functions as described in the Telemetry IDL.
   // These methods implicitly instantiate a Scalar[*] for each key.
@@ -753,35 +752,6 @@ KeyedScalarStorageMapType gKeyedScalarStorageMap;
 namespace {
 
 /**
- * Dumps a log message to the Browser Console using the provided level.
- *
- * @param aLogLevel The level to use when displaying the message in the browser console
- *        (e.g. nsIScriptError::warningFlag, ...).
- * @param aMsg The text message to print to the console.
- */
-void
-internal_LogToBrowserConsole(uint32_t aLogLevel, const nsAString& aMsg)
-{
-  if (!NS_IsMainThread()) {
-    nsString msg(aMsg);
-    nsCOMPtr<nsIRunnable> task =
-      NS_NewRunnableFunction([aLogLevel, msg]() { internal_LogToBrowserConsole(aLogLevel, msg); });
-    NS_DispatchToMainThread(task.forget(), NS_DISPATCH_NORMAL);
-    return;
-  }
-
-  nsCOMPtr<nsIConsoleService> console(do_GetService("@mozilla.org/consoleservice;1"));
-  if (!console) {
-    NS_WARNING("Failed to log message to console.");
-    return;
-  }
-
-  nsCOMPtr<nsIScriptError> error(do_CreateInstance(NS_SCRIPTERROR_CONTRACTID));
-  error->Init(aMsg, EmptyString(), EmptyString(), 0, 0, aLogLevel, "chrome javascript");
-  console->LogMessage(error);
-}
-
-/**
  * Checks if the error should be logged.
  *
  * @param aSr The error code.
@@ -841,7 +811,7 @@ internal_LogScalarError(const nsACString& aScalarName, ScalarResult aSr)
       return;
   }
 
-  internal_LogToBrowserConsole(nsIScriptError::warningFlag, errorMessage);
+  LogToBrowserConsole(nsIScriptError::warningFlag, errorMessage);
 }
 
 } // namespace

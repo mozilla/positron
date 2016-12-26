@@ -51,7 +51,9 @@ var DEFAULT_PREFERENCES =
   "useOnlyCssZoom": false,
   "externalLinkTarget": 0,
   "enhanceTextSelection": false,
-  "renderInteractiveForms": false
+  "renderer": "canvas",
+  "renderInteractiveForms": false,
+  "disablePageLabels": false
 }
 
 
@@ -352,5 +354,4 @@ var PdfjsChromeUtils = {
     });
   }
 };
-
 

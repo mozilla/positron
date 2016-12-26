@@ -49,6 +49,10 @@ class LIRGenerator : public LIRGeneratorSpecific
     MOZ_MUST_USE bool generate();
 
   private:
+    LBoxAllocation useBoxFixedAtStart(MDefinition* mir, Register reg1, Register reg2) {
+        return useBoxFixed(mir, reg1, reg2, /* useAtStart = */ true);
+    }
+
     LBoxAllocation useBoxFixedAtStart(MDefinition* mir, ValueOperand op);
     LBoxAllocation useBoxAtStart(MDefinition* mir, LUse::Policy policy = LUse::REGISTER);
 
@@ -117,6 +121,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitObjectGroupDispatch(MObjectGroupDispatch* ins);
     void visitCompare(MCompare* comp);
     void visitTypeOf(MTypeOf* ins);
+    void visitToAsync(MToAsync* ins);
     void visitToId(MToId* ins);
     void visitBitNot(MBitNot* ins);
     void visitBitAnd(MBitAnd* ins);
@@ -148,6 +153,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitConcat(MConcat* ins);
     void visitCharCodeAt(MCharCodeAt* ins);
     void visitFromCharCode(MFromCharCode* ins);
+    void visitFromCodePoint(MFromCodePoint* ins);
     void visitSinCos(MSinCos *ins);
     void visitStringSplit(MStringSplit* ins);
     void visitStart(MStart* start);
@@ -179,6 +185,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitNullarySharedStub(MNullarySharedStub* ins);
     void visitLambda(MLambda* ins);
     void visitLambdaArrow(MLambdaArrow* ins);
+    void visitSetFunName(MSetFunName* ins);
     void visitKeepAliveObject(MKeepAliveObject* ins);
     void visitSlots(MSlots* ins);
     void visitElements(MElements* ins);
@@ -191,7 +198,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitFunctionEnvironment(MFunctionEnvironment* ins);
     void visitInterruptCheck(MInterruptCheck* ins);
     void visitWasmTrap(MWasmTrap* ins);
-    void visitAsmReinterpret(MAsmReinterpret* ins);
+    void visitWasmReinterpret(MWasmReinterpret* ins);
     void visitStoreSlot(MStoreSlot* ins);
     void visitFilterTypeSet(MFilterTypeSet* ins);
     void visitTypeBarrier(MTypeBarrier* ins);
@@ -200,7 +207,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitPostWriteElementBarrier(MPostWriteElementBarrier* ins);
     void visitArrayLength(MArrayLength* ins);
     void visitSetArrayLength(MSetArrayLength* ins);
-    void visitGetNextMapEntryForIterator(MGetNextMapEntryForIterator* ins);
+    void visitGetNextEntryForIterator(MGetNextEntryForIterator* ins);
     void visitTypedArrayLength(MTypedArrayLength* ins);
     void visitTypedArrayElements(MTypedArrayElements* ins);
     void visitSetDisjointTypedElements(MSetDisjointTypedElements* ins);
@@ -286,10 +293,10 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitWasmBoundsCheck(MWasmBoundsCheck* ins);
     void visitWasmLoadGlobalVar(MWasmLoadGlobalVar* ins);
     void visitWasmStoreGlobalVar(MWasmStoreGlobalVar* ins);
-    void visitAsmJSParameter(MAsmJSParameter* ins);
-    void visitAsmJSReturn(MAsmJSReturn* ins);
-    void visitAsmJSVoidReturn(MAsmJSVoidReturn* ins);
-    void visitAsmJSPassStackArg(MAsmJSPassStackArg* ins);
+    void visitWasmParameter(MWasmParameter* ins);
+    void visitWasmReturn(MWasmReturn* ins);
+    void visitWasmReturnVoid(MWasmReturnVoid* ins);
+    void visitWasmStackArg(MWasmStackArg* ins);
     void visitWasmCall(MWasmCall* ins);
     void visitSetDOMProperty(MSetDOMProperty* ins);
     void visitGetDOMProperty(MGetDOMProperty* ins);
@@ -317,6 +324,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitDebugger(MDebugger* ins);
     void visitNewTarget(MNewTarget* ins);
     void visitArrowNewTarget(MArrowNewTarget* ins);
+    void visitNaNToZero(MNaNToZero *ins);
     void visitAtomicIsLockFree(MAtomicIsLockFree* ins);
     void visitGuardSharedTypedArray(MGuardSharedTypedArray* ins);
     void visitCheckReturn(MCheckReturn* ins);

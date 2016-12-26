@@ -44,7 +44,7 @@ this.UpdateUtils = {
         let partners = Services.prefs.getChildList("app.partner.").sort();
         if (partners.length) {
           channel += "-cck";
-          partners.forEach(function (prefName) {
+          partners.forEach(function(prefName) {
             channel += "-" + Services.prefs.getCharPref(prefName);
           });
         }
@@ -187,6 +187,14 @@ XPCOMUtils.defineLazyGetter(this, "gSystemCapabilities", function aus_gSC() {
     return instructionSet;
   }
 
+  if (AppConstants == "linux") {
+    let instructionSet = "unknown";
+    if (navigator.cpuHasSSE2) {
+      instructionSet = "SSE2";
+    }
+    return instructionSet;
+  }
+
   return "NA"
 });
 
@@ -314,23 +322,6 @@ XPCOMUtils.defineLazyGetter(UpdateUtils, "OSVersion", function() {
           {wSuiteMask: WORD},
           {wProductType: BYTE},
           {wReserved: BYTE}
-          ]);
-
-      // This structure is described at:
-      // http://msdn.microsoft.com/en-us/library/ms724958%28v=vs.85%29.aspx
-      const SYSTEM_INFO = new ctypes.StructType('SYSTEM_INFO',
-          [
-          {wProcessorArchitecture: WORD},
-          {wReserved: WORD},
-          {dwPageSize: DWORD},
-          {lpMinimumApplicationAddress: ctypes.voidptr_t},
-          {lpMaximumApplicationAddress: ctypes.voidptr_t},
-          {dwActiveProcessorMask: DWORD.ptr},
-          {dwNumberOfProcessors: DWORD},
-          {dwProcessorType: DWORD},
-          {dwAllocationGranularity: DWORD},
-          {wProcessorLevel: WORD},
-          {wProcessorRevision: WORD}
           ]);
 
       let kernel32 = false;

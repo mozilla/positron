@@ -64,14 +64,14 @@ nsFormControlFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
 
 /* virtual */
 LogicalSize
-nsFormControlFrame::ComputeAutoSize(nsRenderingContext *aRenderingContext,
-                                    WritingMode aWM,
-                                    const LogicalSize& aCBSize,
-                                    nscoord aAvailableISize,
-                                    const LogicalSize& aMargin,
-                                    const LogicalSize& aBorder,
-                                    const LogicalSize& aPadding,
-                                    bool aShrinkWrap)
+nsFormControlFrame::ComputeAutoSize(nsRenderingContext* aRenderingContext,
+                                    WritingMode         aWM,
+                                    const LogicalSize&  aCBSize,
+                                    nscoord             aAvailableISize,
+                                    const LogicalSize&  aMargin,
+                                    const LogicalSize&  aBorder,
+                                    const LogicalSize&  aPadding,
+                                    ComputeSizeFlags    aFlags)
 {
   const WritingMode wm = GetWritingMode();
   LogicalSize result(wm, GetIntrinsicISize(), GetIntrinsicBSize());
@@ -101,6 +101,19 @@ nsFormControlFrame::GetLogicalBaseline(WritingMode aWritingMode) const
 {
   NS_ASSERTION(!NS_SUBTREE_DIRTY(this),
                "frame must not be dirty");
+
+// NOTE: on Android we use appearance:none by default for checkbox/radio,
+// so the different layout for appearance:none we have on other platforms
+// doesn't work there. *shrug*
+#if !defined(MOZ_WIDGET_ANDROID)
+  // For appearance:none we use a standard CSS baseline, i.e. synthesized from
+  // our margin-box.
+  if (StyleDisplay()->mAppearance == NS_THEME_NONE) {
+    return nsAtomicContainerFrame::GetLogicalBaseline(aWritingMode);
+  }
+#endif
+
+  // This is for compatibility with Chrome, Safari and Edge (Dec 2016).
   // Treat radio buttons and checkboxes as having an intrinsic baseline
   // at the block-end of the control (use the block-end content edge rather
   // than the margin edge).
@@ -185,10 +198,10 @@ nsFormControlFrame::HandleEvent(nsPresContext* aPresContext,
 {
   // Check for user-input:none style
   const nsStyleUserInterface* uiStyle = StyleUserInterface();
-  if (uiStyle->mUserInput == NS_STYLE_USER_INPUT_NONE ||
-      uiStyle->mUserInput == NS_STYLE_USER_INPUT_DISABLED)
+  if (uiStyle->mUserInput == StyleUserInput::None ||
+      uiStyle->mUserInput == StyleUserInput::Disabled) {
     return nsFrame::HandleEvent(aPresContext, aEvent, aEventStatus);
-
+  }
   return NS_OK;
 }
 

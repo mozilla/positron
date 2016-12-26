@@ -206,7 +206,7 @@ EngineSynchronizer.prototype = {
       Svc.Prefs.reset("firstSync");
 
       let syncTime = ((Date.now() - startTime) / 1000).toFixed(2);
-      let dateStr = new Date().toLocaleFormat(LOG_DATE_FORMAT);
+      let dateStr = Utils.formatTimestamp(new Date());
       this._log.info("Sync completed at " + dateStr
                      + " after " + syncTime + " secs.");
     }
@@ -327,6 +327,13 @@ EngineSynchronizer.prototype = {
         // schedule another sync and clear node assignment values.
         // Here we simply want to muffle the exception and return an
         // appropriate value.
+        return false;
+      }
+      // Note that policies.js has already logged info about the exception...
+      if (Async.isShutdownException(e)) {
+        // Failure due to a shutdown exception should prevent other engines
+        // trying to start and immediately failing.
+        this._log.info(`${engine.name} was interrupted by shutdown; no other engines will sync`);
         return false;
       }
     }

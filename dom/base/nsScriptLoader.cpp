@@ -17,8 +17,9 @@
 #include "nsCycleCollectionParticipant.h"
 #include "nsIContent.h"
 #include "nsJSUtils.h"
-#include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/SRILogHelper.h"
 #include "nsGkAtoms.h"
 #include "nsNetUtil.h"
@@ -314,18 +315,8 @@ public:
                  JS::Handle<JSObject*> aModuleRecord);
 
   nsScriptLoader* Loader() const { return mLoader; }
-  JSObject* ModuleRecord() const
-  {
-    if (mModuleRecord) {
-      JS::ExposeObjectToActiveJS(mModuleRecord);
-    }
-    return mModuleRecord;
-  }
-  JS::Value Exception() const
-  {
-    JS::ExposeValueToActiveJS(mException);
-    return mException;
-  }
+  JSObject* ModuleRecord() const { return mModuleRecord; }
+  JS::Value Exception() const { return mException; }
   nsIURI* BaseURL() const { return mBaseURL; }
 
   void SetInstantiationResult(JS::Handle<JS::Value> aMaybeException);
@@ -1392,6 +1383,7 @@ CSPAllowsInlineScript(nsIScriptElement *aElement, nsIDocument *aDocument)
   nsCOMPtr<nsIContent> scriptContent = do_QueryInterface(aElement);
   nsAutoString nonce;
   scriptContent->GetAttr(kNameSpaceID_None, nsGkAtoms::nonce, nonce);
+  bool parserCreated = aElement->GetParserCreated() != mozilla::dom::NOT_FROM_PARSER;
 
   // query the scripttext
   nsAutoString scriptText;
@@ -1399,7 +1391,7 @@ CSPAllowsInlineScript(nsIScriptElement *aElement, nsIDocument *aDocument)
 
   bool allowInlineScript = false;
   rv = csp->GetAllowsInline(nsIContentPolicy::TYPE_SCRIPT,
-                            nonce, scriptText,
+                            nonce, parserCreated, scriptText,
                             aElement->GetScriptLineNumber(),
                             &allowInlineScript);
   return allowInlineScript;
@@ -1727,19 +1719,31 @@ class NotifyOffThreadScriptLoadCompletedRunnable : public Runnable
 {
   RefPtr<nsScriptLoadRequest> mRequest;
   RefPtr<nsScriptLoader> mLoader;
+  RefPtr<DocGroup> mDocGroup;
   void *mToken;
 
 public:
   NotifyOffThreadScriptLoadCompletedRunnable(nsScriptLoadRequest* aRequest,
                                              nsScriptLoader* aLoader)
-    : mRequest(aRequest), mLoader(aLoader), mToken(nullptr)
-  {}
+    : mRequest(aRequest)
+    , mLoader(aLoader)
+    , mDocGroup(aLoader->GetDocGroup())
+    , mToken(nullptr)
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+  }
 
   virtual ~NotifyOffThreadScriptLoadCompletedRunnable();
 
   void SetToken(void* aToken) {
     MOZ_ASSERT(aToken && !mToken);
     mToken = aToken;
+  }
+
+  static void Dispatch(already_AddRefed<NotifyOffThreadScriptLoadCompletedRunnable>&& aSelf) {
+    RefPtr<NotifyOffThreadScriptLoadCompletedRunnable> self = aSelf;
+    RefPtr<DocGroup> docGroup = self->mDocGroup;
+    docGroup->Dispatch("OffThreadScriptLoader", TaskCategory::Other, self.forget());
   }
 
   NS_DECL_NSIRUNNABLE
@@ -1819,7 +1823,7 @@ OffThreadScriptLoaderCallback(void *aToken, void *aCallbackData)
   RefPtr<NotifyOffThreadScriptLoadCompletedRunnable> aRunnable =
     dont_AddRef(static_cast<NotifyOffThreadScriptLoadCompletedRunnable*>(aCallbackData));
   aRunnable->SetToken(aToken);
-  NS_DispatchToMainThread(aRunnable);
+  NotifyOffThreadScriptLoadCompletedRunnable::Dispatch(aRunnable.forget());
 }
 
 nsresult
@@ -2084,6 +2088,10 @@ nsScriptLoader::FillCompileOptionsForRequest(const AutoJSAPI&jsapi,
     return rv;
   }
 
+  if (mDocument) {
+    mDocument->NoteScriptTrackingStatus(aRequest->mURL, aRequest->IsTracking());
+  }
+
   bool isScriptElement = !aRequest->IsModuleRequest() ||
                          aRequest->AsModuleRequest()->IsTopLevel();
   aOptions->setIntroductionType(isScriptElement ? "scriptElement"
@@ -2218,8 +2226,13 @@ nsScriptLoader::ProcessPendingRequestsAsync()
       !mNonAsyncExternalScriptInsertedRequests.isEmpty() ||
       !mDeferRequests.isEmpty() ||
       !mPendingChildLoaders.IsEmpty()) {
-    NS_DispatchToCurrentThread(NewRunnableMethod(this,
-                                                 &nsScriptLoader::ProcessPendingRequests));
+    nsCOMPtr<nsIRunnable> task = NewRunnableMethod(this,
+                                                   &nsScriptLoader::ProcessPendingRequests);
+    if (mDocument) {
+      mDocument->Dispatch("ScriptLoader", TaskCategory::Other, task.forget());
+    } else {
+      NS_DispatchToCurrentThread(task.forget());
+    }
   }
 }
 
@@ -2643,6 +2656,10 @@ nsScriptLoader::PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
     if (NS_SUCCEEDED(rv)) {
       aRequest->mHasSourceMapURL = true;
       aRequest->mSourceMapURL = NS_ConvertUTF8toUTF16(sourceMapURL);
+    }
+
+    if (httpChannel->GetIsTrackingResource()) {
+      aRequest->SetIsTracking();
     }
   }
 

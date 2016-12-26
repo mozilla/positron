@@ -16,6 +16,7 @@
 #include "nsThreadUtils.h"
 #include "nsXPCOMCIDInternal.h"
 #include "prsystem.h"
+#include "nsIXULRuntime.h"
 
 #include "gfxPrefs.h"
 
@@ -159,16 +160,27 @@ private:
 class DecodePoolWorker : public Runnable
 {
 public:
-  explicit DecodePoolWorker(DecodePoolImpl* aImpl) : mImpl(aImpl) { }
+  explicit DecodePoolWorker(DecodePoolImpl* aImpl)
+    : mImpl(aImpl)
+  { }
 
   NS_IMETHOD Run() override
   {
+#ifdef MOZ_ENABLE_PROFILER_SPS
+    char stackBaseGuess; // Need to be the first variable of main loop function.
+#endif // MOZ_ENABLE_PROFILER_SPS
+
     MOZ_ASSERT(!NS_IsMainThread());
 
     mImpl->InitCurrentThread();
 
     nsCOMPtr<nsIThread> thisThread;
     nsThreadManager::get().GetCurrentThread(getter_AddRefs(thisThread));
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+    // InitCurrentThread() has assigned the thread name.
+    profiler_register_thread(PR_GetThreadName(PR_GetCurrentThread()), &stackBaseGuess);
+#endif // MOZ_ENABLE_PROFILER_SPS
 
     do {
       Work work = mImpl->PopWork();
@@ -179,6 +191,11 @@ public:
 
         case Work::Type::SHUTDOWN:
           DecodePoolImpl::ShutdownThread(thisThread);
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+          profiler_unregister_thread();
+#endif // MOZ_ENABLE_PROFILER_SPS
+
           return NS_OK;
 
         default:
@@ -245,6 +262,11 @@ DecodePool::DecodePool()
   if (limit > 32) {
     limit = 32;
   }
+  // The parent process where there are content processes doesn't need as many
+  // threads for decoding images.
+  if (limit > 4 && XRE_IsParentProcess() && BrowserTabsRemoteAutostart()) {
+    limit = 4;
+  }
 
   // Initialize the thread pool.
   for (uint32_t i = 0 ; i < limit ; ++i) {
@@ -306,7 +328,7 @@ DecodePool::AsyncRun(IDecodingTask* aTask)
   mImpl->PushWork(aTask);
 }
 
-void
+bool
 DecodePool::SyncRunIfPreferred(IDecodingTask* aTask)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -314,10 +336,11 @@ DecodePool::SyncRunIfPreferred(IDecodingTask* aTask)
 
   if (aTask->ShouldPreferSyncRun()) {
     aTask->Run();
-    return;
+    return true;
   }
 
   AsyncRun(aTask);
+  return false;
 }
 
 void

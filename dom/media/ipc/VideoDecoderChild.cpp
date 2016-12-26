@@ -10,6 +10,7 @@
 #include "MediaInfo.h"
 #include "ImageContainer.h"
 #include "GPUVideoImage.h"
+#include "mozilla/layers/SynchronousTask.h"
 
 namespace mozilla {
 namespace dom {
@@ -21,8 +22,10 @@ using namespace gfx;
 
 VideoDecoderChild::VideoDecoderChild()
   : mThread(VideoDecoderManagerChild::GetManagerThread())
-  , mLayersBackend(layers::LayersBackend::LAYERS_NONE)
-  , mCanSend(true)
+  , mFlushTask(nullptr)
+  , mCanSend(false)
+  , mInitialized(false)
+  , mIsHardwareAccelerated(false)
 {
 }
 
@@ -32,7 +35,7 @@ VideoDecoderChild::~VideoDecoderChild()
   mInitPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_CANCELED, __func__);
 }
 
-bool
+mozilla::ipc::IPCResult
 VideoDecoderChild::RecvOutput(const VideoDataIPDL& aData)
 {
   AssertOnManagerThread();
@@ -41,7 +44,7 @@ VideoDecoderChild::RecvOutput(const VideoDataIPDL& aData)
   // The Image here creates a TextureData object that takes ownership
   // of the SurfaceDescriptor, and is responsible for making sure that
   // it gets deallocated.
-  RefPtr<Image> image = new GPUVideoImage(aData.sd(), aData.display());
+  RefPtr<Image> image = new GPUVideoImage(GetManager(), aData.sd(), aData.display());
 
   RefPtr<VideoData> video = VideoData::CreateFromImage(info,
                                                        aData.base().offset(),
@@ -51,66 +54,114 @@ VideoDecoderChild::RecvOutput(const VideoDataIPDL& aData)
                                                        aData.base().keyframe(),
                                                        aData.base().timecode(),
                                                        IntRect());
-  mCallback->Output(video);
-  return true;
+  if (mCallback) {
+    mCallback->Output(video);
+  }
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 VideoDecoderChild::RecvInputExhausted()
 {
   AssertOnManagerThread();
-  mCallback->InputExhausted();
-  return true;
+  if (mCallback) {
+    mCallback->InputExhausted();
+  }
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 VideoDecoderChild::RecvDrainComplete()
 {
   AssertOnManagerThread();
-  mCallback->DrainComplete();
-  return true;
+  if (mCallback) {
+    mCallback->DrainComplete();
+  }
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 VideoDecoderChild::RecvError(const nsresult& aError)
 {
   AssertOnManagerThread();
-  mCallback->Error(aError);
-  return true;
+  if (mCallback) {
+    mCallback->Error(aError);
+  }
+  return IPC_OK();
 }
 
-bool
-VideoDecoderChild::RecvInitComplete()
+mozilla::ipc::IPCResult
+VideoDecoderChild::RecvInitComplete(const bool& aHardware, const nsCString& aHardwareReason)
 {
   AssertOnManagerThread();
-  mInitPromise.Resolve(TrackInfo::kVideoTrack, __func__);
-  return true;
+  mInitPromise.ResolveIfExists(TrackInfo::kVideoTrack, __func__);
+  mInitialized = true;
+  mIsHardwareAccelerated = aHardware;
+  mHardwareAcceleratedReason = aHardwareReason;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 VideoDecoderChild::RecvInitFailed(const nsresult& aReason)
 {
   AssertOnManagerThread();
-  mInitPromise.Reject(aReason, __func__);
-  return true;
+  mInitPromise.RejectIfExists(aReason, __func__);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+VideoDecoderChild::RecvFlushComplete()
+{
+  MOZ_ASSERT(mFlushTask);
+  AutoCompleteTask complete(mFlushTask);
+  mFlushTask = nullptr;
+  return IPC_OK();
 }
 
 void
 VideoDecoderChild::ActorDestroy(ActorDestroyReason aWhy)
 {
+  if (aWhy == AbnormalShutdown) {
+    // Defer reporting an error until we've recreated the manager so that
+    // it'll be safe for MediaFormatReader to recreate decoders
+    RefPtr<VideoDecoderChild> ref = this;
+    GetManager()->RunWhenRecreated(NS_NewRunnableFunction([=]() {
+      if (ref->mInitialized && ref->mCallback) {
+        ref->mCallback->Error(NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER);
+      } else {
+        ref->mInitPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER, __func__);
+      }
+    }));
+  }
+  if (mFlushTask) {
+    AutoCompleteTask complete(mFlushTask);
+    mFlushTask = nullptr;
+  }
   mCanSend = false;
 }
 
-void
+bool
 VideoDecoderChild::InitIPDL(MediaDataDecoderCallback* aCallback,
                             const VideoInfo& aVideoInfo,
-                            layers::LayersBackend aLayersBackend)
+                            const layers::TextureFactoryIdentifier& aIdentifier)
 {
-  VideoDecoderManagerChild::GetSingleton()->SendPVideoDecoderConstructor(this);
+  RefPtr<VideoDecoderManagerChild> manager = VideoDecoderManagerChild::GetSingleton();
+  // If the manager isn't available, then don't initialize mIPDLSelfRef and leave
+  // us in an error state. We'll then immediately reject the promise when Init()
+  // is called and the caller can try again. Hopefully by then the new manager is
+  // ready, or we've notified the caller of it being no longer available.
+  // If not, then the cycle repeats until we're ready.
+  if (!manager || !manager->CanSend()) {
+    return true;
+  }
+
   mIPDLSelfRef = this;
   mCallback = aCallback;
-  mVideoInfo = aVideoInfo;
-  mLayersBackend = aLayersBackend;
+  bool success = false;
+  if (manager->SendPVideoDecoderConstructor(this, aVideoInfo, aIdentifier, &success)) {
+    mCanSend = true;
+  }
+  return success;
 }
 
 void
@@ -133,9 +184,15 @@ RefPtr<MediaDataDecoder::InitPromise>
 VideoDecoderChild::Init()
 {
   AssertOnManagerThread();
-  if (!mCanSend || !SendInit(mVideoInfo, mLayersBackend)) {
+
+  if (!mIPDLSelfRef) {
     return MediaDataDecoder::InitPromise::CreateAndReject(
-      NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
+      NS_ERROR_DOM_MEDIA_DECODE_ERR, __func__);
+  }
+  // If we failed to send this, then we'll still resolve the Init promise
+  // as ActorDestroy handles it.
+  if (mCanSend) {
+    SendInit();
   }
   return mInitPromise.Ensure(__func__);
 }
@@ -145,7 +202,6 @@ VideoDecoderChild::Input(MediaRawData* aSample)
 {
   AssertOnManagerThread();
   if (!mCanSend) {
-    mCallback->Error(NS_ERROR_DOM_MEDIA_FATAL_ERR);
     return;
   }
 
@@ -154,7 +210,7 @@ VideoDecoderChild::Input(MediaRawData* aSample)
   // into shmem rather than requiring a copy here.
   Shmem buffer;
   if (!AllocShmem(aSample->Size(), Shmem::SharedMemory::TYPE_BASIC, &buffer)) {
-    mCallback->Error(NS_ERROR_DOM_MEDIA_FATAL_ERR);
+    mCallback->Error(NS_ERROR_DOM_MEDIA_DECODE_ERR);
     return;
   }
 
@@ -167,17 +223,18 @@ VideoDecoderChild::Input(MediaRawData* aSample)
                                         aSample->mFrames,
                                         aSample->mKeyframe),
                           buffer);
-  if (!SendInput(sample)) {
-    mCallback->Error(NS_ERROR_DOM_MEDIA_FATAL_ERR);
-  }
+  SendInput(sample);
 }
 
 void
-VideoDecoderChild::Flush()
+VideoDecoderChild::Flush(SynchronousTask* aTask)
 {
   AssertOnManagerThread();
-  if (!mCanSend || !SendFlush()) {
-    mCallback->Error(NS_ERROR_DOM_MEDIA_FATAL_ERR);
+  if (mCanSend) {
+    SendFlush();
+    mFlushTask = aTask;
+  } else {
+    AutoCompleteTask complete(aTask);
   }
 }
 
@@ -185,8 +242,8 @@ void
 VideoDecoderChild::Drain()
 {
   AssertOnManagerThread();
-  if (!mCanSend || !SendDrain()) {
-    mCallback->Error(NS_ERROR_DOM_MEDIA_FATAL_ERR);
+  if (mCanSend) {
+    SendDrain();
   }
 }
 
@@ -194,8 +251,27 @@ void
 VideoDecoderChild::Shutdown()
 {
   AssertOnManagerThread();
-  if (!mCanSend || !SendShutdown()) {
-    mCallback->Error(NS_ERROR_DOM_MEDIA_FATAL_ERR);
+  mInitPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_CANCELED, __func__);
+  if (mCanSend) {
+    SendShutdown();
+  }
+  mInitialized = false;
+  mCallback = nullptr;
+}
+
+bool
+VideoDecoderChild::IsHardwareAccelerated(nsACString& aFailureReason) const
+{
+  aFailureReason = mHardwareAcceleratedReason;
+  return mIsHardwareAccelerated;
+}
+
+void
+VideoDecoderChild::SetSeekThreshold(const media::TimeUnit& aTime)
+{
+  AssertOnManagerThread();
+  if (mCanSend) {
+    SendSetSeekThreshold(aTime.ToMicroseconds());
   }
 }
 
@@ -203,6 +279,15 @@ void
 VideoDecoderChild::AssertOnManagerThread()
 {
   MOZ_ASSERT(NS_GetCurrentThread() == mThread);
+}
+
+VideoDecoderManagerChild*
+VideoDecoderChild::GetManager()
+{
+  if (!mCanSend) {
+    return nullptr;
+  }
+  return static_cast<VideoDecoderManagerChild*>(Manager());
 }
 
 } // namespace dom

@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "MP4Decoder.h"
+#include "MediaContentType.h"
 #include "MediaDecoderStateMachine.h"
 #include "MP4Demuxer.h"
 #include "mozilla/Preferences.h"
@@ -13,12 +14,8 @@
 #include "mozilla/Logging.h"
 #include "mozilla/SharedThreadPool.h"
 #include "nsMimeTypes.h"
-#include "nsContentTypeParser.h"
 #include "VideoUtils.h"
 
-#ifdef XP_WIN
-#include "mozilla/WindowsVersion.h"
-#endif
 #ifdef MOZ_WIDGET_ANDROID
 #include "nsIGfxInfo.h"
 #endif
@@ -31,7 +28,6 @@ namespace mozilla {
 MP4Decoder::MP4Decoder(MediaDecoderOwner* aOwner)
   : MediaDecoder(aOwner)
 {
-  mDormantSupported = Preferences::GetBool("media.decoder.heuristic.dormant.enabled", false);
 }
 
 MediaDecoderStateMachine* MP4Decoder::CreateStateMachine()
@@ -53,14 +49,6 @@ IsWhitelistedH264Codec(const nsAString& aCodec)
     return false;
   }
 
-#ifdef XP_WIN
-  // Disable 4k video on windows vista since it performs poorly.
-  if (!IsWin7OrLater() &&
-      level >= H264_LEVEL_5) {
-    return false;
-  }
-#endif
-
   // Just assume what we can play on all platforms the codecs/formats that
   // WMF can play, since we don't have documentation about what other
   // platforms can play... According to the WMF documentation:
@@ -79,8 +67,7 @@ IsWhitelistedH264Codec(const nsAString& aCodec)
 
 /* static */
 bool
-MP4Decoder::CanHandleMediaType(const nsACString& aMIMETypeExcludingCodecs,
-                               const nsAString& aCodecs,
+MP4Decoder::CanHandleMediaType(const MediaContentType& aType,
                                DecoderDoctorDiagnostics* aDiagnostics)
 {
   if (!IsEnabled()) {
@@ -90,50 +77,71 @@ MP4Decoder::CanHandleMediaType(const nsACString& aMIMETypeExcludingCodecs,
   // Whitelist MP4 types, so they explicitly match what we encounter on
   // the web, as opposed to what we use internally (i.e. what our demuxers
   // etc output).
-  const bool isMP4Audio = aMIMETypeExcludingCodecs.EqualsASCII("audio/mp4") ||
-                          aMIMETypeExcludingCodecs.EqualsASCII("audio/x-m4a") ||
-                          aMIMETypeExcludingCodecs.EqualsASCII("audio/opus");
+  const bool isMP4Audio = aType.GetMIMEType().EqualsASCII("audio/mp4") ||
+                          aType.GetMIMEType().EqualsASCII("audio/x-m4a");
   const bool isMP4Video =
   // On B2G, treat 3GPP as MP4 when Gonk PDM is available.
 #ifdef MOZ_GONK_MEDIACODEC
-    aMIMETypeExcludingCodecs.EqualsASCII(VIDEO_3GPP) ||
+      aType.GetMIMEType().EqualsASCII(VIDEO_3GPP) ||
 #endif
-    aMIMETypeExcludingCodecs.EqualsASCII("video/mp4") ||
-    aMIMETypeExcludingCodecs.EqualsASCII("video/quicktime") ||
-    aMIMETypeExcludingCodecs.EqualsASCII("video/x-m4v");
+      aType.GetMIMEType().EqualsASCII("video/mp4") ||
+      aType.GetMIMEType().EqualsASCII("video/quicktime") ||
+      aType.GetMIMEType().EqualsASCII("video/x-m4v");
   if (!isMP4Audio && !isMP4Video) {
     return false;
   }
 
-  nsTArray<nsCString> codecMimes;
-  if (aCodecs.IsEmpty()) {
-    // No codecs specified. Assume AAC/H.264
+  nsTArray<UniquePtr<TrackInfo>> trackInfos;
+  if (aType.GetCodecs().IsEmpty()) {
+    // No codecs specified. Assume H.264
     if (isMP4Audio) {
-      codecMimes.AppendElement(NS_LITERAL_CSTRING("audio/mp4a-latm"));
+      trackInfos.AppendElement(
+        CreateTrackInfoWithMIMETypeAndContentTypeExtraParameters(
+          NS_LITERAL_CSTRING("audio/mp4a-latm"), aType));
     } else {
       MOZ_ASSERT(isMP4Video);
-      codecMimes.AppendElement(NS_LITERAL_CSTRING("video/avc"));
+      trackInfos.AppendElement(
+        CreateTrackInfoWithMIMETypeAndContentTypeExtraParameters(
+          NS_LITERAL_CSTRING("video/avc"), aType));
     }
   } else {
     // Verify that all the codecs specified are ones that we expect that
     // we can play.
     nsTArray<nsString> codecs;
-    if (!ParseCodecsString(aCodecs, codecs)) {
+    if (!ParseCodecsString(aType.GetCodecs(), codecs)) {
       return false;
     }
     for (const nsString& codec : codecs) {
       if (IsAACCodecString(codec)) {
-        codecMimes.AppendElement(NS_LITERAL_CSTRING("audio/mp4a-latm"));
+        trackInfos.AppendElement(
+          CreateTrackInfoWithMIMETypeAndContentTypeExtraParameters(
+            NS_LITERAL_CSTRING("audio/mp4a-latm"), aType));
         continue;
       }
       if (codec.EqualsLiteral("mp3")) {
-        codecMimes.AppendElement(NS_LITERAL_CSTRING("audio/mpeg"));
+        trackInfos.AppendElement(
+          CreateTrackInfoWithMIMETypeAndContentTypeExtraParameters(
+            NS_LITERAL_CSTRING("audio/mpeg"), aType));
+        continue;
+      }
+      if (codec.EqualsLiteral("opus")) {
+        trackInfos.AppendElement(
+          CreateTrackInfoWithMIMETypeAndContentTypeExtraParameters(
+            NS_LITERAL_CSTRING("audio/opus"), aType));
+        continue;
+      }
+      if (codec.EqualsLiteral("flac")) {
+        trackInfos.AppendElement(
+          CreateTrackInfoWithMIMETypeAndContentTypeExtraParameters(
+            NS_LITERAL_CSTRING("audio/flac"), aType));
         continue;
       }
       // Note: Only accept H.264 in a video content type, not in an audio
       // content type.
       if (IsWhitelistedH264Codec(codec) && isMP4Video) {
-        codecMimes.AppendElement(NS_LITERAL_CSTRING("video/avc"));
+        trackInfos.AppendElement(
+          CreateTrackInfoWithMIMETypeAndContentTypeExtraParameters(
+            NS_LITERAL_CSTRING("video/avc"), aType));
         continue;
       }
       // Some unsupported codec.
@@ -143,31 +151,13 @@ MP4Decoder::CanHandleMediaType(const nsACString& aMIMETypeExcludingCodecs,
 
   // Verify that we have a PDM that supports the whitelisted types.
   RefPtr<PDMFactory> platform = new PDMFactory();
-  for (const nsCString& codecMime : codecMimes) {
-    if (!platform->SupportsMimeType(codecMime, aDiagnostics)) {
+  for (const auto& trackInfo : trackInfos) {
+    if (!trackInfo || !platform->Supports(*trackInfo, aDiagnostics)) {
       return false;
     }
   }
 
   return true;
-}
-
-/* static */ bool
-MP4Decoder::CanHandleMediaType(const nsAString& aContentType,
-                               DecoderDoctorDiagnostics* aDiagnostics)
-{
-  nsContentTypeParser parser(aContentType);
-  nsAutoString mimeType;
-  nsresult rv = parser.GetType(mimeType);
-  if (NS_FAILED(rv)) {
-    return false;
-  }
-  nsString codecs;
-  parser.GetParameter("codecs", codecs);
-
-  return CanHandleMediaType(NS_ConvertUTF16toUTF8(mimeType),
-                            codecs,
-                            aDiagnostics);
 }
 
 /* static */
@@ -176,6 +166,13 @@ MP4Decoder::IsH264(const nsACString& aMimeType)
 {
   return aMimeType.EqualsLiteral("video/mp4") ||
          aMimeType.EqualsLiteral("video/avc");
+}
+
+/* static */
+bool
+MP4Decoder::IsAAC(const nsACString& aMimeType)
+{
+  return aMimeType.EqualsLiteral("audio/mp4a-latm");
 }
 
 /* static */
@@ -215,7 +212,7 @@ static const uint8_t sTestH264ExtraData[] = {
 };
 
 static already_AddRefed<MediaDataDecoder>
-CreateTestH264Decoder(layers::LayersBackend aBackend,
+CreateTestH264Decoder(layers::KnowsCompositor* aKnowsCompositor,
                       VideoInfo& aConfig,
                       TaskQueue* aTaskQueue)
 {
@@ -229,13 +226,13 @@ CreateTestH264Decoder(layers::LayersBackend aBackend,
                                      MOZ_ARRAY_LENGTH(sTestH264ExtraData));
 
   RefPtr<PDMFactory> platform = new PDMFactory();
-  RefPtr<MediaDataDecoder> decoder(platform->CreateDecoder({ aConfig, aTaskQueue, aBackend }));
+  RefPtr<MediaDataDecoder> decoder(platform->CreateDecoder({ aConfig, aTaskQueue, aKnowsCompositor }));
 
   return decoder.forget();
 }
 
 /* static */ already_AddRefed<dom::Promise>
-MP4Decoder::IsVideoAccelerated(layers::LayersBackend aBackend, nsIGlobalObject* aParent)
+MP4Decoder::IsVideoAccelerated(layers::KnowsCompositor* aKnowsCompositor, nsIGlobalObject* aParent)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -250,7 +247,7 @@ MP4Decoder::IsVideoAccelerated(layers::LayersBackend aBackend, nsIGlobalObject* 
   RefPtr<TaskQueue> taskQueue =
     new TaskQueue(GetMediaThreadPool(MediaThreadType::PLATFORM_DECODER));
   VideoInfo config;
-  RefPtr<MediaDataDecoder> decoder(CreateTestH264Decoder(aBackend, config, taskQueue));
+  RefPtr<MediaDataDecoder> decoder(CreateTestH264Decoder(aKnowsCompositor, config, taskQueue));
   if (!decoder) {
     taskQueue->BeginShutdown();
     taskQueue->AwaitShutdownAndIdle();

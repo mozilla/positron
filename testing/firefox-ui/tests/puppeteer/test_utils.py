@@ -2,16 +2,17 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from firefox_ui_harness.testcases import FirefoxTestCase
+from firefox_puppeteer import PuppeteerMixin
+from marionette_harness import MarionetteTestCase
 
 
-class TestSanitize(FirefoxTestCase):
+class TestSanitize(PuppeteerMixin, MarionetteTestCase):
 
     def setUp(self):
-        FirefoxTestCase.setUp(self)
+        super(TestSanitize, self).setUp()
 
         # Clear all previous history and cookies.
-        self.places.remove_all_history()
+        self.puppeteer.places.remove_all_history()
         self.marionette.delete_all_cookies()
 
         self.urls = [
@@ -27,19 +28,16 @@ class TestSanitize(FirefoxTestCase):
             with self.marionette.using_context('content'):
                 for url in self.urls:
                     self.marionette.navigate(url)
-        self.places.wait_for_visited(self.urls, load_urls)
-
-    def tearDown(self):
-        FirefoxTestCase.tearDown(self)
+        self.puppeteer.places.wait_for_visited(self.urls, load_urls)
 
     def test_sanitize_history(self):
         """ Clears history. """
-        self.assertEqual(self.places.get_all_urls_in_history(), self.urls)
-        self.utils.sanitize(data_type={"history": True})
-        self.assertEqual(self.places.get_all_urls_in_history(), [])
+        self.assertEqual(self.puppeteer.places.get_all_urls_in_history(), self.urls)
+        self.puppeteer.utils.sanitize(data_type={"history": True})
+        self.assertEqual(self.puppeteer.places.get_all_urls_in_history(), [])
 
     def test_sanitize_cookies(self):
         """ Clears cookies. """
         self.assertIsNotNone(self.marionette.get_cookie('litmus_1'))
-        self.utils.sanitize(data_type={"cookies": True})
+        self.puppeteer.utils.sanitize(data_type={"cookies": True})
         self.assertIsNone(self.marionette.get_cookie('litmus_1'))

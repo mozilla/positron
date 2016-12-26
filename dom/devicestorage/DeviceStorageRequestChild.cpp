@@ -31,7 +31,7 @@ DeviceStorageRequestChild::~DeviceStorageRequestChild() {
   MOZ_COUNT_DTOR(DeviceStorageRequestChild);
 }
 
-bool
+mozilla::ipc::IPCResult
 DeviceStorageRequestChild::
   Recv__delete__(const DeviceStorageResponseValue& aValue)
 {
@@ -139,11 +139,11 @@ DeviceStorageRequestChild::
     default:
     {
       DS_LOG_ERROR("unknown %u", mRequest->GetId());
-      NS_RUNTIMEABORT("not reached");
+      MOZ_CRASH("not reached");
       break;
     }
   }
-  return true;
+  return IPC_OK();
 }
 
 } // namespace devicestorage

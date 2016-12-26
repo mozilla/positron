@@ -19,10 +19,6 @@
 #undef MP_ASSEMBLY_SQUARE
 #endif
 
-#if defined(_MSC_VER) && _MSC_VER < 1900
-#define inline __inline
-#endif
-
 #if MP_LOGTAB
 /*
   A table of the logs of 2 for various bases (the 0 and 1 entries of
@@ -39,6 +35,10 @@
   which are the output bases supported.
  */
 #include "logtab.h"
+#endif
+
+#ifdef CT_VERIF
+#include <valgrind/memcheck.h>
 #endif
 
 /* {{{ Constant strings */
@@ -85,6 +85,26 @@ mp_set_prec(mp_size prec)
 } /* end mp_set_prec() */
 
 /* }}} */
+
+#ifdef CT_VERIF
+void
+mp_taint(mp_int *mp)
+{
+    size_t i;
+    for (i = 0; i < mp->used; ++i) {
+        VALGRIND_MAKE_MEM_UNDEFINED(&(mp->dp[i]), sizeof(mp_digit));
+    }
+}
+
+void
+mp_untaint(mp_int *mp)
+{
+    size_t i;
+    for (i = 0; i < mp->used; ++i) {
+        VALGRIND_MAKE_MEM_DEFINED(&(mp->dp[i]), sizeof(mp_digit));
+    }
+}
+#endif
 
 /*------------------------------------------------------------------------*/
 /* {{{ mp_init(mp) */
@@ -2761,7 +2781,7 @@ s_mp_pad(mp_int *mp, mp_size min)
 /* {{{ s_mp_setz(dp, count) */
 
 /* Set 'count' digits pointed to by dp to be zeroes                       */
-inline void
+void
 s_mp_setz(mp_digit *dp, mp_size count)
 {
 #if MP_MEMSET == 0
@@ -2780,7 +2800,7 @@ s_mp_setz(mp_digit *dp, mp_size count)
 /* {{{ s_mp_copy(sp, dp, count) */
 
 /* Copy 'count' digits from sp to dp                                      */
-inline void
+void
 s_mp_copy(const mp_digit *sp, mp_digit *dp, mp_size count)
 {
 #if MP_MEMCPY == 0
@@ -2798,7 +2818,7 @@ s_mp_copy(const mp_digit *sp, mp_digit *dp, mp_size count)
 /* {{{ s_mp_alloc(nb, ni) */
 
 /* Allocate ni records of nb bytes each, and return a pointer to that     */
-inline void *
+void *
 s_mp_alloc(size_t nb, size_t ni)
 {
     return calloc(nb, ni);
@@ -2810,7 +2830,7 @@ s_mp_alloc(size_t nb, size_t ni)
 /* {{{ s_mp_free(ptr) */
 
 /* Free the memory pointed to by ptr                                      */
-inline void
+void
 s_mp_free(void *ptr)
 {
     if (ptr) {
@@ -2823,7 +2843,7 @@ s_mp_free(void *ptr)
 /* {{{ s_mp_clamp(mp) */
 
 /* Remove leading zeroes from the given value                             */
-inline void
+void
 s_mp_clamp(mp_int *mp)
 {
     mp_size used = MP_USED(mp);

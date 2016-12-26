@@ -8,16 +8,18 @@ transforms applied for a particular kind may not be!
 Overview
 --------
 
-To begin, a kind implementation generates a collection of items.  For example,
-the test kind implementation generates a list of tests to run for each matching
-build, representing each as a test description.  The items are simply Python
-dictionaries.
+To begin, a kind implementation generates a collection of items; see
+:doc:`loading`.  The items are simply Python dictionaries, and describe
+"semantically" what the resulting task or tasks should do.
 
 The kind also defines a sequence of transformations.  These are applied, in
 order, to each item.  Early transforms might apply default values or break
 items up into smaller items (for example, chunking a test suite).  Later
 transforms rewrite the items entirely, with the final result being a task
 definition.
+
+Transform Functions
+...................
 
 Each transformation looks like this:
 
@@ -138,12 +140,26 @@ The remainder of the run section is specific to the run-using implementation.
 The effect of a job description is to say "run this thing on this worker".  The
 job description must contain enough information about the worker to identify
 the workerType and the implementation (docker-worker, generic-worker, etc.).
-Any other task-description information is passed along verbatim, although it is
-augmented by the run-using implementation.
+Alternatively, job descriptions can specify the ``platforms`` field in
+conjunction with the  ``by-platform`` key to specify multiple workerTypes and
+implementations. Any other task-description information is passed along
+verbatim, although it is augmented by the run-using implementation.
 
 The run-using implementations are all located in
 ``taskcluster/taskgraph/transforms/job``, along with the schemas for their
-implementations.  Those source files are the canonical documentation.
+implementations.  Those well-commented source files are the canonical
+documentation for what constitutes a job description, and should be considered
+part of the documentation.
+
+following ``run-using`` are available
+
+  * ``hazard``
+  * ``mach``
+  * ``mozharness``
+  * ``run-task``
+  * ``spidermonkey`` or ``spidermonkey-package`` or ``spidermonkey-mozjs-crate``
+  * ``toolchain-script``
+
 
 Task Descriptions
 -----------------
@@ -156,9 +172,11 @@ way.
 The transforms in ``taskcluster/taskgraph/transforms/task.py`` implement
 this common functionality.  They expect a "task description", and produce a
 task definition.  The schema for a task description is defined at the top of
-``task.py``, with copious comments.  In general, these transforms handle
-functionality that is common to all Gecko tasks.  While the schema is the
-definitive reference, the functionality includes:
+``task.py``, with copious comments.  Go forth and read it now!
+
+In general, the task-description transforms handle functionality that is common
+to all Gecko tasks.  While the schema is the definitive reference, the
+functionality includes:
 
 * TreeHerder metadata
 
@@ -173,10 +191,20 @@ definitive reference, the functionality includes:
 * Worker configuration
 
 The parts of the task description that are specific to a worker implementation
-are isolated in a ``worker`` object which has an ``implementation`` property
-naming the worker implementation.  Thus the transforms that produce a task
-description must be aware of the worker implementation to be used, but need not
-be aware of the details of its payload format.
+are isolated in a ``task_description['worker']`` object which has an
+``implementation`` property naming the worker implementation.  Each worker
+implementation has its own section of the schema describing the fields it
+expects.  Thus the transforms that produce a task description must be aware of
+the worker implementation to be used, but need not be aware of the details of
+its payload format.
 
-This file maps treeherder groups to group names using an internal list of group
-names.  Feel free to add additional groups to this list as necessary.
+The ``task.py`` file also contains a dictionary mapping treeherder groups to
+group names using an internal list of group names.  Feel free to add additional
+groups to this list as necessary.
+
+More Detail
+-----------
+
+The source files provide lots of additional detail, both in the code itself and
+in the comments and docstrings.  For the next level of detail beyond this file,
+consult the transform source under ``taskcluster/taskgraph/transforms``.

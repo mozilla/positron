@@ -7,11 +7,11 @@
 #include "frontend/BytecodeCompiler.h"
 
 #include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/Maybe.h"
 
 #include "jscntxt.h"
 #include "jsscript.h"
 
-#include "asmjs/AsmJS.h"
 #include "builtin/ModuleObject.h"
 #include "frontend/BytecodeEmitter.h"
 #include "frontend/FoldConstants.h"
@@ -19,6 +19,7 @@
 #include "frontend/Parser.h"
 #include "vm/GlobalObject.h"
 #include "vm/TraceLogging.h"
+#include "wasm/AsmJS.h"
 
 #include "jsobjinlines.h"
 #include "jsscriptinlines.h"
@@ -28,6 +29,7 @@
 using namespace js;
 using namespace js::frontend;
 using mozilla::Maybe;
+using mozilla::Nothing;
 
 class MOZ_STACK_CLASS AutoCompilationTraceLogger
 {
@@ -57,24 +59,24 @@ class MOZ_STACK_CLASS BytecodeCompiler
 
     // Call setters for optional arguments.
     void maybeSetSourceCompressor(SourceCompressionTask* sourceCompressor);
-    void setSourceArgumentsNotIncluded();
 
     JSScript* compileGlobalScript(ScopeKind scopeKind);
     JSScript* compileEvalScript(HandleObject environment, HandleScope enclosingScope);
     ModuleObject* compileModule();
-    bool compileFunctionBody(MutableHandleFunction fun, Handle<PropertyNameVector> formals,
-                             GeneratorKind generatorKind);
+    bool compileStandaloneFunction(MutableHandleFunction fun, GeneratorKind generatorKind,
+                                   FunctionAsyncKind asyncKind,
+                                   Maybe<uint32_t> parameterListEnd);
 
     ScriptSourceObject* sourceObjectPtr() const;
 
   private:
     JSScript* compileScript(HandleObject environment, SharedContext* sc);
     bool checkLength();
-    bool createScriptSource();
+    bool createScriptSource(Maybe<uint32_t> parameterListEnd);
     bool maybeCompressSource();
     bool canLazilyParse();
     bool createParser();
-    bool createSourceAndParser();
+    bool createSourceAndParser(Maybe<uint32_t> parameterListEnd = Nothing());
     bool createScript();
     bool emplaceEmitter(Maybe<BytecodeEmitter>& emitter, SharedContext* sharedContext);
     bool handleParseFailure(const Directives& newDirectives);
@@ -90,7 +92,6 @@ class MOZ_STACK_CLASS BytecodeCompiler
     SourceBufferHolder& sourceBuffer;
 
     RootedScope enclosingScope;
-    bool sourceArgumentsNotIncluded;
 
     RootedScriptSource sourceObject;
     ScriptSource* scriptSource;
@@ -130,7 +131,6 @@ BytecodeCompiler::BytecodeCompiler(ExclusiveContext* cx,
     options(options),
     sourceBuffer(sourceBuffer),
     enclosingScope(cx, enclosingScope),
-    sourceArgumentsNotIncluded(false),
     sourceObject(cx),
     scriptSource(nullptr),
     sourceCompressor(nullptr),
@@ -147,12 +147,6 @@ BytecodeCompiler::maybeSetSourceCompressor(SourceCompressionTask* sourceCompress
     this->sourceCompressor = sourceCompressor;
 }
 
-void
-BytecodeCompiler::setSourceArgumentsNotIncluded()
-{
-    sourceArgumentsNotIncluded = true;
-}
-
 bool
 BytecodeCompiler::checkLength()
 {
@@ -161,20 +155,20 @@ BytecodeCompiler::checkLength()
     // is using size_t internally already.
     if (sourceBuffer.length() > UINT32_MAX) {
         if (cx->isJSContext())
-            JS_ReportErrorNumber(cx->asJSContext(), GetErrorMessage, nullptr,
-                                 JSMSG_SOURCE_TOO_LONG);
+            JS_ReportErrorNumberASCII(cx->asJSContext(), GetErrorMessage, nullptr,
+                                      JSMSG_SOURCE_TOO_LONG);
         return false;
     }
     return true;
 }
 
 bool
-BytecodeCompiler::createScriptSource()
+BytecodeCompiler::createScriptSource(Maybe<uint32_t> parameterListEnd)
 {
     if (!checkLength())
         return false;
 
-    sourceObject = CreateScriptSourceObject(cx, options);
+    sourceObject = CreateScriptSourceObject(cx, options, parameterListEnd);
     if (!sourceObject)
         return false;
 
@@ -193,9 +187,7 @@ BytecodeCompiler::maybeCompressSource()
     if (!cx->compartment()->behaviors().discardSource()) {
         if (options.sourceIsLazy) {
             scriptSource->setSourceRetrievable();
-        } else if (!scriptSource->setSourceCopy(cx, sourceBuffer, sourceArgumentsNotIncluded,
-                                                sourceCompressor))
-        {
+        } else if (!scriptSource->setSourceCopy(cx, sourceBuffer, sourceCompressor)) {
             return false;
         }
     }
@@ -242,9 +234,9 @@ BytecodeCompiler::createParser()
 }
 
 bool
-BytecodeCompiler::createSourceAndParser()
+BytecodeCompiler::createSourceAndParser(Maybe<uint32_t> parameterListEnd /* = Nothing() */)
 {
-    return createScriptSource() &&
+    return createScriptSource(parameterListEnd) &&
            maybeCompressSource() &&
            createParser();
 }
@@ -294,7 +286,8 @@ BytecodeCompiler::deoptimizeArgumentsInEnclosingScripts(JSContext* cx, HandleObj
     RootedObject env(cx, environment);
     while (env->is<EnvironmentObject>() || env->is<DebugEnvironmentProxy>()) {
         if (env->is<CallObject>()) {
-            RootedScript script(cx, env->as<CallObject>().callee().getOrCreateScript(cx));
+            RootedFunction fun(cx, &env->as<CallObject>().callee());
+            RootedScript script(cx, JSFunction::getOrCreateScript(cx, fun));
             if (!script)
                 return false;
             if (script->argumentsHasVarBinding()) {
@@ -344,9 +337,9 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
                 if (!deoptimizeArgumentsInEnclosingScripts(cx->asJSContext(), environment))
                     return nullptr;
             }
-            if (!NameFunctions(cx, pn))
-                return nullptr;
             if (!emitter->emitScript(pn))
+                return nullptr;
+            if (!NameFunctions(cx, pn))
                 return nullptr;
             parser->handler.freeTree(pn);
 
@@ -405,13 +398,13 @@ BytecodeCompiler::compileModule()
     if (!pn)
         return nullptr;
 
-    if (!NameFunctions(cx, pn))
-        return nullptr;
-
     Maybe<BytecodeEmitter> emitter;
     if (!emplaceEmitter(emitter, &modulesc))
         return nullptr;
     if (!emitter->emitScript(pn->pn_body))
+        return nullptr;
+
+    if (!NameFunctions(cx, pn))
         return nullptr;
 
     parser->handler.freeTree(pn);
@@ -432,17 +425,19 @@ BytecodeCompiler::compileModule()
     return module;
 }
 
+// Compile a standalone JS function, which might appear as the value of an
+// event handler attribute in an HTML <INPUT> tag, or in a Function()
+// constructor.
 bool
-BytecodeCompiler::compileFunctionBody(MutableHandleFunction fun,
-                                      Handle<PropertyNameVector> formals,
-                                      GeneratorKind generatorKind)
+BytecodeCompiler::compileStandaloneFunction(MutableHandleFunction fun,
+                                            GeneratorKind generatorKind,
+                                            FunctionAsyncKind asyncKind,
+                                            Maybe<uint32_t> parameterListEnd)
 {
     MOZ_ASSERT(fun);
     MOZ_ASSERT(fun->isTenured());
 
-    fun->setArgCount(formals.length());
-
-    if (!createSourceAndParser())
+    if (!createSourceAndParser(parameterListEnd))
         return false;
 
     // Speculatively parse using the default directives implied by the context.
@@ -453,14 +448,11 @@ BytecodeCompiler::compileFunctionBody(MutableHandleFunction fun,
     ParseNode* fn;
     do {
         Directives newDirectives = directives;
-        fn = parser->standaloneFunctionBody(fun, enclosingScope, formals, generatorKind,
-                                            directives, &newDirectives);
+        fn = parser->standaloneFunction(fun, enclosingScope, parameterListEnd, generatorKind,
+                                        asyncKind, directives, &newDirectives);
         if (!fn && !handleParseFailure(newDirectives))
             return false;
     } while (!fn);
-
-    if (!NameFunctions(cx, fn))
-        return false;
 
     if (fn->pn_funbox->function()->isInterpreted()) {
         MOZ_ASSERT(fun == fn->pn_funbox->function());
@@ -478,6 +470,9 @@ BytecodeCompiler::compileFunctionBody(MutableHandleFunction fun,
         MOZ_ASSERT(IsAsmJSModule(fun));
     }
 
+    if (!NameFunctions(cx, fn))
+        return false;
+
     if (!maybeCompleteCompressSource())
         return false;
 
@@ -491,14 +486,15 @@ BytecodeCompiler::sourceObjectPtr() const
 }
 
 ScriptSourceObject*
-frontend::CreateScriptSourceObject(ExclusiveContext* cx, const ReadOnlyCompileOptions& options)
+frontend::CreateScriptSourceObject(ExclusiveContext* cx, const ReadOnlyCompileOptions& options,
+                                   Maybe<uint32_t> parameterListEnd /* = Nothing() */)
 {
     ScriptSource* ss = cx->new_<ScriptSource>();
     if (!ss)
         return nullptr;
     ScriptSourceHolder ssHolder(ss);
 
-    if (!ss->initFromOptions(cx, options))
+    if (!ss->initFromOptions(cx, options, parameterListEnd))
         return nullptr;
 
     RootedScriptSource sso(cx, ScriptSourceObject::create(cx, ss));
@@ -646,11 +642,9 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
 
     Rooted<JSFunction*> fun(cx, lazy->functionNonDelazifying());
     MOZ_ASSERT(!lazy->isLegacyGenerator());
-    ParseNode* pn = parser.standaloneLazyFunction(fun, lazy->strict(), lazy->generatorKind());
+    ParseNode* pn = parser.standaloneLazyFunction(fun, lazy->strict(), lazy->generatorKind(),
+                                                  lazy->asyncKind());
     if (!pn)
-        return false;
-
-    if (!NameFunctions(cx, pn))
         return false;
 
     RootedScriptSource sourceObject(cx, lazy->sourceObject());
@@ -671,54 +665,53 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
     if (!bce.init())
         return false;
 
-    return bce.emitFunctionScript(pn->pn_body);
+    if (!bce.emitFunctionScript(pn->pn_body))
+        return false;
+
+    if (!NameFunctions(cx, pn))
+        return false;
+
+    return true;
 }
 
-// Compile a JS function body, which might appear as the value of an event
-// handler attribute in an HTML <INPUT> tag, or in a Function() constructor.
-static bool
-CompileFunctionBody(JSContext* cx, MutableHandleFunction fun, const ReadOnlyCompileOptions& options,
-                    Handle<PropertyNameVector> formals, SourceBufferHolder& srcBuf,
-                    HandleScope enclosingScope, GeneratorKind generatorKind)
+bool
+frontend::CompileStandaloneFunction(JSContext* cx, MutableHandleFunction fun,
+                                    const ReadOnlyCompileOptions& options,
+                                    JS::SourceBufferHolder& srcBuf,
+                                    Maybe<uint32_t> parameterListEnd,
+                                    HandleScope enclosingScope /* = nullptr */)
 {
-    MOZ_ASSERT(!options.isRunOnce);
+    RootedScope scope(cx, enclosingScope);
+    if (!scope)
+        scope = &cx->global()->emptyGlobalScope();
 
-    // FIXME: make Function pass in two strings and parse them as arguments and
-    // ProgramElements respectively.
-
-    BytecodeCompiler compiler(cx, cx->tempLifoAlloc(), options, srcBuf, enclosingScope,
+    BytecodeCompiler compiler(cx, cx->tempLifoAlloc(), options, srcBuf, scope,
                               TraceLogger_ParserCompileFunction);
-    compiler.setSourceArgumentsNotIncluded();
-    return compiler.compileFunctionBody(fun, formals, generatorKind);
+    return compiler.compileStandaloneFunction(fun, NotGenerator, SyncFunction, parameterListEnd);
 }
 
 bool
-frontend::CompileFunctionBody(JSContext* cx, MutableHandleFunction fun,
-                              const ReadOnlyCompileOptions& options,
-                              Handle<PropertyNameVector> formals, JS::SourceBufferHolder& srcBuf,
-                              HandleScope enclosingScope)
-{
-    return CompileFunctionBody(cx, fun, options, formals, srcBuf, enclosingScope, NotGenerator);
-}
-
-bool
-frontend::CompileFunctionBody(JSContext* cx, MutableHandleFunction fun,
-                              const ReadOnlyCompileOptions& options,
-                              Handle<PropertyNameVector> formals, JS::SourceBufferHolder& srcBuf)
+frontend::CompileStandaloneGenerator(JSContext* cx, MutableHandleFunction fun,
+                                     const ReadOnlyCompileOptions& options,
+                                     JS::SourceBufferHolder& srcBuf,
+                                     Maybe<uint32_t> parameterListEnd)
 {
     RootedScope emptyGlobalScope(cx, &cx->global()->emptyGlobalScope());
-    return CompileFunctionBody(cx, fun, options, formals, srcBuf, emptyGlobalScope,
-                               NotGenerator);
+
+    BytecodeCompiler compiler(cx, cx->tempLifoAlloc(), options, srcBuf, emptyGlobalScope,
+                              TraceLogger_ParserCompileFunction);
+    return compiler.compileStandaloneFunction(fun, StarGenerator, SyncFunction, parameterListEnd);
 }
 
-
 bool
-frontend::CompileStarGeneratorBody(JSContext* cx, MutableHandleFunction fun,
-                                   const ReadOnlyCompileOptions& options,
-                                   Handle<PropertyNameVector> formals,
-                                   JS::SourceBufferHolder& srcBuf)
+frontend::CompileStandaloneAsyncFunction(JSContext* cx, MutableHandleFunction fun,
+                                         const ReadOnlyCompileOptions& options,
+                                         JS::SourceBufferHolder& srcBuf,
+                                         Maybe<uint32_t> parameterListEnd)
 {
     RootedScope emptyGlobalScope(cx, &cx->global()->emptyGlobalScope());
-    return CompileFunctionBody(cx, fun, options, formals, srcBuf, emptyGlobalScope,
-                               StarGenerator);
+
+    BytecodeCompiler compiler(cx, cx->tempLifoAlloc(), options, srcBuf, emptyGlobalScope,
+                              TraceLogger_ParserCompileFunction);
+    return compiler.compileStandaloneFunction(fun, StarGenerator, AsyncFunction, parameterListEnd);
 }

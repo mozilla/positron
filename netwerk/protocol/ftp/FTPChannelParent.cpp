@@ -25,7 +25,6 @@
 #include "SerializedLoadContext.h"
 #include "nsIContentPolicy.h"
 #include "mozilla/ipc/BackgroundUtils.h"
-#include "nsIOService.h"
 #include "mozilla/LoadInfo.h"
 
 using namespace mozilla::dom;
@@ -57,17 +56,12 @@ FTPChannelParent::FTPChannelParent(const PBrowserOrId& aIframeEmbedding,
     mTabParent = static_cast<dom::TabParent*>(aIframeEmbedding.get_PBrowserParent());
   }
 
-  mObserver = new OfflineObserver(this);
-
   mEventQ = new ChannelEventQueue(static_cast<nsIParentChannel*>(this));
 }
 
 FTPChannelParent::~FTPChannelParent()
 {
   gFtpHandler->Release();
-  if (mObserver) {
-    mObserver->RemoveObserver();
-  }
 }
 
 void
@@ -155,17 +149,6 @@ FTPChannelParent::DoAsyncOpen(const URIParams& aURI,
     return SendFailedAsyncOpen(rv);
   }
 
-  bool app_offline = false;
-  uint32_t appId = attrs.mAppId;
-  if (appId != NECKO_UNKNOWN_APP_ID &&
-      appId != NECKO_NO_APP_ID) {
-    gIOService->IsAppOffline(appId, &app_offline);
-    LOG(("FTP app id %u is offline %d\n", appId, app_offline));
-  }
-
-  if (app_offline)
-    return SendFailedAsyncOpen(NS_ERROR_OFFLINE);
-
   nsCOMPtr<nsIChannel> chan;
   rv = NS_NewChannelInternal(getter_AddRefs(chan), uri, loadInfo,
                              nullptr, nullptr,
@@ -230,31 +213,31 @@ FTPChannelParent::ConnectChannel(const uint32_t& channelId)
   return true;
 }
 
-bool
+mozilla::ipc::IPCResult
 FTPChannelParent::RecvCancel(const nsresult& status)
 {
   if (mChannel)
     mChannel->Cancel(status);
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 FTPChannelParent::RecvSuspend()
 {
   if (mChannel) {
     SuspendChannel();
   }
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 FTPChannelParent::RecvResume()
 {
   if (mChannel) {
     ResumeChannel();
   }
-  return true;
+  return IPC_OK();
 }
 
 class FTPDivertDataAvailableEvent : public ChannelEvent
@@ -283,7 +266,7 @@ private:
   uint32_t mCount;
 };
 
-bool
+mozilla::ipc::IPCResult
 FTPChannelParent::RecvDivertOnDataAvailable(const nsCString& data,
                                             const uint64_t& offset,
                                             const uint32_t& count)
@@ -292,17 +275,17 @@ FTPChannelParent::RecvDivertOnDataAvailable(const nsCString& data,
     MOZ_ASSERT(mDivertingFromChild,
                "Cannot RecvDivertOnDataAvailable if diverting is not set!");
     FailDiversion(NS_ERROR_UNEXPECTED);
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
 
   // Drop OnDataAvailables if the parent was canceled already.
   if (NS_FAILED(mStatus)) {
-    return true;
+    return IPC_OK();
   }
 
   mEventQ->RunOrEnqueue(new FTPDivertDataAvailableEvent(this, data, offset,
                                                         count));
-  return true;
+  return IPC_OK();
 }
 
 void
@@ -367,18 +350,18 @@ private:
   nsresult mStatusCode;
 };
 
-bool
+mozilla::ipc::IPCResult
 FTPChannelParent::RecvDivertOnStopRequest(const nsresult& statusCode)
 {
   if (NS_WARN_IF(!mDivertingFromChild)) {
     MOZ_ASSERT(mDivertingFromChild,
                "Cannot RecvDivertOnStopRequest if diverting is not set!");
     FailDiversion(NS_ERROR_UNEXPECTED);
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
 
   mEventQ->RunOrEnqueue(new FTPDivertStopRequestEvent(this, statusCode));
-  return true;
+  return IPC_OK();
 }
 
 void
@@ -424,18 +407,18 @@ private:
   FTPChannelParent* mParent;
 };
 
-bool
+mozilla::ipc::IPCResult
 FTPChannelParent::RecvDivertComplete()
 {
   if (NS_WARN_IF(!mDivertingFromChild)) {
     MOZ_ASSERT(mDivertingFromChild,
                "Cannot RecvDivertComplete if diverting is not set!");
     FailDiversion(NS_ERROR_UNEXPECTED);
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
 
   mEventQ->RunOrEnqueue(new FTPDivertCompleteEvent(this));
-  return true;
+  return IPC_OK();
 }
 
 void
@@ -575,6 +558,13 @@ FTPChannelParent::SetParentListener(HttpChannelParentListener* aListener)
 
 NS_IMETHODIMP
 FTPChannelParent::NotifyTrackingProtectionDisabled()
+{
+  // One day, this should probably be filled in.
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+FTPChannelParent::NotifyTrackingResource()
 {
   // One day, this should probably be filled in.
   return NS_OK;
@@ -874,28 +864,6 @@ FTPChannelParent::NotifyDiversionFailed(nsresult aErrorCode,
   if (!mIPCClosed) {
     Unused << SendDeleteSelf();
   }
-}
-
-void
-FTPChannelParent::OfflineDisconnect()
-{
-  if (mChannel) {
-    mChannel->Cancel(NS_ERROR_OFFLINE);
-  }
-  mStatus = NS_ERROR_OFFLINE;
-}
-
-uint32_t
-FTPChannelParent::GetAppId()
-{
-  uint32_t appId = NECKO_UNKNOWN_APP_ID;
-  if (mChannel) {
-    NeckoOriginAttributes attrs;
-    if (NS_GetOriginAttributes(mChannel, attrs)) {
-      appId = attrs.mAppId;
-    }
-  }
-  return appId;
 }
 
 //-----------------------------------------------------------------------------

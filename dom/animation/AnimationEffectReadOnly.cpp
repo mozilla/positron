@@ -44,17 +44,6 @@ AnimationEffectReadOnly::AnimationEffectReadOnly(
   MOZ_ASSERT(aTiming);
 }
 
-// https://w3c.github.io/web-animations/#in-play
-bool
-AnimationEffectReadOnly::IsInPlay() const
-{
-  if (!mAnimation || mAnimation->PlayState() == AnimationPlayState::Finished) {
-    return false;
-  }
-
-  return GetComputedTiming().mPhase == ComputedTiming::AnimationPhase::Active;
-}
-
 // https://w3c.github.io/web-animations/#current
 bool
 AnimationEffectReadOnly::IsCurrent() const
@@ -138,10 +127,6 @@ AnimationEffectReadOnly::GetComputedTimingAt(
   }
   const TimeDuration& localTime = aLocalTime.Value();
 
-  // Calculate the time within the active interval.
-  // https://w3c.github.io/web-animations/#active-time
-  StickyTimeDuration activeTime;
-
   StickyTimeDuration beforeActiveBoundary =
     std::max(std::min(StickyTimeDuration(aTiming.mDelay), result.mEndTime),
              zeroDuration);
@@ -159,7 +144,7 @@ AnimationEffectReadOnly::GetComputedTimingAt(
       // The animation isn't active or filling at this time.
       return result;
     }
-    activeTime =
+    result.mActiveTime =
       std::max(std::min(StickyTimeDuration(localTime - aTiming.mDelay),
                         result.mActiveDuration),
                zeroDuration);
@@ -170,13 +155,14 @@ AnimationEffectReadOnly::GetComputedTimingAt(
       // The animation isn't active or filling at this time.
       return result;
     }
-    activeTime = std::max(StickyTimeDuration(localTime - aTiming.mDelay),
-                          zeroDuration);
+    result.mActiveTime
+      = std::max(StickyTimeDuration(localTime - aTiming.mDelay),
+                 zeroDuration);
   } else {
     MOZ_ASSERT(result.mActiveDuration != zeroDuration,
                "How can we be in the middle of a zero-duration interval?");
     result.mPhase = ComputedTiming::AnimationPhase::Active;
-    activeTime = localTime - aTiming.mDelay;
+    result.mActiveTime = localTime - aTiming.mDelay;
   }
 
   // Convert active time to a multiple of iterations.
@@ -187,7 +173,7 @@ AnimationEffectReadOnly::GetComputedTimingAt(
                       ? 0.0
                       : result.mIterations;
   } else {
-    overallProgress = activeTime / result.mDuration;
+    overallProgress = result.mActiveTime / result.mDuration;
   }
 
   // Factor in iteration start offset.
@@ -219,7 +205,8 @@ AnimationEffectReadOnly::GetComputedTimingAt(
   if (result.mPhase == ComputedTiming::AnimationPhase::After &&
       progress == 0.0 &&
       result.mIterations != 0.0 &&
-      (activeTime != zeroDuration || result.mDuration == zeroDuration)) {
+      (result.mActiveTime != zeroDuration ||
+       result.mDuration == zeroDuration)) {
     // The only way we can be in the after phase with a progress of zero and
     // a current iteration of zero, is if we have a zero iteration count or
     // were clipped using a negative end delay--both of which we should have

@@ -143,7 +143,6 @@ nsTimerImpl::nsTimerImpl(nsITimer* aTimer) :
   mDelay(0),
   mITimer(aTimer)
 {
-  MOZ_COUNT_CTOR(nsTimerImpl);
   // XXXbsmedberg: shouldn't this be in Init()?
   mEventTarget = static_cast<nsIEventTarget*>(NS_GetCurrentThread());
 
@@ -152,7 +151,6 @@ nsTimerImpl::nsTimerImpl(nsITimer* aTimer) :
 
 nsTimerImpl::~nsTimerImpl()
 {
-  MOZ_COUNT_DTOR(nsTimerImpl);
   ReleaseCallback();
 }
 
@@ -326,17 +324,14 @@ void
 nsTimerImpl::Neuter()
 {
   if (gThread) {
-    gThread->RemoveTimer(this);
+    gThread->RemoveTimer(this, true);
   }
 
   // If invoked on the target thread, guarantees that the timer doesn't pop.
   // If invoked anywhere else, it might prevent the timer from popping, but
-  // no guarantees.
+  // no guarantees. In any case, the above RemoveTimer call will prevent it
+  // from being rescheduled.
   ++mGeneration;
-
-  // Breaks cycles when TimerEvents are in the queue of a thread that is no
-  // longer running.
-  mEventTarget = nullptr;
 }
 
 NS_IMETHODIMP
@@ -651,6 +646,42 @@ nsTimerImpl::SetDelayInternal(uint32_t aDelay, TimeStamp aBase)
     } else {
       mStart2 = aBase;
     }
+  }
+}
+
+void
+nsTimerImpl::GetName(nsACString& aName)
+{
+  switch (mCallbackType) {
+    case CallbackType::Function:
+      if (mName.is<NameString>()) {
+        aName.Assign(mName.as<NameString>());
+      } else if (mName.is<NameFunc>()) {
+        static const size_t buflen = 1024;
+        char buf[buflen];
+        mName.as<NameFunc>()(mITimer, mClosure, buf, buflen);
+        aName.Assign(buf);
+      } else {
+        MOZ_ASSERT(mName.is<NameNothing>());
+        aName.Truncate();
+      }
+      break;
+
+    case CallbackType::Interface:
+      if (nsCOMPtr<nsINamed> named = do_QueryInterface(mCallback.i)) {
+        named->GetName(aName);
+      }
+      break;
+
+    case CallbackType::Observer:
+      if (nsCOMPtr<nsINamed> named = do_QueryInterface(mCallback.o)) {
+        named->GetName(aName);
+      }
+      break;
+
+    case CallbackType::Unknown:
+      aName.Truncate();
+      break;
   }
 }
 

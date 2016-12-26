@@ -29,8 +29,8 @@ using mozilla::CountLeadingZeroes32;
 
 void dbg_break() {}
 
-// The ABIArgGenerator is used for making system ABI calls and for inter-AsmJS
-// calls. The system ABI can either be SoftFp or HardFp, and inter-AsmJS calls
+// The ABIArgGenerator is used for making system ABI calls and for inter-wasm
+// calls. The system ABI can either be SoftFp or HardFp, and inter-wasm calls
 // are always HardFp calls. The initialization defaults to HardFp, and the ABI
 // choice is made before any system ABI calls with the method "setUseHardFp".
 ABIArgGenerator::ABIArgGenerator()
@@ -134,10 +134,8 @@ ABIArgGenerator::hardNext(MIRType type)
         break;
       case MIRType::Float32:
         if (floatRegIndex_ == NumFloatArgRegs) {
-            static const uint32_t align = sizeof(double) - 1;
-            stackOffset_ = (stackOffset_ + align) & ~align;
             current_ = ABIArg(stackOffset_);
-            stackOffset_ += sizeof(uint64_t);
+            stackOffset_ += sizeof(uint32_t);
             break;
         }
         current_ = ABIArg(VFPRegister(floatRegIndex_, VFPRegister::Single));
@@ -592,32 +590,22 @@ Operand2::toOp2Reg() const {
     return *(Op2Reg*)this;
 }
 
-O2RegImmShift
-Op2Reg::toO2RegImmShift() const {
-    return *(O2RegImmShift*)this;
-}
-
-O2RegRegShift
-Op2Reg::toO2RegRegShift() const {
-    return *(O2RegRegShift*)this;
-}
-
 Imm16::Imm16(Instruction& inst)
-  : lower(inst.encode() & 0xfff),
-    upper(inst.encode() >> 16),
-    invalid(0xfff)
+  : lower_(inst.encode() & 0xfff),
+    upper_(inst.encode() >> 16),
+    invalid_(0xfff)
 { }
 
 Imm16::Imm16(uint32_t imm)
-  : lower(imm & 0xfff), pad(0),
-    upper((imm >> 12) & 0xf),
-    invalid(0)
+  : lower_(imm & 0xfff), pad_(0),
+    upper_((imm >> 12) & 0xf),
+    invalid_(0)
 {
     MOZ_ASSERT(decode() == imm);
 }
 
 Imm16::Imm16()
-  : invalid(0xfff)
+  : invalid_(0xfff)
 { }
 
 void
@@ -937,10 +925,10 @@ Assembler::trace(JSTracer* trc)
 {
     for (size_t i = 0; i < jumps_.length(); i++) {
         RelativePatch& rp = jumps_[i];
-        if (rp.kind == Relocation::JITCODE) {
-            JitCode* code = JitCode::FromExecutable((uint8_t*)rp.target);
+        if (rp.kind() == Relocation::JITCODE) {
+            JitCode* code = JitCode::FromExecutable((uint8_t*)rp.target());
             TraceManuallyBarrieredEdge(trc, &code, "masmrel32");
-            MOZ_ASSERT(code == JitCode::FromExecutable((uint8_t*)rp.target));
+            MOZ_ASSERT(code == JitCode::FromExecutable((uint8_t*)rp.target()));
         }
     }
 
@@ -1022,6 +1010,14 @@ Assembler::ConditionWithoutEqual(Condition cond)
         MOZ_CRASH("unexpected condition");
     }
 }
+
+Assembler::DoubleCondition
+Assembler::InvertCondition(DoubleCondition cond)
+{
+    const uint32_t ConditionInversionBit = 0x10000000;
+    return DoubleCondition(ConditionInversionBit ^ cond);
+}
+
 Imm8::TwoImm8mData
 Imm8::EncodeTwoImms(uint32_t imm)
 {
@@ -1117,7 +1113,7 @@ Imm8::EncodeTwoImms(uint32_t imm)
 }
 
 ALUOp
-jit::ALUNeg(ALUOp op, Register dest, Imm32* imm, Register* negDest)
+jit::ALUNeg(ALUOp op, Register dest, Register scratch, Imm32* imm, Register* negDest)
 {
     // Find an alternate ALUOp to get the job done, and use a different imm.
     *negDest = dest;
@@ -1149,7 +1145,7 @@ jit::ALUNeg(ALUOp op, Register dest, Imm32* imm, Register* negDest)
       case OpTst:
         MOZ_ASSERT(dest == InvalidReg);
         *imm = Imm32(~imm->value);
-        *negDest = ScratchRegister;
+        *negDest = scratch;
         return OpBic;
         // orr has orn on thumb2 only.
       default:
@@ -1295,14 +1291,14 @@ static js::jit::DoubleEncoder doubleEncoder;
 
 js::jit::VFPImm::VFPImm(uint32_t top)
 {
-    data = -1;
+    data_ = -1;
     datastore::Imm8VFPImmData tmp;
     if (doubleEncoder.lookup(top, &tmp))
-        data = tmp.encode();
+        data_ = tmp.encode();
 }
 
-BOffImm::BOffImm(Instruction& inst)
-  : data(inst.encode() & 0x00ffffff)
+BOffImm::BOffImm(const Instruction& inst)
+  : data_(inst.encode() & 0x00ffffff)
 {
 }
 
@@ -1312,7 +1308,7 @@ BOffImm::getDest(Instruction* src) const
     // TODO: It is probably worthwhile to verify that src is actually a branch.
     // NOTE: This does not explicitly shift the offset of the destination left by 2,
     // since it is indexing into an array of instruction sized objects.
-    return &src[(((int32_t)data << 8) >> 8) + 2];
+    return &src[((int32_t(data_) << 8) >> 8) + 2];
 }
 
 const js::jit::DoubleEncoder::DoubleEntry js::jit::DoubleEncoder::table[256] = {
@@ -2197,7 +2193,12 @@ Assembler::as_BranchPool(uint32_t value, RepatchLabel* label, ARMBuffer::PoolEnt
     // with a correct branch.
     if (label->bound()) {
         BufferOffset dest(label);
-        as_b(dest.diffB<BOffImm>(ret), c, ret);
+        BOffImm offset = dest.diffB<BOffImm>(ret);
+        if (offset.isInvalid()) {
+            m_buffer.fail_bail();
+            return ret;
+        }
+        as_b(offset, c, ret);
     } else if (!oom()) {
         label->use(ret.getOffset());
     }
@@ -2385,6 +2386,8 @@ void
 Assembler::WritePoolGuard(BufferOffset branch, Instruction* dest, BufferOffset afterPool)
 {
     BOffImm off = afterPool.diffB<BOffImm>(branch);
+    if (off.isInvalid())
+        MOZ_CRASH("BOffImm invalid");
     *dest = InstBImm(off, Always);
 }
 
@@ -2442,7 +2445,7 @@ Assembler::as_b(Label* l, Condition c)
 }
 
 BufferOffset
-Assembler::as_b(wasm::JumpTarget target, Condition c)
+Assembler::as_b(wasm::TrapDesc target, Condition c)
 {
     Label l;
     BufferOffset ret = as_b(&l, c);
@@ -2487,7 +2490,13 @@ Assembler::as_bl(Label* l, Condition c)
         if (oom())
             return BufferOffset();
 
-        as_bl(BufferOffset(l).diffB<BOffImm>(ret), c, ret);
+        BOffImm offset = BufferOffset(l).diffB<BOffImm>(ret);
+        if (offset.isInvalid()) {
+            m_buffer.fail_bail();
+            return BufferOffset();
+        }
+
+        as_bl(offset, c, ret);
 #ifdef JS_DISASM_ARM
         spewBranch(m_buffer.getInstOrNull(ret), l);
 #endif
@@ -2861,10 +2870,15 @@ Assembler::bind(Label* label, BufferOffset boff)
             more = nextLink(b, &next);
             Instruction branch = *editSrc(b);
             Condition c = branch.extractCond();
+            BOffImm offset = dest.diffB<BOffImm>(b);
+            if (offset.isInvalid()) {
+                m_buffer.fail_bail();
+                return;
+            }
             if (branch.is<InstBImm>())
-                as_b(dest.diffB<BOffImm>(b), c, b);
+                as_b(offset, c, b);
             else if (branch.is<InstBLImm>())
-                as_bl(dest.diffB<BOffImm>(b), c, b);
+                as_bl(offset, c, b);
             else
                 MOZ_CRASH("crazy fixup!");
             b = next;
@@ -2875,12 +2889,12 @@ Assembler::bind(Label* label, BufferOffset boff)
 }
 
 void
-Assembler::bindLater(Label* label, wasm::JumpTarget target)
+Assembler::bindLater(Label* label, wasm::TrapDesc target)
 {
     if (label->used()) {
         BufferOffset b(label);
         do {
-            append(target, b.getOffset());
+            append(wasm::TrapSite(target, b.getOffset()));
         } while (nextLink(b, &b));
     }
     label->reset();
@@ -2907,7 +2921,13 @@ Assembler::bind(RepatchLabel* label)
             cond = p.phd.getCond();
         else
             cond = branch->extractCond();
-        as_b(dest.diffB<BOffImm>(branchOff), cond, branchOff);
+
+        BOffImm offset = dest.diffB<BOffImm>(branchOff);
+        if (offset.isInvalid()) {
+            m_buffer.fail_bail();
+            return;
+        }
+        as_b(offset, cond, branchOff);
     }
     label->bind(dest.getOffset());
 }
@@ -3401,6 +3421,8 @@ Assembler::GetNopFill()
         uint32_t fill;
         if (fillStr && sscanf(fillStr, "%u", &fill) == 1)
             NopFill = fill;
+        if (NopFill > 8)
+            MOZ_CRASH("Nop fill > 8 is not supported");
         isSet = true;
     }
     return NopFill;
@@ -3420,4 +3442,9 @@ Assembler::GetPoolMaxOffset()
         isSet = true;
     }
     return AsmPoolMaxOffset;
+}
+
+SecondScratchRegisterScope::SecondScratchRegisterScope(MacroAssembler &masm)
+  : AutoRegisterScope(masm, masm.getSecondScratchReg())
+{
 }

@@ -80,7 +80,7 @@ GMPContentChild::DeallocPGMPDecryptorChild(PGMPDecryptorChild* aActor)
 }
 
 PGMPVideoDecoderChild*
-GMPContentChild::AllocPGMPVideoDecoderChild()
+GMPContentChild::AllocPGMPVideoDecoderChild(const uint32_t& aDecryptorId)
 {
   GMPVideoDecoderChild* actor = new GMPVideoDecoderChild(this);
   actor->AddRef();
@@ -199,14 +199,14 @@ private:
   GMPDecryptor7* mDecryptorV7;
 };
 
-bool
+mozilla::ipc::IPCResult
 GMPContentChild::RecvPGMPDecryptorConstructor(PGMPDecryptorChild* aActor)
 {
   GMPDecryptorChild* child = static_cast<GMPDecryptorChild*>(aActor);
   GMPDecryptorHost* host = static_cast<GMPDecryptorHost*>(child);
 
   void* ptr = nullptr;
-  GMPErr err = mGMPChild->GetAPI(GMP_API_DECRYPTOR, host, &ptr);
+  GMPErr err = mGMPChild->GetAPI(GMP_API_DECRYPTOR, host, &ptr, aActor->Id());
   GMPDecryptor* decryptor = nullptr;
   if (GMP_SUCCEEDED(err) && ptr) {
     decryptor = static_cast<GMPDecryptor*>(ptr);
@@ -217,17 +217,17 @@ GMPContentChild::RecvPGMPDecryptorConstructor(PGMPDecryptorChild* aActor)
     // members at the end of the key status enumerations.
     err = mGMPChild->GetAPI(GMP_API_DECRYPTOR_BACKWARDS_COMPAT, host, &ptr);
     if (err != GMPNoErr || !ptr) {
-      return false;
+      return IPC_FAIL_NO_REASON(this);
     }
     decryptor = new GMPDecryptor7BackwardsCompat(static_cast<GMPDecryptor7*>(ptr));
   }
 
   child->Init(decryptor);
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 GMPContentChild::RecvPGMPAudioDecoderConstructor(PGMPAudioDecoderChild* aActor)
 {
   auto vdc = static_cast<GMPAudioDecoderChild*>(aActor);
@@ -235,32 +235,33 @@ GMPContentChild::RecvPGMPAudioDecoderConstructor(PGMPAudioDecoderChild* aActor)
   void* vd = nullptr;
   GMPErr err = mGMPChild->GetAPI(GMP_API_AUDIO_DECODER, &vdc->Host(), &vd);
   if (err != GMPNoErr || !vd) {
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
 
   vdc->Init(static_cast<GMPAudioDecoder*>(vd));
 
-  return true;
+  return IPC_OK();
 }
 
-bool
-GMPContentChild::RecvPGMPVideoDecoderConstructor(PGMPVideoDecoderChild* aActor)
+mozilla::ipc::IPCResult
+GMPContentChild::RecvPGMPVideoDecoderConstructor(PGMPVideoDecoderChild* aActor,
+                                                 const uint32_t& aDecryptorId)
 {
   auto vdc = static_cast<GMPVideoDecoderChild*>(aActor);
 
   void* vd = nullptr;
-  GMPErr err = mGMPChild->GetAPI(GMP_API_VIDEO_DECODER, &vdc->Host(), &vd);
+  GMPErr err = mGMPChild->GetAPI(GMP_API_VIDEO_DECODER, &vdc->Host(), &vd, aDecryptorId);
   if (err != GMPNoErr || !vd) {
     NS_WARNING("GMPGetAPI call failed trying to construct decoder.");
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
 
   vdc->Init(static_cast<GMPVideoDecoder*>(vd));
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 GMPContentChild::RecvPGMPVideoEncoderConstructor(PGMPVideoEncoderChild* aActor)
 {
   auto vec = static_cast<GMPVideoEncoderChild*>(aActor);
@@ -269,12 +270,12 @@ GMPContentChild::RecvPGMPVideoEncoderConstructor(PGMPVideoEncoderChild* aActor)
   GMPErr err = mGMPChild->GetAPI(GMP_API_VIDEO_ENCODER, &vec->Host(), &ve);
   if (err != GMPNoErr || !ve) {
     NS_WARNING("GMPGetAPI call failed trying to construct encoder.");
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
 
   vec->Init(static_cast<GMPVideoEncoder*>(ve));
 
-  return true;
+  return IPC_OK();
 }
 
 void

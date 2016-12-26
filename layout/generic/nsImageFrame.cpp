@@ -264,7 +264,7 @@ nsImageFrame::Init(nsIContent*       aContent,
 
   nsCOMPtr<nsIImageLoadingContent> imageLoader = do_QueryInterface(aContent);
   if (!imageLoader) {
-    NS_RUNTIMEABORT("Why do we have an nsImageFrame here at all?");
+    MOZ_CRASH("Why do we have an nsImageFrame here at all?");
   }
 
   imageLoader->AddObserver(mListener);
@@ -870,13 +870,10 @@ nsImageFrame::ComputeSize(nsRenderingContext *aRenderingContext,
     }
   }
 
-  return nsLayoutUtils::ComputeSizeWithIntrinsicDimensions(aWM,
-                            aRenderingContext, this,
-                            intrinsicSize, mIntrinsicRatio,
-                            aCBSize,
-                            aMargin,
-                            aBorder,
-                            aPadding);
+  return ComputeSizeWithIntrinsicDimensions(aRenderingContext, aWM,
+                                            intrinsicSize, mIntrinsicRatio,
+                                            aCBSize, aMargin, aBorder, aPadding,
+                                            aFlags);
 }
 
 // XXXdholbert This function's clients should probably just be calling
@@ -1265,9 +1262,7 @@ struct nsRecessedBorder : public nsStyleBorder {
     : nsStyleBorder(aPresContext)
   {
     NS_FOR_CSS_SIDES(side) {
-      // Note: use SetBorderColor here because we want to make sure
-      // the "special" flags are unset.
-      SetBorderColor(side, NS_RGB(0, 0, 0));
+      mBorderColor[side] = StyleComplexColor::FromColor(NS_RGB(0, 0, 0));
       mBorder.Side(side) = aBorderWidth;
       // Note: use SetBorderStyle here because we want to affect
       // mComputedBorder
@@ -1578,42 +1573,44 @@ nsDisplayImage::GetLayerState(nsDisplayListBuilder* aBuilder,
                               LayerManager* aManager,
                               const ContainerLayerParameters& aParameters)
 {
-  bool animated = false;
-  if (!nsLayoutUtils::AnimatedImageLayersEnabled() ||
-      mImage->GetType() != imgIContainer::TYPE_RASTER ||
-      NS_FAILED(mImage->GetAnimated(&animated)) ||
-      !animated) {
-    if (!aManager->IsCompositingCheap() ||
-        !nsLayoutUtils::GPUImageScalingEnabled()) {
-      return LAYER_NONE;
-    }
-  }
-
-  if (!animated) {
-    int32_t imageWidth;
-    int32_t imageHeight;
-    mImage->GetWidth(&imageWidth);
-    mImage->GetHeight(&imageHeight);
-
-    NS_ASSERTION(imageWidth != 0 && imageHeight != 0, "Invalid image size!");
-
-    const int32_t factor = mFrame->PresContext()->AppUnitsPerDevPixel();
-    const LayoutDeviceRect destRect =
-      LayoutDeviceRect::FromAppUnits(GetDestRect(), factor);
-    const LayerRect destLayerRect = destRect * aParameters.Scale();
-
-    // Calculate the scaling factor for the frame.
-    const gfxSize scale = gfxSize(destLayerRect.width / imageWidth,
-                                  destLayerRect.height / imageHeight);
-
-    // If we are not scaling at all, no point in separating this into a layer.
-    if (scale.width == 1.0f && scale.height == 1.0f) {
-      return LAYER_NONE;
+  if (!nsDisplayItem::ForceActiveLayers()) {
+    bool animated = false;
+    if (!nsLayoutUtils::AnimatedImageLayersEnabled() ||
+        mImage->GetType() != imgIContainer::TYPE_RASTER ||
+        NS_FAILED(mImage->GetAnimated(&animated)) ||
+        !animated) {
+      if (!aManager->IsCompositingCheap() ||
+          !nsLayoutUtils::GPUImageScalingEnabled()) {
+        return LAYER_NONE;
+      }
     }
 
-    // If the target size is pretty small, no point in using a layer.
-    if (destLayerRect.width * destLayerRect.height < 64 * 64) {
-      return LAYER_NONE;
+    if (!animated) {
+      int32_t imageWidth;
+      int32_t imageHeight;
+      mImage->GetWidth(&imageWidth);
+      mImage->GetHeight(&imageHeight);
+
+      NS_ASSERTION(imageWidth != 0 && imageHeight != 0, "Invalid image size!");
+
+      const int32_t factor = mFrame->PresContext()->AppUnitsPerDevPixel();
+      const LayoutDeviceRect destRect =
+        LayoutDeviceRect::FromAppUnits(GetDestRect(), factor);
+      const LayerRect destLayerRect = destRect * aParameters.Scale();
+
+      // Calculate the scaling factor for the frame.
+      const gfxSize scale = gfxSize(destLayerRect.width / imageWidth,
+                                    destLayerRect.height / imageHeight);
+
+      // If we are not scaling at all, no point in separating this into a layer.
+      if (scale.width == 1.0f && scale.height == 1.0f) {
+        return LAYER_NONE;
+      }
+
+      // If the target size is pretty small, no point in using a layer.
+      if (destLayerRect.width * destLayerRect.height < 64 * 64) {
+        return LAYER_NONE;
+      }
     }
   }
 
@@ -1646,9 +1643,10 @@ nsDisplayImage::BuildLayer(nsDisplayListBuilder* aBuilder,
                            LayerManager* aManager,
                            const ContainerLayerParameters& aParameters)
 {
-  uint32_t flags = aBuilder->ShouldSyncDecodeImages()
-                 ? imgIContainer::FLAG_SYNC_DECODE
-                 : imgIContainer::FLAG_NONE;
+  uint32_t flags = imgIContainer::FLAG_ASYNC_NOTIFY;
+  if (aBuilder->ShouldSyncDecodeImages()) {
+    flags |= imgIContainer::FLAG_SYNC_DECODE;
+  }
 
   RefPtr<ImageContainer> container =
     mImage->GetImageContainer(aManager, flags);
@@ -2060,7 +2058,9 @@ nsImageFrame::GetCursor(const nsPoint& aPoint,
       // specified will inherit the style from the image.
       RefPtr<nsStyleContext> areaStyle = 
         PresContext()->PresShell()->StyleSet()->
-          ResolveStyleFor(area->AsElement(), StyleContext());
+          ResolveStyleFor(area->AsElement(), StyleContext(),
+                          ConsumeStyleBehavior::DontConsume,
+                          LazyComputeBehavior::Allow);
       FillCursorInformationFromStyle(areaStyle->StyleUserInterface(),
                                      aCursor);
       if (NS_STYLE_CURSOR_AUTO == aCursor.mCursor) {

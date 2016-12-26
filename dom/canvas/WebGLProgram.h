@@ -130,7 +130,6 @@ class WebGLProgram final
     : public nsWrapperCache
     , public WebGLRefCountedObject<WebGLProgram>
     , public LinkedListElement<WebGLProgram>
-    , public WebGLContextBoundObject
 {
     friend class WebGLTransformFeedback;
 
@@ -145,7 +144,7 @@ public:
     // GL funcs
     void AttachShader(WebGLShader* shader);
     void BindAttribLocation(GLuint index, const nsAString& name);
-    void DetachShader(WebGLShader* shader);
+    void DetachShader(const WebGLShader* shader);
     already_AddRefed<WebGLActiveInfo> GetActiveAttrib(GLuint index) const;
     already_AddRefed<WebGLActiveInfo> GetActiveUniform(GLuint index) const;
     void GetAttachedShaders(nsTArray<RefPtr<WebGLShader>>* const out) const;
@@ -155,11 +154,9 @@ public:
     JS::Value GetProgramParameter(GLenum pname) const;
     GLuint GetUniformBlockIndex(const nsAString& name) const;
     void GetActiveUniformBlockName(GLuint uniformBlockIndex, nsAString& name) const;
-    void GetActiveUniformBlockParam(GLuint uniformBlockIndex, GLenum pname,
-                                    dom::Nullable<dom::OwningUnsignedLongOrUint32ArrayOrBoolean>& retval) const;
-    void GetActiveUniformBlockActiveUniforms(JSContext* cx, GLuint uniformBlockIndex,
-                                             dom::Nullable<dom::OwningUnsignedLongOrUint32ArrayOrBoolean>& retval,
-                                             ErrorResult& rv) const;
+    JS::Value GetActiveUniformBlockParam(GLuint uniformBlockIndex, GLenum pname) const;
+    JS::Value GetActiveUniformBlockActiveUniforms(JSContext* cx, GLuint uniformBlockIndex,
+                                                  ErrorResult* const out_error) const;
     already_AddRefed<WebGLUniformLocation> GetUniformLocation(const nsAString& name) const;
     void GetUniformIndices(const dom::Sequence<nsString>& uniformNames,
                            dom::Nullable< nsTArray<GLuint> >& retval) const;

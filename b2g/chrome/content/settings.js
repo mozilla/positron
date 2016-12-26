@@ -35,10 +35,6 @@ XPCOMUtils.defineLazyServiceGetter(this, "uuidgen",
                                    "@mozilla.org/uuid-generator;1",
                                    "nsIUUIDGenerator");
 
-XPCOMUtils.defineLazyServiceGetter(this, "gPACGenerator",
-                                   "@mozilla.org/pac-generator;1",
-                                   "nsIPACGenerator");
-
 // Once Bug 731746 - Allow chrome JS object to implement nsIDOMEventTarget
 // is resolved this helper could be removed.
 var SettingsListener = {
@@ -130,7 +126,7 @@ SettingsListener.observe('language.current', 'en-US', function(value) {
 // =================== RIL ====================
 (function RILSettingsToPrefs() {
   // DSDS default service IDs
-  ['mms', 'sms', 'telephony', 'voicemail'].forEach(function(key) {
+  ['mms', 'sms', 'telephony'].forEach(function(key) {
     SettingsListener.observe('ril.' + key + '.defaultServiceId', 0,
                              function(value) {
       if (value != null) {
@@ -481,85 +477,8 @@ setUpdateTrackingId();
   });
 })();
 
-// ================ Theme selection ============
-// theme.selected holds the manifest url of the currently used theme.
-SettingsListener.observe("theme.selected",
-                         "app://default_theme.gaiamobile.org/manifest.webapp",
-                         function(value) {
-  if (!value) {
-    return;
-  }
-
-  let newTheme;
-  try {
-    let enabled = Services.prefs.getBoolPref("dom.mozApps.themable");
-    if (!enabled) {
-      return;
-    }
-
-    // Make sure this is a url, and only keep the host part to set the pref.
-    let uri = Services.io.newURI(value, null, null);
-    // We only support overriding in the app:// protocol handler.
-    if (uri.scheme !== "app") {
-      return;
-    }
-    newTheme = uri.host;
-  } catch(e) {
-    return;
-  }
-
-  let currentTheme;
-  try {
-    currentTheme = Services.prefs.getCharPref('dom.mozApps.selected_theme');
-  } catch(e) {};
-
-  if (currentTheme != newTheme) {
-    debug("New theme selected " + value);
-    Services.prefs.setCharPref('dom.mozApps.selected_theme', newTheme);
-    Services.prefs.savePrefFile(null);
-    Services.obs.notifyObservers(null, 'app-theme-changed', newTheme);
-  }
-});
-
-// =================== Proxy server ======================
-(function setupBrowsingProxySettings() {
-  function setPAC() {
-    let usePAC;
-    try {
-      usePAC = Services.prefs.getBoolPref('network.proxy.pac_generator');
-    } catch (ex) {}
-
-    if (usePAC) {
-      Services.prefs.setCharPref('network.proxy.autoconfig_url',
-                                 gPACGenerator.generate());
-      Services.prefs.setIntPref('network.proxy.type',
-                                Ci.nsIProtocolProxyService.PROXYCONFIG_PAC);
-    }
-  }
-
-  SettingsListener.observe('browser.proxy.enabled', false, function(value) {
-    Services.prefs.setBoolPref('network.proxy.browsing.enabled', value);
-    setPAC();
-  });
-
-  SettingsListener.observe('browser.proxy.host', '', function(value) {
-    Services.prefs.setCharPref('network.proxy.browsing.host', value);
-    setPAC();
-  });
-
-  SettingsListener.observe('browser.proxy.port', 0, function(value) {
-    Services.prefs.setIntPref('network.proxy.browsing.port', value);
-    setPAC();
-  });
-
-  setPAC();
-})();
-
 // ======================= Dogfooders FOTA ==========================
 if (AppConstants.MOZ_B2G_RIL) {
-  XPCOMUtils.defineLazyModuleGetter(this, "AppsUtils",
-                                    "resource://gre/modules/AppsUtils.jsm");
-
   SettingsListener.observe('debug.performance_data.dogfooding', false,
     isDogfooder => {
       if (!isDogfooder) {
@@ -576,24 +495,6 @@ if (AppConstants.MOZ_B2G_RIL) {
         dump('AUS:Settings: There is no mozMobileConnections!\n');
         return;
       }
-
-      let conn = navigator.mozMobileConnections[0];
-      conn.addEventListener('radiostatechange', function onradiostatechange() {
-        if (conn.radioState !== 'enabled') {
-          return;
-        }
-
-        conn.removeEventListener('radiostatechange', onradiostatechange);
-        navigator.mozTelephony.dial('*#06#').then(call => {
-          return call.result.then(res => {
-            if (res.success && res.statusMessage
-                && (res.serviceCode === 'scImei')) {
-              Services.prefs.setCharPref("app.update.imei_hash",
-                                         AppsUtils.computeHash(res.statusMessage, "SHA512"));
-            }
-          });
-        });
-      });
     });
 }
 
@@ -639,8 +540,6 @@ var settingsToObserve = {
     resetToPref: true
   },
 
-  'dom.mozApps.use_reviewer_certs': false,
-  'dom.mozApps.signed_apps_installable_from': 'https://marketplace.firefox.com',
   'dom.presentation.discovery.enabled': false,
   'dom.presentation.discoverable': false,
   'dom.serviceWorkers.testing.enabled': false,

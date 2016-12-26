@@ -554,7 +554,9 @@ nsXPCWrappedJSClass::DelegatedQueryInterface(nsXPCWrappedJS* self,
         nsresult rv = nsXPCWrappedJS::GetNewOrUsed(obj, aIID, getter_AddRefs(wrapper));
 
         // Do the same thing we do for the "check for any existing wrapper" case above.
-        *aInstancePtr = wrapper.forget().take()->GetXPTCStub();
+        if (NS_SUCCEEDED(rv) && wrapper) {
+            *aInstancePtr = wrapper.forget().take()->GetXPTCStub();
+        }
         return rv;
     }
 
@@ -971,7 +973,7 @@ nsXPCWrappedJSClass::CallMethod(nsXPCWrappedJS* wrapper, uint16_t methodIndex,
         const char* str = "IDL methods marked with [implicit_jscontext] "
                           "or [optional_argc] may not be implemented in JS";
         // Throw and warn for good measure.
-        JS_ReportErrorASCII(cx, str);
+        JS_ReportErrorASCII(cx, "%s", str);
         NS_WARNING(str);
         return CheckForException(ccx, aes, name, GetInterfaceName());
     }

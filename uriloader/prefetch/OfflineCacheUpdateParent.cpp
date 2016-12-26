@@ -222,12 +222,6 @@ OfflineCacheUpdateParent::GetNestedFrameId(uint64_t* aId)
 }
 
 NS_IMETHODIMP
-OfflineCacheUpdateParent::IsAppOfType(uint32_t appType, bool *_retval)
-{
-    return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
 OfflineCacheUpdateParent::GetIsContent(bool *aIsContent)
 {
     return NS_ERROR_NOT_IMPLEMENTED;
@@ -267,13 +261,6 @@ OfflineCacheUpdateParent::GetIsInIsolatedMozBrowserElement(bool *aIsInIsolatedMo
 {
     NS_ENSURE_TRUE(mLoadingPrincipal, NS_ERROR_UNEXPECTED);
     return mLoadingPrincipal->GetIsInIsolatedMozBrowserElement(aIsInIsolatedMozBrowserElement);
-}
-
-NS_IMETHODIMP
-OfflineCacheUpdateParent::GetAppId(uint32_t *aAppId)
-{
-    NS_ENSURE_TRUE(mLoadingPrincipal, NS_ERROR_UNEXPECTED);
-    return mLoadingPrincipal->GetAppId(aAppId);
 }
 
 NS_IMETHODIMP

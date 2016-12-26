@@ -9,7 +9,9 @@
 #include "mozilla/layers/TextureClient.h"
 #include "base/thread.h"
 #include "MediaInfo.h"
+#include "MediaPrefs.h"
 #include "ImageContainer.h"
+#include "mozilla/layers/SynchronousTask.h"
 
 namespace mozilla {
 namespace dom {
@@ -35,10 +37,18 @@ RemoteVideoDecoder::~RemoteVideoDecoder()
   // task queue for the VideoDecoderChild thread to keep
   // it alive until we send the delete message.
   RefPtr<VideoDecoderChild> actor = mActor;
-  VideoDecoderManagerChild::GetManagerThread()->Dispatch(NS_NewRunnableFunction([actor]() {
+
+  RefPtr<Runnable> task = NS_NewRunnableFunction([actor]() {
     MOZ_ASSERT(actor);
     actor->DestroyIPDL();
-  }), NS_DISPATCH_NORMAL);
+  });
+
+  // Drop out references to the actor so that the last ref
+  // always gets released on the manager thread.
+  actor = nullptr;
+  mActor = nullptr;
+
+  VideoDecoderManagerChild::GetManagerThread()->Dispatch(task.forget(), NS_DISPATCH_NORMAL);
 }
 
 RefPtr<MediaDataDecoder::InitPromise>
@@ -73,11 +83,12 @@ void
 RemoteVideoDecoder::Flush()
 {
   MOZ_ASSERT(mCallback->OnReaderTaskQueue());
-  RefPtr<RemoteVideoDecoder> self = this;
-  VideoDecoderManagerChild::GetManagerThread()->Dispatch(NS_NewRunnableFunction([self]() {
-    MOZ_ASSERT(self->mActor);
-    self->mActor->Flush();
+  SynchronousTask task("Decoder flush");
+  VideoDecoderManagerChild::GetManagerThread()->Dispatch(NS_NewRunnableFunction([&]() {
+    MOZ_ASSERT(this->mActor);
+    this->mActor->Flush(&task);
   }), NS_DISPATCH_NORMAL);
+  task.Wait();
 }
 
 void
@@ -95,17 +106,40 @@ void
 RemoteVideoDecoder::Shutdown()
 {
   MOZ_ASSERT(mCallback->OnReaderTaskQueue());
+  SynchronousTask task("Shutdown");
   RefPtr<RemoteVideoDecoder> self = this;
-  VideoDecoderManagerChild::GetManagerThread()->Dispatch(NS_NewRunnableFunction([self]() {
+  VideoDecoderManagerChild::GetManagerThread()->Dispatch(NS_NewRunnableFunction([&]() {
+    AutoCompleteTask complete(&task);
     MOZ_ASSERT(self->mActor);
     self->mActor->Shutdown();
   }), NS_DISPATCH_NORMAL);
+  task.Wait();
+}
+
+bool
+RemoteVideoDecoder::IsHardwareAccelerated(nsACString& aFailureReason) const
+{
+  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
+  return mActor->IsHardwareAccelerated(aFailureReason);
+}
+
+void
+RemoteVideoDecoder::SetSeekThreshold(const media::TimeUnit& aTime)
+{
+  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
+  RefPtr<RemoteVideoDecoder> self = this;
+  media::TimeUnit time = aTime;
+  VideoDecoderManagerChild::GetManagerThread()->Dispatch(NS_NewRunnableFunction([=]() {
+    MOZ_ASSERT(self->mActor);
+    self->mActor->SetSeekThreshold(time);
+  }), NS_DISPATCH_NORMAL);
+
 }
 
 nsresult
 RemoteDecoderModule::Startup()
 {
-  if (!VideoDecoderManagerChild::GetSingleton()) {
+  if (!VideoDecoderManagerChild::GetManagerThread()) {
     return NS_ERROR_FAILURE;
   }
   return mWrapped->Startup();
@@ -127,16 +161,29 @@ RemoteDecoderModule::DecoderNeedsConversion(const TrackInfo& aConfig) const
 already_AddRefed<MediaDataDecoder>
 RemoteDecoderModule::CreateVideoDecoder(const CreateDecoderParams& aParams)
 {
+  if (!MediaPrefs::PDMUseGPUDecoder() ||
+      !aParams.mKnowsCompositor ||
+      aParams.mKnowsCompositor->GetTextureFactoryIdentifier().mParentProcessType != GeckoProcessType_GPU) {
+    return nullptr;
+  }
+
   MediaDataDecoderCallback* callback = aParams.mCallback;
   MOZ_ASSERT(callback->OnReaderTaskQueue());
   RefPtr<RemoteVideoDecoder> object = new RemoteVideoDecoder(callback);
 
-  VideoInfo info = aParams.VideoConfig();
-
-  layers::LayersBackend backend = aParams.mLayersBackend;
-  VideoDecoderManagerChild::GetManagerThread()->Dispatch(NS_NewRunnableFunction([object, callback, info, backend]() {
-    object->mActor->InitIPDL(callback, info, backend);
+  SynchronousTask task("InitIPDL");
+  bool success;
+  VideoDecoderManagerChild::GetManagerThread()->Dispatch(NS_NewRunnableFunction([&]() {
+    AutoCompleteTask complete(&task);
+    success = object->mActor->InitIPDL(callback,
+                                       aParams.VideoConfig(),
+                                       aParams.mKnowsCompositor->GetTextureFactoryIdentifier());
   }), NS_DISPATCH_NORMAL);
+  task.Wait();
+
+  if (!success) {
+    return nullptr;
+  }
 
   return object.forget();
 }

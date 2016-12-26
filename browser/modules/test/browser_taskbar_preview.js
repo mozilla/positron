@@ -42,7 +42,7 @@ function test() {
   for (let preview of AeroPeek.previews)
     ok(preview.visible, "Preview is shown as expected after re-enabling");
 
-  [1, 2, 3, 4].forEach(function (idx) {
+  [1, 2, 3, 4].forEach(function(idx) {
     gBrowser.selectedTab = gBrowser.tabs[idx];
     ok(checkSelectedTab(), "Current tab is correctly selected");
   });
@@ -96,9 +96,5 @@ function test() {
 
   function checkSelectedTab() {
     return getPreviewForTab(gBrowser.selectedTab).active;
-  }
-
-  function isTabSelected(idx) {
-    return gBrowser.tabs[idx].selected;
   }
 }

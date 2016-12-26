@@ -131,6 +131,12 @@ interface Element : Node {
    */
   void releaseCapture();
 
+  /*
+   * Chrome-only version of setCapture that works outside of a mousedown event.
+   */
+  [ChromeOnly]
+  void setCaptureAlways(optional boolean retargetToElement = false);
+
   // Mozilla extensions
 
   // Obsolete methods.
@@ -208,14 +214,6 @@ partial interface Element {
                readonly attribute long scrollLeftMax;
 };
 
-// http://dvcs.w3.org/hg/undomanager/raw-file/tip/undomanager.html
-partial interface Element {
-  [Pref="dom.undo_manager.enabled"]
-  readonly attribute UndoManager? undoManager;
-  [SetterThrows,Pref="dom.undo_manager.enabled"]
-  attribute boolean undoScope;
-};
-
 // http://domparsing.spec.whatwg.org/#extensions-to-the-element-interface
 partial interface Element {
   [Pure,SetterThrows,TreatNullAs=EmptyString]
@@ -252,16 +250,16 @@ Element implements GeometryUtils;
 
 // https://fullscreen.spec.whatwg.org/#api
 partial interface Element {
-  [Throws, UnsafeInPrerendering, Func="nsDocument::IsUnprefixedFullscreenEnabled"]
+  [Throws, UnsafeInPrerendering, Func="nsDocument::IsUnprefixedFullscreenEnabled", NeedsCallerType]
   void requestFullscreen();
-  [Throws, UnsafeInPrerendering, BinaryName="requestFullscreen"]
+  [Throws, UnsafeInPrerendering, BinaryName="requestFullscreen", NeedsCallerType]
   void mozRequestFullScreen();
 };
 
 // https://w3c.github.io/pointerlock/#extensions-to-the-element-interface
 partial interface Element {
-  [UnsafeInPrerendering]
+  [UnsafeInPrerendering, NeedsCallerType]
   void requestPointerLock();
-  [UnsafeInPrerendering, BinaryName="requestPointerLock", Pref="pointer-lock-api.prefixed.enabled"]
+  [UnsafeInPrerendering, BinaryName="requestPointerLock", Pref="pointer-lock-api.prefixed.enabled", NeedsCallerType]
   void mozRequestPointerLock();
 };

@@ -153,7 +153,7 @@ public:
 
     // OnSVGDocumentParsed will release our owner's reference to us, so ensure
     // we stick around long enough to complete our work.
-    RefPtr<SVGParseCompleteListener> kungFuDeathGroup(this);
+    RefPtr<SVGParseCompleteListener> kungFuDeathGrip(this);
 
     mImage->OnSVGDocumentParsed();
   }
@@ -212,7 +212,7 @@ public:
 
     // OnSVGDocumentLoaded/OnSVGDocumentError will release our owner's reference
     // to us, so ensure we stick around long enough to complete our work.
-    RefPtr<SVGLoadEventListener> kungFuDeathGroup(this);
+    RefPtr<SVGLoadEventListener> kungFuDeathGrip(this);
 
     nsAutoString eventType;
     aEvent->GetType(eventType);
@@ -382,6 +382,10 @@ VectorImage::Init(const char* aMimeType,
 size_t
 VectorImage::SizeOfSourceWithComputedFallback(MallocSizeOf aMallocSizeOf) const
 {
+  if (!mSVGDocumentWrapper) {
+    return 0; // No document, so no memory used for the document.
+  }
+
   nsIDocument* doc = mSVGDocumentWrapper->GetDocument();
   if (!doc) {
     return 0; // No document, so no memory used for the document.
@@ -536,8 +540,8 @@ VectorImage::RequestRefresh(const TimeStamp& aTime)
   mSVGDocumentWrapper->TickRefreshDriver();
 
   if (mHasPendingInvalidation) {
-    SendInvalidationNotifications();
     mHasPendingInvalidation = false;
+    SendInvalidationNotifications();
   }
 }
 
@@ -831,8 +835,8 @@ VectorImage::Draw(gfxContext* aContext,
     return DrawResult::TEMPORARY_ERROR;
   }
 
-  if (mAnimationConsumers == 0 && mProgressTracker) {
-    mProgressTracker->OnUnlockedDraw();
+  if (mAnimationConsumers == 0) {
+    SendOnUnlockedDraw(aFlags);
   }
 
   AutoRestore<bool> autoRestoreIsDrawing(mIsDrawing);
@@ -981,8 +985,19 @@ VectorImage::CreateSurfaceAndShow(const SVGDrawingParameters& aParams, BackendTy
 
   // Send out an invalidation so that surfaces that are still in use get
   // re-locked. See the discussion of the UnlockSurfaces call above.
-  mProgressTracker->SyncNotifyProgress(FLAG_FRAME_COMPLETE,
-                                       GetMaxSizedIntRect());
+  if (!(aParams.flags & FLAG_ASYNC_NOTIFY)) {
+    mProgressTracker->SyncNotifyProgress(FLAG_FRAME_COMPLETE,
+                                         GetMaxSizedIntRect());
+  } else {
+    NotNull<RefPtr<VectorImage>> image = WrapNotNull(this);
+    NS_DispatchToMainThread(NS_NewRunnableFunction([=]() -> void {
+      RefPtr<ProgressTracker> tracker = image->GetProgressTracker();
+      if (tracker) {
+        tracker->SyncNotifyProgress(FLAG_FRAME_COMPLETE,
+                                    GetMaxSizedIntRect());
+      }
+    }));
+  }
 }
 
 
@@ -1011,10 +1026,17 @@ VectorImage::RecoverFromLossOfSurfaces()
 }
 
 NS_IMETHODIMP
-VectorImage::StartDecoding()
+VectorImage::StartDecoding(uint32_t aFlags)
 {
   // Nothing to do for SVG images
   return NS_OK;
+}
+
+bool
+VectorImage::StartDecodingWithResult(uint32_t aFlags)
+{
+  // SVG images are ready to draw when they are loaded
+  return mIsFullyLoaded;
 }
 
 NS_IMETHODIMP
@@ -1140,6 +1162,10 @@ VectorImage::OnStartRequest(nsIRequest* aRequest, nsISupports* aCtxt)
     return rv;
   }
 
+  // ProgressTracker::SyncNotifyProgress may release us, so ensure we
+  // stick around long enough to complete our work.
+  RefPtr<VectorImage> kungFuDeathGrip(this);
+
   // Block page load until the document's ready.  (We unblock it in
   // OnSVGDocumentLoaded or OnSVGDocumentError.)
   if (mProgressTracker) {
@@ -1219,6 +1245,10 @@ VectorImage::OnSVGDocumentLoaded()
 
   // Start listening to our image for rendering updates.
   mRenderingObserver = new SVGRootRenderingObserver(mSVGDocumentWrapper, this);
+
+  // ProgressTracker::SyncNotifyProgress may release us, so ensure we
+  // stick around long enough to complete our work.
+  RefPtr<VectorImage> kungFuDeathGrip(this);
 
   // Tell *our* observers that we're done loading.
   if (mProgressTracker) {

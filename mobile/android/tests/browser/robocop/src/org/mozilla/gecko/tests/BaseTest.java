@@ -32,6 +32,7 @@ import android.os.Build;
 import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentActivity;
 import android.support.v4.app.FragmentManager;
+import android.support.v7.widget.RecyclerView;
 import android.text.TextUtils;
 import android.util.DisplayMetrics;
 import android.view.View;
@@ -67,7 +68,8 @@ abstract class BaseTest extends BaseRobocopTest {
 
     protected void blockForDelayedStartup() {
         try {
-            Actions.EventExpecter delayedStartupExpector = mActions.expectGeckoEvent("Gecko:DelayedStartup");
+            Actions.EventExpecter delayedStartupExpector =
+                    mActions.expectGlobalEvent(Actions.EventType.UI, "Gecko:DelayedStartup");
             delayedStartupExpector.blockForEvent(GECKO_READY_WAIT_MS, true);
             delayedStartupExpector.unregisterListener();
         } catch (Exception e) {
@@ -77,7 +79,8 @@ abstract class BaseTest extends BaseRobocopTest {
 
     protected void blockForGeckoReady() {
         try {
-            Actions.EventExpecter geckoReadyExpector = mActions.expectGeckoEvent("Gecko:Ready");
+            Actions.EventExpecter geckoReadyExpector =
+                    mActions.expectGlobalEvent(Actions.EventType.GECKO, "Gecko:Ready");
             if (!GeckoThread.isRunning()) {
                 geckoReadyExpector.blockForEvent(GECKO_READY_WAIT_MS, true);
             }
@@ -152,7 +155,8 @@ abstract class BaseTest extends BaseRobocopTest {
     }
 
     protected final void hitEnterAndWait() {
-        Actions.EventExpecter contentEventExpecter = mActions.expectGeckoEvent("DOMContentLoaded");
+        Actions.EventExpecter contentEventExpecter =
+                mActions.expectGlobalEvent(Actions.EventType.GECKO, "Content:DOMContentLoaded");
         mActions.sendSpecialKey(Actions.SpecialKey.ENTER);
         // wait for screen to load
         contentEventExpecter.blockForEvent();
@@ -195,7 +199,8 @@ abstract class BaseTest extends BaseRobocopTest {
      * <code>org.mozilla.gecko.Tabs</code> API and wait for DOMContentLoaded.
      */
     protected final void loadUrlAndWait(final String url) {
-        Actions.EventExpecter contentEventExpecter = mActions.expectGeckoEvent("DOMContentLoaded");
+        Actions.EventExpecter contentEventExpecter =
+                mActions.expectGlobalEvent(Actions.EventType.GECKO, "Content:DOMContentLoaded");
         loadUrl(url);
         contentEventExpecter.blockForEvent();
         contentEventExpecter.unregisterListener();
@@ -612,14 +617,14 @@ abstract class BaseTest extends BaseRobocopTest {
     }
 
     /**
-     * Gets the AdapterView of the tabs list.
+     * Gets the RecyclerView of the tabs list.
      *
      * @return List view in the tabs panel
      */
-    private final AdapterView<ListAdapter> getTabsLayout() {
+    private final RecyclerView getTabsLayout() {
         Element tabs = mDriver.findElement(getActivity(), R.id.tabs);
         tabs.click();
-        return (AdapterView<ListAdapter>) getActivity().findViewById(R.id.normal_tabs);
+        return (RecyclerView) getActivity().findViewById(R.id.normal_tabs);
     }
 
     /**
@@ -630,12 +635,12 @@ abstract class BaseTest extends BaseRobocopTest {
     private View getTabViewAt(final int index) {
         final View[] childView = { null };
 
-        final AdapterView<ListAdapter> view = getTabsLayout();
+        final RecyclerView view = getTabsLayout();
 
         runOnUiThreadSync(new Runnable() {
             @Override
             public void run() {
-                view.setSelection(index);
+                view.scrollToPosition(index);
 
                 // The selection isn't updated synchronously; posting a
                 // runnable to the view's queue guarantees we'll run after the
@@ -643,11 +648,10 @@ abstract class BaseTest extends BaseRobocopTest {
                 view.post(new Runnable() {
                     @Override
                     public void run() {
-                        // getChildAt() is relative to the list of visible
-                        // views, but our index is relative to all views in the
-                        // list. Subtract the first visible list position for
-                        // the correct offset.
-                        childView[0] = view.getChildAt(index - view.getFirstVisiblePosition());
+                        // Index is relative to all views in the list.
+                        final RecyclerView.ViewHolder itemViewHolder =
+                                view.findViewHolderForLayoutPosition(index);
+                        childView[0] = itemViewHolder == null ? null : itemViewHolder.itemView;
                     }
                 });
             }

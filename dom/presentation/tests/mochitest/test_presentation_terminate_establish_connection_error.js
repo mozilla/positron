@@ -138,6 +138,15 @@ function testConnectionTerminate() {
       };
     }),
     new Promise(function(aResolve, aReject) {
+      function deviceDisconnectedHandler() {
+        gScript.removeMessageListener('device-disconnected', deviceDisconnectedHandler);
+        ok(true, 'should not receive device disconnect');
+        aResolve();
+      }
+
+      gScript.addMessageListener('device-disconnected', deviceDisconnectedHandler);
+    }),
+    new Promise(function(aResolve, aReject) {
       receiverIframe.addEventListener('mozbrowserclose', function() {
         ok(true, 'observe receiver page closing');
         aResolve();
@@ -181,6 +190,7 @@ SpecialPowers.pushPermissions([
                                       ["dom.presentation.receiver.enabled", true],
                                       ['dom.presentation.test.enabled', true],
                                       ['dom.mozBrowserFramesEnabled', true],
+                                      ["network.disable.ipc.security", true],
                                       ['dom.ipc.tabs.disabled', false],
                                       ['dom.presentation.test.stage', 0]]},
                             runTests);

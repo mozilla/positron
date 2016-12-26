@@ -5,10 +5,13 @@
 
 'use strict';
 
+/* import-globals-from ../../../content/contentAreaUtils.js */
+
 // Firefox's macBrowserOverlay.xul includes scripts that define Cc, Ci, and Cr
 // so we have to use different names.
 const {classes: CoC, interfaces: CoI, results: CoR, utils: CoU} = Components;
 
+/* globals DownloadUtils, Services, AUSTLMY */
 CoU.import("resource://gre/modules/DownloadUtils.jsm", this);
 CoU.import("resource://gre/modules/Services.jsm", this);
 CoU.import("resource://gre/modules/UpdateTelemetry.jsm", this);
@@ -228,7 +231,7 @@ var gUpdates = {
     return this.strings.getString(key);
   },
 
-  never: function () {
+  never: function() {
     // If the user clicks "No Thanks", we should not prompt them to update to
     // this version again unless they manually select "Check for Updates..."
     // which will clear all of the "never" prefs. There are currently two
@@ -305,7 +308,7 @@ var gUpdates = {
    * Helper function for onLoad
    * Saves default button label & accesskey for use by _setButton
    */
-  _cacheButtonStrings: function (buttonName) {
+  _cacheButtonStrings: function(buttonName) {
     var button = this.wiz.getButton(buttonName);
     button.defaultLabel = button.label;
     button.defaultAccesskey = button.getAttribute("accesskey");
@@ -1279,9 +1282,8 @@ var gFinishedPage = {
     }
 
     if (getPref("getBoolPref", PREF_APP_UPDATE_TEST_LOOP, false)) {
-      setTimeout(function () {
-                   gUpdates.wiz.getButton("finish").click();
-                 }, UPDATE_TEST_LOOP_INTERVAL);
+      setTimeout(function() { gUpdates.wiz.getButton("finish").click(); },
+                 UPDATE_TEST_LOOP_INTERVAL);
     }
   },
 

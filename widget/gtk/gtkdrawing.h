@@ -145,8 +145,11 @@ typedef enum {
   MOZ_GTK_ENTRY,
   /* Paints a GtkExpander. */
   MOZ_GTK_EXPANDER,
-  /* Paints a GtkTextView. */
+  /* Paints the text window or gets the style context corresponding to the
+     root node of a GtkTextView. */
   MOZ_GTK_TEXT_VIEW,
+  /* The "text" window or node of a GtkTextView */
+  MOZ_GTK_TEXT_VIEW_TEXT,
   /* Paints a GtkOptionMenu. */
   MOZ_GTK_DROPDOWN,
   /* Paints a dropdown arrow (a GtkButton containing a down GtkArrow). */
@@ -160,11 +163,15 @@ typedef enum {
   MOZ_GTK_TOOLBAR_SEPARATOR,
   /* Paints a GtkToolTip */
   MOZ_GTK_TOOLTIP,
+  /* Paints a GtkBox from GtkToolTip  */
+  MOZ_GTK_TOOLTIP_BOX,
+  /* Paints a GtkLabel of GtkToolTip */
+  MOZ_GTK_TOOLTIP_BOX_LABEL,
   /* Paints a GtkFrame (e.g. a status bar panel). */
   MOZ_GTK_FRAME,
   /* Paints the border of a GtkFrame */
   MOZ_GTK_FRAME_BORDER,
-  /* Paints a resize grip for a GtkWindow */
+  /* Paints a resize grip for a GtkTextView */
   MOZ_GTK_RESIZER,
   /* Paints a GtkProgressBar. */
   MOZ_GTK_PROGRESSBAR,
@@ -210,11 +217,13 @@ typedef enum {
   MOZ_GTK_MENUBARITEM,
   /* Paints items of popup menus. */
   MOZ_GTK_MENUITEM,
-  MOZ_GTK_IMAGEMENUITEM,
-  MOZ_GTK_CHECKMENUITEM_CONTAINER,
-  MOZ_GTK_RADIOMENUITEM_CONTAINER,
+  /* Paints a menuitem with check indicator, or the gets the style context for
+     a menuitem that contains a checkbox. */
   MOZ_GTK_CHECKMENUITEM,
+  /* Gets the style context for a checkbox in a check menuitem. */
+  MOZ_GTK_CHECKMENUITEM_INDICATOR,
   MOZ_GTK_RADIOMENUITEM,
+  MOZ_GTK_RADIOMENUITEM_INDICATOR,
   MOZ_GTK_MENUSEPARATOR,
   /* GtkVPaned base class */
   MOZ_GTK_SPLITTER_HORIZONTAL,
@@ -230,6 +239,22 @@ typedef enum {
   MOZ_GTK_WINDOW_CONTAINER,
   /* Paints a GtkInfoBar, for notifications. */
   MOZ_GTK_INFO_BAR,
+  /* Used for widget tree construction. */
+  MOZ_GTK_COMBOBOX,
+  /* Paints a GtkComboBox button widget. */
+  MOZ_GTK_COMBOBOX_BUTTON,
+  /* Paints a GtkComboBox arrow widget. */
+  MOZ_GTK_COMBOBOX_ARROW,
+  /* Paints a GtkComboBox separator widget. */
+  MOZ_GTK_COMBOBOX_SEPARATOR,
+  /* Used for widget tree construction. */
+  MOZ_GTK_COMBOBOX_ENTRY,
+  /* Paints a GtkComboBox entry widget. */
+  MOZ_GTK_COMBOBOX_ENTRY_TEXTAREA,
+  /* Paints a GtkComboBox entry button widget. */
+  MOZ_GTK_COMBOBOX_ENTRY_BUTTON,
+  /* Paints a GtkComboBox entry arrow widget. */
+  MOZ_GTK_COMBOBOX_ENTRY_ARROW,
   /* Used for scrolled window shell. */
   MOZ_GTK_SCROLLED_WINDOW,
 
@@ -509,6 +534,13 @@ moz_gtk_get_tab_thickness(WidgetNodeType aNodeType);
  * If TRUE, draw scrollbar buttons.
  */
 gboolean moz_gtk_has_scrollbar_buttons(void);
+
+/**
+ * Get minimum widget size as sum of margin, padding, border and min-width,
+ * min-height.
+ */
+void moz_gtk_get_widget_min_size(WidgetNodeType aGtkWidgetType, int* width,
+                                 int* height);
 
 #if (MOZ_WIDGET_GTK == 2)
 #ifdef __cplusplus

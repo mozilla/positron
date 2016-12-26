@@ -127,7 +127,9 @@ MOZCONFIG_OUT_FILTERED := $(filter-out $(START_COMMENT)%,$(MOZCONFIG_OUT_LINES))
 ifdef AUTOCLOBBER
 export AUTOCLOBBER=1
 endif
+ifdef MOZ_PGO
 export MOZ_PGO
+endif
 
 ifdef MOZ_PARALLEL_BUILD
   MOZ_MAKE_FLAGS := $(filter-out -j%,$(MOZ_MAKE_FLAGS))
@@ -326,6 +328,10 @@ CONFIG_STATUS_DEPS := \
   $(TOPSRCDIR)/testing/mozbase/packages.txt \
   $(OBJDIR)/.mozconfig.json \
   $(NULL)
+
+# Include a dep file emitted by configure to track Python files that
+# may influence the result of configure.
+-include $(OBJDIR)/configure.d
 
 CONFIGURE_ENV_ARGS += \
   MAKE='$(MAKE)' \

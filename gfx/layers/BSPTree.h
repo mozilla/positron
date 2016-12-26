@@ -7,6 +7,7 @@
 #define MOZILLA_LAYERS_BSPTREE_H
 
 #include "mozilla/gfx/Polygon.h"
+#include "mozilla/Move.h"
 #include "mozilla/UniquePtr.h"
 #include "nsTArray.h"
 
@@ -19,14 +20,20 @@ class Layer;
 
 // Represents a layer that might have a non-rectangular geometry.
 struct LayerPolygon {
-  LayerPolygon(gfx::Polygon3D&& aGeometry, Layer *aLayer)
-    : layer(aLayer), geometry(Some(aGeometry)) {}
-
   explicit LayerPolygon(Layer *aLayer)
     : layer(aLayer) {}
 
+  LayerPolygon(Layer *aLayer,
+               gfx::Polygon&& aGeometry)
+    : layer(aLayer), geometry(Some(aGeometry)) {}
+
+  LayerPolygon(Layer *aLayer,
+               nsTArray<gfx::Point4D>&& aPoints,
+               const gfx::Point4D& aNormal)
+    : layer(aLayer), geometry(Some(gfx::Polygon(Move(aPoints), aNormal))) {}
+
   Layer *layer;
-  Maybe<gfx::Polygon3D> geometry;
+  Maybe<gfx::Polygon> geometry;
 };
 
 LayerPolygon PopFront(std::deque<LayerPolygon>& aLayers);
@@ -37,10 +44,10 @@ LayerPolygon PopFront(std::deque<LayerPolygon>& aLayers);
 struct BSPTreeNode {
   explicit BSPTreeNode(LayerPolygon&& layer)
   {
-    layers.push_back(std::move(layer));
+    layers.push_back(Move(layer));
   }
 
-  const gfx::Polygon3D& First() const
+  const gfx::Polygon& First() const
   {
     MOZ_ASSERT(layers[0].geometry);
     return *layers[0].geometry;

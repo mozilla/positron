@@ -4,11 +4,12 @@
 
 import os
 
-from firefox_ui_harness.testcases import FirefoxTestCase
+from firefox_puppeteer import PuppeteerMixin
 from marionette_driver import Wait
+from marionette_harness import MarionetteTestCase
 
 
-class TestSafeBrowsingInitialDownload(FirefoxTestCase):
+class TestSafeBrowsingInitialDownload(PuppeteerMixin, MarionetteTestCase):
 
     file_extensions = [
         'pset',
@@ -32,6 +33,7 @@ class TestSafeBrowsingInitialDownload(FirefoxTestCase):
     }
 
     prefs_safebrowsing = {
+        'browser.safebrowsing.debug': True,
         'browser.safebrowsing.blockedURIs.enabled': True,
         'browser.safebrowsing.downloads.enabled': True,
         'browser.safebrowsing.phishing.enabled': True,
@@ -50,7 +52,7 @@ class TestSafeBrowsingInitialDownload(FirefoxTestCase):
         return set(sorted(files))
 
     def setUp(self):
-        FirefoxTestCase.setUp(self)
+        super(TestSafeBrowsingInitialDownload, self).setUp()
 
         # Force the preferences for the new profile
         enforce_prefs = self.prefs_safebrowsing
@@ -66,7 +68,7 @@ class TestSafeBrowsingInitialDownload(FirefoxTestCase):
             # Restart with a fresh profile
             self.restart(clean=True)
         finally:
-            FirefoxTestCase.tearDown(self)
+            super(TestSafeBrowsingInitialDownload, self).tearDown()
 
     def test_safe_browsing_initial_download(self):
         def check_downloaded(_):

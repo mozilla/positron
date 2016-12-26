@@ -14,7 +14,6 @@
 #include "mozilla/Variant.h"
 #include "mozilla/XorShift128PlusRNG.h"
 
-#include "asmjs/WasmCompartment.h"
 #include "builtin/RegExp.h"
 #include "gc/Barrier.h"
 #include "gc/NurseryAwareHashMap.h"
@@ -23,6 +22,7 @@
 #include "vm/PIC.h"
 #include "vm/SavedStacks.h"
 #include "vm/Time.h"
+#include "wasm/WasmCompartment.h"
 
 namespace js {
 
@@ -84,7 +84,7 @@ class CrossCompartmentKey
 
     explicit CrossCompartmentKey(JSObject* obj) : wrapped(obj) { MOZ_RELEASE_ASSERT(obj); }
     explicit CrossCompartmentKey(JSString* str) : wrapped(str) { MOZ_RELEASE_ASSERT(str); }
-    explicit CrossCompartmentKey(JS::Value v)
+    explicit CrossCompartmentKey(const JS::Value& v)
       : wrapped(v.isString() ? WrappedType(v.toString()) : WrappedType(&v.toObject()))
     {}
     explicit CrossCompartmentKey(NativeObject* debugger, JSObject* obj, DebuggerObjectKind kind)
@@ -337,6 +337,13 @@ struct JSCompartment
         isSystem_ = isSystem;
     }
 
+    bool isAtomsCompartment() const {
+        return isAtomsCompartment_;
+    }
+    void setIsAtomsCompartment() {
+        isAtomsCompartment_ = true;
+    }
+
     // Used to approximate non-content code when reporting telemetry.
     inline bool isProbablySystemOrAddonCode() const {
         if (creationOptions_.addonIdOrNull())
@@ -347,11 +354,14 @@ struct JSCompartment
   private:
     JSPrincipals*                principals_;
     bool                         isSystem_;
+    bool                         isAtomsCompartment_;
+
   public:
     bool                         isSelfHosting;
     bool                         marked;
     bool                         warnedAboutExprClosure;
     bool                         warnedAboutForEach;
+    uint32_t                     warnedAboutStringGenericsMethods;
 
 #ifdef DEBUG
     bool                         firedOnNewGlobalObject;
@@ -708,7 +718,7 @@ struct JSCompartment
     // 1. When a compartment's isDebuggee() == true, relazification and lazy
     //    parsing are disabled.
     //
-    //    Whether AOT asm.js is disabled is togglable by the Debugger API. By
+    //    Whether AOT wasm is disabled is togglable by the Debugger API. By
     //    default it is disabled. See debuggerObservesAsmJS below.
     //
     // 2. When a compartment's debuggerObservesAllExecution() == true, all of
@@ -755,9 +765,9 @@ struct JSCompartment
     // True if this compartment's global is a debuggee of some Debugger object
     // whose allowUnobservedAsmJS flag is false.
     //
-    // Note that since AOT asm.js functions cannot bail out, this flag really
-    // means "observe asm.js from this point forward". We cannot make
-    // already-compiled asm.js code observable to Debugger.
+    // Note that since AOT wasm functions cannot bail out, this flag really
+    // means "observe wasm from this point forward". We cannot make
+    // already-compiled wasm code observable to Debugger.
     bool debuggerObservesAsmJS() const {
         static const unsigned Mask = IsDebuggee | DebuggerObservesAsmJS;
         return (debugModeBits & Mask) == Mask;
@@ -1041,7 +1051,7 @@ class MOZ_RAII AutoWrapperVector : public JS::AutoVectorRooterBase<WrapperValue>
 
 class MOZ_RAII AutoWrapperRooter : private JS::AutoGCRooter {
   public:
-    AutoWrapperRooter(JSContext* cx, WrapperValue v
+    AutoWrapperRooter(JSContext* cx, const WrapperValue& v
                       MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : JS::AutoGCRooter(cx, WRAPPER), value(v)
     {

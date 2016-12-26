@@ -306,7 +306,28 @@ var AddonTestUtils = {
         testScope.do_print(`Got exception removing addon app dir: ${ex}`);
       }
 
-      var testDir = this.profileDir.clone();
+      // ensure no leftover files in the system addon upgrade location
+      let featuresDir = this.profileDir.clone();
+      featuresDir.append("features");
+      // upgrade directories will be in UUID folders under features/
+      let systemAddonDirs = [];
+      if (featuresDir.exists()) {
+        let featuresDirEntries = featuresDir.directoryEntries
+                                            .QueryInterface(Ci.nsIDirectoryEnumerator);
+        while (featuresDirEntries.hasMoreElements()) {
+          let entry = featuresDirEntries.getNext();
+          entry.QueryInterface(Components.interfaces.nsIFile);
+          systemAddonDirs.push(entry);
+        }
+
+        systemAddonDirs.map(dir => {
+          dir.append("stage");
+          pathShouldntExist(dir);
+        });
+      }
+
+      // ensure no leftover files in the user addon location
+      let testDir = this.profileDir.clone();
       testDir.append("extensions");
       testDir.append("trash");
       pathShouldntExist(testDir);
@@ -853,6 +874,7 @@ var AddonTestUtils = {
         for (let part of entry.split("/"))
           target.append(part);
         zip.extract(entry, target);
+        target.permissions |= FileUtils.PERMS_FILE;
       }
       zip.close();
 
@@ -993,7 +1015,7 @@ var AddonTestUtils = {
    *
    * @param {AddonInstall} install
    *        The add-on to install.
-   * @returns {Promise}
+   * @returns {Promise<AddonInstall>}
    *        Resolves when the install completes, either successfully or
    *        in failure.
    */
@@ -1013,6 +1035,7 @@ var AddonTestUtils = {
       install.install();
     }).then(() => {
       install.removeListener(listener);
+      return install;
     });
   },
 
@@ -1028,17 +1051,17 @@ var AddonTestUtils = {
    *        Resolves when the install has completed.
    */
   promiseInstallFile(file, ignoreIncompatible = false) {
-    return new Promise((resolve, reject) => {
-      AddonManager.getInstallForFile(file, install => {
-        if (!install)
-          reject(new Error(`No AddonInstall created for ${file.path}`));
-        else if (install.state != AddonManager.STATE_DOWNLOADED)
-          reject(new Error(`Expected file to be downloaded for install of ${file.path}`));
-        else if (ignoreIncompatible && install.addon.appDisabled)
-          resolve();
-        else
-          resolve(this.promiseCompleteInstall(install));
-      });
+    return AddonManager.getInstallForFile(file).then(install => {
+      if (!install)
+        throw new Error(`No AddonInstall created for ${file.path}`);
+
+      if (install.state != AddonManager.STATE_DOWNLOADED)
+        throw new Error(`Expected file to be downloaded for install of ${file.path}`);
+
+      if (ignoreIncompatible && install.addon.appDisabled)
+        return null;
+
+      return this.promiseCompleteInstall(install);
     });
   },
 
@@ -1064,40 +1087,62 @@ var AddonTestUtils = {
   },
 
   /**
-   * A promise-based variant of AddonManager.getAddonsByIDs.
+   * Returns a promise that will be resolved when an add-on update check is
+   * complete. The value resolved will be an AddonInstall if a new version was
+   * found.
    *
-   * @param {Array<string>} list
-   *        As the first argument of AddonManager.getAddonsByIDs
-   * @return {Promise<Array<Addon>>}
-   *        Resolves to the array of add-ons for the given IDs.
+   * @param {object} addon The add-on to find updates for.
+   * @param {integer} reason The type of update to find.
+   * @return {Promise<object>} an object containing information about the update.
    */
-  promiseAddonsByIDs(list) {
-    return new Promise(resolve => AddonManager.getAddonsByIDs(list, resolve));
-  },
+  promiseFindAddonUpdates(addon, reason = AddonManager.UPDATE_WHEN_PERIODIC_UPDATE) {
+    let equal = this.testScope.equal;
+    return new Promise((resolve, reject) => {
+      let result = {};
+      addon.findUpdates({
+        onNoCompatibilityUpdateAvailable: function(addon2) {
+          if ("compatibilityUpdate" in result) {
+            throw new Error("Saw multiple compatibility update events");
+          }
+          equal(addon, addon2, "onNoCompatibilityUpdateAvailable");
+          result.compatibilityUpdate = false;
+        },
 
-  /**
-   * A promise-based variant of AddonManager.getAddonByID.
-   *
-   * @param {string} id
-   *        The ID of the add-on.
-   * @return {Promise<Addon>}
-   *        Resolves to the add-on with the given ID.
-   */
-  promiseAddonByID(id) {
-    return new Promise(resolve => AddonManager.getAddonByID(id, resolve));
-  },
+        onCompatibilityUpdateAvailable: function(addon2) {
+          if ("compatibilityUpdate" in result) {
+            throw new Error("Saw multiple compatibility update events");
+          }
+          equal(addon, addon2, "onCompatibilityUpdateAvailable");
+          result.compatibilityUpdate = true;
+        },
 
-  /**
-   * A promise-based variant of AddonManager.getAddonsWithOperationsByTypes
-   *
-   * @param {Array<string>} types
-   *        The first argument to AddonManager.getAddonsWithOperationsByTypes
-   * @return {Promise<Array<Addon>>}
-   *        Resolves to an array of add-ons with the given operations
-   *        pending.
-   */
-  promiseAddonsWithOperationsByTypes(types) {
-    return new Promise(resolve => AddonManager.getAddonsWithOperationsByTypes(types, resolve));
+        onNoUpdateAvailable: function(addon2) {
+          if ("updateAvailable" in result) {
+            throw new Error("Saw multiple update available events");
+          }
+          equal(addon, addon2, "onNoUpdateAvailable");
+          result.updateAvailable = false;
+        },
+
+        onUpdateAvailable: function(addon2, install) {
+          if ("updateAvailable" in result) {
+            throw new Error("Saw multiple update available events");
+          }
+          equal(addon, addon2, "onUpdateAvailable");
+          result.updateAvailable = install;
+        },
+
+        onUpdateFinished: function(addon2, error) {
+          equal(addon, addon2, "onUpdateFinished");
+          if (error == AddonManager.UPDATE_STATUS_NO_ERROR) {
+            resolve(result);
+          } else {
+            result.error = error;
+            reject(result);
+          }
+        }
+      }, reason);
+    });
   },
 
   /**

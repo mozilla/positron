@@ -108,11 +108,15 @@ const Cr = Components.results;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "ExtensionUtils",
+                                  "resource://gre/modules/ExtensionUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
                                   "resource://gre/modules/PromiseUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
 
+XPCOMUtils.defineLazyGetter(this, "MessageManagerProxy",
+                            () => ExtensionUtils.MessageManagerProxy);
 
 /**
  * Handles the mapping and dispatching of messages to their registered
@@ -273,8 +277,6 @@ class FilteringMessageManagerMap extends Map {
 
 const MESSAGE_MESSAGE = "MessageChannel:Message";
 const MESSAGE_RESPONSE = "MessageChannel:Response";
-
-let gChannelId = 0;
 
 this.MessageChannel = {
   init() {
@@ -510,7 +512,7 @@ this.MessageChannel = {
     let recipient = options.recipient || {};
     let responseType = options.responseType || this.RESPONSE_SINGLE;
 
-    let channelId = `${gChannelId++}-${Services.appinfo.uniqueProcessID}`;
+    let channelId = ExtensionUtils.getUniqueId();
     let message = {messageName, channelId, sender, recipient, data, responseType};
 
     if (responseType == this.RESPONSE_NONE) {
@@ -610,14 +612,6 @@ this.MessageChannel = {
    * @param {nsIMessageSender|{messageManager:nsIMessageSender}} data.target
    */
   _handleMessage(handlers, data) {
-    // The target passed to `receiveMessage` is sometimes a message manager
-    // owner instead of a message manager, so make sure to convert it to a
-    // message manager first if necessary.
-    let {target} = data;
-    if (!(target instanceof Ci.nsIMessageSender)) {
-      target = target.messageManager;
-    }
-
     if (data.responseType == this.RESPONSE_NONE) {
       handlers.forEach(handler => {
         // The sender expects no reply, so dump any errors to the console.
@@ -630,6 +624,8 @@ this.MessageChannel = {
       // Note: Unhandled messages are silently dropped.
       return;
     }
+
+    let target = new MessageManagerProxy(data.target);
 
     let deferred = {
       sender: data.sender,
@@ -673,6 +669,10 @@ this.MessageChannel = {
         }
 
         target.sendAsyncMessage(MESSAGE_RESPONSE, response);
+      }).catch(e => {
+        Cu.reportError(e);
+      }).then(() => {
+        target.dispose();
       });
 
     this._addPendingResponse(deferred);
@@ -771,7 +771,7 @@ this.MessageChannel = {
    */
   abortMessageManager(target, reason) {
     for (let response of this.pendingResponses) {
-      if (response.messageManager === target) {
+      if (MessageManagerProxy.matches(response.messageManager, target)) {
         response.reject(reason);
       }
     }

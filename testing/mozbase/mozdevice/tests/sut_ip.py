@@ -1,7 +1,10 @@
-#/usr/bin/env python
+#!/usr/bin/env python
 import mozdevice
 import logging
 import unittest
+
+import mozunit
+
 from sut import MockAgent
 
 
@@ -34,4 +37,4 @@ class TestGetIP(unittest.TestCase):
         self.assertRaises(mozdevice.DMError, d.getIP, interfaces=['fake0'])
 
 if __name__ == '__main__':
-    unittest.main()
+    mozunit.main()

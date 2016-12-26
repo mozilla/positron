@@ -40,9 +40,7 @@ python/**
 rdf/**
 startupcache/**
 testing/**
-!tools/lint/eslint/eslint-plugin-mozilla/
-tools/lint/eslint/eslint-plugin-mozilla/node_modules/**
-tools/**
+tools/update-packaging/**
 uriloader/**
 view/**
 widget/**
@@ -57,6 +55,7 @@ b2g/locales/en-US/b2g-l10n.js
 
 # browser/ exclusions
 browser/app/**
+browser/branding/**/firefox-branding.js
 browser/base/content/browser-social.js
 browser/base/content/nsContextMenu.js
 browser/base/content/sanitizeDialog.js
@@ -64,77 +63,59 @@ browser/base/content/test/general/file_csp_block_all_mixedcontent.html
 browser/base/content/test/urlbar/file_blank_but_not_blank.html
 browser/base/content/newtab/**
 browser/components/downloads/**
-browser/components/feeds/**
 browser/components/privatebrowsing/**
 browser/components/sessionstore/**
 browser/components/tabview/**
-browser/components/translation/**
+# generated files in cld2
+browser/components/translation/cld2/cld-worker.js
 browser/extensions/pdfjs/**
 # generated or library files in pocket
 browser/extensions/pocket/content/panels/js/tmpl.js
 browser/extensions/pocket/content/panels/js/vendor/**
 browser/locales/**
+# imported from chromium
+browser/extensions/mortar/**
 
 # devtools/ exclusions
 devtools/client/canvasdebugger/**
 devtools/client/commandline/**
 devtools/client/debugger/**
-devtools/client/eyedropper/**
 devtools/client/framework/**
 !devtools/client/framework/selection.js
 !devtools/client/framework/toolbox.js
-devtools/client/jsonview/lib/**
-devtools/client/memory/**
 devtools/client/netmonitor/test/**
 devtools/client/netmonitor/har/test/**
 devtools/client/projecteditor/**
-devtools/client/promisedebugger/**
 devtools/client/responsivedesign/**
 devtools/client/scratchpad/**
 devtools/client/shadereditor/**
 devtools/client/shared/*.jsm
 devtools/client/shared/webgl-utils.js
-devtools/client/shared/developer-toolbar.js
-devtools/client/shared/components/test/**
-devtools/client/shared/redux/middleware/test/**
-devtools/client/shared/test/**
-!devtools/client/shared/test/test-actor-registry.js
 devtools/client/shared/widgets/*.jsm
-devtools/client/sourceeditor/test/*.js
 devtools/client/webaudioeditor/**
-devtools/client/webconsole/**
-!devtools/client/webconsole/panel.js
-!devtools/client/webconsole/jsterm.js
-!devtools/client/webconsole/console-commands.js
+devtools/client/webconsole/net/**
+devtools/client/webconsole/test/**
+devtools/client/webconsole/console-output.js
+devtools/client/webconsole/hudservice.js
+devtools/client/webconsole/utils.js
+devtools/client/webconsole/webconsole-connection-proxy.js
+devtools/client/webconsole/webconsole.js
 devtools/client/webide/**
 !devtools/client/webide/components/webideCli.js
-devtools/server/*.js
-devtools/server/*.jsm
-!devtools/server/child.js
-!devtools/server/css-logic.js
-!devtools/server/main.js
-!devtools/server/websocket-server.js
-devtools/server/actors/**
+devtools/server/actors/*.js
+!devtools/server/actors/csscoverage.js
 !devtools/server/actors/inspector.js
-!devtools/server/actors/highlighters/css-grid.js
-!devtools/server/actors/highlighters/eye-dropper.js
+!devtools/server/actors/layout.js
+!devtools/server/actors/string.js
+!devtools/server/actors/styles.js
+!devtools/server/actors/tab.js
 !devtools/server/actors/webbrowser.js
 !devtools/server/actors/webextension.js
-!devtools/server/actors/styles.js
-!devtools/server/actors/string.js
-!devtools/server/actors/csscoverage.js
-devtools/server/performance/**
-devtools/server/tests/**
-devtools/shared/*.js
-!devtools/shared/async-storage.js
-!devtools/shared/async-utils.js
-!devtools/shared/defer.js
-!devtools/shared/event-emitter.js
-!devtools/shared/indentation.js
-!devtools/shared/loader-plugin-raw.jsm
-!devtools/shared/task.js
-devtools/shared/*.jsm
-!devtools/shared/Loader.jsm
+!devtools/server/actors/webextension-inspected-window.js
+devtools/server/tests/browser/**
+!devtools/server/tests/browser/browser_webextension_inspected_window.js
+devtools/server/tests/mochitest/**
+devtools/server/tests/unit/**
 devtools/shared/apps/**
 devtools/shared/client/**
 devtools/shared/discovery/**
@@ -142,7 +123,6 @@ devtools/shared/gcli/**
 !devtools/shared/gcli/templater.js
 devtools/shared/heapsnapshot/**
 devtools/shared/layout/**
-devtools/shared/locales/**
 devtools/shared/performance/**
 !devtools/shared/platform/**
 devtools/shared/qrcode/**
@@ -178,6 +158,7 @@ devtools/client/shared/demangle.js
 devtools/client/shared/vendor/*
 devtools/client/sourceeditor/codemirror/*.js
 devtools/client/sourceeditor/codemirror/**/*.js
+devtools/client/sourceeditor/test/cm_mode_ruby.js
 devtools/client/sourceeditor/test/codemirror/*
 devtools/client/inspector/markup/test/lib_*
 devtools/client/jsonview/lib/require.js
@@ -242,7 +223,6 @@ toolkit/components/reader/JSDOMParser.js
 # Uses preprocessing
 toolkit/content/widgets/wizard.xml
 toolkit/components/jsdownloads/src/DownloadIntegration.jsm
-toolkit/components/search/nsSearchService.js
 toolkit/components/url-classifier/**
 toolkit/components/urlformatter/nsURLFormatter.js
 toolkit/identity/FirefoxAccounts.jsm

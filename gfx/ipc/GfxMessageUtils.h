@@ -25,6 +25,7 @@
 #include "mozilla/layers/LayersTypes.h"
 #include "nsRect.h"
 #include "nsRegion.h"
+#include "mozilla/Array.h"
 
 #include <stdint.h>
 
@@ -699,6 +700,19 @@ struct ParamTraits<mozilla::layers::FrameMetrics::ScrollOffsetUpdateType>
              mozilla::layers::FrameMetrics::ScrollOffsetUpdateType::eSentinel>
 {};
 
+template<>
+struct ParamTraits<mozilla::layers::LayerHandle>
+{
+  typedef mozilla::layers::LayerHandle paramType;
+
+  static void Write(Message* msg, const paramType& param) {
+    WriteParam(msg, param.mHandle);
+  }
+  static bool Read(const Message* msg, PickleIterator* iter, paramType* result) {
+    return ReadParam(msg, iter, &result->mHandle);
+  }
+};
+
 // Helper class for reading bitfields.
 // If T has bitfields members, derive ParamTraits<T> from BitfieldHelper<T>.
 template <typename ParamType>
@@ -876,6 +890,14 @@ struct ParamTraits<mozilla::layers::ScrollMetadata>
 };
 
 template<>
+struct ParamTraits<GeckoProcessType>
+  : public ContiguousEnumSerializer<
+             GeckoProcessType,
+             GeckoProcessType_Default,
+             GeckoProcessType_End>
+{};
+
+template<>
 struct ParamTraits<mozilla::layers::TextureFactoryIdentifier>
 {
   typedef mozilla::layers::TextureFactoryIdentifier paramType;
@@ -883,18 +905,22 @@ struct ParamTraits<mozilla::layers::TextureFactoryIdentifier>
   static void Write(Message* aMsg, const paramType& aParam)
   {
     WriteParam(aMsg, aParam.mParentBackend);
+    WriteParam(aMsg, aParam.mParentProcessType);
     WriteParam(aMsg, aParam.mMaxTextureSize);
     WriteParam(aMsg, aParam.mSupportsTextureBlitting);
     WriteParam(aMsg, aParam.mSupportsPartialUploads);
+    WriteParam(aMsg, aParam.mSupportsComponentAlpha);
     WriteParam(aMsg, aParam.mSyncHandle);
   }
 
   static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
   {
     bool result = ReadParam(aMsg, aIter, &aResult->mParentBackend) &&
+                  ReadParam(aMsg, aIter, &aResult->mParentProcessType) &&
                   ReadParam(aMsg, aIter, &aResult->mMaxTextureSize) &&
                   ReadParam(aMsg, aIter, &aResult->mSupportsTextureBlitting) &&
                   ReadParam(aMsg, aIter, &aResult->mSupportsPartialUploads) &&
+                  ReadParam(aMsg, aIter, &aResult->mSupportsComponentAlpha) &&
                   ReadParam(aMsg, aIter, &aResult->mSyncHandle);
     return result;
   }
@@ -940,6 +966,14 @@ struct ParamTraits<mozilla::StereoMode>
              mozilla::StereoMode,
              mozilla::StereoMode::MONO,
              mozilla::StereoMode::MAX>
+{};
+
+template <>
+struct ParamTraits<mozilla::YUVColorSpace>
+  : public ContiguousEnumSerializer<
+             mozilla::YUVColorSpace,
+             mozilla::YUVColorSpace::BT601,
+             mozilla::YUVColorSpace::UNKNOWN>
 {};
 
 template <>
@@ -1245,6 +1279,42 @@ struct ParamTraits<mozilla::layers::AsyncDragMetrics>
             ReadParam(aMsg, aIter, &aResult->mScrollbarDragOffset) &&
             ReadParam(aMsg, aIter, &aResult->mScrollTrack) &&
             ReadParam(aMsg, aIter, &aResult->mDirection));
+  }
+};
+
+template <>
+struct ParamTraits<mozilla::gfx::Glyph>
+{
+  typedef mozilla::gfx::Glyph paramType;
+  static void Write(Message* aMsg, const paramType& aParam) {
+    WriteParam(aMsg, aParam.mIndex);
+    WriteParam(aMsg, aParam.mPosition);
+  }
+
+  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult) {
+    return (ReadParam(aMsg, aIter, &aResult->mIndex) &&
+            ReadParam(aMsg, aIter, &aResult->mPosition)
+      );
+  }
+};
+
+template<typename T, size_t Length>
+struct ParamTraits<mozilla::Array<T, Length>>
+{
+  typedef mozilla::Array<T, Length> paramType;
+  static void Write(Message* aMsg, const paramType& aParam) {
+    for (size_t i = 0; i < Length; i++) {
+      WriteParam(aMsg, aParam[i]);
+    }
+  }
+
+  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult) {
+    for (size_t i = 0; i < Length; i++) {
+      if (!ReadParam(aMsg, aIter, &aResult[i])) {
+        return false;
+      }
+    }
+    return true;
   }
 };
 

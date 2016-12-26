@@ -7,6 +7,8 @@
 #ifndef jit_CompileInfo_h
 #define jit_CompileInfo_h
 
+#include "mozilla/Maybe.h"
+
 #include "jsfun.h"
 
 #include "jit/JitAllocPolicy.h"
@@ -195,10 +197,10 @@ enum AnalysisMode {
 class CompileInfo
 {
   public:
-    CompileInfo(JSScript* script, JSFunction* fun, jsbytecode* osrPc, bool constructing,
+    CompileInfo(JSScript* script, JSFunction* fun, jsbytecode* osrPc,
                 AnalysisMode analysisMode, bool scriptNeedsArgsObj,
                 InlineScriptTree* inlineScriptTree)
-      : script_(script), fun_(fun), osrPc_(osrPc), constructing_(constructing),
+      : script_(script), fun_(fun), osrPc_(osrPc),
         analysisMode_(analysisMode), scriptNeedsArgsObj_(scriptNeedsArgsObj),
         hadOverflowBailout_(script->hadOverflowBailout()),
         mayReadFrameArgsDirectly_(script->mayReadFrameArgsDirectly()),
@@ -221,10 +223,27 @@ class CompileInfo
         nlocals_ = script->nfixed();
         nstack_ = Max<unsigned>(script->nslots() - script->nfixed(), MinJITStackSize);
         nslots_ = nimplicit_ + nargs_ + nlocals_ + nstack_;
+
+        // For derived class constructors, find and cache the frame slot for
+        // the .this binding. This slot is assumed to be always
+        // observable. See isObservableFrameSlot.
+        if (script->isDerivedClassConstructor()) {
+            MOZ_ASSERT(script->functionHasThisBinding());
+            CompileRuntime* runtime = GetJitContext()->runtime;
+            for (BindingIter bi(script); bi; bi++) {
+                if (bi.name() != runtime->names().dotThis)
+                    continue;
+                BindingLocation loc = bi.location();
+                if (loc.kind() == BindingLocation::Kind::Frame) {
+                    thisSlotForDerivedClassConstructor_ = mozilla::Some(localSlot(loc.slot()));
+                    break;
+                }
+            }
+        }
     }
 
     explicit CompileInfo(unsigned nlocals)
-      : script_(nullptr), fun_(nullptr), osrPc_(nullptr), constructing_(false),
+      : script_(nullptr), fun_(nullptr), osrPc_(nullptr),
         analysisMode_(Analysis_None), scriptNeedsArgsObj_(false),
         mayReadFrameArgsDirectly_(false), inlineScriptTree_(nullptr)
     {
@@ -238,7 +257,7 @@ class CompileInfo
     JSScript* script() const {
         return script_;
     }
-    bool compilingAsmJS() const {
+    bool compilingWasm() const {
         return script() == nullptr;
     }
     JSFunction* funMaybeLazy() const {
@@ -246,9 +265,6 @@ class CompileInfo
     }
     ModuleObject* module() const {
         return script_->module();
-    }
-    bool constructing() const {
-        return constructing_;
     }
     jsbytecode* osrPc() const {
         return osrPc_;
@@ -440,6 +456,13 @@ class CompileInfo
         if (slot == thisSlot())
             return true;
 
+        // The |this| frame slot in derived class constructors should never be
+        // optimized out, as a Debugger might need to perform TDZ checks on it
+        // via, e.g., an exceptionUnwind handler. The TDZ check is required
+        // for correctness if the handler decides to continue execution.
+        if (thisSlotForDerivedClassConstructor_ && *thisSlotForDerivedClassConstructor_ == slot)
+            return true;
+
         if (funMaybeLazy()->needsSomeEnvironmentObject() && slot == environmentChainSlot())
             return true;
 
@@ -506,10 +529,10 @@ class CompileInfo
     unsigned nlocals_;
     unsigned nstack_;
     unsigned nslots_;
+    mozilla::Maybe<unsigned> thisSlotForDerivedClassConstructor_;
     JSScript* script_;
     JSFunction* fun_;
     jsbytecode* osrPc_;
-    bool constructing_;
     AnalysisMode analysisMode_;
 
     // Whether a script needs an arguments object is unstable over compilation

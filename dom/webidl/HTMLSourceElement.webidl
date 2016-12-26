@@ -11,6 +11,7 @@
  * and create derivative works of this document.
  */
 
+[HTMLConstructor]
 interface HTMLSourceElement : HTMLElement {
            [SetterThrows]
            attribute DOMString src;
@@ -19,9 +20,9 @@ interface HTMLSourceElement : HTMLElement {
 };
 
 partial interface HTMLSourceElement {
-           [SetterThrows, Pref="dom.image.picture.enabled"]
+           [SetterThrows]
            attribute DOMString srcset;
-           [SetterThrows, Pref="dom.image.picture.enabled"]
+           [SetterThrows]
            attribute DOMString sizes;
            [SetterThrows]
            attribute DOMString media;

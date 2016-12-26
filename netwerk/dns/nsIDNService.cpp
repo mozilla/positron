@@ -326,11 +326,8 @@ nsresult nsIDNService::ACEtoUTF8(const nsACString & input, nsACString & _retval,
 
 NS_IMETHODIMP nsIDNService::IsACE(const nsACString & input, bool *_retval)
 {
-  nsACString::const_iterator begin;
-  input.BeginReading(begin);
-
-  const char *data = begin.get();
-  uint32_t dataLen = begin.size_forward();
+  const char *data = input.BeginReading();
+  uint32_t dataLen = input.Length();
 
   // look for the ACE prefix in the input string.  it may occur
   // at the beginning of any segment in the domain name.  for
@@ -718,7 +715,7 @@ nsresult nsIDNService::decodeACE(const nsACString& in, nsACString& out,
   // RFC 3490 - 4.2 ToUnicode
   // The ToUnicode output never contains more code points than its input.
   punycode_uint output_length = in.Length() - kACEPrefixLen + 1;
-  punycode_uint *output = new punycode_uint[output_length];
+  auto *output = new punycode_uint[output_length];
   NS_ENSURE_TRUE(output, NS_ERROR_OUT_OF_MEMORY);
 
   enum punycode_status status = punycode_decode(in.Length() - kACEPrefixLen,
@@ -817,12 +814,11 @@ bool nsIDNService::isLabelSafe(const nsAString &label)
     }
 
     // Check for restricted characters; aspirational scripts are permitted
-    XidmodType xm = GetIdentifierModification(ch);
-    if (xm != XIDMOD_RECOMMENDED &&
-        xm != XIDMOD_INCLUSION &&
-        xm != XIDMOD_ASPIRATIONAL) {
+    IdentifierType idType = GetIdentifierType(ch);
+    if (idType == IDTYPE_RESTRICTED) {
       return false;
     }
+    MOZ_ASSERT(idType == IDTYPE_ALLOWED || idType == IDTYPE_ASPIRATIONAL);
 
     // Check for mixed script
     Script script = GetScriptCode(ch);

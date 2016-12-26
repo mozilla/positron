@@ -56,20 +56,20 @@ add_task(function* init() {
 
   yield new Promise((resolve, reject) => {
     info("adding search history values: " + kValues);
-    let ops = kValues.map(value => { return {op: "add",
+    let addOps = kValues.map(value => { return {op: "add",
                                              fieldname: "searchbar-history",
                                              value: value}
                                    });
-    searchbar.FormHistory.update(ops, {
+    searchbar.FormHistory.update(addOps, {
       handleCompletion: function() {
         registerCleanupFunction(() => {
           info("removing search history values: " + kValues);
-          let ops =
+          let removeOps =
             kValues.map(value => { return {op: "remove",
                                            fieldname: "searchbar-history",
                                            value: value}
                                  });
-          searchbar.FormHistory.update(ops);
+          searchbar.FormHistory.update(removeOps);
         });
         resolve();
       },
@@ -132,7 +132,6 @@ add_task(function* open_empty() {
   textbox.value = "foo";
 
   promise = promiseEvent(searchPopup, "popuphidden");
-  let clickPromise = promiseEvent(searchIcon, "click");
 
   info("Hiding popup");
   yield synthesizeNativeMouseClick(searchIcon);
@@ -281,7 +280,7 @@ add_task(function* contextmenu_closes_popup() {
 
   promise = promiseEvent(searchPopup, "popuphidden");
 
-  //synthesizeKey does not work with VK_CONTEXT_MENU (bug 1127368)
+  // synthesizeKey does not work with VK_CONTEXT_MENU (bug 1127368)
   EventUtils.synthesizeMouseAtCenter(textbox, { type: "contextmenu", button: null });
 
   yield promise;

@@ -60,6 +60,13 @@ public:
   bool TextureSharingWorks();
   bool IsWARP();
 
+  // Returns true if we can create a texture with
+  // D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX and also
+  // upload texture data during the CreateTexture2D
+  // call. This crashes on some devices, so we might
+  // need to avoid it.
+  bool CanInitializeKeyedMutexTextures();
+
   bool CreateCompositorDevices();
   void CreateContentDevices();
 
@@ -69,9 +76,22 @@ public:
   void ResetDevices();
   void InitializeDirectDraw();
 
-  // Call GetDeviceRemovedReason on each device until one returns
-  // a failure.
-  bool GetAnyDeviceRemovedReason(DeviceResetReason* aOutReason);
+  // Reset and reacquire the devices if a reset has happened.
+  // Returns whether a reset occurred not whether reacquiring
+  // was successful.
+  bool MaybeResetAndReacquireDevices();
+
+  // Test whether we can acquire a DXGI 1.2-compatible adapter. This should
+  // only be called on startup before devices are initialized.
+  bool CheckRemotePresentSupport();
+
+  // Device reset helpers.
+  bool HasDeviceReset(DeviceResetReason* aOutReason = nullptr);
+
+  // Note: these set the cached device reset reason, which will be picked up
+  // on the next frame.
+  void ForceDeviceReset(ForcedDeviceResetReason aReason);
+  void NotifyD3D9DeviceReset();
 
 private:
   IDXGIAdapter1 *GetDXGIAdapter();
@@ -100,6 +120,10 @@ private:
   bool LoadD3D11();
   void ReleaseD3D11();
 
+  // Call GetDeviceRemovedReason on each device until one returns
+  // a failure.
+  bool GetAnyDeviceRemovedReason(DeviceResetReason* aOutReason);
+
 private:
   static StaticAutoPtr<DeviceManagerDx> sInstance;
 
@@ -120,6 +144,8 @@ private:
 
   nsModuleHandle mDirectDrawDLL;
   RefPtr<IDirectDraw7> mDirectDraw;
+
+  Maybe<DeviceResetReason> mDeviceResetReason;
 };
 
 } // namespace gfx

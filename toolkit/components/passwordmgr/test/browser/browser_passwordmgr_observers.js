@@ -1,8 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-function test() {
-  waitForExplicitFinish();
+add_task(function* test() {
+  yield new Promise(resolve => {
 
   const LOGIN_HOST = "http://example.com";
   const LOGIN_COUNT = 5;
@@ -19,7 +19,7 @@ function test() {
   let modifiedLogin;
   let testNumber = 0;
   let testObserver = {
-    observe: function (subject, topic, data) {
+    observe: function(subject, topic, data) {
       if (topic == "passwordmgr-dialog-updated") {
         switch (testNumber) {
           case 1:
@@ -122,8 +122,10 @@ function test() {
         Services.obs.removeObserver(
           testObserver, "passwordmgr-dialog-updated", false);
         pmDialog.close();
-        finish();
+        resolve();
         break;
     }
   }
-}
+
+  });
+});

@@ -53,16 +53,29 @@ SplitAt(const char* aDelims,
 }
 
 nsCString
-ToBase64(const nsTArray<uint8_t>& aBytes)
+ToHexString(const uint8_t * aBytes, uint32_t aLength)
 {
-  nsAutoCString base64;
-  nsDependentCSubstring raw(reinterpret_cast<const char*>(aBytes.Elements()),
-                            aBytes.Length());
-  nsresult rv = Base64Encode(raw, base64);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return NS_LITERAL_CSTRING("[Base64EncodeFailed]");
+  static const char hex[] = {
+    '0', '1', '2', '3',
+    '4', '5', '6', '7',
+    '8', '9', 'a', 'b',
+    'c', 'd', 'e', 'f'
+  };
+  nsCString str;
+  for (uint32_t i = 0; i < aLength; i++) {
+    char buf[3];
+    buf[0] = hex[(aBytes[i] & 0xf0) >> 4];
+    buf[1] = hex[aBytes[i] & 0x0f];
+    buf[2] = 0;
+    str.AppendASCII(buf);
   }
-  return base64;
+  return str;
+}
+
+nsCString
+ToHexString(const nsTArray<uint8_t>& aBytes)
+{
+  return ToHexString(aBytes.Elements(), aBytes.Length());
 }
 
 bool
@@ -207,5 +220,23 @@ GMPInfoFileParser::Get(const nsCString& aKey) const {
   }
   return EmptyCString();
 }
+
+bool
+HaveGMPFor(const nsCString& aAPI,
+           nsTArray<nsCString>&& aTags)
+{
+  nsCOMPtr<mozIGeckoMediaPluginService> mps =
+    do_GetService("@mozilla.org/gecko-media-plugin-service;1");
+  if (NS_WARN_IF(!mps)) {
+    return false;
+  }
+
+  bool hasPlugin = false;
+  if (NS_FAILED(mps->HasPluginForAPI(aAPI, &aTags, &hasPlugin))) {
+    return false;
+  }
+  return hasPlugin;
+}
+
 
 } // namespace mozilla

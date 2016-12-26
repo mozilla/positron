@@ -5,7 +5,6 @@ from __future__ import print_function
 import argparse
 import json
 import os
-import signal
 import socket
 import sys
 import threading
@@ -16,15 +15,15 @@ import uuid
 from collections import defaultdict, OrderedDict
 from multiprocessing import Process, Event
 
-from .. import localpaths
+from ..localpaths import repo_root
 
 import sslutils
+from manifest.sourcefile import meta_re
 from wptserve import server as wptserve, handlers
 from wptserve import stash
 from wptserve.logger import set_logger
+from wptserve.handlers import filesystem_path
 from mod_pywebsocket import standalone as pywebsocket
-
-repo_root = localpaths.repo_root
 
 def replace_end(s, old, new):
     """
@@ -35,38 +34,71 @@ def replace_end(s, old, new):
     return s[:-len(old)] + new
 
 
-class WorkersHandler(object):
-    def __init__(self):
+class BaseWorkerHandler(object):
+    source_suffix = None
+    url_suffix = None
+    path_suffix = None
+    response_template = None
+
+    def __init__(self, base_path=None, url_base="/"):
+        self.base_path = base_path
+        self.url_base = url_base
         self.handler = handlers.handler(self.handle_request)
 
     def __call__(self, request, response):
         return self.handler(request, response)
 
     def handle_request(self, request, response):
-        worker_path = replace_end(request.url_parts.path, ".worker", ".worker.js")
-        return """<!doctype html>
+        url_path = replace_end(request.url_parts.path, self.source_suffix, self.url_suffix)
+        meta = self._get_meta(request)
+        return self.response_template % {"meta": meta, "url_path": url_path}
+
+    def _get_meta(self, request):
+        path = filesystem_path(self.base_path, request, self.url_base)
+        path = replace_end(path, self.source_suffix, self.path_suffix)
+        meta_values = []
+        with open(path) as f:
+            for line in f:
+                m = meta_re.match(line)
+                if m:
+                    name, content = m.groups()
+                    name = name.replace('"', '\\"').replace(">", "&gt;")
+                    content = content.replace('"', '\\"').replace(">", "&gt;")
+                    meta_values.append((name, content))
+        return "\n".join('<meta name="%s" content="%s">' % item for item in meta_values)
+
+
+class WorkerHandler(BaseWorkerHandler):
+    source_suffix = ".worker.html"
+    url_suffix = ".worker.js"
+    path_suffix = ".worker.js"
+
+    response_template = """<!doctype html>
 <meta charset=utf-8>
+%(meta)s
 <script src="/resources/testharness.js"></script>
 <script src="/resources/testharnessreport.js"></script>
 <div id=log></div>
 <script>
-fetch_tests_from_worker(new Worker("%s"));
+fetch_tests_from_worker(new Worker("%(url_path)s"));
 </script>
-""" % (worker_path,)
+"""
 
 
-class AnyHtmlHandler(object):
-    def __init__(self):
-        self.handler = handlers.handler(self.handle_request)
+class AnyWorkerHandler(WorkerHandler):
+    source_suffix = ".any.worker.html"
+    url_suffix = ".any.worker.js"
+    path_suffix = ".any.js"
 
-    def __call__(self, request, response):
-        return self.handler(request, response)
 
-    def handle_request(self, request, response):
-        test_path = replace_end(request.url_parts.path, ".any.html", ".any.js")
-        return """\
-<!doctype html>
+class AnyHtmlHandler(BaseWorkerHandler):
+    source_suffix = ".any.html"
+    url_suffix = ".any.js"
+    path_suffix = ".any.js"
+
+    response_template =  """<!doctype html>
 <meta charset=utf-8>
+%(meta)s
 <script>
 self.GLOBAL = {
   isWindow: function() { return true; },
@@ -76,37 +108,38 @@ self.GLOBAL = {
 <script src="/resources/testharness.js"></script>
 <script src="/resources/testharnessreport.js"></script>
 <div id=log></div>
-<script src="%s"></script>
-""" % (test_path,)
+<script src="%(url_path)s"></script>
+"""
 
 
-class AnyWorkerHandler(object):
-    def __init__(self):
-        self.handler = handlers.handler(self.handle_request)
+class AnyWorkerScriptHandler(BaseWorkerHandler):
+    source_suffix = ".any.worker.js"
+    url_suffix = ".any.js"
+    path_suffix = None
 
-    def __call__(self, request, response):
-        return self.handler(request, response)
-
-    def handle_request(self, request, response):
-        test_path = replace_end(request.url_parts.path, ".any.worker.js", ".any.js")
-        return """\
+    response_template = """\
 self.GLOBAL = {
   isWindow: function() { return false; },
   isWorker: function() { return true; },
 };
 importScripts("/resources/testharness.js");
-importScripts("%s");
+importScripts("%(url_path)s");
 done();
-""" % (test_path,)
+"""
+
+    def _get_meta(self, path):
+        return None
 
 
 rewrites = [("GET", "/resources/WebIDLParser.js", "/resources/webidl2/lib/webidl2.js")]
+
 
 subdomains = [u"www",
               u"www1",
               u"www2",
               u"天気の良い日",
               u"élève"]
+
 
 class RoutesBuilder(object):
     def __init__(self):
@@ -120,9 +153,10 @@ class RoutesBuilder(object):
                           ("*", "/serve.py", handlers.ErrorHandler(404))]
 
         self.static = [
-            ("GET", "*.worker", WorkersHandler()),
             ("GET", "*.any.html", AnyHtmlHandler()),
-            ("GET", "*.any.worker.js", AnyWorkerHandler()),
+            ("GET", "*.any.worker.html", AnyWorkerHandler()),
+            ("GET", "*.any.worker.js", AnyWorkerScriptHandler()),
+            ("GET", "*.worker.html", WorkerHandler()),
         ]
 
         self.mountpoint_routes = OrderedDict()
@@ -157,9 +191,23 @@ class RoutesBuilder(object):
                  b"%s%s" % (str(url_base) if url_base != "/" else "", str(suffix)),
                  handler_cls(base_path=path, url_base=url_base)))
 
+    def add_file_mount_point(self, file_url, base_path):
+        assert file_url.startswith("/")
+        url_base = file_url[0:file_url.rfind("/") + 1]
+        self.mountpoint_routes[file_url] = [("GET", file_url, handlers.FileHandler(base_path=base_path, url_base=url_base))]
 
-def default_routes():
-    return RoutesBuilder().get_routes()
+
+def build_routes(aliases):
+    builder = RoutesBuilder()
+    for url, directory in aliases.items():
+        if not url.startswith("/") or len(directory) == 0:
+            logger.error("A map entry of 'aliases' must be \"/<url-path>\": \"<local-directory>\"")
+            continue
+        if url.endswith("/"):
+            builder.add_mount_point(url, directory)
+        else:
+            builder.add_file_mount_point(url, directory)
+    return builder.get_routes()
 
 
 def setup_logger(level):
@@ -237,12 +285,12 @@ class ServerProc(object):
         return self.proc.is_alive()
 
 
-def check_subdomains(host, paths, bind_hostname, ssl_config):
+def check_subdomains(host, paths, bind_hostname, ssl_config, aliases):
     port = get_port()
     subdomains = get_subdomains(host)
 
     wrapper = ServerProc()
-    wrapper.start(start_http_server, host, port, paths, default_routes(), bind_hostname,
+    wrapper.start(start_http_server, host, port, paths, build_routes(aliases), bind_hostname,
                   None, ssl_config)
 
     connected = False
@@ -471,7 +519,7 @@ def start(config, ssl_environment, routes, **kwargs):
     ssl_config = get_ssl_config(config, external_config["domains"].values(), ssl_environment)
 
     if config["check_subdomains"]:
-        check_subdomains(host, paths, bind_hostname, ssl_config)
+        check_subdomains(host, paths, bind_hostname, ssl_config, config["aliases"])
 
     servers = start_servers(host, ports, paths, routes, bind_hostname, external_config,
                             ssl_config, **kwargs)
@@ -500,6 +548,9 @@ def set_computed_defaults(config):
     if not value_set(config, "ws_doc_root"):
         root = get_value_or_default(config, "doc_root", default=repo_root)
         config["ws_doc_root"] = os.path.join(root, "websockets", "handlers")
+
+    if not value_set(config, "aliases"):
+        config["aliases"] = {}
 
 
 def merge_json(base_obj, override_obj):
@@ -587,7 +638,7 @@ def main():
 
     with stash.StashServer((config["host"], get_port()), authkey=str(uuid.uuid4())):
         with get_ssl_environment(config) as ssl_env:
-            config_, servers = start(config, ssl_env, default_routes(), **kwargs)
+            config_, servers = start(config, ssl_env, build_routes(config["aliases"]), **kwargs)
 
             try:
                 while any(item.is_alive() for item in iter_procs(servers)):

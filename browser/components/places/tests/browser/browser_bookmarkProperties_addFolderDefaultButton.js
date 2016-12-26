@@ -17,7 +17,6 @@ add_task(function* () {
 
   yield withSidebarTree("bookmarks", function* (tree) {
     // Select the new bookmark in the sidebar.
-    let itemId = PlacesUIUtils.leftPaneQueries["UnfiledBookmarks"];
     tree.selectItems([newBookmarkId]);
     ok(tree.controller.isCommandEnabled("placesCmd_new:folder"),
        "'placesCmd_new:folder' on current selected node is enabled");
@@ -32,7 +31,7 @@ add_task(function* () {
       },
       function* test(dialogWin) {
         let promiseTitleChangeNotification = promiseBookmarksNotification(
-          "onItemChanged", (itemId, prop, isAnno, val) => prop == "title" && val =="n");
+          "onItemChanged", (itemId, prop, isAnno, val) => prop == "title" && val == "n");
 
         fillBookmarkTextField("editBMPanel_namePicker", "n", dialogWin, false);
 

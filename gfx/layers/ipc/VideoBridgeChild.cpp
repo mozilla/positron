@@ -23,19 +23,23 @@ VideoBridgeChild::Startup()
   sVideoBridgeChildSingleton->Open(parent->GetIPCChannel(),
                                    loop,
                                    ipc::ChildSide);
+  sVideoBridgeChildSingleton->mIPDLSelfRef = sVideoBridgeChildSingleton;
+  parent->SetOtherProcessId(base::GetCurrentProcId());
 }
 
 /* static */ void
 VideoBridgeChild::Shutdown()
 {
-  sVideoBridgeChildSingleton = nullptr;
-
+  if (sVideoBridgeChildSingleton) {
+    sVideoBridgeChildSingleton->Close();
+    sVideoBridgeChildSingleton = nullptr;
+  }
 }
 
 VideoBridgeChild::VideoBridgeChild()
   : mMessageLoop(MessageLoop::current())
+  , mCanSend(true)
 {
-  sVideoBridgeChildSingleton = this;
 }
 
 VideoBridgeChild::~VideoBridgeChild()
@@ -65,10 +69,10 @@ VideoBridgeChild::AllocShmem(size_t aSize,
   return PVideoBridgeChild::AllocShmem(aSize, aType, aShmem);
 }
 
-void
+bool
 VideoBridgeChild::DeallocShmem(ipc::Shmem& aShmem)
 {
-  PVideoBridgeChild::DeallocShmem(aShmem);
+  return PVideoBridgeChild::DeallocShmem(aShmem);
 }
 
 PTextureChild*
@@ -85,6 +89,18 @@ bool
 VideoBridgeChild::DeallocPTextureChild(PTextureChild* actor)
 {
   return TextureClient::DestroyIPDLActor(actor);
+}
+
+void
+VideoBridgeChild::ActorDestroy(ActorDestroyReason aWhy)
+{
+  mCanSend = false;
+}
+
+void
+VideoBridgeChild::DeallocPVideoBridgeChild()
+{
+  mIPDLSelfRef = nullptr;
 }
 
 PTextureChild*

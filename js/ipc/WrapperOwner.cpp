@@ -83,7 +83,7 @@ ObjectId
 WrapperOwner::idOf(JSObject* obj)
 {
     ObjectId objId = idOfUnchecked(obj);
-    MOZ_ASSERT(findCPOWById(objId) == obj);
+    MOZ_ASSERT(hasCPOW(objId, obj));
     return objId;
 }
 
@@ -93,7 +93,7 @@ class CPOWProxyHandler : public BaseProxyHandler
     constexpr CPOWProxyHandler()
       : BaseProxyHandler(&family) {}
 
-    virtual bool finalizeInBackground(Value priv) const override {
+    virtual bool finalizeInBackground(const Value& priv) const override {
         return false;
     }
 
@@ -930,7 +930,7 @@ void
 WrapperOwner::updatePointer(JSObject* obj, const JSObject* old)
 {
     ObjectId objId = idOfUnchecked(obj);
-    MOZ_ASSERT(findCPOWById(objId) == old);
+    MOZ_ASSERT(hasCPOW(objId, old));
     cpows_.add(objId, obj);
 }
 
@@ -1168,7 +1168,7 @@ WrapperOwner::toObjectVariant(JSContext* cx, JSObject* objArg, ObjectVariant* ob
 }
 
 JSObject*
-WrapperOwner::fromObjectVariant(JSContext* cx, ObjectVariant objVar)
+WrapperOwner::fromObjectVariant(JSContext* cx, const ObjectVariant& objVar)
 {
     if (objVar.type() == ObjectVariant::TRemoteObject) {
         return fromRemoteObjectVariant(cx, objVar.get_RemoteObject());
@@ -1178,7 +1178,7 @@ WrapperOwner::fromObjectVariant(JSContext* cx, ObjectVariant objVar)
 }
 
 JSObject*
-WrapperOwner::fromRemoteObjectVariant(JSContext* cx, RemoteObject objVar)
+WrapperOwner::fromRemoteObjectVariant(JSContext* cx, const RemoteObject& objVar)
 {
     ObjectId objId = ObjectId::deserialize(objVar.serializedId());
     RootedObject obj(cx, findCPOWById(objId));
@@ -1203,6 +1203,8 @@ WrapperOwner::fromRemoteObjectVariant(JSContext* cx, RemoteObject objVar)
         if (!cpows_.add(objId, obj))
             return nullptr;
 
+        nextCPOWNumber_ = objId.serialNumber() + 1;
+
         // Incref once we know the decref will be called.
         incref();
 
@@ -1222,7 +1224,7 @@ WrapperOwner::fromRemoteObjectVariant(JSContext* cx, RemoteObject objVar)
 }
 
 JSObject*
-WrapperOwner::fromLocalObjectVariant(JSContext* cx, LocalObject objVar)
+WrapperOwner::fromLocalObjectVariant(JSContext* cx, const LocalObject& objVar)
 {
     ObjectId id = ObjectId::deserialize(objVar.serializedId());
     Rooted<JSObject*> obj(cx, findObjectById(cx, id));

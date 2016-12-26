@@ -39,15 +39,7 @@ public:
 
   NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) override = 0;
 
-  mozilla::CSSStyleSheet* GetSheet() const
-  {
-    // XXXheycam Return nullptr for ServoStyleSheets until we have a way of
-    // exposing them to script.
-    NS_ASSERTION(!mStyleSheet || mStyleSheet->IsGecko(),
-                 "stylo: ServoStyleSheets can't be exposed to script yet");
-    return mStyleSheet && mStyleSheet->IsGecko() ? mStyleSheet->AsGecko() :
-                                                   nullptr;
-  }
+  mozilla::StyleSheet* GetSheet() const { return mStyleSheet; }
 
   // nsIStyleSheetLinkingElement  
   NS_IMETHOD SetStyleSheet(mozilla::StyleSheet* aStyleSheet) override;
@@ -71,7 +63,8 @@ public:
     eNEXT =         0x00000008,
     eALTERNATE =    0x00000010,
     eHTMLIMPORT =   0x00000020,
-    ePRECONNECT =   0x00000040
+    ePRECONNECT =   0x00000040,
+    ePRERENDER =    0x00000080
   };
 
   // The return value is a bitwise or of 0 or more RelValues.

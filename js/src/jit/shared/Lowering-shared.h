@@ -47,6 +47,22 @@ class LIRGeneratorShared : public MDefinitionVisitor
         return gen;
     }
 
+    // Needed to capture the abort error out of the visitInstruction methods.
+    bool errored() {
+        return gen->getOffThreadStatus().isErr();
+    }
+    void abort(AbortReason r, const char* message, ...) MOZ_FORMAT_PRINTF(3, 4) {
+        va_list ap;
+        va_start(ap, message);
+        auto reason_ = gen->abortFmt(r, message, ap);
+        va_end(ap);
+        gen->setOffThreadStatus(reason_);
+    }
+    void abort(AbortReason r) {
+        auto reason_ = gen->abort(r);
+        gen->setOffThreadStatus(reason_);
+    }
+
   protected:
 
     static void ReorderCommutative(MDefinition** lhsp, MDefinition** rhsp, MInstruction* ins);
@@ -92,6 +108,7 @@ class LIRGeneratorShared : public MDefinitionVisitor
     inline LUse useFixed(MDefinition* mir, FloatRegister reg);
     inline LUse useFixed(MDefinition* mir, AnyRegister reg);
     inline LUse useFixedAtStart(MDefinition* mir, Register reg);
+    inline LUse useFixedAtStart(MDefinition* mir, AnyRegister reg);
     inline LAllocation useOrConstant(MDefinition* mir);
     inline LAllocation useOrConstantAtStart(MDefinition* mir);
     // "Any" is architecture dependent, and will include registers and stack
@@ -187,10 +204,14 @@ class LIRGeneratorShared : public MDefinitionVisitor
     inline LInt64Allocation useInt64AtStart(MDefinition* mir);
     inline LInt64Allocation useInt64OrConstant(MDefinition* mir, bool useAtStart = false);
     inline LInt64Allocation useInt64Register(MDefinition* mir, bool useAtStart = false);
+    inline LInt64Allocation useInt64RegisterOrConstant(MDefinition* mir, bool useAtStart = false);
     inline LInt64Allocation useInt64Fixed(MDefinition* mir, Register64 regs, bool useAtStart = false);
 
     LInt64Allocation useInt64RegisterAtStart(MDefinition* mir) {
         return useInt64Register(mir, /* useAtStart = */ true);
+    }
+    LInt64Allocation useInt64RegisterOrConstantAtStart(MDefinition* mir) {
+        return useInt64RegisterOrConstant(mir, /* useAtStart = */ true);
     }
     LInt64Allocation useInt64OrConstantAtStart(MDefinition* mir) {
         return useInt64OrConstant(mir, /* useAtStart = */ true);
@@ -214,7 +235,7 @@ class LIRGeneratorShared : public MDefinitionVisitor
         // failed and return a dummy vreg. Include a + 1 here for NUNBOX32
         // platforms that expect Value vregs to be adjacent.
         if (vreg + 1 >= MAX_VIRTUAL_REGISTERS) {
-            gen->abort("max virtual registers");
+            abort(AbortReason::Alloc, "max virtual registers");
             return 1;
         }
         return vreg;

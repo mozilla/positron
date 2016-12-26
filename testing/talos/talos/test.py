@@ -498,7 +498,9 @@ class tp5o_scroll(PageloaderTest):
     tpmozafterpaint = False
     preferences = {'layout.frame_rate': 0,
                    'docshell.event_starvation_delay_hint': 1,
-                   'dom.send_after_paint_to_content': False}
+                   'dom.send_after_paint_to_content': False,
+                   'layout.css.scroll-behavior.spring-constant': "'10'",
+                   'toolkit.framesRecording.bufferSize': 10000}
     filters = filter.ignore_first.prepare(1) + filter.median.prepare()
     unit = '1/FPS'
 
@@ -624,7 +626,8 @@ class dromaeo_dom(dromaeo):
 @register_test()
 class tsvgm(PageloaderTest):
     """
-    An svg-only number that measures SVG rendering performance.
+    An svg-only number that measures SVG rendering performance
+    for dynamic content only.
     """
     tpmanifest = '${talos}/tests/svgx/svgm.manifest'
     tpcycles = 1
@@ -643,7 +646,8 @@ class tsvgm(PageloaderTest):
 @register_test()
 class tsvgx(PageloaderTest):
     """
-    An svg-only number that measures SVG rendering performance.
+    An svg-only number that measures SVG rendering performance
+    for dynamic content only.
     """
     tpmanifest = '${talos}/tests/svgx/svgx.manifest'
     tpcycles = 1
@@ -655,6 +659,22 @@ class tsvgx(PageloaderTest):
     preferences = {'layout.frame_rate': 0,
                    'docshell.event_starvation_delay_hint': 1,
                    'dom.send_after_paint_to_content': False}
+    filters = filter.ignore_first.prepare(5) + filter.median.prepare()
+    unit = 'ms'
+
+
+@register_test()
+class tsvg_static(PageloaderTest):
+    """
+    An svg-only number that measures SVG rendering performance
+    for static content only.
+    """
+    tpmanifest = '${talos}/tests/svg_static/svg_static.manifest'
+    tpcycles = 1
+    tppagecycles = 25
+    tpmozafterpaint = True
+    sps_profile_interval = 1
+    sps_profile_entries = 10000000
     filters = filter.ignore_first.prepare(5) + filter.median.prepare()
     unit = 'ms'
 
@@ -688,7 +708,9 @@ class tscrollx(PageloaderTest):
     """ ASAP mode """
     preferences = {'layout.frame_rate': 0,
                    'docshell.event_starvation_delay_hint': 1,
-                   'dom.send_after_paint_to_content': False}
+                   'dom.send_after_paint_to_content': False,
+                   'layout.css.scroll-behavior.spring-constant': "'10'",
+                   'toolkit.framesRecording.bufferSize': 10000}
     filters = filter.ignore_first.prepare(5) + filter.median.prepare()
     unit = 'ms'
 

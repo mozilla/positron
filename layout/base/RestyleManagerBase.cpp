@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/RestyleManagerBase.h"
-#include "mozilla/StyleSetHandle.h"
+#include "mozilla/StyleSetHandleInlines.h"
 #include "nsIFrame.h"
 
 namespace mozilla {
@@ -153,7 +153,8 @@ RestyleManagerBase::ChangeHintToString(nsChangeHint aHint)
     "BorderStyleNoneChange", "UpdateTextPath", "SchedulePaint",
     "NeutralChange", "InvalidateRenderingObservers",
     "ReflowChangesSizeOrPosition", "UpdateComputedBSize",
-    "UpdateUsesOpacity", "UpdateBackgroundPosition"
+    "UpdateUsesOpacity", "UpdateBackgroundPosition",
+    "AddOrRemoveTransform"
   };
   static_assert(nsChangeHint_AllHints == (1 << ArrayLength(names)) - 1,
                 "Name list doesn't match change hints.");
@@ -677,16 +678,14 @@ FrameHasPositionedPlaceholderDescendants(nsIFrame* aFrame,
         }
       }
       uint32_t positionMask = aPositionMask;
-      // Is it faster to check aPositionMask & (1 << NS_STYLE_POSITION_ABSOLUTE)
-      // before we check IsAbsPosContainingBlock?  Not clear....
-      if (f->IsAbsPosContainingBlock()) {
-        if (f->IsFixedPosContainingBlock()) {
-          continue;
-        }
-        // We don't care about absolutely positioned things inside f, because
-        // they will still use f as their containing block.
-        positionMask = (1 << NS_STYLE_POSITION_FIXED);
-      }
+      // NOTE:  It's tempting to check f->IsAbsPosContainingBlock() or
+      // f->IsFixedPosContainingBlock() here.  However, that would only
+      // be testing the *new* style of the frame, which might exclude
+      // descendants that currently have this frame as an abs-pos
+      // containing block.  Taking the codepath where we don't reframe
+      // could lead to an unsafe call to
+      // cont->MarkAsNotAbsoluteContainingBlock() before we've reframed
+      // the descendant and taken it off the absolute list.
       if (FrameHasPositionedPlaceholderDescendants(f, positionMask)) {
         return true;
       }
@@ -1125,26 +1124,45 @@ RestyleManagerBase::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
           // but we're not going to reconstruct the frame so we need to set them.
           // It's because we need to set this state on each affected frame
           // that we can't coalesce nsChangeHint_UpdateContainingBlock hints up
-          // to ancestors (i.e. it can't be an inherited change hint).
+          // to ancestors (i.e. it can't be an change hint that is handled for
+          // descendants).
           if (cont->IsAbsPosContainingBlock()) {
-            if (cont->StyleDisplay()->HasTransform(cont)) {
-              cont->AddStateBits(NS_FRAME_MAY_BE_TRANSFORMED);
-            }
             if (!cont->IsAbsoluteContainer() &&
                 (cont->GetStateBits() & NS_FRAME_CAN_HAVE_ABSPOS_CHILDREN)) {
               cont->MarkAsAbsoluteContainingBlock();
             }
           } else {
-            // Don't remove NS_FRAME_MAY_BE_TRANSFORMED since it may still by
-            // transformed by other means. It's OK to have the bit even if it's
-            // not needed.
             if (cont->IsAbsoluteContainer()) {
-              cont->MarkAsNotAbsoluteContainingBlock();
+              if (cont->HasAbsolutelyPositionedChildren()) {
+                // If |cont| still has absolutely positioned children,
+                // we can't call MarkAsNotAbsoluteContainingBlock.  This
+                // will remove a frame list that still has children in
+                // it that we need to keep track of.
+                // The optimization of removing it isn't particularly
+                // important, although it does mean we skip some tests.
+                NS_WARNING("skipping removal of absolute containing block");
+              } else {
+                cont->MarkAsNotAbsoluteContainingBlock();
+              }
             }
           }
         }
       }
     }
+
+    if ((hint & nsChangeHint_AddOrRemoveTransform) && frame &&
+        !(hint & nsChangeHint_ReconstructFrame)) {
+      for (nsIFrame* cont = frame; cont;
+           cont = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(cont)) {
+        if (cont->StyleDisplay()->HasTransform(cont)) {
+          cont->AddStateBits(NS_FRAME_MAY_BE_TRANSFORMED);
+        }
+        // Don't remove NS_FRAME_MAY_BE_TRANSFORMED since it may still be
+        // transformed by other means. It's OK to have the bit even if it's
+        // not needed.
+      }
+    }
+
     if (hint & nsChangeHint_ReconstructFrame) {
       // If we ever start passing true here, be careful of restyles
       // that involve a reframe and animations.  In particular, if the

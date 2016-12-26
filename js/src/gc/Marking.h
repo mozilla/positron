@@ -182,7 +182,7 @@ class GCMarker : public JSTracer
 
     // Calls traverse on target after making additional assertions.
     template <typename S, typename T> void traverseEdge(S source, T* target);
-    template <typename S, typename T> void traverseEdge(S source, T target);
+    template <typename S, typename T> void traverseEdge(S source, const T& target);
 
     // Notes a weak graph edge for later sweeping.
     template <typename T> void noteWeakEdge(T* edge);
@@ -236,6 +236,11 @@ class GCMarker : public JSTracer
 #endif
 
     void markEphemeronValues(gc::Cell* markedCell, gc::WeakEntryVector& entry);
+
+    static GCMarker* fromTracer(JSTracer* trc) {
+        MOZ_ASSERT(trc->isMarkingTracer());
+        return static_cast<GCMarker*>(trc);
+    }
 
   private:
 #ifdef DEBUG

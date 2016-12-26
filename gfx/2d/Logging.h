@@ -16,7 +16,7 @@
 #endif
 #include "mozilla/Tuple.h"
 
-#if defined(MOZ_WIDGET_GONK) || defined(MOZ_WIDGET_ANDROID)
+#if defined(MOZ_WIDGET_ANDROID)
 #include "nsDebug.h"
 #endif
 #include "Point.h"
@@ -129,6 +129,8 @@ enum class LogReason : int {
   AlphaWithBasicClient,
   UnbalancedClipStack,
   ProcessingError,
+  InvalidDrawTarget,
+  NativeFontResourceNotFound,
   // End
   MustBeLessThanThis = 101,
 };
@@ -140,7 +142,7 @@ struct BasicLogger
   // in the appropriate places in that method.
   static bool ShouldOutputMessage(int aLevel) {
     if (LoggingPrefs::sGfxLogLevel >= aLevel) {
-#if defined(MOZ_WIDGET_GONK) || defined(MOZ_WIDGET_ANDROID)
+#if defined(MOZ_WIDGET_ANDROID)
       return true;
 #else
 #if defined(MOZ_LOGGING)
@@ -173,7 +175,7 @@ struct BasicLogger
     // make the corresponding change in the ShouldOutputMessage method
     // above.
     if (LoggingPrefs::sGfxLogLevel >= aLevel) {
-#if defined(MOZ_WIDGET_GONK) || defined(MOZ_WIDGET_ANDROID)
+#if defined(MOZ_WIDGET_ANDROID)
       printf_stderr("%s%s", aString.c_str(), aNoNewline ? "" : "\n");
 #else
 #if defined(MOZ_LOGGING)
@@ -643,7 +645,10 @@ public:
   }
 
   void IncreaseIndent() { ++mDepth; }
-  void DecreaseIndent() { --mDepth; }
+  void DecreaseIndent() {
+    MOZ_ASSERT(mDepth > 0);
+    --mDepth;
+  }
 
   void ConditionOnPrefFunction(bool(*aPrefFunction)()) {
     mConditionedOnPref = true;
@@ -681,6 +686,14 @@ public:
   explicit TreeAutoIndent(TreeLog& aTreeLog) : mTreeLog(aTreeLog) {
     mTreeLog.IncreaseIndent();
   }
+
+  TreeAutoIndent(const TreeAutoIndent& aTreeAutoIndent) :
+      TreeAutoIndent(aTreeAutoIndent.mTreeLog) {
+    mTreeLog.IncreaseIndent();
+  }
+
+  TreeAutoIndent& operator=(const TreeAutoIndent& aTreeAutoIndent) = delete;
+
   ~TreeAutoIndent() {
     mTreeLog.DecreaseIndent();
   }

@@ -145,7 +145,7 @@ struct Zone : public JS::shadow::Zone,
 
     void findOutgoingEdges(js::gc::ZoneComponentFinder& finder);
 
-    void discardJitCode(js::FreeOp* fop);
+    void discardJitCode(js::FreeOp* fop, bool discardBaselineCode = true);
 
     void addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                                 size_t* typePool,
@@ -355,11 +355,16 @@ struct Zone : public JS::shadow::Zone,
     // Keep track of all TypeDescr and related objects in this compartment.
     // This is used by the GC to trace them all first when compacting, since the
     // TypedObject trace hook may access these objects.
-    using TypeDescrObjectSet = js::GCHashSet<js::HeapPtr<JSObject*>,
-                                             js::MovableCellHasher<js::HeapPtr<JSObject*>>,
+    //
+    // There are no barriers here - the set contains only tenured objects so no
+    // post-barrier is required, and these are weak references so no pre-barrier
+    // is required.
+    using TypeDescrObjectSet = js::GCHashSet<JSObject*,
+                                             js::MovableCellHasher<JSObject*>,
                                              js::SystemAllocPolicy>;
     JS::WeakCache<TypeDescrObjectSet> typeDescrObjects;
 
+    bool addTypeDescrObject(JSContext* cx, HandleObject obj);
 
     // Malloc counter to measure memory pressure for GC scheduling. It runs from
     // gcMaxMallocBytes down to zero. This counter should be used only when it's
@@ -392,7 +397,10 @@ struct Zone : public JS::shadow::Zone,
     // Set of all unowned base shapes in the Zone.
     JS::WeakCache<js::BaseShapeSet> baseShapes;
 
-    // Set of initial shapes in the Zone.
+    // Set of initial shapes in the Zone. For certain prototypes -- namely,
+    // those of various builtin classes -- there are two entries: one for a
+    // lookup via TaggedProto, and one for a lookup via JSProtoKey. See
+    // InitialShapeProto.
     JS::WeakCache<js::InitialShapeSet> initialShapes;
 
 #ifdef JSGC_HASH_TABLE_CHECKS
@@ -408,9 +416,6 @@ struct Zone : public JS::shadow::Zone,
     bool isSystem;
 
     mozilla::Atomic<bool> usedByExclusiveThread;
-
-    // True when there are active frames.
-    bool active;
 
 #ifdef DEBUG
     unsigned gcLastZoneGroupIndex;
@@ -513,6 +518,13 @@ struct Zone : public JS::shadow::Zone,
     void checkUniqueIdTableAfterMovingGC();
 #endif
 
+    bool keepShapeTables() const {
+        return keepShapeTables_;
+    }
+    void setKeepShapeTables(bool b) {
+        keepShapeTables_ = b;
+    }
+
   private:
     js::jit::JitZone* jitZone_;
 
@@ -520,6 +532,7 @@ struct Zone : public JS::shadow::Zone,
     bool gcScheduled_;
     bool gcPreserveCode_;
     bool jitUsingBarriers_;
+    bool keepShapeTables_;
 
     // Allow zones to be linked into a list
     friend class js::gc::ZoneList;

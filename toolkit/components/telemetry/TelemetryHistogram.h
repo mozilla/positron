@@ -9,6 +9,7 @@
 #include "mozilla/TelemetryHistogramEnums.h"
 
 #include "mozilla/TelemetryComms.h"
+#include "nsXULAppAPI.h"
 
 // This module is internal to Telemetry.  It encapsulates Telemetry's
 // histogram accumulation and storage logic.  It should only be used by
@@ -44,8 +45,10 @@ void Accumulate(const char* name, const nsCString& key, uint32_t sample);
 
 void AccumulateCategorical(mozilla::Telemetry::ID aId, const nsCString& aLabel);
 
-void AccumulateChild(const nsTArray<mozilla::Telemetry::Accumulation>& aAccumulations);
-void AccumulateChildKeyed(const nsTArray<mozilla::Telemetry::KeyedAccumulation>& aAccumulations);
+void AccumulateChild(GeckoProcessType aProcessType,
+                     const nsTArray<mozilla::Telemetry::Accumulation>& aAccumulations);
+void AccumulateChildKeyed(GeckoProcessType aProcessType,
+                          const nsTArray<mozilla::Telemetry::KeyedAccumulation>& aAccumulations);
 
 nsresult
 GetHistogramById(const nsACString &name, JSContext *cx,
@@ -57,10 +60,6 @@ GetKeyedHistogramById(const nsACString &name, JSContext *cx,
 
 const char*
 GetHistogramName(mozilla::Telemetry::ID id);
-
-nsresult
-HistogramFrom(const nsACString &name, const nsACString &existing_name,
-              JSContext *cx, JS::MutableHandle<JS::Value> ret);
 
 nsresult
 CreateHistogramSnapshots(JSContext *cx, JS::MutableHandle<JS::Value> ret,

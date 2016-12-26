@@ -13,8 +13,6 @@ const DEFAULT_UA = Cc["@mozilla.org/network/protocol;1?name=http"]
 
 const Types = require("devtools/client/responsive.html/types");
 
-const { addDevice, removeDevice } = require("devtools/client/shared/devices");
-
 const testDevice = {
   "name": "Fake Phone RDM Test",
   "width": 320,
@@ -28,7 +26,7 @@ const testDevice = {
 };
 
 // Add the new device to the list
-addDevice(testDevice);
+addDeviceForTest(testDevice);
 
 addRDMTask(TEST_URL, function* ({ ui, manager }) {
   let { store } = ui.toolWindow;
@@ -45,29 +43,28 @@ addRDMTask(TEST_URL, function* ({ ui, manager }) {
   testViewportSelectLabel(ui, "no device selected");
 
   // Test device with custom properties
-  yield switchDevice(ui, "Fake Phone RDM Test");
+  yield selectDevice(ui, "Fake Phone RDM Test");
   yield waitForViewportResizeTo(ui, testDevice.width, testDevice.height);
   yield testUserAgent(ui, testDevice.userAgent);
   yield testDevicePixelRatio(ui, testDevice.pixelRatio);
   yield testTouchEventsOverride(ui, true);
 
   // Test resetting device when resizing viewport
+  let deviceChanged = once(ui, "viewport-device-changed");
   yield testViewportResize(ui, ".viewport-vertical-resize-handle",
     [-10, -10], [testDevice.width, testDevice.height - 10], [0, -10], ui);
+  yield deviceChanged;
   yield testUserAgent(ui, DEFAULT_UA);
   yield testDevicePixelRatio(ui, DEFAULT_DPPX);
   yield testTouchEventsOverride(ui, false);
   testViewportSelectLabel(ui, "no device selected");
 
   // Test device with generic properties
-  yield switchDevice(ui, "Laptop (1366 x 768)");
+  yield selectDevice(ui, "Laptop (1366 x 768)");
   yield waitForViewportResizeTo(ui, 1366, 768);
   yield testUserAgent(ui, DEFAULT_UA);
   yield testDevicePixelRatio(ui, 1);
   yield testTouchEventsOverride(ui, false);
-
-  ok(removeDevice(testDevice),
-    "Test Device properly removed.");
 });
 
 function testViewportDimensions(ui, w, h) {

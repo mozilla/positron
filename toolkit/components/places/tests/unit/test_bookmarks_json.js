@@ -48,13 +48,13 @@ var test_bookmarks = {
       title: "test",
       description: "folder test comment",
       dateAdded: 1177541020000000,
-      //lastModified: 1177541050000000,
+      // lastModified: 1177541050000000,
       children: [
         { guid:"OCyeUO5uu9GX",
           title: "test post keyword",
           description: "item description",
           dateAdded: 1177375336000000,
-          //lastModified: 1177375423000000,
+          // lastModified: 1177375423000000,
           keyword: "test",
           sidebar: true,
           postData: "hidden1%3Dbar&text1%3D%25s",
@@ -186,7 +186,7 @@ function* checkItem(aExpected, aNode) {
           let deferred = Promise.defer();
           PlacesUtils.favicons.getFaviconDataForPage(
             NetUtil.newURI(aExpected.url),
-            function (aURI, aDataLen, aData, aMimeType) {
+            function(aURI, aDataLen, aData, aMimeType) {
               deferred.resolve(aData);
             });
           let data = yield deferred.promise;

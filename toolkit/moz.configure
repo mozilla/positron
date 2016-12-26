@@ -65,7 +65,7 @@ set_config('MOZ_DMD', dmd)
 set_define('MOZ_DMD', dmd)
 add_old_configure_assignment('MOZ_DMD', dmd)
 imply_option('--enable-profiling', dmd)
-imply_option('--enable-jemalloc', dmd)
+# --enable-jemalloc is implied below.
 imply_option('--enable-replace-malloc', dmd)
 
 # JACK cubeb backend
@@ -86,16 +86,23 @@ set_define('MOZ_JACK', jack)
 include('../js/moz.configure')
 
 
+# Rust
+# ==============================================================
+include('../build/moz.configure/rust.configure',
+        when='--enable-compile-environment')
+
+
 # L10N
 # ==============================================================
 option('--with-l10n-base', nargs=1, env='L10NBASEDIR',
        help='Path to l10n repositories')
 
 @depends('--with-l10n-base')
+@imports(_from='os.path', _import='isdir')
 def l10n_base(value):
     if value:
         path = value[0]
-        if not os.path.isdir(path):
+        if not isdir(path):
             die("Invalid value --with-l10n-base, %s doesn't exist", path)
         return os.path.realpath(os.path.abspath(path))
 
@@ -274,6 +281,68 @@ def fc_freetype(value, toolkit):
 
 add_old_configure_assignment('USE_FC_FREETYPE', fc_freetype)
 
+# Pango
+# ==============================================================
+pkg_check_modules('MOZ_PANGO',
+                  'pango >= 1.22.0 pangoft2 >= 1.22.0 pangocairo >= 1.22.0',
+                  when=toolkit_gtk)
+
+# Fontconfig
+# ==============================================================
+fontconfig_info = pkg_check_modules('_FONTCONFIG', 'fontconfig >= 2.7.0',
+                                    when=fc_freetype)
+
+@depends(fc_freetype)
+def check_for_freetype2(fc_freetype):
+    if fc_freetype:
+        return True
+
+# Check for freetype2. Flags are combined with fontconfig flags.
+freetype2_info = pkg_check_modules('_FT2', 'freetype2 >= 6.1.0',
+                                   when=check_for_freetype2)
+
+@depends(fontconfig_info, freetype2_info)
+def freetype2_combined_info(fontconfig_info, freetype2_info):
+    if not freetype2_info:
+        return
+    if not fontconfig_info:
+        return freetype2_info
+    return namespace(
+        cflags=freetype2_info.cflags + fontconfig_info.cflags,
+        libs=freetype2_info.libs + fontconfig_info.libs,
+    )
+
+add_old_configure_assignment('_HAVE_FREETYPE2',
+                             depends_if(freetype2_info)(lambda _: True))
+
+# Build Freetype in the tree
+# ==============================================================
+@depends(target)
+def tree_freetype(target):
+    if target.os == 'Android':
+        return True
+
+set_define('MOZ_TREE_FREETYPE', tree_freetype)
+set_config('MOZ_TREE_FREETYPE', tree_freetype)
+add_old_configure_assignment('MOZ_TREE_FREETYPE', tree_freetype)
+
+set_define('HAVE_FT_BITMAP_SIZE_Y_PPEM', tree_freetype)
+set_define('HAVE_FT_GLYPHSLOT_EMBOLDEN', tree_freetype)
+set_define('HAVE_FT_LOAD_SFNT_TABLE', tree_freetype)
+
+@depends(freetype2_combined_info, tree_freetype, check_build_environment)
+def ft2_info(freetype2_combined_info, tree_freetype, build_env):
+    if tree_freetype:
+        return namespace(cflags=('-I%s/modules/freetype2/include' % build_env.topsrcdir,),
+                         libs=())
+    if freetype2_combined_info:
+        return freetype2_combined_info
+
+set_config('FT2_LIBS', delayed_getattr(ft2_info, 'libs'))
+add_old_configure_assignment('FT2_LIBS',
+                             delayed_getattr(ft2_info, 'libs'))
+add_old_configure_assignment('FT2_CFLAGS',
+                             delayed_getattr(ft2_info, 'cflags'))
 
 # Apple platform decoder support
 # ==============================================================
@@ -366,7 +435,8 @@ def enable_eme(value, target):
         return value
     elif value and value.origin != 'default':
         die('%s is not supported on %s' % (value.format('--enable-eme'), target.alias))
-    return value
+    # Return the same type of OptionValue (Positive or Negative), with an empty tuple.
+    return value.__class__(())
 
 @depends(enable_eme, fmp4)
 def eme(value, fmp4):
@@ -472,7 +542,7 @@ def gpsd(value):
 system_gpsd = pkg_check_modules('MOZ_GPSD', 'libgps >= 3.11',
                                 when=gpsd)
 
-set_config('MOZ_GPSD', system_gpsd)
+set_config('MOZ_GPSD', depends_if(system_gpsd)(lambda _: True))
 
 # Miscellaneous programs
 # ==============================================================
@@ -505,8 +575,18 @@ def stylo(value):
     if value:
         return True
 
+set_config('MOZ_STYLO', stylo)
 set_define('MOZ_STYLO', stylo)
-imply_option('--enable-jemalloc', depends_if('--enable-stylo')(lambda _: 'moz'))
+
+@depends(stylo, dmd)
+def jemalloc(stylo, dmd):
+    if stylo:
+        return 'moz'
+    elif dmd:
+        return True
+
+imply_option('--enable-jemalloc', jemalloc,
+             reason='--enable-dmd or --enable-stylo')
 
 option('--with-servo', env='SERVO_TARGET_DIR', nargs=1,
        help='Absolute path of the target directory where libgeckoservo can '
@@ -613,22 +693,6 @@ def webspeech_test_backend(value):
 set_config('MOZ_WEBSPEECH_TEST_BACKEND', webspeech_test_backend)
 set_define('MOZ_WEBSPEECH_TEST_BACKEND', webspeech_test_backend)
 
-# WebSMS
-# ==============================================================
-@depends(build_project, '--help')
-def websms_default(build_project, _):
-    return build_project in ('b2g', 'b2g/graphene')
-
-option('--enable-websms-backend', default=websms_default,
-       help='Enable WebSMS backend')
-
-@depends_if('--enable-websms-backend')
-def websms_backend(value):
-    return True
-
-set_config('MOZ_WEBSMS_BACKEND', websms_backend)
-set_define('MOZ_WEBSMS_BACKEND', websms_backend)
-
 # Enable IPDL's "expensive" unit tests
 # ==============================================================
 option('--enable-ipdl-tests', help='Enable expensive IPDL tests')
@@ -707,11 +771,11 @@ add_old_configure_assignment('NECKO_PROTOCOLS', necko_protocols)
 # ==============================================================
 option('--disable-skia', help='Disable use of Skia')
 
-@depends('--disable-skia', target)
-def skia(value, target):
-    if value.origin == 'default' and target.endianness == 'big':
-        return None
-    if value:
+@depends('--disable-skia')
+def skia(value):
+    if not value:
+        die('--disable-skia is not supported anymore')
+    else:
         return True
 
 set_config('MOZ_ENABLE_SKIA', skia)
@@ -743,6 +807,23 @@ def skia_gpu(value, skia, target):
 set_config('MOZ_ENABLE_SKIA_GPU', skia_gpu)
 set_define('USE_SKIA_GPU', skia_gpu)
 
+option('--enable-skia-pdf', help='Enable Skia PDF')
+
+@depends('--enable-skia-pdf', skia, milestone)
+def skia_pdf(value, skia, milestone):
+    if value.origin == 'default':
+        if not skia:
+            return None
+        if milestone.is_nightly:
+            return True
+    elif value and not skia:
+        die('Cannot enable Skia PDF without enabling Skia')
+    if skia and value:
+        return True
+
+set_config('MOZ_ENABLE_SKIA_PDF', skia_pdf)
+set_define('MOZ_ENABLE_SKIA_PDF', skia_pdf)
+
 @depends(skia, skia_gpu)
 def skia_includes(skia, skia_gpu):
     includes = []
@@ -765,12 +846,66 @@ set_config('SKIA_INCLUDES', skia_includes)
 
 # Support various fuzzing options
 # ==============================================================
-option('--enable-libfuzzer', help='Enable libfuzzer support')
+with only_when('--enable-compile-environment'):
+    option('--enable-fuzzing', help='Enable fuzzing support')
 
-@depends('--enable-libfuzzer')
-def enable_libfuzzer(value):
+    @depends('--enable-fuzzing')
+    def enable_fuzzing(value):
+        if value:
+            return True
+
+    @depends(enable_fuzzing,
+             try_compile(body='__AFL_COMPILER;',
+                         check_msg='for AFL compiler',
+                         when='--enable-fuzzing'))
+    def enable_libfuzzer(fuzzing, afl):
+        if fuzzing and not afl:
+            return True
+
+    set_config('FUZZING', enable_fuzzing)
+    set_define('FUZZING', enable_fuzzing)
+
+    set_config('LIBFUZZER', enable_libfuzzer)
+    set_define('LIBFUZZER', enable_libfuzzer)
+
+# Mortar
+# ==============================================================
+option('--enable-mortar', help='Enable mortar extension')
+
+set_config('MOZ_MORTAR', True, when='--enable-mortar')
+
+# Marionette is a Web Driver / Selenium comamnd server and client automation
+# driver for Mozilla's Gecko engine.  For more, see
+# https://developer.mozilla.org/en-US/docs/Mozilla/QA/Marionette.
+#
+# Marionette isn't really a toolkit feature, it's a Gecko engine feature, but
+# it's enabled based on the toolkit (and target), so here it lives.
+
+@depends(target, toolkit)
+def marionette_default(target, toolkit):
+    # By default, enable Marionette if not Android and not gonk.
+    #
+    # None means "don't set anything", which allows to override with
+    # --enable-marionette.  False means --disable-marionette, which
+    # cannot be overridden with --enable-marionette.  We want to allow
+    # overrides.
+    if target.os == 'Android':
+        return None
+
+    if toolkit == 'gonk':
+        return None
+
+    return True
+
+imply_option('--enable-marionette', marionette_default,
+             reason='not Android and not gonk')
+
+option('--enable-marionette',
+       help='Enable internal Marionette command server')
+
+@depends('--enable-marionette')
+def marionette(value):
     if value:
         return True
 
-set_config('LIBFUZZER', enable_libfuzzer)
-set_define('LIBFUZZER', enable_libfuzzer)
+set_config('ENABLE_MARIONETTE', marionette)

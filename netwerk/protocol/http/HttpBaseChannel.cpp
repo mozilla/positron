@@ -55,8 +55,10 @@
 #include "nsIHttpHeaderVisitor.h"
 #include "nsIXULRuntime.h"
 #include "nsICacheInfoChannel.h"
+#include "nsIDOMWindowUtils.h"
 
 #include <algorithm>
+#include "HttpBaseChannel.h"
 
 namespace mozilla {
 namespace net {
@@ -87,6 +89,7 @@ HttpBaseChannel::HttpBaseChannel()
   , mTimingEnabled(false)
   , mAllowSpdy(true)
   , mAllowAltSvc(true)
+  , mBeConservative(false)
   , mResponseTimeoutEnabled(true)
   , mAllRedirectsSameOrigin(true)
   , mAllRedirectsPassTimingAllowCheck(true)
@@ -112,9 +115,11 @@ HttpBaseChannel::HttpBaseChannel()
   , mTransferSize(0)
   , mDecodedBodySize(0)
   , mEncodedBodySize(0)
+  , mContentWindowId(0)
   , mRequireCORSPreflight(false)
   , mReportCollector(new ConsoleReportCollector())
   , mForceMainDocumentChannel(false)
+  , mIsTrackingResource(false)
 {
   LOG(("Creating HttpBaseChannel @%x\n", this));
 
@@ -229,6 +234,9 @@ NS_INTERFACE_MAP_BEGIN(HttpBaseChannel)
   NS_INTERFACE_MAP_ENTRY(nsITimedChannel)
   NS_INTERFACE_MAP_ENTRY(nsIConsoleReportCollector)
   NS_INTERFACE_MAP_ENTRY(nsIThrottledInputChannel)
+  if (aIID.Equals(NS_GET_IID(HttpBaseChannel))) {
+    foundInterface = static_cast<nsIWritablePropertyBag*>(this);
+  } else
 NS_INTERFACE_MAP_END_INHERITING(nsHashPropertyBag)
 
 //-----------------------------------------------------------------------------
@@ -1195,6 +1203,37 @@ HttpBaseChannel::SetChannelId(const nsACString& aChannelId)
   return NS_ERROR_FAILURE;
 }
 
+NS_IMETHODIMP HttpBaseChannel::GetTopLevelContentWindowId(uint64_t *aWindowId)
+{
+  if (!mContentWindowId) {
+    nsCOMPtr<nsILoadContext> loadContext;
+    GetCallback(loadContext);
+    if (loadContext) {
+      nsCOMPtr<mozIDOMWindowProxy> topWindow;
+      loadContext->GetTopWindow(getter_AddRefs(topWindow));
+      nsCOMPtr<nsIDOMWindowUtils> windowUtils = do_GetInterface(topWindow);
+      if (windowUtils) {
+        windowUtils->GetCurrentInnerWindowID(&mContentWindowId);
+      }
+    }
+  }
+  *aWindowId = mContentWindowId;
+  return NS_OK;
+}
+
+NS_IMETHODIMP HttpBaseChannel::SetTopLevelContentWindowId(uint64_t aWindowId)
+{
+  mContentWindowId = aWindowId;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::GetIsTrackingResource(bool* aIsTrackingResource)
+{
+  *aIsTrackingResource = mIsTrackingResource;
+  return NS_OK;
+}
+
 NS_IMETHODIMP
 HttpBaseChannel::GetTransferSize(uint64_t *aTransferSize)
 {
@@ -1288,7 +1327,7 @@ HttpBaseChannel::SetReferrerWithPolicy(nsIURI *referrer,
   if(NS_FAILED(rv)) {
     return rv;
   }
-  mReferrerPolicy = REFERRER_POLICY_NO_REFERRER_WHEN_DOWNGRADE;
+  mReferrerPolicy = referrerPolicy;
 
   if (!referrer) {
     return NS_OK;
@@ -1296,7 +1335,6 @@ HttpBaseChannel::SetReferrerWithPolicy(nsIURI *referrer,
 
   // Don't send referrer at all when the meta referrer setting is "no-referrer"
   if (referrerPolicy == REFERRER_POLICY_NO_REFERRER) {
-    mReferrerPolicy = REFERRER_POLICY_NO_REFERRER;
     return NS_OK;
   }
 
@@ -1408,22 +1446,6 @@ HttpBaseChannel::SetReferrerWithPolicy(nsIURI *referrer,
 
       // in other referrer policies, https->http is not allowed...
       if (!match) return NS_OK;
-
-      // ...and https->https is possibly only allowed if the hosts match.
-      if (!gHttpHandler->SendSecureXSiteReferrer()) {
-        nsAutoCString referrerHost;
-        nsAutoCString host;
-
-        rv = referrer->GetAsciiHost(referrerHost);
-        if (NS_FAILED(rv)) return rv;
-
-        rv = mURI->GetAsciiHost(host);
-        if (NS_FAILED(rv)) return rv;
-
-        // GetAsciiHost returns lowercase hostname.
-        if (!referrerHost.Equals(host))
-          return NS_OK;
-      }
     }
   }
 
@@ -1517,6 +1539,15 @@ HttpBaseChannel::SetReferrerWithPolicy(nsIURI *referrer,
 
   nsAutoCString spec;
 
+  // Apply the user cross-origin trimming policy if it's more
+  // restrictive than the general one.
+  if (isCrossOrigin) {
+    int userReferrerXOriginTrimmingPolicy =
+      gHttpHandler->ReferrerXOriginTrimmingPolicy();
+    userReferrerTrimmingPolicy =
+      std::max(userReferrerTrimmingPolicy, userReferrerXOriginTrimmingPolicy);
+  }
+
   // site-specified referrer trimming may affect the trim level
   // "unsafe-url" behaves like "origin" (send referrer in the same situations) but
   // "unsafe-url" sends the whole referrer and origin removes the path.
@@ -1588,7 +1619,6 @@ HttpBaseChannel::SetReferrerWithPolicy(nsIURI *referrer,
   if (NS_FAILED(rv)) return rv;
 
   mReferrer = clone;
-  mReferrerPolicy = referrerPolicy;
   return NS_OK;
 }
 
@@ -2198,7 +2228,7 @@ HttpBaseChannel::AddSecurityMessage(const nsAString &aMessageTag,
     return NS_ERROR_FAILURE;
   }
 
-  uint32_t innerWindowID = loadInfo->GetInnerWindowID();
+  auto innerWindowID = loadInfo->GetInnerWindowID();
 
   nsXPIDLString errorText;
   rv = nsContentUtils::GetLocalizedString(
@@ -2310,6 +2340,22 @@ NS_IMETHODIMP
 HttpBaseChannel::SetAllowAltSvc(bool aAllowAltSvc)
 {
   mAllowAltSvc = aAllowAltSvc;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::GetBeConservative(bool *aBeConservative)
+{
+  NS_ENSURE_ARG_POINTER(aBeConservative);
+
+  *aBeConservative = mBeConservative;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::SetBeConservative(bool aBeConservative)
+{
+  mBeConservative = aBeConservative;
   return NS_OK;
 }
 
@@ -2502,6 +2548,12 @@ HttpBaseChannel::GetIntegrityMetadata(nsAString& aIntegrityMetadata)
   return NS_OK;
 }
 
+mozilla::net::nsHttpChannel*
+HttpBaseChannel::QueryHttpChannelImpl(void)
+{
+  return nullptr;
+}
+
 //-----------------------------------------------------------------------------
 // HttpBaseChannel::nsISupportsPriority
 //-----------------------------------------------------------------------------
@@ -2664,18 +2716,33 @@ HttpBaseChannel::ShouldIntercept(nsIURI* aURI)
   return shouldIntercept;
 }
 
-void HttpBaseChannel::CheckPrivateBrowsing()
+#ifdef DEBUG
+void HttpBaseChannel::AssertPrivateBrowsingId()
 {
   nsCOMPtr<nsILoadContext> loadContext;
   NS_QueryNotificationCallbacks(this, loadContext);
   // For addons it's possible that mLoadInfo is null.
-  if (mLoadInfo && loadContext) {
-      DocShellOriginAttributes docShellAttrs;
-      loadContext->GetOriginAttributes(docShellAttrs);
-      MOZ_ASSERT(mLoadInfo->GetOriginAttributes().mPrivateBrowsingId == docShellAttrs.mPrivateBrowsingId,
-                 "PrivateBrowsingId values are not the same between LoadInfo and LoadContext.");
+  if (!mLoadInfo) {
+    return;
   }
+
+  if (!loadContext) {
+    return;
+  }
+
+  // We skip testing of favicon loading here since it could be triggered by XUL image
+  // which uses SystemPrincipal. The SystemPrincpal doesn't have mPrivateBrowsingId.
+  if (nsContentUtils::IsSystemPrincipal(mLoadInfo->LoadingPrincipal()) &&
+      mLoadInfo->InternalContentPolicyType() == nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON) {
+    return;
+  }
+
+  DocShellOriginAttributes docShellAttrs;
+  loadContext->GetOriginAttributes(docShellAttrs);
+  MOZ_ASSERT(mLoadInfo->GetOriginAttributes().mPrivateBrowsingId == docShellAttrs.mPrivateBrowsingId,
+             "PrivateBrowsingId values are not the same between LoadInfo and LoadContext.");
 }
+#endif
 
 //-----------------------------------------------------------------------------
 // nsHttpChannel::nsITraceableChannel
@@ -2684,9 +2751,13 @@ void HttpBaseChannel::CheckPrivateBrowsing()
 NS_IMETHODIMP
 HttpBaseChannel::SetNewListener(nsIStreamListener *aListener, nsIStreamListener **_retval)
 {
+  LOG(("HttpBaseChannel::SetNewListener [this=%p, mListener=%p, newListener=%p]",
+       this, mListener.get(), aListener));
+
   if (!mTracingEnabled)
     return NS_ERROR_FAILURE;
 
+  NS_ENSURE_STATE(mListener);
   NS_ENSURE_ARG_POINTER(aListener);
 
   nsCOMPtr<nsIStreamListener> wrapper = new nsStreamListenerWrapper(mListener);
@@ -2944,13 +3015,9 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
       if (loadContext) {
         loadContext->GetOriginAttributes(docShellAttrs);
       }
-      MOZ_ASSERT(docShellAttrs.mFirstPartyDomain.IsEmpty(),
-                 "top-level docshell shouldn't have firstPartyDomain attribute.");
 
       NeckoOriginAttributes attrs = newLoadInfo->GetOriginAttributes();
 
-      MOZ_ASSERT(docShellAttrs.mAppId == attrs.mAppId,
-                "docshell and necko should have the same appId attribute.");
       MOZ_ASSERT(docShellAttrs.mUserContextId == attrs.mUserContextId,
                 "docshell and necko should have the same userContextId attribute.");
       MOZ_ASSERT(docShellAttrs.mInIsolatedMozBrowser == attrs.mInIsolatedMozBrowser,
@@ -3067,10 +3134,11 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
   httpChannel->SetRequestContextID(mRequestContextID);
 
   if (httpInternal) {
-    // Convey third party cookie and spdy flags.
+    // Convey third party cookie, conservative, and spdy flags.
     httpInternal->SetThirdPartyFlags(mThirdPartyFlags);
     httpInternal->SetAllowSpdy(mAllowSpdy);
     httpInternal->SetAllowAltSvc(mAllowAltSvc);
+    httpInternal->SetBeConservative(mBeConservative);
 
     RefPtr<nsHttpChannel> realChannel;
     CallQueryInterface(newChannel, realChannel.StartAssignment());

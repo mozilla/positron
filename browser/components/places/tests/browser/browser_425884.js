@@ -31,9 +31,9 @@ add_task(function* () {
     type: PlacesUtils.bookmarks.TYPE_FOLDER,
     title: "test root"
   });
-  is(toolbarNode.childCount, oldCount+1, "confirm test root node is a container, and is empty");
+  is(toolbarNode.childCount, oldCount + 1, "confirm test root node is a container, and is empty");
 
-  let testRootNode = toolbarNode.getChild(toolbarNode.childCount-1);
+  let testRootNode = toolbarNode.getChild(toolbarNode.childCount - 1);
   testRootNode.QueryInterface(Ci.nsINavHistoryContainerResultNode);
   testRootNode.containerOpen = true;
   is(testRootNode.childCount, 0, "confirm test root node is a container, and is empty");
@@ -122,8 +122,6 @@ function validate(aNode) {
   PlacesUtils.asContainer(folderNode);
   folderNode.containerOpen = true;
   is(folderNode.childCount, 2, "confirm child count match");
-  var bookmarkNode = folderNode.getChild(0);
-  var separatorNode = folderNode.getChild(1);
   folderNode.containerOpen = false;
   aNode.containerOpen = false;
 }

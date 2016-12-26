@@ -9,9 +9,10 @@ const osString = Services.appinfo.OS;
 
 // Panels
 loader.lazyGetter(this, "OptionsPanel", () => require("devtools/client/framework/toolbox-options").OptionsPanel);
-loader.lazyGetter(this, "InspectorPanel", () => require("devtools/client/inspector/inspector-panel").InspectorPanel);
+loader.lazyGetter(this, "InspectorPanel", () => require("devtools/client/inspector/panel").InspectorPanel);
 loader.lazyGetter(this, "WebConsolePanel", () => require("devtools/client/webconsole/panel").WebConsolePanel);
 loader.lazyGetter(this, "DebuggerPanel", () => require("devtools/client/debugger/panel").DebuggerPanel);
+loader.lazyGetter(this, "NewDebuggerPanel", () => require("devtools/client/debugger/new/panel").DebuggerPanel);
 loader.lazyGetter(this, "StyleEditorPanel", () => require("devtools/client/styleeditor/styleeditor-panel").StyleEditorPanel);
 loader.lazyGetter(this, "ShaderEditorPanel", () => require("devtools/client/shadereditor/panel").ShaderEditorPanel);
 loader.lazyGetter(this, "CanvasDebuggerPanel", () => require("devtools/client/canvasdebugger/panel").CanvasDebuggerPanel);
@@ -24,7 +25,7 @@ loader.lazyGetter(this, "ScratchpadPanel", () => require("devtools/client/scratc
 loader.lazyGetter(this, "DomPanel", () => require("devtools/client/dom/dom-panel").DomPanel);
 
 const {LocalizationHelper} = require("devtools/shared/l10n");
-const L10N = new LocalizationHelper("devtools/locale/startup.properties");
+const L10N = new LocalizationHelper("devtools/client/locales/startup.properties");
 
 var Tools = {};
 exports.Tools = Tools;
@@ -155,8 +156,6 @@ Tools.jsdebugger = {
 
 function switchDebugger() {
   if (Services.prefs.getBoolPref("devtools.debugger.new-debugger-frontend")) {
-    const NewDebuggerPanel = require("devtools/client/debugger/new/panel").DebuggerPanel;
-
     Tools.jsdebugger.url = "chrome://devtools/content/debugger/new/index.html";
     Tools.jsdebugger.build = function (iframeWindow, toolbox) {
       return new NewDebuggerPanel(iframeWindow, toolbox);
@@ -465,6 +464,27 @@ exports.defaultThemes = [
   Tools.darkTheme,
   Tools.lightTheme,
   Tools.firebugTheme,
+];
+
+// White-list buttons that can be toggled to prevent adding prefs for
+// addons that have manually inserted toolbarbuttons into DOM.
+// (By default, supported target is only local tab)
+exports.ToolboxButtons = [
+  { id: "command-button-frames",
+    isTargetSupported: target => {
+      return target.activeTab && target.activeTab.traits.frames;
+    }
+  },
+  { id: "command-button-splitconsole",
+    isTargetSupported: target => !target.isAddon },
+  { id: "command-button-responsive" },
+  { id: "command-button-paintflashing" },
+  { id: "command-button-scratchpad" },
+  { id: "command-button-screenshot" },
+  { id: "command-button-rulers" },
+  { id: "command-button-measure" },
+  { id: "command-button-noautohide",
+    isTargetSupported: target => target.chrome },
 ];
 
 /**

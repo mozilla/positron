@@ -7,6 +7,9 @@
 #include "jit/BaselineCompiler.h"
 
 #include "mozilla/Casting.h"
+#include "mozilla/SizePrintfMacros.h"
+
+#include "jsfun.h"
 
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
@@ -21,6 +24,7 @@
 #include "jit/SharedICHelpers.h"
 #include "jit/VMFunctions.h"
 #include "js/UniquePtr.h"
+#include "vm/AsyncFunction.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/Interpreter.h"
 #include "vm/TraceLogging.h"
@@ -82,10 +86,10 @@ BaselineCompiler::addPCMappingEntry(bool addIndexEntry)
 MethodStatus
 BaselineCompiler::compile()
 {
-    JitSpew(JitSpew_BaselineScripts, "Baseline compiling script %s:%d (%p)",
+    JitSpew(JitSpew_BaselineScripts, "Baseline compiling script %s:%" PRIuSIZE " (%p)",
             script->filename(), script->lineno(), script);
 
-    JitSpew(JitSpew_Codegen, "# Emitting baseline code for script %s:%d",
+    JitSpew(JitSpew_Codegen, "# Emitting baseline code for script %s:%" PRIuSIZE,
             script->filename(), script->lineno());
 
     TraceLoggerThread* logger = TraceLoggerForMainThread(cx->runtime());
@@ -217,7 +221,7 @@ BaselineCompiler::compile()
     baselineScript->setMethod(code);
     baselineScript->setTemplateEnvironment(templateEnv);
 
-    JitSpew(JitSpew_BaselineScripts, "Created BaselineScript %p (raw %p) for %s:%d",
+    JitSpew(JitSpew_BaselineScripts, "Created BaselineScript %p (raw %p) for %s:%" PRIuSIZE,
             (void*) baselineScript.get(), (void*) code->raw(),
             script->filename(), script->lineno());
 
@@ -250,7 +254,7 @@ BaselineCompiler::compile()
     for (size_t i = 0; i < icLoadLabels_.length(); i++) {
         CodeOffset label = icLoadLabels_[i].label;
         size_t icEntry = icLoadLabels_[i].icEntry;
-        ICEntry* entryAddr = &(baselineScript->icEntry(icEntry));
+        BaselineICEntry* entryAddr = &(baselineScript->icEntry(icEntry));
         Assembler::PatchDataWithValueCheck(CodeLocationLabel(code, label),
                                            ImmPtr(entryAddr),
                                            ImmPtr((void*)-1));
@@ -279,7 +283,7 @@ BaselineCompiler::compile()
     // Always register a native => bytecode mapping entry, since profiler can be
     // turned on with baseline jitcode on stack, and baseline jitcode cannot be invalidated.
     {
-        JitSpew(JitSpew_Profiling, "Added JitcodeGlobalEntry for baseline script %s:%d (%p)",
+        JitSpew(JitSpew_Profiling, "Added JitcodeGlobalEntry for baseline script %s:%" PRIuSIZE " (%p)",
                     script->filename(), script->lineno(), baselineScript.get());
 
         // Generate profiling string.
@@ -499,7 +503,7 @@ BaselineCompiler::emitOutOfLinePostBarrierSlot()
 bool
 BaselineCompiler::emitIC(ICStub* stub, ICEntry::Kind kind)
 {
-    ICEntry* entry = allocateICEntry(stub, kind);
+    BaselineICEntry* entry = allocateICEntry(stub, kind);
     if (!entry)
         return false;
 
@@ -1143,7 +1147,7 @@ BaselineCompiler::emit_JSOP_PICK()
     //     after : A B D E C
 
     // First, move value at -(amount + 1) into R0.
-    int depth = -(GET_INT8(pc) + 1);
+    int32_t depth = -(GET_INT8(pc) + 1);
     masm.loadValue(frame.addressOfStackValue(frame.peek(depth)), R0);
 
     // Move the other values down.
@@ -1158,6 +1162,34 @@ BaselineCompiler::emit_JSOP_PICK()
     // Push R0.
     frame.pop();
     frame.push(R0);
+    return true;
+}
+
+bool
+BaselineCompiler::emit_JSOP_UNPICK()
+{
+    frame.syncStack(0);
+
+    // Pick takes the top of the stack value and moves it under the nth value.
+    // For instance, unpick 2:
+    //     before: A B C D E
+    //     after : A B E C D
+
+    // First, move value at -1 into R0.
+    masm.loadValue(frame.addressOfStackValue(frame.peek(-1)), R0);
+
+    // Move the other values up.
+    int32_t depth = -(GET_INT8(pc) + 1);
+    for (int32_t i = -1; i > depth; i--) {
+        Address source = frame.addressOfStackValue(frame.peek(i - 1));
+        Address dest = frame.addressOfStackValue(frame.peek(i));
+        masm.loadValue(source, R1);
+        masm.storeValue(R1, dest);
+    }
+
+    // Store R0 under the nth value.
+    Address dest = frame.addressOfStackValue(frame.peek(depth));
+    masm.storeValue(R0, dest);
     return true;
 }
 
@@ -1677,6 +1709,29 @@ BaselineCompiler::emit_JSOP_LAMBDA_ARROW()
     masm.tagValue(JSVAL_TYPE_OBJECT, ReturnReg, R0);
     frame.push(R0);
     return true;
+}
+
+typedef bool (*SetFunNameFn)(JSContext*, HandleFunction, HandleValue, FunctionPrefixKind);
+static const VMFunction SetFunNameInfo =
+    FunctionInfo<SetFunNameFn>(js::SetFunctionNameIfNoOwnName, "SetFunName");
+
+bool
+BaselineCompiler::emit_JSOP_SETFUNNAME()
+{
+    frame.popRegsAndSync(2);
+
+    frame.push(R0);
+    frame.syncStack(0);
+
+    FunctionPrefixKind prefixKind = FunctionPrefixKind(GET_UINT8(pc));
+    masm.unboxObject(R0, R0.scratchReg());
+
+    prepareVMCall();
+
+    pushArg(Imm32(int32_t(prefixKind)));
+    pushArg(R1);
+    pushArg(R0.scratchReg());
+    return callVM(SetFunNameInfo);
 }
 
 void
@@ -2749,15 +2804,14 @@ static const VMFunction DefFunOperationInfo =
 bool
 BaselineCompiler::emit_JSOP_DEFFUN()
 {
-    RootedFunction fun(cx, script->getFunction(GET_UINT32_INDEX(pc)));
-
-    frame.syncStack(0);
-    masm.loadPtr(frame.addressOfEnvironmentChain(), R0.scratchReg());
+    frame.popRegsAndSync(1);
+    masm.unboxObject(R0, R0.scratchReg());
+    masm.loadPtr(frame.addressOfEnvironmentChain(), R1.scratchReg());
 
     prepareVMCall();
 
-    pushArg(ImmGCPtr(fun));
     pushArg(R0.scratchReg());
+    pushArg(R1.scratchReg());
     pushArg(ImmGCPtr(script));
 
     return callVM(DefFunOperationInfo);
@@ -3803,6 +3857,27 @@ BaselineCompiler::emit_JSOP_TOID()
 
     masm.bind(&done);
     frame.pop(); // Pop index.
+    frame.push(R0);
+    return true;
+}
+
+typedef JSObject* (*ToAsyncFn)(JSContext*, HandleFunction);
+static const VMFunction ToAsyncInfo = FunctionInfo<ToAsyncFn>(js::WrapAsyncFunction, "ToAsync");
+
+bool
+BaselineCompiler::emit_JSOP_TOASYNC()
+{
+    frame.syncStack(0);
+    masm.unboxObject(frame.addressOfStackValue(frame.peek(-1)), R0.scratchReg());
+
+    prepareVMCall();
+    pushArg(R0.scratchReg());
+
+    if (!callVM(ToAsyncInfo))
+        return false;
+
+    masm.tagValue(JSVAL_TYPE_OBJECT, ReturnReg, R0);
+    frame.pop();
     frame.push(R0);
     return true;
 }

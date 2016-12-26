@@ -165,6 +165,10 @@ var gPlayTests = [
   { name:"wavedata_alaw.wav", type:"audio/x-wav", duration:1.0 },
   // uLaw compressed wave file
   { name:"wavedata_ulaw.wav", type:"audio/x-wav", duration:1.0 },
+  // Data length 0xFFFFFFFF
+  { name:"bug1301226.wav", type:"audio/x-wav", duration:0.003673 },
+  // Data length 0xFFFFFFFF and odd chunk lengths.
+  { name:"bug1301226-odd.wav", type:"audio/x-wav", duration:0.003673 },
 
   // Ogg stream without eof marker
   { name:"bug461281.ogg", type:"application/ogg", duration:2.208 },
@@ -1545,9 +1549,6 @@ var PARALLEL_TESTS = 2;
 // conditions that might not otherwise be encountered on the test data.
 var gTestPrefs = [
   ['media.recorder.max_memory', 1024],
-  ["media.preload.default", 2], // default preload = metadata
-  ["media.preload.auto", 3], // auto preload = enough
-  ["media.test.dumpDebugInfo", true],
 ];
 
 // When true, we'll loop forever on whatever test we run. Use this to debug
@@ -1700,14 +1701,6 @@ function mediaTestCleanup(callback) {
       A[i] = null;
     }
     SpecialPowers.exactGC(callback);
-}
-
-function setMediaTestsPrefs(callback, extraPrefs) {
-  var prefs = gTestPrefs;
-  if (extraPrefs) {
-    prefs = prefs.concat(extraPrefs);
-  }
-  SpecialPowers.pushPrefEnv({"set": prefs}, callback);
 }
 
 // B2G emulator and Android 2.3 are condidered slow platforms

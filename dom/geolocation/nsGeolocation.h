@@ -21,12 +21,12 @@
 #include "nsCycleCollectionParticipant.h"
 
 #include "nsGeoPosition.h"
-#include "nsIDOMEventListener.h"
 #include "nsIDOMGeoGeolocation.h"
 #include "nsIDOMGeoPosition.h"
 #include "nsIDOMGeoPositionError.h"
 #include "nsIDOMGeoPositionCallback.h"
 #include "nsIDOMGeoPositionErrorCallback.h"
+#include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/GeolocationBinding.h"
 #include "mozilla/dom/PositionErrorBinding.h"
 #include "mozilla/dom/CallbackObject.h"
@@ -87,7 +87,6 @@ public:
 
   // create, or reinitalize the callback timer
   void     SetDisconnectTimer();
-  void     StopDisconnectTimer();
 
   // Update the accuracy and notify the provider if changed
   void     UpdateAccuracy(bool aForceHigh = false);
@@ -125,8 +124,7 @@ namespace dom {
  */
 class Geolocation final : public nsIDOMGeoGeolocation,
                           public nsIGeolocationUpdate,
-                          public nsWrapperCache,
-                          public nsIDOMEventListener
+                          public nsWrapperCache
 {
 public:
 
@@ -136,8 +134,6 @@ public:
   NS_DECL_NSIGEOLOCATIONUPDATE
   NS_DECL_NSIDOMGEOGEOLOCATION
 
-  NS_DECL_NSIDOMEVENTLISTENER
-
   Geolocation();
 
   nsresult Init(nsPIDOMWindowInner* aContentDom = nullptr);
@@ -145,17 +141,22 @@ public:
   nsPIDOMWindowInner* GetParentObject() const;
   virtual JSObject* WrapObject(JSContext *aCtx, JS::Handle<JSObject*> aGivenProto) override;
 
-  int32_t WatchPosition(PositionCallback& aCallback, PositionErrorCallback* aErrorCallback, const PositionOptions& aOptions, ErrorResult& aRv);
-  void GetCurrentPosition(PositionCallback& aCallback, PositionErrorCallback* aErrorCallback, const PositionOptions& aOptions, ErrorResult& aRv);
+  int32_t WatchPosition(PositionCallback& aCallback,
+                        PositionErrorCallback* aErrorCallback,
+                        const PositionOptions& aOptions,
+                        CallerType aCallerType,
+                        ErrorResult& aRv);
+  void GetCurrentPosition(PositionCallback& aCallback,
+                          PositionErrorCallback* aErrorCallback,
+                          const PositionOptions& aOptions,
+                          CallerType aCallerType,
+                          ErrorResult& aRv);
 
   // Returns true if any of the callbacks are repeating
   bool HasActiveCallbacks();
 
   // Register an allowed request
   void NotifyAllowedRequest(nsGeolocationRequest* aRequest);
-
-  // Check if callbacks arrays already contain this request
-  bool ContainsRequest(nsGeolocationRequest* aRequest);
 
   // Remove request from all callbacks arrays
   void RemoveRequest(nsGeolocationRequest* request);
@@ -179,25 +180,21 @@ public:
   // Check to see if any active request requires high accuracy
   bool HighAccuracyRequested();
 
-  // Notification from the service:
-  void ServiceReady();
-
 private:
 
   ~Geolocation();
 
   nsresult GetCurrentPosition(GeoPositionCallback aCallback,
                               GeoPositionErrorCallback aErrorCallback,
-                              nsAutoPtr<PositionOptions>&& aOptions);
+                              UniquePtr<PositionOptions>&& aOptions,
+                              CallerType aCallerType);
   nsresult WatchPosition(GeoPositionCallback aCallback,
                          GeoPositionErrorCallback aErrorCallback,
-                         nsAutoPtr<PositionOptions>&& aOptions, int32_t* aRv);
+                         UniquePtr<PositionOptions>&& aOptions,
+                         CallerType aCallerType,
+                         int32_t* aRv);
 
   bool RegisterRequestWithPrompt(nsGeolocationRequest* request);
-
-  // Methods for the service when it's ready to process requests:
-  nsresult GetCurrentPositionReady(nsGeolocationRequest* aRequest);
-  nsresult WatchPositionReady(nsGeolocationRequest* aRequest);
 
   // Check if clearWatch is already called
   bool IsAlreadyCleared(nsGeolocationRequest* aRequest);

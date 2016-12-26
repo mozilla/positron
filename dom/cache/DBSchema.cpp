@@ -32,20 +32,15 @@ namespace mozilla {
 namespace dom {
 namespace cache {
 namespace db {
-
 const int32_t kFirstShippedSchemaVersion = 15;
-
 namespace {
-
 // Update this whenever the DB schema is changed.
-const int32_t kLatestSchemaVersion = 22;
-
+const int32_t kLatestSchemaVersion = 24;
 // ---------
 // The following constants define the SQL schema.  These are defined in the
 // same order the SQL should be executed in CreateOrMigrateSchema().  They are
 // broken out as constants for convenient use in validation and migration.
 // ---------
-
 // The caches table is the single source of truth about what Cache
 // objects exist for the origin.  The contents of the Cache are stored
 // in the entries table that references back to caches.
@@ -103,14 +98,13 @@ const char* const kTableEntries =
     "response_security_info_id INTEGER NULL REFERENCES security_info(id), "
     "response_principal_info TEXT NOT NULL, "
     "cache_id INTEGER NOT NULL REFERENCES caches(id) ON DELETE CASCADE, "
-
     "request_redirect INTEGER NOT NULL, "
     "request_referrer_policy INTEGER NOT NULL, "
-    "request_integrity TEXT NOT NULL"
+    "request_integrity TEXT NOT NULL, "
+    "request_url_fragment TEXT NOT NULL"
     // New columns must be added at the end of table to migrate and
     // validate properly.
   ")";
-
 // Create an index to support the QueryCache() matching algorithm.  This
 // needs to quickly find entries in a given Cache that match the request
 // URL.  The url query is separated in order to support the ignoreSearch
@@ -203,7 +197,10 @@ static_assert(int(ReferrerPolicy::_empty) == 0 &&
               int(ReferrerPolicy::Origin) == 3 &&
               int(ReferrerPolicy::Origin_when_cross_origin) == 4 &&
               int(ReferrerPolicy::Unsafe_url) == 5 &&
-              int(ReferrerPolicy::EndGuard_) == 6,
+              int(ReferrerPolicy::Same_origin) == 6 &&
+              int(ReferrerPolicy::Strict_origin) == 7 &&
+              int(ReferrerPolicy::Strict_origin_when_cross_origin) == 8 &&
+              int(ReferrerPolicy::EndGuard_) == 9,
               "ReferrerPolicy values are as expected");
 static_assert(int(RequestMode::Same_origin) == 0 &&
               int(RequestMode::No_cors) == 1 &&
@@ -292,7 +289,8 @@ static_assert(nsIContentPolicy::TYPE_INVALID == 0 &&
               nsIContentPolicy::TYPE_INTERNAL_IMAGE == 37 &&
               nsIContentPolicy::TYPE_INTERNAL_IMAGE_PRELOAD == 38 &&
               nsIContentPolicy::TYPE_INTERNAL_STYLESHEET == 39 &&
-              nsIContentPolicy::TYPE_INTERNAL_STYLESHEET_PRELOAD == 40,
+              nsIContentPolicy::TYPE_INTERNAL_STYLESHEET_PRELOAD == 40 &&
+              nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON == 41,
               "nsContentPolicyType values are as expected");
 
 namespace {
@@ -1122,8 +1120,8 @@ QueryCache(mozIStorageConnection* aConn, CacheId aCacheId,
   MOZ_ASSERT(aConn);
   MOZ_ASSERT(aMaxResults > 0);
 
-  if (!aParams.ignoreMethod() && !aRequest.method().LowerCaseEqualsLiteral("get")
-                              && !aRequest.method().LowerCaseEqualsLiteral("head"))
+  if (!aParams.ignoreMethod() &&
+      !aRequest.method().LowerCaseEqualsLiteral("get"))
   {
     return NS_OK;
   }
@@ -1654,6 +1652,7 @@ InsertEntry(mozIStorageConnection* aConn, CacheId aCacheId,
       "request_url_no_query_hash, "
       "request_url_query, "
       "request_url_query_hash, "
+      "request_url_fragment, "
       "request_referrer, "
       "request_referrer_policy, "
       "request_headers_guard, "
@@ -1678,6 +1677,7 @@ InsertEntry(mozIStorageConnection* aConn, CacheId aCacheId,
       ":request_url_no_query_hash, "
       ":request_url_query, "
       ":request_url_query_hash, "
+      ":request_url_fragment, "
       ":request_referrer, "
       ":request_referrer_policy, "
       ":request_headers_guard, "
@@ -1723,19 +1723,19 @@ InsertEntry(mozIStorageConnection* aConn, CacheId aCacheId,
   nsAutoCString urlQueryHash;
   rv = HashCString(crypto, aRequest.urlQuery(), urlQueryHash);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
   rv = state->BindUTF8StringAsBlobByName(
     NS_LITERAL_CSTRING("request_url_query_hash"), urlQueryHash);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+  rv = state->BindUTF8StringByName(NS_LITERAL_CSTRING("request_url_fragment"),
+                                   aRequest.urlFragment());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   rv = state->BindStringByName(NS_LITERAL_CSTRING("request_referrer"),
                                aRequest.referrer());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
   rv = state->BindInt32ByName(NS_LITERAL_CSTRING("request_referrer_policy"),
                               static_cast<int32_t>(aRequest.referrerPolicy()));
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
   rv = state->BindInt32ByName(NS_LITERAL_CSTRING("request_headers_guard"),
     static_cast<int32_t>(aRequest.headersGuard()));
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -2042,13 +2042,13 @@ ReadRequest(mozIStorageConnection* aConn, EntryId aEntryId,
   MOZ_ASSERT(!NS_IsMainThread());
   MOZ_ASSERT(aConn);
   MOZ_ASSERT(aSavedRequestOut);
-
   nsCOMPtr<mozIStorageStatement> state;
   nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
     "SELECT "
       "request_method, "
       "request_url_no_query, "
       "request_url_query, "
+      "request_url_fragment, "
       "request_referrer, "
       "request_referrer_policy, "
       "request_headers_guard, "
@@ -2073,70 +2073,59 @@ ReadRequest(mozIStorageConnection* aConn, EntryId aEntryId,
 
   rv = state->GetUTF8String(0, aSavedRequestOut->mValue.method());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
   rv = state->GetUTF8String(1, aSavedRequestOut->mValue.urlWithoutQuery());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
   rv = state->GetUTF8String(2, aSavedRequestOut->mValue.urlQuery());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
-  rv = state->GetString(3, aSavedRequestOut->mValue.referrer());
+  rv = state->GetUTF8String(3, aSavedRequestOut->mValue.urlFragment());
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+  rv = state->GetString(4, aSavedRequestOut->mValue.referrer());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   int32_t referrerPolicy;
-  rv = state->GetInt32(4, &referrerPolicy);
+  rv = state->GetInt32(5, &referrerPolicy);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   aSavedRequestOut->mValue.referrerPolicy() =
     static_cast<ReferrerPolicy>(referrerPolicy);
-
   int32_t guard;
-  rv = state->GetInt32(5, &guard);
+  rv = state->GetInt32(6, &guard);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   aSavedRequestOut->mValue.headersGuard() =
     static_cast<HeadersGuardEnum>(guard);
-
   int32_t mode;
-  rv = state->GetInt32(6, &mode);
+  rv = state->GetInt32(7, &mode);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   aSavedRequestOut->mValue.mode() = static_cast<RequestMode>(mode);
-
   int32_t credentials;
-  rv = state->GetInt32(7, &credentials);
+  rv = state->GetInt32(8, &credentials);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   aSavedRequestOut->mValue.credentials() =
     static_cast<RequestCredentials>(credentials);
-
   int32_t requestContentPolicyType;
-  rv = state->GetInt32(8, &requestContentPolicyType);
+  rv = state->GetInt32(9, &requestContentPolicyType);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   aSavedRequestOut->mValue.contentPolicyType() =
     static_cast<nsContentPolicyType>(requestContentPolicyType);
-
   int32_t requestCache;
-  rv = state->GetInt32(9, &requestCache);
+  rv = state->GetInt32(10, &requestCache);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   aSavedRequestOut->mValue.requestCache() =
     static_cast<RequestCache>(requestCache);
-
   int32_t requestRedirect;
-  rv = state->GetInt32(10, &requestRedirect);
+  rv = state->GetInt32(11, &requestRedirect);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   aSavedRequestOut->mValue.requestRedirect() =
     static_cast<RequestRedirect>(requestRedirect);
-
-  rv = state->GetString(11, aSavedRequestOut->mValue.integrity());
+  rv = state->GetString(12, aSavedRequestOut->mValue.integrity());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
   bool nullBody = false;
-  rv = state->GetIsNull(12, &nullBody);
+  rv = state->GetIsNull(13, &nullBody);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   aSavedRequestOut->mHasBodyId = !nullBody;
-
   if (aSavedRequestOut->mHasBodyId) {
-    rv = ExtractId(state, 12, &aSavedRequestOut->mBodyId);
+    rv = ExtractId(state, 13, &aSavedRequestOut->mBodyId);
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   }
-
   rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
     "SELECT "
       "name, "
@@ -2490,7 +2479,8 @@ nsresult MigrateFrom18To19(mozIStorageConnection* aConn, bool& aRewriteSchema);
 nsresult MigrateFrom19To20(mozIStorageConnection* aConn, bool& aRewriteSchema);
 nsresult MigrateFrom20To21(mozIStorageConnection* aConn, bool& aRewriteSchema);
 nsresult MigrateFrom21To22(mozIStorageConnection* aConn, bool& aRewriteSchema);
-
+nsresult MigrateFrom22To23(mozIStorageConnection* aConn, bool& aRewriteSchema);
+nsresult MigrateFrom23To24(mozIStorageConnection* aConn, bool& aRewriteSchema);
 // Configure migration functions to run for the given starting version.
 Migration sMigrationList[] = {
   Migration(15, MigrateFrom15To16),
@@ -2500,10 +2490,10 @@ Migration sMigrationList[] = {
   Migration(19, MigrateFrom19To20),
   Migration(20, MigrateFrom20To21),
   Migration(21, MigrateFrom21To22),
+  Migration(22, MigrateFrom22To23),
+  Migration(23, MigrateFrom23To24),
 };
-
 uint32_t sMigrationListLength = sizeof(sMigrationList) / sizeof(Migration);
-
 nsresult
 RewriteEntriesSchema(mozIStorageConnection* aConn)
 {
@@ -2991,8 +2981,38 @@ nsresult MigrateFrom21To22(mozIStorageConnection* aConn, bool& aRewriteSchema)
   return rv;
 }
 
-} // anonymous namespace
+nsresult MigrateFrom22To23(mozIStorageConnection* aConn, bool& aRewriteSchema)
+{
+  MOZ_ASSERT(!NS_IsMainThread());
+  MOZ_ASSERT(aConn);
 
+  // The only change between 22 and 23 was a different snappy compression
+  // format, but it's backwards-compatible.
+  nsresult rv = aConn->SetSchemaVersion(23);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+  return rv;
+}
+nsresult MigrateFrom23To24(mozIStorageConnection* aConn, bool& aRewriteSchema)
+{
+  MOZ_ASSERT(!NS_IsMainThread());
+  MOZ_ASSERT(aConn);
+
+  // Add the request_url_fragment column.
+  nsresult rv = aConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "ALTER TABLE entries "
+    "ADD COLUMN request_url_fragment TEXT NOT NULL DEFAULT ''"
+  ));
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  rv = aConn->SetSchemaVersion(24);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  aRewriteSchema = true;
+
+  return rv;
+}
+
+} // anonymous namespace
 } // namespace db
 } // namespace cache
 } // namespace dom

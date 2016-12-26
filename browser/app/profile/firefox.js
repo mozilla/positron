@@ -49,6 +49,7 @@ pref("extensions.getAddons.search.url", "https://services.addons.mozilla.org/%LO
 pref("extensions.webservice.discoverURL", "https://discovery.addons.mozilla.org/%LOCALE%/firefox/discovery/pane/%VERSION%/%OS%/%COMPATIBILITY_MODE%");
 pref("extensions.getAddons.recommended.url", "https://services.addons.mozilla.org/%LOCALE%/%APP%/api/%API_VERSION%/list/recommended/all/%MAX_RESULTS%/%OS%/%VERSION%?src=firefox");
 pref("extensions.getAddons.link.url", "https://addons.mozilla.org/%LOCALE%/firefox/");
+pref("extensions.getAddons.themes.browseURL", "https://addons.mozilla.org/%LOCALE%/firefox/themes/?src=firefox");
 
 pref("extensions.update.autoUpdateDefault", true);
 
@@ -82,9 +83,15 @@ pref("app.update.checkInstallTime", true);
 // The number of days a binary is permitted to be old without checking is defined in
 // firefox-branding.js (app.update.checkInstallTime.days)
 
-// The minimum delay in seconds for the timer to fire.
-// default=2 minutes
+// The minimum delay in seconds for the timer to fire between the notification
+// of each consumer of the timer manager.
+// minimum=30 seconds, default=120 seconds, and maximum=300 seconds
 pref("app.update.timerMinimumDelay", 120);
+
+// The minimum delay in milliseconds for the first firing after startup of the timer
+// to notify consumers of the timer manager.
+// minimum=10 seconds, default=30 seconds, and maximum=120 seconds
+pref("app.update.timerFirstInterval", 30000);
 
 // App-specific update preferences
 
@@ -104,12 +111,6 @@ pref("app.update.log", false);
 // the failure.
 pref("app.update.backgroundMaxErrors", 10);
 
-// When |app.update.cert.requireBuiltIn| is true or not specified the
-// final certificate and all certificates the connection is redirected to before
-// the final certificate for the url specified in the |app.update.url|
-// preference must be built-in.
-pref("app.update.cert.requireBuiltIn", false);
-
 // Whether or not app updates are enabled
 pref("app.update.enabled", true);
 
@@ -122,7 +123,7 @@ pref("app.update.auto", true);
 pref("app.update.silent", false);
 
 // If set to true, the hamburger button will show badges for update events.
-#ifndef RELEASE_BUILD
+#ifndef RELEASE_OR_BETA
 pref("app.update.badge", true);
 #else
 pref("app.update.badge", false);
@@ -137,9 +138,6 @@ pref("app.update.staging.enabled", true);
 pref("app.update.url", "https://aus5.mozilla.org/update/6/%PRODUCT%/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%SYSTEM_CAPABILITIES%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
 // app.update.url.manual is in branding section
 // app.update.url.details is in branding section
-
-// User-settable override to app.update.url for testing purposes.
-//pref("app.update.url.override", "");
 
 // app.update.interval is in branding section
 // app.update.promptWaitTime is in branding section
@@ -212,13 +210,21 @@ pref("general.autoScroll", true);
 pref("browser.shell.checkDefaultBrowser", true);
 pref("browser.shell.shortcutFavicons",true);
 pref("browser.shell.mostRecentDateSetAsDefault", "");
+#ifdef RELEASE_OR_BETA
+pref("browser.shell.skipDefaultBrowserCheckOnFirstRun", false);
+#else
+pref("browser.shell.skipDefaultBrowserCheckOnFirstRun", true);
+#endif
 pref("browser.shell.skipDefaultBrowserCheck", true);
 pref("browser.shell.defaultBrowserCheckCount", 0);
+pref("browser.defaultbrowser.notificationbar", false);
 
 // 0 = blank, 1 = home (browser.startup.homepage), 2 = last visited page, 3 = resume previous browser session
 // The behavior of option 3 is detailed at: http://wiki.mozilla.org/Session_Restore
 pref("browser.startup.page",                1);
 pref("browser.startup.homepage",            "chrome://branding/locale/browserconfig.properties");
+// Whether we should skip the homepage when opening the first-run page
+pref("browser.startup.firstrunSkipsHomepage", false);
 
 pref("browser.slowStartup.notificationDisabled", false);
 pref("browser.slowStartup.timeThreshold", 40000);
@@ -328,7 +334,7 @@ pref("browser.download.folderList", 1);
 pref("browser.download.manager.addToRecentDocs", true);
 pref("browser.download.manager.resumeOnWakeDelay", 10000);
 
-#ifdef RELEASE_BUILD
+#ifdef RELEASE_OR_BETA
 pref("browser.download.showPanelDropmarker", false);
 #else
 pref("browser.download.showPanelDropmarker", true);
@@ -378,9 +384,6 @@ pref("browser.search.context.loadInBackground", false);
 pref("browser.search.hiddenOneOffs", "");
 
 pref("browser.search.reset.enabled", true);
-
-pref("browser.usedOnWindows10", false);
-pref("browser.usedOnWindows10.introURL", "https://www.mozilla.org/%LOCALE%/firefox/windows-10/welcome/?utm_source=firefox-browser&utm_medium=firefox-browser");
 
 pref("browser.sessionhistory.max_entries", 50);
 
@@ -439,8 +442,8 @@ pref("browser.tabs.drawInTitlebar", true);
 pref("browser.tabs.selectOwnerOnClose", true);
 
 pref("browser.tabs.showAudioPlayingIcon", true);
-
-pref("browser.tabs.dontfocusfordialogs", true);
+// This should match Chromium's audio indicator delay.
+pref("browser.tabs.delayHidingAudioPlayingIconMS", 3000);
 
 pref("browser.ctrlTab.previews", false);
 
@@ -504,6 +507,8 @@ pref("privacy.cpd.sessions",                true);
 pref("privacy.cpd.offlineApps",             false);
 pref("privacy.cpd.siteSettings",            false);
 pref("privacy.cpd.openWindows",             false);
+
+pref("privacy.history.custom",              false);
 
 // What default should we use for the time span in the sanitizer:
 // 0 - Clear everything
@@ -590,9 +595,7 @@ pref("browser.xul.error_pages.enabled", true);
 pref("browser.xul.error_pages.expert_bad_cert", false);
 
 // Enable captive portal detection.
-#ifdef NIGHTLY_BUILD
 pref("network.captive-portal-service.enabled", true);
-#endif
 
 // If true, network link events will change the value of navigator.onLine
 pref("network.manage-offline-status", true);
@@ -650,12 +653,6 @@ pref("plugin.defaultXpi.state", 2);
 // all channels.
 pref("plugin.state.flash", 2);
 pref("plugin.state.java", 1);
-
-#ifdef XP_MACOSX
-pref("browser.preferences.animateFadeIn", true);
-#else
-pref("browser.preferences.animateFadeIn", false);
-#endif
 
 #ifdef XP_WIN
 pref("browser.preferences.instantApply", false);
@@ -759,9 +756,6 @@ pref("gecko.handlerService.schemes.ircs.2.name", "chrome://browser-region/locale
 pref("gecko.handlerService.schemes.ircs.2.uriTemplate", "chrome://browser-region/locale/region.properties");
 pref("gecko.handlerService.schemes.ircs.3.name", "chrome://browser-region/locale/region.properties");
 pref("gecko.handlerService.schemes.ircs.3.uriTemplate", "chrome://browser-region/locale/region.properties");
-
-// By default, we don't want protocol/content handlers to be registered from a different host, see bug 402287
-pref("gecko.handlerService.allowRegisterFromDifferentHost", false);
 
 pref("browser.geolocation.warning.infoURL", "https://www.mozilla.org/%LOCALE%/firefox/geolocation/");
 
@@ -1008,7 +1002,7 @@ pref("security.sandbox.content.level", 1);
 //
 // This setting may not be required anymore once we decide to permanently
 // enable the content sandbox.
-pref("security.sandbox.content.level", 1);
+pref("security.sandbox.content.level", 2);
 #endif
 
 #if defined(XP_MACOSX) || defined(XP_WIN)
@@ -1044,7 +1038,7 @@ pref("browser.taskbar.lists.refreshInSeconds", 120);
 #endif
 
 // The sync engines to use.
-pref("services.sync.registerEngines", "Bookmarks,Form,History,Password,Prefs,Tab,Addons");
+pref("services.sync.registerEngines", "Bookmarks,Form,History,Password,Prefs,Tab,Addons,ExtensionStorage");
 // Preferences to be synced by default
 pref("services.sync.prefs.sync.accessibility.blockautorefresh", true);
 pref("services.sync.prefs.sync.accessibility.browsewithcaret", true);
@@ -1128,11 +1122,7 @@ pref("services.sync.prefs.sync.xpinstall.whitelist.required", true);
 // user's tabs and bookmarks. Note this pref is also synced.
 pref("services.sync.syncedTabs.showRemoteIcons", true);
 
-#ifdef NIGHTLY_BUILD
 pref("services.sync.sendTabToDevice.enabled", true);
-#else
-pref("services.sync.sendTabToDevice.enabled", false);
-#endif
 
 // Developer edition preferences
 #ifdef MOZ_DEV_EDITION
@@ -1225,12 +1215,9 @@ pref("social.shareDirectory", "https://activations.cdn.mozilla.net/sharePanel.ht
 pref("security.mixed_content.block_active_content", true);
 
 // Show degraded UI for http pages with password fields.
-// Only for Nightly, Dev Edition and early beta, not for late beta or release.
-#ifdef EARLY_BETA_OR_EARLIER
 pref("security.insecure_password.ui.enabled", true);
-#else
-pref("security.insecure_password.ui.enabled", false);
-#endif
+
+pref("security.insecure_field_warning.contextual.enabled", false);
 
 // 1 = allow MITM for certificate pinning checks.
 pref("security.cert_pinning.enforcement_level", 1);
@@ -1244,14 +1231,14 @@ pref("plain_text.wrap_long_lines", true);
 pref("dom.debug.propagate_gesture_events_through_content", false);
 
 // The request URL of the GeoLocation backend.
-#ifdef RELEASE_BUILD
+#ifdef RELEASE_OR_BETA
 pref("geo.wifi.uri", "https://www.googleapis.com/geolocation/v1/geolocate?key=%GOOGLE_API_KEY%");
 #else
 pref("geo.wifi.uri", "https://location.services.mozilla.com/v1/geolocate?key=%MOZILLA_API_KEY%");
 #endif
 
 #ifdef XP_MACOSX
-#ifdef RELEASE_BUILD
+#ifdef RELEASE_OR_BETA
 pref("geo.provider.use_corelocation", false);
 #else
 pref("geo.provider.use_corelocation", true);
@@ -1264,7 +1251,7 @@ pref("geo.provider.ms-windows-location", false);
 
 #ifdef MOZ_WIDGET_GTK
 #ifdef MOZ_GPSD
-#ifdef RELEASE_BUILD
+#ifdef RELEASE_OR_BETA
 pref("geo.provider.use_gpsd", false);
 #else
 pref("geo.provider.use_gpsd", true);
@@ -1423,12 +1410,14 @@ pref("privacy.trackingprotection.introURL", "https://www.mozilla.org/%LOCALE%/fi
 #ifdef NIGHTLY_BUILD
 pref("privacy.userContext.enabled", true);
 pref("privacy.userContext.ui.enabled", true);
+pref("privacy.usercontext.about_newtab_segregation.enabled", true);
 #else
 pref("privacy.userContext.enabled", false);
 pref("privacy.userContext.ui.enabled", false);
+pref("privacy.usercontext.about_newtab_segregation.enabled", false);
 #endif
 
-#ifndef RELEASE_BUILD
+#ifndef RELEASE_OR_BETA
 // At the moment, autostart.2 is used, while autostart.1 is unused.
 // We leave it here set to false to reset users' defaults and allow
 // us to change everybody to true in the future, when desired.
@@ -1439,6 +1428,7 @@ pref("browser.tabs.remote.autostart.2", true);
 // For the about:tabcrashed page
 pref("browser.tabs.crashReporting.sendReport", true);
 pref("browser.tabs.crashReporting.includeURL", false);
+pref("browser.tabs.crashReporting.requestEmail", false);
 pref("browser.tabs.crashReporting.emailMe", false);
 pref("browser.tabs.crashReporting.email", "");
 
@@ -1447,11 +1437,9 @@ pref("extensions.interposition.enabled", true);
 pref("extensions.interposition.prefetching", true);
 
 // Enable blocking of e10s for add-on users on beta/release.
-#ifdef RELEASE_BUILD
+#ifdef RELEASE_OR_BETA
 pref("extensions.e10sBlocksEnabling", true);
 #endif
-
-pref("browser.defaultbrowser.notificationbar", false);
 
 // How often to check for CPOW timeouts. CPOWs are only timed out by
 // the hang monitor.
@@ -1520,8 +1508,20 @@ pref("extensions.pocket.enabled", true);
 
 pref("signon.schemeUpgrades", true);
 
-// Enable the "Simplify Page" feature in Print Preview
+// "Simplify Page" feature in Print Preview. This feature is disabled by default
+// in toolkit.
+//
+// This feature is only enabled on Nightly for Linux until bug 1306295 is fixed.
+// For non-Linux, this feature is only enabled up to early Beta.
+#ifdef UNIX_BUT_NOT_MAC
+#if defined(NIGHTLY_BUILD)
 pref("print.use_simplify_page", true);
+#endif
+#else
+#if defined(EARLY_BETA_OR_EARLIER)
+pref("print.use_simplify_page", true);
+#endif
+#endif
 
 // Space separated list of URLS that are allowed to send objects (instead of
 // only strings) through webchannels. This list is duplicated in mobile/android/app/mobile.js
@@ -1530,10 +1530,10 @@ pref("webchannel.allowObject.urlWhitelist", "https://accounts.firefox.com https:
 // Whether or not the browser should scan for unsubmitted
 // crash reports, and then show a notification for submitting
 // those reports.
-#ifdef RELEASE_BUILD
-pref("browser.crashReports.unsubmittedCheck.enabled", false);
-#else
+#ifdef EARLY_BETA_OR_EARLIER
 pref("browser.crashReports.unsubmittedCheck.enabled", true);
+#else
+pref("browser.crashReports.unsubmittedCheck.enabled", false);
 #endif
 
 // chancesUntilSuppress is how many times we'll show the unsubmitted
@@ -1548,3 +1548,6 @@ pref("browser.crashReports.unsubmittedCheck.autoSubmit", false);
 // controlling validation are located in /services/sync/services-sync.js
 pref("services.sync.validation.enabled", true);
 #endif
+
+// Preferences for the form autofill system extension
+pref("browser.formautofill.enabled", false);

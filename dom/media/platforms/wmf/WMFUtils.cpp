@@ -8,7 +8,6 @@
 #include <stdint.h>
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/RefPtr.h"
-#include "mozilla/WindowsVersion.h"
 #include "mozilla/Logging.h"
 #include "nsThreadUtils.h"
 #include "nsWindowsHelpers.h"
@@ -203,18 +202,16 @@ HRESULT
 MFStartup()
 {
   HRESULT hr = LoadDLLs();
-  NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
+  if (FAILED(hr)) {
+    return hr;
+  }
 
-  const int MF_VISTA_VERSION = (0x0001 << 16 | MF_API_VERSION);
   const int MF_WIN7_VERSION = (0x0002 << 16 | MF_API_VERSION);
 
   // decltype is unusable for functions having default parameters
   DECL_FUNCTION_PTR(MFStartup, ULONG, DWORD);
   ENSURE_FUNCTION_PTR_(MFStartup, Mfplat.dll)
-  if (!IsWin7OrLater())
-    return MFStartupPtr(MF_VISTA_VERSION, MFSTARTUP_FULL);
-  else
-    return MFStartupPtr(MF_WIN7_VERSION, MFSTARTUP_FULL);
+  return MFStartupPtr(MF_WIN7_VERSION, MFSTARTUP_FULL);
 }
 
 HRESULT

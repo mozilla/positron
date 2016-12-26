@@ -118,7 +118,7 @@ var commandsPeerConnectionInitial = [
       test.setupSignalingClient();
       test.registerSignalingCallback("ice_candidate", function (message) {
         var pc = test.pcRemote ? test.pcRemote : test.pcLocal;
-        pc.storeOrAddIceCandidate(new RTCIceCandidate(message.ice_candidate));
+        pc.storeOrAddIceCandidate(message.ice_candidate);
       });
       test.registerSignalingCallback("end_of_trickle_ice", function (message) {
         test.signalingMessagesFinished();
@@ -476,7 +476,7 @@ var commandsPeerConnectionOfferAnswer = [
     }
   },
   function PC_REMOTE_VERIFY_SDP_AFTER_END_OF_TRICKLE(test) {
-    if (test.pcRemote.endOfTrickelSdp) {
+    if (test.pcRemote.endOfTrickleSdp) {
       /* In case the endOfTrickleSdp promise is resolved already it will win the
        * race because it gets evaluated first. But if endOfTrickleSdp is still
        * pending the rejection will win the race. */

@@ -117,6 +117,7 @@ USE_LIBS += [
     'lgpllibs',
     'nspr',
     'nss',
+    'psshparser',
     'sqlite',
     'zlib',
 ]
@@ -214,15 +215,9 @@ if CONFIG['OS_ARCH'] == 'WINNT':
         'winspool',
     ]
 
-if CONFIG['MOZ_B2G_BT_BLUEZ'] and CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
     OS_LIBS += [
         'dbus',
-    ]
-
-if CONFIG['MOZ_B2G_CAMERA'] and CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-    OS_LIBS += [
-        'stagefright',
-        'stagefright_omx',
     ]
 
 if CONFIG['OS_ARCH'] == 'Linux' and CONFIG['OS_TARGET'] != 'Android':
@@ -262,11 +257,6 @@ if CONFIG['MOZ_ALSA']:
 
 if CONFIG['HAVE_CLOCK_MONOTONIC']:
     OS_LIBS += CONFIG['REALTIME_LIBS']
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
-    OS_LIBS += [
-        'GLESv2',
-    ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
     OS_LIBS += [

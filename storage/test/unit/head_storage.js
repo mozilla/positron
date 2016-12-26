@@ -76,7 +76,7 @@ function asyncCleanup()
 
   // close the connection
   print("*** Storage Tests: Trying to asyncClose!");
-  getOpenedDatabase().asyncClose(function () { closed = true; });
+  getOpenedDatabase().asyncClose(function() { closed = true; });
 
   let curThread = Components.classes["@mozilla.org/thread-manager;1"]
                             .getService().currentThread;
@@ -267,12 +267,11 @@ function getTableRowCount(aTableName)
   return currentRows;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//// Promise-Returning Functions
+// Promise-Returning Functions
 
 function asyncClone(db, readOnly) {
   let deferred = Promise.defer();
-  db.asyncClone(readOnly, function (status, db2) {
+  db.asyncClone(readOnly, function(status, db2) {
     if (Components.isSuccessCode(status)) {
       deferred.resolve(db2);
     } else {
@@ -284,7 +283,7 @@ function asyncClone(db, readOnly) {
 
 function asyncClose(db) {
   let deferred = Promise.defer();
-  db.asyncClose(function (status) {
+  db.asyncClose(function(status) {
     if (Components.isSuccessCode(status)) {
       deferred.resolve();
     } else {
@@ -304,7 +303,7 @@ function openAsyncDatabase(file, options) {
       properties.setProperty(k, options[k]);
     }
   }
-  getService().openAsyncDatabase(file, properties, function (status, db) {
+  getService().openAsyncDatabase(file, properties, function(status, db) {
     if (Components.isSuccessCode(status)) {
       deferred.resolve(db.QueryInterface(Ci.mozIStorageAsyncConnection));
     } else {
@@ -317,15 +316,15 @@ function openAsyncDatabase(file, options) {
 function executeAsync(statement, onResult) {
   let deferred = Promise.defer();
   statement.executeAsync({
-    handleError: function (error) {
+    handleError: function(error) {
       deferred.reject(error);
     },
-    handleResult: function (result) {
+    handleResult: function(result) {
       if (onResult) {
         onResult(result);
       }
     },
-    handleCompletion: function (result) {
+    handleCompletion: function(result) {
       deferred.resolve(result);
     }
   });
@@ -335,15 +334,15 @@ function executeAsync(statement, onResult) {
 function executeMultipleStatementsAsync(db, statements, onResult) {
   let deferred = Promise.defer();
   db.executeAsync(statements, statements.length, {
-    handleError: function (error) {
+    handleError: function(error) {
       deferred.reject(error);
     },
-    handleResult: function (result) {
+    handleResult: function(result) {
       if (onResult) {
         onResult(result);
       }
     },
-    handleCompletion: function (result) {
+    handleCompletion: function(result) {
       deferred.resolve(result);
     }
   });

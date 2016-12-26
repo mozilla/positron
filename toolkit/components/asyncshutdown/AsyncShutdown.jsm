@@ -217,7 +217,7 @@ Services.prefs.addObserver(PREF_DEBUG_LOG, function() {
   DEBUG_LOG = Services.prefs.getBoolPref(PREF_DEBUG_LOG);
 }, false);
 
-function debug(msg, error=null) {
+function debug(msg, error = null) {
   if (DEBUG_LOG) {
     log(msg, "DEBUG: ", error);
   }
@@ -525,7 +525,6 @@ Spinner.prototype = {
   observe: function() {
     let topic = this._topic;
     debug(`Starting phase ${ topic }`);
-    let barrier = this._barrier;
     Services.obs.removeObserver(this, topic);
 
     let satisfied = false; // |true| once we have satisfied all conditions

@@ -36,6 +36,7 @@
 #include "nsIObserverService.h"
 #include "nsIObserver.h"
 #include "mozilla/Services.h"
+#include "mozilla/Sprintf.h"
 #include "nsProxyRelease.h"
 #include "nsThread.h"
 #include "nsThreadUtils.h"
@@ -97,7 +98,7 @@ public:
 private:
   // The only instance of DataChannelShutdown is owned by the observer
   // service, so there is no need to call RemoveObserver here.
-  virtual ~DataChannelShutdown() {}
+  virtual ~DataChannelShutdown() = default;
 
 public:
   NS_IMETHOD Observe(nsISupports* aSubject, const char* aTopic,
@@ -129,7 +130,7 @@ BufferedMsg::BufferedMsg(struct sctp_sendv_spa &spa, const char *data,
 {
   mSpa = new sctp_sendv_spa;
   *mSpa = spa;
-  char *tmp = new char[length]; // infallible malloc!
+  auto *tmp = new char[length]; // infallible malloc!
   memcpy(tmp, data, length);
   mData = tmp;
 }
@@ -196,7 +197,7 @@ debug_printf(const char *format, ...)
 #ifdef _WIN32
     if (vsnprintf_s(buffer, sizeof(buffer), _TRUNCATE, format, ap) > 0) {
 #else
-    if (vsnprintf(buffer, sizeof(buffer), format, ap) > 0) {
+    if (VsprintfLiteral(buffer, format, ap) > 0) {
 #endif
       PR_LogPrint("%s", buffer);
     }
@@ -432,8 +433,8 @@ DataChannelConnection::Init(unsigned short aPort, uint16_t aNumStreams, bool aUs
   memset(&event, 0, sizeof(event));
   event.se_assoc_id = SCTP_ALL_ASSOC;
   event.se_on = 1;
-  for (uint32_t i = 0; i < sizeof(event_types)/sizeof(event_types[0]); ++i) {
-    event.se_type = event_types[i];
+  for (unsigned short event_type : event_types) {
+    event.se_type = event_type;
     if (usrsctp_setsockopt(mMasterSocket, IPPROTO_SCTP, SCTP_EVENT, &event, sizeof(event)) < 0) {
       LOG(("*** failed setsockopt SCTP_EVENT errno %d", errno));
       goto error_cleanup;
@@ -677,10 +678,10 @@ DataChannelConnection::SctpDtlsOutput(void *addr, void *buffer, size_t length,
   // SCTP has an option for Apple, on IP connections only, to release at least
   // one of the locks before calling a packet output routine; with changes to
   // the underlying SCTP stack this might remove the need to use an async proxy.
-  if ((0 /*peer->IsSTSThread()*/)) {
+  if ((false /*peer->IsSTSThread()*/)) {
     res = peer->SendPacket(static_cast<unsigned char *>(buffer), length, false);
   } else {
-    unsigned char *data = new unsigned char[length];
+    auto *data = new unsigned char[length];
     memcpy(data, buffer, length);
     // Commented out since we have to Dispatch SendPacket to avoid deadlock"
     // res = -1;
@@ -1747,15 +1748,12 @@ DataChannelConnection::HandleStreamResetEvent(const struct sctp_stream_reset_eve
             // Mark the stream for reset (the reset is sent below)
             ResetOutgoingStream(channel->mStream);
           }
-          NS_DispatchToMainThread(do_AddRef(new DataChannelOnMessageAvailable(
-                                    DataChannelOnMessageAvailable::ON_CHANNEL_CLOSED, this,
-                                    channel)));
           mStreams[channel->mStream] = nullptr;
 
           LOG(("Disconnected DataChannel %p from connection %p",
                (void *) channel.get(), (void *) channel->mConnection.get()));
-          channel->DestroyLocked();
-          // At this point when we leave here, the object is a zombie held alive only by the DOM object
+          // This sends ON_CHANNEL_CLOSED to mainthread
+          channel->StreamClosedLocked();
         } else {
           LOG(("Can't find incoming channel %d",i));
         }
@@ -2232,7 +2230,7 @@ DataChannelConnection::SendMsgInternal(DataChannel *channel, const char *data,
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
 
       // queue data for resend!  And queue any further data for the stream until it is...
-      BufferedMsg *buffered = new BufferedMsg(spa, data, length); // infallible malloc
+      auto *buffered = new BufferedMsg(spa, data, length); // infallible malloc
       channel->mBufferedData.AppendElement(buffered); // owned by mBufferedData array
       channel->mFlags |= DATA_CHANNEL_FLAGS_SEND_DATA;
       LOG(("Queued %u buffers (len=%u)", channel->mBufferedData.Length(), length));
@@ -2346,7 +2344,7 @@ public:
     : mConnection(aConnection)
     , mStream(aStream) {}
 
-  ~DataChannelBlobSendRunnable()
+  ~DataChannelBlobSendRunnable() override
   {
     if (!NS_IsMainThread() && mConnection) {
       MOZ_ASSERT(false);
@@ -2491,7 +2489,7 @@ DataChannelConnection::CloseInt(DataChannel *aChannel)
   aChannel->mState = CLOSING;
   if (mState == CLOSED) {
     // we're not going to hang around waiting
-    channel->DestroyLocked();
+    channel->StreamClosedLocked();
   }
   // At this point when we leave here, the object is a zombie held alive only by the DOM object
 }
@@ -2544,14 +2542,16 @@ DataChannel::~DataChannel()
 void
 DataChannel::Close()
 {
-  ENSURE_DATACONNECTION;
-  RefPtr<DataChannelConnection> connection(mConnection);
-  connection->Close(this);
+  if (mConnection) {
+    // ensure we don't get deleted
+    RefPtr<DataChannelConnection> connection(mConnection);
+    connection->Close(this);
+  }
 }
 
 // Used when disconnecting from the DataChannelConnection
 void
-DataChannel::DestroyLocked()
+DataChannel::StreamClosedLocked()
 {
   mConnection->mLock.AssertCurrentThreadOwns();
   ENSURE_DATACONNECTION;
@@ -2564,6 +2564,13 @@ DataChannel::DestroyLocked()
   NS_DispatchToMainThread(do_AddRef(new DataChannelOnMessageAvailable(
                                       DataChannelOnMessageAvailable::ON_CHANNEL_CLOSED,
                                       mConnection, this)));
+  // We leave mConnection live until the DOM releases us, to avoid races
+}
+
+void
+DataChannel::ReleaseConnection()
+{
+  ASSERT_WEBRTC(NS_IsMainThread());
   mConnection = nullptr;
 }
 

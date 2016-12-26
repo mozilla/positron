@@ -85,14 +85,13 @@ function generateKeyInfo(aData) {
 
 add_task(function* setup() {
   // Make sure userContext is enabled.
-  yield new Promise(resolve => {
-    SpecialPowers.pushPrefEnv({"set": [
-      [ "privacy.userContext.enabled", true ],
-      [ "media.mediasource.enabled", true ],
-      [ "media.eme.apiVisible", true ],
-      [ "media.mediasource.webm.enabled", true ],
-    ]}, resolve);
-  });
+  yield SpecialPowers.pushPrefEnv({"set": [
+    [ "privacy.userContext.enabled", true ],
+    [ "media.mediasource.enabled", true ],
+    [ "media.eme.apiVisible", true ],
+    [ "media.mediasource.webm.enabled", true ],
+    [ "media.clearkey.persistent-license.enabled", true ],
+  ]});
 });
 
 add_task(function* test() {
@@ -116,7 +115,7 @@ add_task(function* test() {
     let res = {};
 
     // Insert the media key.
-    let result = yield new Promise(resolve => {
+    yield new Promise(resolve => {
       session.addEventListener("message", function(event) {
         session.update(aKeyInfo.keyObj).then(
           () => { resolve(); }

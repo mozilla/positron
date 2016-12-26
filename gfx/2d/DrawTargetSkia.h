@@ -7,6 +7,7 @@
 #define _MOZILLA_GFX_SOURCESURFACESKIA_H
 
 #include "skia/include/core/SkCanvas.h"
+#include "skia/include/core/SkSurface.h"
 
 #include "2D.h"
 #include "HelpersSkia.h"
@@ -130,7 +131,8 @@ public:
   virtual void DetachAllSnapshots() override { MarkChanged(); }
 
   bool Init(const IntSize &aSize, SurfaceFormat aFormat);
-  void Init(unsigned char* aData, const IntSize &aSize, int32_t aStride, SurfaceFormat aFormat, bool aUninitialized = false);
+  bool Init(unsigned char* aData, const IntSize &aSize, int32_t aStride, SurfaceFormat aFormat, bool aUninitialized = false);
+  bool Init(SkCanvas* aCanvas);
 
 #ifdef USE_SKIA_GPU
   bool InitWithGrContext(GrContext* aGrContext,
@@ -174,27 +176,31 @@ private:
                 bool aOpaque,
                 Float aOpacity,
                 SourceSurface* aMask,
-                const Matrix& aMaskTransform)
+                const Matrix& aMaskTransform,
+                SkBaseDevice* aPreviousDevice)
       : mOldPermitSubpixelAA(aOldPermitSubpixelAA),
         mOpaque(aOpaque),
         mOpacity(aOpacity),
         mMask(aMask),
-        mMaskTransform(aMaskTransform)
+        mMaskTransform(aMaskTransform),
+        mPreviousDevice(aPreviousDevice)
     {}
     bool mOldPermitSubpixelAA;
     bool mOpaque;
     Float mOpacity;
     RefPtr<SourceSurface> mMask;
     Matrix mMaskTransform;
+    SkBaseDevice* mPreviousDevice;
   };
   std::vector<PushedLayer> mPushedLayers;
 
 #ifdef USE_SKIA_GPU
-  RefPtrSkia<GrContext> mGrContext;
+  sk_sp<GrContext> mGrContext;
 #endif
 
   IntSize mSize;
-  RefPtrSkia<SkCanvas> mCanvas;
+  sk_sp<SkSurface> mSurface;
+  sk_sp<SkCanvas> mCanvas;
   SourceSurfaceSkia* mSnapshot;
 
 #ifdef MOZ_WIDGET_COCOA

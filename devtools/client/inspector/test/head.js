@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 /* eslint no-unused-vars: [2, {"vars": "local"}] */
 /* import-globals-from ../../framework/test/shared-head.js */
-/* import-globals-from ../../commandline/test/helpers.js */
 /* import-globals-from ../../shared/test/test-actor-registry.js */
 /* import-globals-from ../../inspector/test/shared-head.js */
 "use strict";
@@ -19,11 +18,6 @@ Services.scriptloader.loadSubScript(
 //   Services.prefs.clearUserPref("devtools.debugger.log");
 // });
 
-// Import the GCLI test helper
-Services.scriptloader.loadSubScript(
-  "chrome://mochitests/content/browser/devtools/client/commandline/test/helpers.js",
-  this);
-
 // Import helpers registering the test-actor in remote targets
 Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/devtools/client/shared/test/test-actor-registry.js",
@@ -35,7 +29,8 @@ Services.scriptloader.loadSubScript(
   this);
 
 const {LocalizationHelper} = require("devtools/shared/l10n");
-const INSPECTOR_L10N = new LocalizationHelper("devtools/locale/inspector.properties");
+const INSPECTOR_L10N =
+      new LocalizationHelper("devtools/client/locales/inspector.properties");
 
 flags.testing = true;
 registerCleanupFunction(() => {
@@ -47,37 +42,48 @@ registerCleanupFunction(() => {
 });
 
 registerCleanupFunction(function* () {
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
-  yield gDevTools.closeToolbox(target);
-
   // Move the mouse outside inspector. If the test happened fake a mouse event
   // somewhere over inspector the pointer is considered to be there when the
   // next test begins. This might cause unexpected events to be emitted when
   // another test moves the mouse.
   EventUtils.synthesizeMouseAtPoint(1, 1, {type: "mousemove"}, window);
-
-  while (gBrowser.tabs.length > 1) {
-    gBrowser.removeCurrentTab();
-  }
 });
 
-var navigateTo = function (toolbox, url) {
-  let activeTab = toolbox.target.activeTab;
-  return activeTab.navigateTo(url);
-};
+var navigateTo = Task.async(function* (inspector, url) {
+  let markuploaded = inspector.once("markuploaded");
+  let onNewRoot = inspector.once("new-root");
+  let onUpdated = inspector.once("inspector-updated");
+
+  info("Navigating to: " + url);
+  let activeTab = inspector.toolbox.target.activeTab;
+  yield activeTab.navigateTo(url);
+
+  info("Waiting for markup view to load after navigation.");
+  yield markuploaded;
+
+  info("Waiting for new root.");
+  yield onNewRoot;
+
+  info("Waiting for inspector to update after new-root event.");
+  yield onUpdated;
+});
 
 /**
  * Start the element picker and focus the content window.
  * @param {Toolbox} toolbox
+ * @param {Boolean} skipFocus - Allow tests to bypass the focus event.
  */
-var startPicker = Task.async(function* (toolbox) {
+var startPicker = Task.async(function* (toolbox, skipFocus) {
   info("Start the element picker");
+  toolbox.win.focus();
   yield toolbox.highlighterUtils.startPicker();
-  // Make sure the content window is focused since the picker does not focus
-  // the content window by default.
-  yield ContentTask.spawn(gBrowser.selectedBrowser, null, function* () {
-    content.focus();
-  });
+  if (!skipFocus) {
+    // By default make sure the content window is focused since the picker may not focus
+    // the content window by default.
+    yield ContentTask.spawn(gBrowser.selectedBrowser, null, function* () {
+      content.focus();
+    });
+  }
 });
 
 /**
@@ -694,4 +700,27 @@ function getRuleViewRuleEditor(view, childrenIndex, nodeIndex) {
   return nodeIndex !== undefined ?
     view.element.children[childrenIndex].childNodes[nodeIndex]._ruleEditor :
     view.element.children[childrenIndex]._ruleEditor;
+}
+
+/**
+ * Get the text displayed for a given DOM Element's textContent within the
+ * markup view.
+ *
+ * @param {String} selector
+ * @param {InspectorPanel} inspector
+ * @return {String} The text displayed in the markup view
+ */
+function* getDisplayedNodeTextContent(selector, inspector) {
+  // We have to ensure that the textContent is displayed, for that the DOM
+  // Element has to be selected in the markup view and to be expanded.
+  yield selectNode(selector, inspector);
+
+  let container = yield getContainerForSelector(selector, inspector);
+  yield inspector.markup.expandNode(container.node);
+  yield waitForMultipleChildrenUpdates(inspector);
+  if (container) {
+    let textContainer = container.elt.querySelector("pre");
+    return textContainer.textContent;
+  }
+  return null;
 }

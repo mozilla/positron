@@ -184,13 +184,18 @@ SharedWorker::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 }
 
 nsresult
-SharedWorker::PreHandleEvent(EventChainPreVisitor& aVisitor)
+SharedWorker::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   AssertIsOnMainThread();
 
-  nsIDOMEvent*& event = aVisitor.mDOMEvent;
+  if (IsFrozen()) {
+    nsCOMPtr<nsIDOMEvent> event = aVisitor.mDOMEvent;
+    if (!event) {
+      event = EventDispatcher::CreateEvent(aVisitor.mEvent->mOriginalTarget,
+                                           aVisitor.mPresContext,
+                                           aVisitor.mEvent, EmptyString());
+    }
 
-  if (IsFrozen() && event) {
     QueueEvent(event);
 
     aVisitor.mCanHandle = false;
@@ -198,5 +203,5 @@ SharedWorker::PreHandleEvent(EventChainPreVisitor& aVisitor)
     return NS_OK;
   }
 
-  return DOMEventTargetHelper::PreHandleEvent(aVisitor);
+  return DOMEventTargetHelper::GetEventTargetParent(aVisitor);
 }

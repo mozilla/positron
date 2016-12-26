@@ -369,7 +369,6 @@ description > html|a {
 #dialogFrame {
   -moz-box-flex: 1;
   /* Default dialog dimensions */
-  height: 20em;
   width: 66ch;
 }
 
@@ -514,7 +513,7 @@ description > html|a {
 }
 
 .fxaAccountBoxButtons > button:first-child {
-  margin-right: 14px !important;
+  margin-inline-end: 14px !important;
 }
 
 .fxaSyncIllustration {

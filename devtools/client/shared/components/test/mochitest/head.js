@@ -1,5 +1,6 @@
-/* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 /* eslint no-unused-vars: [2, {"vars": "local"}] */
 
 "use strict";
@@ -48,15 +49,9 @@ function onNextAnimationFrame(fn) {
 }
 
 function setState(component, newState) {
-  var deferred = defer();
-  component.setState(newState, onNextAnimationFrame(deferred.resolve));
-  return deferred.promise;
-}
-
-function setProps(component, newState) {
-  var deferred = defer();
-  component.setProps(newState, onNextAnimationFrame(deferred.resolve));
-  return deferred.promise;
+  return new Promise(resolve => {
+    component.setState(newState, onNextAnimationFrame(resolve));
+  });
 }
 
 function dumpn(msg) {
@@ -70,7 +65,7 @@ function dumpn(msg) {
 var TEST_TREE_INTERFACE = {
   getParent: x => TEST_TREE.parent[x],
   getChildren: x => TEST_TREE.children[x],
-  renderItem: (x, depth, focused, arrow) => "-".repeat(depth) + x + ":" + focused + "\n",
+  renderItem: (x, depth, focused) => "-".repeat(depth) + x + ":" + focused + "\n",
   getRoots: () => ["A", "M"],
   getKey: x => "key-" + x,
   itemHeight: 1,
@@ -144,7 +139,9 @@ var TEST_TREE = {
 /**
  * Frame
  */
-function checkFrameString({ el, file, line, column, source, functionName, shouldLink, tooltip }) {
+function checkFrameString({
+  el, file, line, column, source, functionName, shouldLink, tooltip
+}) {
   let $ = selector => el.querySelector(selector);
 
   let $func = $(".frame-link-function-display-name");
@@ -155,7 +152,8 @@ function checkFrameString({ el, file, line, column, source, functionName, should
 
   is($filename.textContent, file, "Correct filename");
   is(el.getAttribute("data-line"), line ? `${line}` : null, "Expected `data-line` found");
-  is(el.getAttribute("data-column"), column ? `${column}` : null, "Expected `data-column` found");
+  is(el.getAttribute("data-column"),
+     column ? `${column}` : null, "Expected `data-column` found");
   is($sourceInner.getAttribute("title"), tooltip, "Correct tooltip");
   is($source.tagName, shouldLink ? "A" : "SPAN", "Correct linkable status");
   if (shouldLink) {
@@ -202,7 +200,7 @@ function shallowRenderComponent(component, props) {
  */
 function testRepRenderModes(modeTests, testName, componentUnderTest, gripStub) {
   modeTests.forEach(({mode, expectedOutput, message}) => {
-    const modeString = typeof mode === "undefined" ? "no mode" : mode;
+    const modeString = typeof mode === "undefined" ? "no mode" : mode.toString();
     if (!message) {
       message = `${testName}: ${modeString} renders correctly.`;
     }

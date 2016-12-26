@@ -1,8 +1,9 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Robocop Input</title>
+    <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robocop Input</title>
   </head>
   <body>
     <p>Input: <input id="input" type="text"></p>
@@ -108,22 +109,31 @@
         },
 
         test_reflush_changes: function() {
-          let inputIme = getEditor().QueryInterface(SpecialPowers.Ci.nsIEditorIMESupport);
-          do_check_true(inputIme.composing);
+          do_check_true(getEditor().composing);
 
           // Ending the composition then setting the input value triggers the bug.
-          inputIme.forceCompositionEnd();
+          getEditor().forceCompositionEnd();
           setValue("good"); // Value that testInputConnection.java expects.
           setSelection(4);
         },
 
         test_set_selection: function() {
-          let inputIme = getEditor().QueryInterface(SpecialPowers.Ci.nsIEditorIMESupport);
-          do_check_true(inputIme.composing);
+          do_check_true(getEditor().composing);
 
           // Ending the composition then setting the selection triggers the bug.
-          inputIme.forceCompositionEnd();
+          getEditor().forceCompositionEnd();
           setSelection(3); // Offsets that testInputConnection.java expects.
+        },
+
+        test_bug1123514: function() {
+          document.activeElement.addEventListener('input', function test_bug1123514_listener() {
+            this.removeEventListener('input', test_bug1123514_listener);
+
+            // Only works on input and textarea.
+            if (this.value === 'b') {
+              this.value = 'abc';
+            }
+          });
         },
 
         focus_resetting_input: function(val) {

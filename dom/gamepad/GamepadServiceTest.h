@@ -8,6 +8,8 @@
 #define mozilla_dom_GamepadServiceTest_h_
 
 #include "nsIIPCBackgroundChildCreateCallback.h"
+#include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/dom/GamepadBinding.h"
 
 namespace mozilla {
 namespace dom {
@@ -27,11 +29,11 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(GamepadServiceTest,
                                            DOMEventTargetHelper)
 
-  uint32_t NoMapping() const { return 0; }
-  uint32_t StandardMapping() const { return 1; }
+  GamepadMappingType NoMapping() const { return GamepadMappingType::_empty; }
+  GamepadMappingType StandardMapping() const { return GamepadMappingType::Standard; }
 
   already_AddRefed<Promise> AddGamepad(const nsAString& aID,
-                                       uint32_t aMapping,
+                                       GamepadMappingType aMapping,
                                        uint32_t aNumButtons,
                                        uint32_t aNumAxes,
                                        ErrorResult& aRv);

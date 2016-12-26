@@ -20,7 +20,7 @@ function test() {
   ok(PlacesUIUtils, "PlacesUIUtils in context");
 
   // Open Library, we will check the left pane.
-  openLibrary(function (library) {
+  openLibrary(function(library) {
     gLibrary = library;
     startTest();
   });
@@ -120,7 +120,7 @@ function startTest() {
   bs.moveItem(id, bs.unfiledBookmarksFolder, 0);
 
   // Remove all added bookmarks.
-  addedBookmarks.forEach(function (aItem) {
+  addedBookmarks.forEach(function(aItem) {
     // If we remove an item after its containing folder has been removed,
     // this will throw, but we can ignore that.
     try {
@@ -187,8 +187,7 @@ var bookmarksObserver = {
 
   onItemRemoved: function PSB_onItemRemoved(aItemId, aFolder, aIndex) {
     var node = null;
-    var index = null;
-    [node, index] = getNodeForTreeItem(aItemId, gLibrary.PlacesOrganizer._places);
+    [node, ] = getNodeForTreeItem(aItemId, gLibrary.PlacesOrganizer._places);
     is(node, null, "Places node not found in left pane");
   },
 
@@ -230,7 +229,7 @@ var bookmarksObserver = {
                                              tree.columns.getColumnAt(0));
         return cellText == aNewValue;
       }
-      let [node, index, valid] = getNodeForTreeItem(aItemId, gLibrary.PlacesOrganizer._places, validator);
+      let [node, , valid] = getNodeForTreeItem(aItemId, gLibrary.PlacesOrganizer._places, validator);
       if (node) // Only visible nodes.
         ok(valid, "Title cell value has been correctly updated");
     }
