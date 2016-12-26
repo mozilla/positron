@@ -923,9 +923,10 @@ nsListControlFrame::HandleEvent(nsPresContext* aPresContext,
   // do we have style that affects how we are selected?
   // do we have user-input style?
   const nsStyleUserInterface* uiStyle = StyleUserInterface();
-  if (uiStyle->mUserInput == NS_STYLE_USER_INPUT_NONE || uiStyle->mUserInput == NS_STYLE_USER_INPUT_DISABLED)
+  if (uiStyle->mUserInput == StyleUserInput::None ||
+      uiStyle->mUserInput == StyleUserInput::Disabled) {
     return nsFrame::HandleEvent(aPresContext, aEvent, aEventStatus);
-
+  }
   EventStates eventStates = mContent->AsElement()->State();
   if (eventStates.HasState(NS_EVENT_STATE_DISABLED))
     return NS_OK;
@@ -1777,14 +1778,19 @@ nsListControlFrame::GetIndexFromDOMEvent(nsIDOMEvent* aMouseEvent,
 }
 
 static bool
-FireShowDropDownEvent(nsIContent* aContent, bool show)
+FireShowDropDownEvent(nsIContent* aContent, bool aShow, bool aIsSourceTouchEvent)
 {
   if (XRE_IsContentProcess() &&
       Preferences::GetBool("browser.tabs.remote.desktopbehavior", false)) {
+    nsString eventName;
+    if (aShow) {
+      eventName = aIsSourceTouchEvent ? NS_LITERAL_STRING("mozshowdropdown-sourcetouch") :
+                                        NS_LITERAL_STRING("mozshowdropdown");
+    } else {
+      eventName = NS_LITERAL_STRING("mozhidedropdown");
+    }
     nsContentUtils::DispatchChromeEvent(aContent->OwnerDoc(), aContent,
-                                        show ? NS_LITERAL_STRING("mozshowdropdown") :
-                                               NS_LITERAL_STRING("mozhidedropdown"),
-                                        true, false);
+                                        eventName, true, false);
     return true;
   }
 
@@ -1849,7 +1855,13 @@ nsListControlFrame::MouseDown(nsIDOMEvent* aMouseEvent)
         }
       }
 
-      if (FireShowDropDownEvent(mContent, !mComboboxFrame->IsDroppedDownOrHasParentPopup())) {
+      uint16_t inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
+      if (NS_FAILED(mouseEvent->GetMozInputSource(&inputSource))) {
+        return NS_ERROR_FAILURE;
+      }
+      bool isSourceTouchEvent = inputSource == nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
+      if (FireShowDropDownEvent(mContent, !mComboboxFrame->IsDroppedDownOrHasParentPopup(),
+                                isSourceTouchEvent)) {
         return NS_OK;
       }
 
@@ -2092,7 +2104,7 @@ nsListControlFrame::DropDownToggleKey(nsIDOMEvent* aKeyEvent)
   if (IsInDropDownMode() && !nsComboboxControlFrame::ToolkitHasNativePopup()) {
     aKeyEvent->PreventDefault();
     if (!mComboboxFrame->IsDroppedDown()) {
-      if (!FireShowDropDownEvent(mContent, true)) {
+      if (!FireShowDropDownEvent(mContent, true, false)) {
         mComboboxFrame->ShowDropDown(true);
       }
     } else {
@@ -2139,9 +2151,12 @@ nsListControlFrame::KeyDown(nsIDOMEvent* aKeyEvent)
   dropDownMenuOnUpDown = keyEvent->IsAlt();
   dropDownMenuOnSpace = IsInDropDownMode() && !mComboboxFrame->IsDroppedDown();
 #endif
+  bool withinIncrementalSearchTime =
+    keyEvent->mTime - gLastKeyTime <= INCREMENTAL_SEARCH_KEYPRESS_TIME;
   if ((dropDownMenuOnUpDown &&
        (keyEvent->mKeyCode == NS_VK_UP || keyEvent->mKeyCode == NS_VK_DOWN)) ||
-      (dropDownMenuOnSpace && keyEvent->mKeyCode == NS_VK_SPACE)) {
+      (dropDownMenuOnSpace && keyEvent->mKeyCode == NS_VK_SPACE &&
+       !withinIncrementalSearchTime)) {
     DropDownToggleKey(aKeyEvent);
     if (keyEvent->DefaultPrevented()) {
       return NS_OK;
@@ -2179,18 +2194,27 @@ nsListControlFrame::KeyDown(nsIDOMEvent* aKeyEvent)
     mControlSelectMode = false;
   }
 
+  // We should not change the selection if the popup is "opened
+  // in the parent process" (even when we're in single-process mode).
+  bool shouldSelectByKey = !mComboboxFrame ||
+                           !mComboboxFrame->IsOpenInParentProcess();
+
   switch (keyEvent->mKeyCode) {
     case NS_VK_UP:
     case NS_VK_LEFT:
-      AdjustIndexForDisabledOpt(mEndSelectionIndex, newIndex,
-                                static_cast<int32_t>(numOptions),
-                                -1, -1);
+      if (shouldSelectByKey) {
+        AdjustIndexForDisabledOpt(mEndSelectionIndex, newIndex,
+                                  static_cast<int32_t>(numOptions),
+                                  -1, -1);
+      }
       break;
     case NS_VK_DOWN:
     case NS_VK_RIGHT:
-      AdjustIndexForDisabledOpt(mEndSelectionIndex, newIndex,
-                                static_cast<int32_t>(numOptions),
-                                1, 1);
+      if (shouldSelectByKey) {
+        AdjustIndexForDisabledOpt(mEndSelectionIndex, newIndex,
+                                  static_cast<int32_t>(numOptions),
+                                  1, 1);
+      }
       break;
     case NS_VK_RETURN:
       if (IsInDropDownMode()) {
@@ -2230,30 +2254,38 @@ nsListControlFrame::KeyDown(nsIDOMEvent* aKeyEvent)
       return NS_OK;
     }
     case NS_VK_PAGE_UP: {
-      int32_t itemsPerPage =
-        std::max(1, static_cast<int32_t>(mNumDisplayRows - 1));
-      AdjustIndexForDisabledOpt(mEndSelectionIndex, newIndex,
-                                static_cast<int32_t>(numOptions),
-                                -itemsPerPage, -1);
+      if (shouldSelectByKey) {
+        int32_t itemsPerPage =
+          std::max(1, static_cast<int32_t>(mNumDisplayRows - 1));
+        AdjustIndexForDisabledOpt(mEndSelectionIndex, newIndex,
+                                  static_cast<int32_t>(numOptions),
+                                  -itemsPerPage, -1);
+      }
       break;
     }
     case NS_VK_PAGE_DOWN: {
-      int32_t itemsPerPage =
-        std::max(1, static_cast<int32_t>(mNumDisplayRows - 1));
-      AdjustIndexForDisabledOpt(mEndSelectionIndex, newIndex,
-                                static_cast<int32_t>(numOptions),
-                                itemsPerPage, 1);
+      if (shouldSelectByKey) {
+        int32_t itemsPerPage =
+          std::max(1, static_cast<int32_t>(mNumDisplayRows - 1));
+        AdjustIndexForDisabledOpt(mEndSelectionIndex, newIndex,
+                                  static_cast<int32_t>(numOptions),
+                                  itemsPerPage, 1);
+      }
       break;
     }
     case NS_VK_HOME:
-      AdjustIndexForDisabledOpt(0, newIndex,
-                                static_cast<int32_t>(numOptions),
-                                0, 1);
+      if (shouldSelectByKey) {
+        AdjustIndexForDisabledOpt(0, newIndex,
+                                  static_cast<int32_t>(numOptions),
+                                  0, 1);
+      }
       break;
     case NS_VK_END:
-      AdjustIndexForDisabledOpt(static_cast<int32_t>(numOptions) - 1, newIndex,
-                                static_cast<int32_t>(numOptions),
-                                0, -1);
+      if (shouldSelectByKey) {
+        AdjustIndexForDisabledOpt(static_cast<int32_t>(numOptions) - 1, newIndex,
+                                  static_cast<int32_t>(numOptions),
+                                  0, -1);
+      }
       break;
 
 #if defined(XP_WIN)

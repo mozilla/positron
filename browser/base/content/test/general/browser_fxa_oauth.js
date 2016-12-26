@@ -2,7 +2,6 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-///////////////////
 //
 // Whitelisting this test.
 // As part of bug 1077403, the leaking uncaught rejection should be fixed.
@@ -22,7 +21,7 @@ const HTTP_ENDPOINT_WITH_KEYS = "/browser/browser/base/content/test/general/brow
 var gTests = [
   {
     desc: "FxA OAuth - should open a new tab, complete OAuth flow",
-    run: function () {
+    run: function() {
       return new Promise(function(resolve, reject) {
         let tabOpened = false;
         let properURL = "http://example.com/browser/browser/base/content/test/general/browser_fxa_oauth.html";
@@ -35,7 +34,7 @@ var gTests = [
         ];
         queryStrings.sort();
 
-        waitForTab(function (tab) {
+        waitForTab(function(tab) {
           Assert.ok("Tab successfully opened");
           Assert.ok(gBrowser.currentURI.spec.split("?")[0], properURL, "Check URL without params");
           let actualURL = new URL(gBrowser.currentURI.spec);
@@ -75,7 +74,7 @@ var gTests = [
   },
   {
     desc: "FxA OAuth - should open a new tab, complete OAuth flow when forcing auth",
-    run: function () {
+    run: function() {
       return new Promise(function(resolve, reject) {
         let tabOpened = false;
         let properURL = "http://example.com/browser/browser/base/content/test/general/browser_fxa_oauth.html";
@@ -89,7 +88,7 @@ var gTests = [
         ];
         queryStrings.sort();
 
-        waitForTab(function (tab) {
+        waitForTab(function(tab) {
           Assert.ok("Tab successfully opened");
           Assert.ok(gBrowser.currentURI.spec.split("?")[0], properURL, "Check URL without params");
 
@@ -132,11 +131,11 @@ var gTests = [
   },
   {
     desc: "FxA OAuth - should receive an error when there's a state mismatch",
-    run: function () {
+    run: function() {
       return new Promise(function(resolve, reject) {
         let tabOpened = false;
 
-        waitForTab(function (tab) {
+        waitForTab(function(tab) {
           Assert.ok("Tab successfully opened");
 
           // It should have passed in the expected non-matching state value.
@@ -170,11 +169,11 @@ var gTests = [
   },
   {
     desc: "FxA OAuth - should be able to request keys during OAuth flow",
-    run: function () {
+    run: function() {
       return new Promise(function(resolve, reject) {
         let tabOpened = false;
 
-        waitForTab(function (tab) {
+        waitForTab(function(tab) {
           Assert.ok("Tab successfully opened");
 
           // It should have asked for keys.
@@ -212,11 +211,11 @@ var gTests = [
   },
   {
     desc: "FxA OAuth - should not receive keys if not explicitly requested",
-    run: function () {
+    run: function() {
       return new Promise(function(resolve, reject) {
         let tabOpened = false;
 
-        waitForTab(function (tab) {
+        waitForTab(function(tab) {
           Assert.ok("Tab successfully opened");
 
           // It should not have asked for keys.
@@ -253,11 +252,11 @@ var gTests = [
   },
   {
     desc: "FxA OAuth - should receive an error if keys could not be obtained",
-    run: function () {
+    run: function() {
       return new Promise(function(resolve, reject) {
         let tabOpened = false;
 
-        waitForTab(function (tab) {
+        waitForTab(function(tab) {
           Assert.ok("Tab successfully opened");
 
           // It should have asked for keys.
@@ -314,9 +313,9 @@ function test() {
     let newWhitelist = origWhitelist + " http://example.com";
     Services.prefs.setCharPref(webchannelWhitelistPref, newWhitelist);
     try {
-      for (let test of gTests) {
-        info("Running: " + test.desc);
-        yield test.run();
+      for (let testCase of gTests) {
+        info("Running: " + testCase.desc);
+        yield testCase.run();
       }
     } finally {
       Services.prefs.clearUserPref(webchannelWhitelistPref);

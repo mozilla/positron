@@ -56,11 +56,6 @@ TEST_SUITES = {
         'mach_command': 'crashtest',
         'kwargs': {'test_file': None},
     },
-    'crashtest-ipc': {
-        'aliases': ('Cipc', 'cipc'),
-        'mach_command': 'crashtest-ipc',
-        'kwargs': {'test_file': None},
-    },
     'firefox-ui-functional': {
         'aliases': ('Fxfn',),
         'mach_command': 'firefox-ui-functional',
@@ -111,11 +106,6 @@ TEST_SUITES = {
         'aliases': ('RR', 'rr', 'Rr'),
         'mach_command': 'reftest',
         'kwargs': {'tests': None},
-    },
-    'reftest-ipc': {
-        'aliases': ('Ripc',),
-        'mach_command': 'reftest-ipc',
-        'kwargs': {'test_file': None},
     },
     'web-platform-tests': {
         'aliases': ('wpt',),
@@ -320,7 +310,7 @@ class Test(MachCommandBase):
 
         buckets = {}
         for test in run_tests:
-            key = (test['flavor'], test['subsuite'])
+            key = (test['flavor'], test.get('subsuite', ''))
             buckets.setdefault(key, []).append(test)
 
         for (flavor, subsuite), tests in sorted(buckets.items()):

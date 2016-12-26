@@ -8,6 +8,7 @@
 #include "mozilla/ArrayUtils.h"
 
 #include "nsCSSPseudoClasses.h"
+#include "nsCSSPseudoElements.h"
 #include "nsStaticAtom.h"
 #include "mozilla/Preferences.h"
 #include "nsString.h"
@@ -88,7 +89,6 @@ nsCSSPseudoClasses::HasStringArg(Type aType)
          aType == Type::mozEmptyExceptChildrenWithLocalname ||
          aType == Type::mozSystemMetric ||
          aType == Type::mozLocaleDir ||
-         aType == Type::mozDir ||
          aType == Type::dir;
 }
 

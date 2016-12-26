@@ -3,7 +3,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "FxAccountsCommon", function () {
+XPCOMUtils.defineLazyGetter(this, "FxAccountsCommon", function() {
   return Components.utils.import("resource://gre/modules/FxAccountsCommon.js", {});
 });
 
@@ -24,6 +24,6 @@ let self = window;
 
 // Load mocking/stubbing library, sinon
 // docs: http://sinonjs.org/docs/
+/* global sinon */
 let loader = Cc["@mozilla.org/moz/jssubscript-loader;1"].getService(Ci.mozIJSSubScriptLoader);
 loader.loadSubScript("resource://testing-common/sinon-1.16.1.js");
-

@@ -9,7 +9,6 @@ DIRS += ['test']
 EXTRA_COMPONENTS += [
     'AlertsService.js',
     'B2GAboutRedirector.js',
-    'B2GAppMigrator.js',
     'B2GPresentationDevicePrompt.js',
     'BootstrapCommandLine.js',
     'ContentPermissionPrompt.js',
@@ -23,7 +22,6 @@ EXTRA_COMPONENTS += [
     'SmsProtocolHandler.js',
     'SystemMessageInternal.js',
     'TelProtocolHandler.js',
-    'WebappsUpdateTimer.js',
 ]
 
 if CONFIG['OS_TARGET'] != 'Android':
@@ -41,11 +39,6 @@ if CONFIG['MOZ_B2G']:
     EXTRA_COMPONENTS += [
         'DirectoryProvider.js',
         'RecoveryService.js',
-    ]
-
-if CONFIG['MOZ_UPDATER']:
-    EXTRA_COMPONENTS += [
-        'UpdatePrompt.js',
     ]
 
 EXTRA_JS_MODULES += [
@@ -67,7 +60,6 @@ EXTRA_JS_MODULES += [
     'SignInToWebsite.jsm',
     'SystemAppProxy.jsm',
     'TelURIParser.jsm',
-    'WebappsUpdater.jsm',
 ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'gonk':

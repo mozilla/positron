@@ -5,10 +5,12 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 DIRS += [
+    'aushelper',
     'e10srollout',
     'pdfjs',
     'pocket',
     'webcompat',
+    'shield-recipe-client',
 ]
 
 # Only include the following system add-ons if building Aurora or Nightly
@@ -16,4 +18,11 @@ if 'a' in CONFIG['GRE_MILESTONE']:
     DIRS += [
         'flyweb',
         'formautofill',
+        'presentation',
+    ]
+
+# Only include mortar system add-ons if we locally enable it
+if CONFIG['MOZ_MORTAR']:
+    DIRS += [
+        'mortar',
     ]

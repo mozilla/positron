@@ -183,7 +183,7 @@ nsresult nsExtProtocolChannel::OpenURL()
   }
 
 finish:
-  mCallbacks = 0;
+  mCallbacks = nullptr;
   return rv;
 }
 
@@ -396,6 +396,12 @@ NS_IMETHODIMP nsExtProtocolChannel::SetParentListener(HttpChannelParentListener*
 }
 
 NS_IMETHODIMP nsExtProtocolChannel::NotifyTrackingProtectionDisabled()
+{
+  // nothing to do
+  return NS_OK;
+}
+
+NS_IMETHODIMP nsExtProtocolChannel::NotifyTrackingResource()
 {
   // nothing to do
   return NS_OK;

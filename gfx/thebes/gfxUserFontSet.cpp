@@ -181,7 +181,7 @@ public:
     virtual ots::TableAction GetTableAction(uint32_t aTag) override {
         // Preserve Graphite, color glyph and SVG tables
         if (
-#ifdef RELEASE_BUILD // For Beta/Release, also allow OT Layout tables through
+#ifdef RELEASE_OR_BETA // For Beta/Release, also allow OT Layout tables through
                      // unchecked, and rely on harfbuzz to handle them safely.
             aTag == TRUETYPE_TAG('G', 'D', 'E', 'F') ||
             aTag == TRUETYPE_TAG('G', 'P', 'O', 'S') ||
@@ -423,8 +423,8 @@ gfxUserFontEntry::LoadNextSrc()
 
         if (currSrc.mSourceType == gfxFontFaceSrc::eSourceType_Local) {
             // Don't look up local fonts if the font whitelist is being used.
-            gfxFontEntry* fe = gfxPlatformFontList::PlatformFontList()->
-                                 IsFontFamilyWhitelistActive() ?
+            gfxPlatformFontList* pfl = gfxPlatformFontList::PlatformFontList();
+            gfxFontEntry* fe = pfl && pfl->IsFontFamilyWhitelistActive() ?
                 nullptr :
                 gfxPlatform::GetPlatform()->LookupLocalFont(currSrc.mLocalName,
                                                             mWeight,
@@ -636,6 +636,16 @@ gfxUserFontEntry::LoadPlatformFont(const uint8_t* aFontData, uint32_t& aLength)
         SanitizeOpenTypeData(aFontData, aLength, saneLen, fontType);
     if (!saneData) {
         mFontSet->LogMessage(this, "rejected by sanitizer");
+    } else {
+        // Check whether saneData is a known OpenType format; it might be
+        // a TrueType Collection, which OTS would accept but we don't yet
+        // know how to handle. If so, discard.
+        if (gfxFontUtils::DetermineFontDataType(saneData, saneLen) !=
+            GFX_USERFONT_OPENTYPE) {
+            mFontSet->LogMessage(this, "not a supported OpenType format");
+            free((void*)saneData);
+            saneData = nullptr;
+        }
     }
     if (saneData) {
         if (saneLen) {

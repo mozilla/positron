@@ -7,6 +7,8 @@
 #include "MediaBufferDecoder.h"
 #include "BufferDecoder.h"
 #include "mozilla/dom/AudioContextBinding.h"
+#include "mozilla/dom/BaseAudioContextBinding.h"
+#include "mozilla/dom/DOMException.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include <speex/speex_resampler.h>
 #include "nsXPCOMCIDInternal.h"
@@ -25,7 +27,7 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/Telemetry.h"
 #include "nsPrintfCString.h"
-#include "GMPService.h"
+#include "GMPCrashHelper.h"
 
 namespace mozilla {
 
@@ -611,7 +613,11 @@ WebAudioDecodeJob::OnFailure(ErrorCode aErrorCode)
   // Ignore errors in calling the callback, since there is not much that we can
   // do about it here.
   if (mFailureCallback) {
-    mFailureCallback->Call();
+    nsAutoCString errorString(errorMessage);
+    RefPtr<DOMException> exception =
+      DOMException::Create(NS_ERROR_DOM_ENCODING_NOT_SUPPORTED_ERR,
+                           errorString);
+    mFailureCallback->Call(*exception);
   }
 
   mPromise->MaybeReject(NS_ERROR_DOM_ENCODING_NOT_SUPPORTED_ERR);

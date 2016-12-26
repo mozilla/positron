@@ -13,22 +13,31 @@
 #include "mozilla/layers/ImageBridgeChild.h"
 
 namespace mozilla {
+namespace dom {
+class VideoDecoderManagerChild;
+}
 namespace layers {
 
 // Image class that refers to a decoded video frame within
 // the GPU process.
 class GPUVideoImage final : public Image {
 public:
-  GPUVideoImage(const SurfaceDescriptorGPUVideo& aSD,
+  GPUVideoImage(dom::VideoDecoderManagerChild* aManager,
+                const SurfaceDescriptorGPUVideo& aSD,
                 const gfx::IntSize& aSize)
     : Image(nullptr, ImageFormat::GPU_VIDEO)
     , mSize(aSize)
   {
     // Create the TextureClient immediately since the GPUVideoTextureData
     // is responsible for deallocating the SurfaceDescriptor.
+    //
+    // Use the RECYCLE texture flag, since it's likely that our 'real'
+    // TextureData (in the decoder thread of the GPU process) is using
+    // it too, and we want to make sure we don't send the delete message
+    // until we've stopped being used on the compositor.
     mTextureClient =
-      TextureClient::CreateWithData(new GPUVideoTextureData(aSD, aSize),
-                                    TextureFlags::DEFAULT,
+      TextureClient::CreateWithData(new GPUVideoTextureData(aManager, aSD, aSize),
+                                    TextureFlags::RECYCLE,
                                     ImageBridgeChild::GetSingleton().get());
   }
 
@@ -36,9 +45,14 @@ public:
 
   gfx::IntSize GetSize() override { return mSize; }
 
-  // TODO: We really want to be able to support this, but it's complex, since we need to readback
-  // in the other process and send it across.
-  virtual already_AddRefed<gfx::SourceSurface> GetAsSourceSurface() override { return nullptr; }
+  virtual already_AddRefed<gfx::SourceSurface> GetAsSourceSurface() override
+  {
+    if (!mTextureClient) {
+      return nullptr;
+    }
+    GPUVideoTextureData* data = mTextureClient->GetInternalData()->AsGPUVideoTextureData();
+    return data->GetAsSourceSurface();
+  }
 
   virtual TextureClient* GetTextureClient(KnowsCompositor* aForwarder) override
   {

@@ -35,7 +35,6 @@ CheckDecoderState(const ImageTestCase& aTestCase, Decoder* aDecoder)
   EXPECT_TRUE(aDecoder->GetDecodeDone());
   EXPECT_EQ(bool(aTestCase.mFlags & TEST_CASE_HAS_ERROR),
             aDecoder->HasError());
-  EXPECT_TRUE(!aDecoder->WasAborted());
 
   // Verify that the decoder made the expected progress.
   Progress progress = aDecoder->TakeProgress();
@@ -363,6 +362,11 @@ TEST_F(ImageDecoders, CorruptICOWithBadBMPHeightSingleChunk)
 TEST_F(ImageDecoders, CorruptICOWithBadBMPHeightMultiChunk)
 {
   CheckDecoderMultiChunk(CorruptICOWithBadBMPHeightTestCase());
+}
+
+TEST_F(ImageDecoders, CorruptICOWithBadBppSingleChunk)
+{
+  CheckDecoderSingleChunk(CorruptICOWithBadBppTestCase());
 }
 
 TEST_F(ImageDecoders, AnimatedGIFWithFRAME_FIRST)

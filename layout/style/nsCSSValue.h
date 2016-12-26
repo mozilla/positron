@@ -30,9 +30,11 @@
 #include "nsStringBuffer.h"
 #include "nsTArray.h"
 #include "nsStyleConsts.h"
+#include "nsStyleCoord.h"
 #include "gfxFontFamilyList.h"
 
 class imgRequestProxy;
+class nsIContent;
 class nsIDocument;
 class nsIPrincipal;
 class nsIURI;
@@ -92,6 +94,7 @@ namespace css {
 
 struct URLValueData
 {
+protected:
   // Methods are not inline because using an nsIPrincipal means requiring
   // caps, which leads to REQUIRES hell, since this header is included all
   // over.
@@ -111,10 +114,15 @@ struct URLValueData
                already_AddRefed<PtrHolder<nsIURI>> aReferrer,
                already_AddRefed<PtrHolder<nsIPrincipal>> aOriginPrincipal);
 
-  bool operator==(const URLValueData& aOther) const;
+public:
+  // Returns true iff all fields of the two URLValueData objects are equal.
+  //
+  // Only safe to call on the main thread, since this will call Equals on the
+  // nsIURI and nsIPrincipal objects stored on the URLValueData objects.
+  bool Equals(const URLValueData& aOther) const;
 
   // Returns true iff we know for sure, by comparing the mBaseURI pointer,
-  // the specified url() value mString, and the mLocalURLFlag, that these
+  // the specified url() value mString, and the mIsLocalRef, that these
   // two URLValueData objects represent the same computed url() value.
   //
   // Doesn't look at mReferrer or mOriginPrincipal.
@@ -128,9 +136,20 @@ struct URLValueData
 
   nsIURI* GetURI() const;
 
-  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+  bool IsLocalRef() const { return mIsLocalRef; }
 
-  bool GetLocalURLFlag() const { return mLocalURLFlag; }
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(URLValueData)
+
+  // When matching a url with mIsLocalRef set, resolve it against aURI;
+  // Otherwise, ignore aURL and return mURL directly.
+  already_AddRefed<nsIURI> ResolveLocalRef(nsIURI* aURI) const;
+  already_AddRefed<nsIURI> ResolveLocalRef(nsIContent* aContent) const;
+
+  // Serializes mURI as a computed URI value, taking into account mIsLocalRef
+  // and serializing just the fragment if true.
+  void GetSourceString(nsString& aRef) const;
+
+  bool EqualsExceptRef(nsIURI* aURI) const;
 
 private:
   // mURI stores the lazily resolved URI.  This may be null if the URI is
@@ -143,15 +162,20 @@ public:
   PtrHandle<nsIPrincipal> mOriginPrincipal;
 private:
   mutable bool mURIResolved;
-  // mLocalURLFlag is set when url starts with a U+0023 number
-  // sign(#) character.
-  bool mLocalURLFlag;
+  // mIsLocalRef is set when url starts with a U+0023 number sign(#) character.
+  bool mIsLocalRef;
 
+protected:
+  virtual ~URLValueData() = default;
+
+  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+
+private:
   URLValueData(const URLValueData& aOther) = delete;
   URLValueData& operator=(const URLValueData& aOther) = delete;
 };
 
-struct URLValue : public URLValueData
+struct URLValue final : public URLValueData
 {
   // These two constructors are safe to call only on the main thread.
   URLValue(nsStringBuffer* aString, nsIURI* aBaseURI, nsIURI* aReferrer,
@@ -171,15 +195,9 @@ struct URLValue : public URLValueData
   URLValue& operator=(const URLValue&) = delete;
 
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
-
-protected:
-  ~URLValue() {}
-
-public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(URLValue)
 };
 
-struct ImageValue : public URLValueData
+struct ImageValue final : public URLValueData
 {
   // Not making the constructor and destructor inline because that would
   // force us to include imgIRequest.h, which leads to REQUIRES hell, since
@@ -191,20 +209,32 @@ struct ImageValue : public URLValueData
              nsIURI* aReferrer, nsIPrincipal* aOriginPrincipal,
              nsIDocument* aDocument);
 
+  // This constructor is safe to call from any thread, but Initialize
+  // must be called later for the object to be useful.
+  ImageValue(nsStringBuffer* aString,
+             already_AddRefed<PtrHolder<nsIURI>> aBaseURI,
+             already_AddRefed<PtrHolder<nsIURI>> aReferrer,
+             already_AddRefed<PtrHolder<nsIPrincipal>> aOriginPrincipal);
+
   ImageValue(const ImageValue&) = delete;
   ImageValue& operator=(const ImageValue&) = delete;
 
+  void Initialize(nsIDocument* aDocument);
+
   // XXXheycam We should have our own SizeOfIncludingThis method.
 
-private:
+protected:
   ~ImageValue();
 
 public:
-  // Inherit operator== from URLValue
+  // Inherit Equals from URLValueData
 
   nsRefPtrHashtable<nsPtrHashKey<nsIDocument>, imgRequestProxy> mRequests;
 
-  NS_INLINE_DECL_REFCOUNTING(ImageValue)
+private:
+#ifdef DEBUG
+  bool mInitialized = false;
+#endif
 };
 
 struct GridNamedArea {
@@ -269,35 +299,25 @@ class FontFamilyListRefCnt final : public FontFamilyList {
 public:
     FontFamilyListRefCnt()
         : FontFamilyList()
-    {
-        MOZ_COUNT_CTOR(FontFamilyListRefCnt);
-    }
+    {}
 
     explicit FontFamilyListRefCnt(FontFamilyType aGenericType)
         : FontFamilyList(aGenericType)
-    {
-        MOZ_COUNT_CTOR(FontFamilyListRefCnt);
-    }
+    {}
 
     FontFamilyListRefCnt(const nsAString& aFamilyName,
                          QuotedName aQuoted)
         : FontFamilyList(aFamilyName, aQuoted)
-    {
-        MOZ_COUNT_CTOR(FontFamilyListRefCnt);
-    }
+    {}
 
     FontFamilyListRefCnt(const FontFamilyListRefCnt& aOther)
         : FontFamilyList(aOther)
-    {
-        MOZ_COUNT_CTOR(FontFamilyListRefCnt);
-    }
+    {}
 
     NS_INLINE_DECL_REFCOUNTING(FontFamilyListRefCnt);
 
 private:
-    ~FontFamilyListRefCnt() {
-        MOZ_COUNT_DTOR(FontFamilyListRefCnt);
-    }
+    ~FontFamilyListRefCnt() {}
 };
 
 struct RGBAColorData
@@ -375,8 +395,7 @@ struct ComplexColorData
 
   StyleComplexColor ToComplexColor() const
   {
-    return StyleComplexColor(
-      mColor.ToColor(), ClampColor(mForegroundRatio * 255.0f));
+    return {mColor.ToColor(), ClampColor(mForegroundRatio * 255.0f)};
   }
 };
 
@@ -637,6 +656,10 @@ public:
     { return eCSSUnit_Point <= aUnit && aUnit <= eCSSUnit_Pixel; }
   bool      IsPixelLengthUnit() const
     { return IsPixelLengthUnit(mUnit); }
+  static bool IsPercentLengthUnit(nsCSSUnit aUnit)
+    { return aUnit == eCSSUnit_Percent; }
+  bool      IsPercentLengthUnit()
+    { return IsPercentLengthUnit(mUnit); }
   static bool IsFloatUnit(nsCSSUnit aUnit)
     { return eCSSUnit_Number <= aUnit; }
   bool      IsAngularUnit() const  
@@ -721,6 +744,9 @@ public:
 
   // Converts any angle to radians.
   double GetAngleValueInRadians() const;
+
+  // Converts any angle to degrees.
+  double GetAngleValueInDegrees() const;
 
   nsAString& GetStringValue(nsAString& aBuffer) const
   {
@@ -838,6 +864,11 @@ public:
   // all over.
   imgRequestProxy* GetImageValue(nsIDocument* aDocument) const;
 
+  // Like GetImageValue, but additionally will pass the imgRequestProxy
+  // through nsContentUtils::GetStaticRequest if aPresContent is static.
+  already_AddRefed<imgRequestProxy> GetPossiblyStaticImageValue(
+      nsIDocument* aDocument, nsPresContext* aPresContext) const;
+
   nscoord GetFixedLength(nsPresContext* aPresContext) const;
   nscoord GetPixelLength() const;
 
@@ -870,6 +901,8 @@ public:
   void SetStringValue(const nsString& aValue, nsCSSUnit aUnit);
   void SetColorValue(nscolor aValue);
   void SetIntegerColorValue(nscolor aValue, nsCSSUnit aUnit);
+  // converts the nscoord to pixels
+  void SetIntegerCoordValue(nscoord aCoord);
   void SetFloatColorValue(float aComponent1,
                           float aComponent2,
                           float aComponent3,
@@ -901,6 +934,9 @@ public:
   void SetSystemFontValue();
   void SetDummyValue();
   void SetDummyInheritValue();
+
+  // Converts an nsStyleCoord::CalcValue back into a CSSValue
+  void SetCalcValue(const nsStyleCoord::CalcValue* aCalc);
 
   // These are a little different - they allocate storage for you and
   // return a handle.
@@ -1074,7 +1110,6 @@ private:
     : mRefCnt(0)
     , mCount(aItemCount)
   {
-    MOZ_COUNT_CTOR(nsCSSValue::Array);
     CSSVALUE_LIST_FOR_EXTRA_VALUES(val) {
       new (val) nsCSSValue();
     }
@@ -1082,7 +1117,6 @@ private:
 
   ~Array()
   {
-    MOZ_COUNT_DTOR(nsCSSValue::Array);
     CSSVALUE_LIST_FOR_EXTRA_VALUES(val) {
       val->~nsCSSValue();
     }
@@ -1152,14 +1186,12 @@ struct nsCSSValueSharedList final {
   nsCSSValueSharedList()
     : mHead(nullptr)
   {
-    MOZ_COUNT_CTOR(nsCSSValueSharedList);
   }
 
   // Takes ownership of aList.
   explicit nsCSSValueSharedList(nsCSSValueList* aList)
     : mHead(aList)
   {
-    MOZ_COUNT_CTOR(nsCSSValueSharedList);
   }
 
 private:
@@ -1167,7 +1199,7 @@ private:
   ~nsCSSValueSharedList();
 
 public:
-  NS_INLINE_DECL_REFCOUNTING(nsCSSValueSharedList)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nsCSSValueSharedList)
 
   void AppendToString(nsCSSPropertyID aProperty, nsAString& aResult,
                       nsCSSValue::Serialization aValueSerialization) const;
@@ -1796,16 +1828,12 @@ public:
     , mComponent2(aComponent2)
     , mComponent3(aComponent3)
     , mAlpha(aAlpha)
-  {
-    MOZ_COUNT_CTOR(nsCSSValueFloatColor);
-  }
+  {}
 
 private:
   // Private destructor, to discourage deletion outside of Release():
   ~nsCSSValueFloatColor()
-  {
-    MOZ_COUNT_DTOR(nsCSSValueFloatColor);
-  }
+  {}
 
 public:
   bool operator==(nsCSSValueFloatColor& aOther) const;

@@ -46,7 +46,7 @@
 #include "nsXPCOMPrivate.h"
 #include "prthread.h"
 
-#ifdef RELEASE_BUILD
+#ifdef RELEASE_OR_BETA
 #define THREADSAFETY_ASSERT MOZ_ASSERT
 #else
 #define THREADSAFETY_ASSERT MOZ_RELEASE_ASSERT
@@ -332,7 +332,7 @@ class ChildImpl final : public BackgroundChildImpl
   // create the background thread after application shutdown has started.
   static bool sShutdownHasStarted;
 
-#if defined(DEBUG) || !defined(RELEASE_BUILD)
+#if defined(DEBUG) || !defined(RELEASE_OR_BETA)
   nsIThread* mBoundThread;
 #endif
 
@@ -352,7 +352,7 @@ public:
   {
     THREADSAFETY_ASSERT(mBoundThread);
 
-#ifdef RELEASE_BUILD
+#ifdef RELEASE_OR_BETA
     DebugOnly<bool> current;
 #else
     bool current;
@@ -369,7 +369,7 @@ public:
   }
 
   ChildImpl()
-#if defined(DEBUG) || !defined(RELEASE_BUILD)
+#if defined(DEBUG) || !defined(RELEASE_OR_BETA)
   : mBoundThread(nullptr)
 #endif
 #ifdef DEBUG
@@ -450,7 +450,7 @@ private:
   {
     THREADSAFETY_ASSERT(!mBoundThread);
 
-#if defined(DEBUG) || !defined(RELEASE_BUILD)
+#if defined(DEBUG) || !defined(RELEASE_OR_BETA)
     mBoundThread = NS_GetCurrentThread();
 #endif
 
@@ -1737,10 +1737,6 @@ ChildImpl::CloseForCurrentThread()
   threadLocalInfo->mClosed = true;
 #endif
 
-  if (threadLocalInfo->mActor) {
-    threadLocalInfo->mActor->FlushPendingInterruptQueue();
-  }
-
   // Clearing the thread local will synchronously close the actor.
   DebugOnly<PRStatus> status = PR_SetThreadPrivate(sThreadLocalIndex, nullptr);
   MOZ_ASSERT(status == PR_SUCCESS);
@@ -2032,6 +2028,13 @@ ChildImpl::OpenProtocolOnMainThread(nsIEventTarget* aEventTarget)
 
   ContentChild* content = ContentChild::GetSingleton();
   MOZ_ASSERT(content);
+
+  if (content->IsShuttingDown()) {
+    // The transport for ContentChild is shut down and can't be used to open
+    // PBackground.
+    DispatchFailureCallback(aEventTarget);
+    return false;
+  }
 
   if (!PBackground::Open(content)) {
     MOZ_CRASH("Failed to create top level actor!");

@@ -4,7 +4,7 @@
 "use strict";
 
 const { LocalizationHelper } = require("devtools/shared/l10n");
-const STRINGS_URI = "devtools/locale/jit-optimizations.properties";
+const STRINGS_URI = "devtools/client/locales/jit-optimizations.properties";
 const L10N = new LocalizationHelper(STRINGS_URI);
 
 const {PluralForm} = require("devtools/shared/plural-form");
@@ -39,6 +39,10 @@ const JITOptimizationsItem = createClass({
     onViewSourceInDebugger: PropTypes.func.isRequired,
     frameData: PropTypes.object.isRequired,
     type: PropTypes.oneOf(OPTIMIZATION_ITEM_TYPES).isRequired,
+    depth: PropTypes.number.isRequired,
+    arrow: PropTypes.element.isRequired,
+    item: PropTypes.object,
+    focused: PropTypes.bool
   },
 
   _renderSite({ item: site, onViewSourceInDebugger, frameData }) {
@@ -164,7 +168,7 @@ const JITOptimizationsItem = createClass({
     return dom.div(
       {
         className: `optimization-tree-item optimization-tree-item-${type}`,
-        style: { marginLeft: depth * TREE_ROW_HEIGHT }
+        style: { marginInlineStart: depth * TREE_ROW_HEIGHT }
       },
       arrow,
       content

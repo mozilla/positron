@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* eslint no-undef:2 */
+
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/AppConstants.jsm");
@@ -187,8 +189,8 @@ function openWindow(parent, url, target, features, args, noExternalArgs) {
   }
 
   // Pass an array to avoid the browser "|"-splitting behavior.
-  var argArray = Components.classes["@mozilla.org/supports-array;1"]
-                    .createInstance(Components.interfaces.nsISupportsArray);
+  var argArray = Components.classes["@mozilla.org/array;1"]
+                    .createInstance(Components.interfaces.nsIMutableArray);
 
   // add args to the arguments array
   var stringArgs = null;
@@ -199,44 +201,44 @@ function openWindow(parent, url, target, features, args, noExternalArgs) {
 
   if (stringArgs) {
     // put the URIs into argArray
-    var uriArray = Components.classes["@mozilla.org/supports-array;1"]
-                       .createInstance(Components.interfaces.nsISupportsArray);
-    stringArgs.forEach(function (uri) {
+    var uriArray = Components.classes["@mozilla.org/array;1"]
+                       .createInstance(Components.interfaces.nsIMutableArray);
+    stringArgs.forEach(function(uri) {
       var sstring = Components.classes["@mozilla.org/supports-string;1"]
                               .createInstance(nsISupportsString);
       sstring.data = uri;
-      uriArray.AppendElement(sstring);
+      uriArray.appendElement(sstring, /* weak = */ false);
     });
-    argArray.AppendElement(uriArray);
+    argArray.appendElement(uriArray, /* weak =*/ false);
   } else {
-    argArray.AppendElement(null);
+    argArray.appendElement(null, /* weak =*/ false);
   }
 
   // Pass these as null to ensure that we always trigger the "single URL"
   // behavior in browser.js's gBrowserInit.onLoad (which handles the window
   // arguments)
-  argArray.AppendElement(null); // charset
-  argArray.AppendElement(null); // referer
-  argArray.AppendElement(null); // postData
-  argArray.AppendElement(null); // allowThirdPartyFixup
+  argArray.appendElement(null, /* weak =*/ false); // charset
+  argArray.appendElement(null, /* weak =*/ false); // referer
+  argArray.appendElement(null, /* weak =*/ false); // postData
+  argArray.appendElement(null, /* weak =*/ false); // allowThirdPartyFixup
 
   return Services.ww.openWindow(parent, url, target, features, argArray);
 }
 
 function openPreferences() {
-  var sa = Components.classes["@mozilla.org/supports-array;1"]
-                     .createInstance(Components.interfaces.nsISupportsArray);
+  var args = Components.classes["@mozilla.org/array;1"]
+                     .createInstance(Components.interfaces.nsIMutableArray);
 
   var wuri = Components.classes["@mozilla.org/supports-string;1"]
                        .createInstance(Components.interfaces.nsISupportsString);
   wuri.data = "about:preferences";
 
-  sa.AppendElement(wuri);
+  args.appendElement(wuri, /* weak = */ false);
 
   Services.ww.openWindow(null, gBrowserContentHandler.chromeURL,
                          "_blank",
                          "chrome,dialog=no,all",
-                         sa);
+                         args);
 }
 
 function logSystemBasedSearch(engine) {
@@ -251,18 +253,18 @@ function doSearch(searchTerm, cmdLine) {
 
   var submission = engine.getSubmission(searchTerm, null, "system");
 
-  // fill our nsISupportsArray with uri-as-wstring, null, null, postData
-  var sa = Components.classes["@mozilla.org/supports-array;1"]
-                     .createInstance(Components.interfaces.nsISupportsArray);
+  // fill our nsIMutableArray with uri-as-wstring, null, null, postData
+  var args = Components.classes["@mozilla.org/array;1"]
+                     .createInstance(Components.interfaces.nsIMutableArray);
 
   var wuri = Components.classes["@mozilla.org/supports-string;1"]
                        .createInstance(Components.interfaces.nsISupportsString);
   wuri.data = submission.uri.spec;
 
-  sa.AppendElement(wuri);
-  sa.AppendElement(null);
-  sa.AppendElement(null);
-  sa.AppendElement(submission.postData);
+  args.appendElement(wuri, /* weak =*/ false);
+  args.appendElement(null, /* weak =*/ false);
+  args.appendElement(null, /* weak =*/ false);
+  args.appendElement(submission.postData, /* weak =*/ false);
 
   // XXXbsmedberg: use handURIToExistingBrowser to obey tabbed-browsing
   // preferences, but need nsIBrowserDOMWindow extensions
@@ -271,7 +273,7 @@ function doSearch(searchTerm, cmdLine) {
                                 "_blank",
                                 "chrome,dialog=no,all" +
                                 gBrowserContentHandler.getFeatures(cmdLine),
-                                sa);
+                                args);
 }
 
 function nsBrowserContentHandler() {
@@ -525,22 +527,6 @@ nsBrowserContentHandler.prototype = {
     if (overridePage == "about:blank")
       overridePage = "";
 
-    // Temporary override page for users who are running Firefox on Windows 10 for their first time.
-    let platformVersion = Services.sysinfo.getProperty("version");
-    if (AppConstants.platform == "win" &&
-        Services.vc.compare(platformVersion, "10") == 0 &&
-        !Services.prefs.getBoolPref("browser.usedOnWindows10")) {
-      Services.prefs.setBoolPref("browser.usedOnWindows10", true);
-      let firstUseOnWindows10URL = Services.urlFormatter.formatURLPref("browser.usedOnWindows10.introURL");
-
-      if (firstUseOnWindows10URL && firstUseOnWindows10URL.length) {
-        additionalPage = firstUseOnWindows10URL;
-        if (override == OVERRIDE_NEW_PROFILE) {
-          additionalPage += "&utm_content=firstrun";
-        }
-      }
-    }
-
     if (!additionalPage) {
       additionalPage = LaterRun.getURL() || "";
     }
@@ -565,8 +551,11 @@ nsBrowserContentHandler.prototype = {
     if (startPage == "about:blank")
       startPage = "";
 
-    // Only show the startPage if we're not restoring an update session.
-    if (overridePage && startPage && !willRestoreSession)
+    let skipStartPage = override == OVERRIDE_NEW_PROFILE &&
+      prefb.getBoolPref("browser.startup.firstrunSkipsHomepage");
+    // Only show the startPage if we're not restoring an update session and are
+    // not set to skip the start page on this profile
+    if (overridePage && startPage && !willRestoreSession && !skipStartPage)
       return overridePage + "|" + startPage;
 
     return overridePage || startPage || "about:blank";
@@ -708,18 +697,6 @@ nsDefaultCommandLineHandler.prototype = {
 
   /* nsICommandLineHandler */
   handle : function dch_handle(cmdLine) {
-    // The -url flag is inserted by the operating system when the default
-    // application handler is used. We check for default browser to remove
-    // instances where users explicitly decide to "open with" the browser.
-    // Note that users who launch firefox manually with the -url flag will
-    // get erroneously counted.
-    try {
-      if (cmdLine.findFlag("url", false) &&
-          ShellService.isDefaultBrowser(false, false)) {
-        Services.telemetry.getHistogramById("FX_STARTUP_EXTERNAL_CONTENT_HANDLER").add();
-      }
-    } catch (e) {}
-
     var urilist = [];
 
     if (AppConstants.platform == "win") {
@@ -732,7 +709,7 @@ nsDefaultCommandLineHandler.prototype = {
       if (!this._haveProfile) {
         try {
           // This will throw when a profile has not been selected.
-          var dir = Services.dirsvc.get("ProfD", Components.interfaces.nsILocalFile);
+          Services.dirsvc.get("ProfD", Components.interfaces.nsILocalFile);
           this._haveProfile = true;
         }
         catch (e) {

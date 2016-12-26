@@ -6,6 +6,8 @@
 
 "use strict";
 
+/* exported init, finish */
+
 Components.utils.import("resource://gre/modules/Services.jsm");
 
 var gArgs;
@@ -26,7 +28,7 @@ function init() {
 
   var richlist = document.getElementById("addonList");
   var list = gArgs.list;
-  list.sort(function(a, b) { return String.localeCompare(a.name, b.name); });
+  list.sort((a, b) => String(a.name).localeCompare(b.name));
   for (let listItem of list) {
     let item = document.createElement("richlistitem");
     item.setAttribute("name", listItem.name);

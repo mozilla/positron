@@ -34,7 +34,7 @@ class JSObject2WrappedJSMap
 
 public:
     static JSObject2WrappedJSMap* newMap(int length) {
-        JSObject2WrappedJSMap* map = new JSObject2WrappedJSMap();
+        auto* map = new JSObject2WrappedJSMap();
         if (!map->mTable.init(length)) {
             // This is a decent estimate of the size of the hash table's
             // entry storage. The |2| is because on average the capacity is
@@ -509,41 +509,6 @@ private:
 
 /***************************************************************************/
 
-class XPCNativeScriptableSharedMap
-{
-public:
-    struct Entry : public PLDHashEntryHdr
-    {
-        // This is a weak reference that will be cleared
-        // in the XPCNativeScriptableShared destructor.
-        XPCNativeScriptableShared* key;
-
-        static PLDHashNumber
-        Hash(const void* key);
-
-        static bool
-        Match(const PLDHashEntryHdr* entry, const void* key);
-
-        static const struct PLDHashTableOps sOps;
-    };
-
-    static XPCNativeScriptableSharedMap* newMap(int length);
-
-    bool GetNewOrUsed(uint32_t flags, char* name, XPCNativeScriptableInfo* si);
-
-    inline uint32_t Count() { return mTable.EntryCount(); }
-
-    void Remove(XPCNativeScriptableShared* key) { mTable.Remove(key); }
-
-private:
-    XPCNativeScriptableSharedMap();    // no implementation
-    explicit XPCNativeScriptableSharedMap(int size);
-private:
-    PLDHashTable mTable;
-};
-
-/***************************************************************************/
-
 class XPCWrappedNativeProtoMap
 {
 public:
@@ -592,7 +557,7 @@ class JSObject2JSObjectMap
 
 public:
     static JSObject2JSObjectMap* newMap(int length) {
-        JSObject2JSObjectMap* map = new JSObject2JSObjectMap();
+        auto* map = new JSObject2JSObjectMap();
         if (!map->mTable.init(length)) {
             // This is a decent estimate of the size of the hash table's
             // entry storage. The |2| is because on average the capacity is

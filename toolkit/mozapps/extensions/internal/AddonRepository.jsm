@@ -11,7 +11,7 @@ const Cr = Components.results;
 
 Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/AddonManager.jsm");
-/*globals AddonManagerPrivate*/
+/* globals AddonManagerPrivate*/
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
@@ -22,8 +22,12 @@ XPCOMUtils.defineLazyModuleGetter(this, "DeferredSave",
                                   "resource://gre/modules/DeferredSave.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AddonRepository_SQLiteMigrator",
                                   "resource://gre/modules/addons/AddonRepository_SQLiteMigrator.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
+                                  "resource://gre/modules/Preferences.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Promise",
                                   "resource://gre/modules/Promise.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "ServiceRequest",
+                                  "resource://gre/modules/ServiceRequest.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
 
@@ -51,7 +55,6 @@ const XMLURI_PARSE_ERROR  = "http://www.mozilla.org/newlayout/xml/parsererror.xm
 const API_VERSION = "1.5";
 const DEFAULT_CACHE_TYPES = "extension,theme,locale,dictionary";
 
-const KEY_PROFILEDIR        = "ProfD";
 const FILE_DATABASE         = "addons.json";
 const DB_SCHEMA             = 5;
 const DB_MIN_JSON_SCHEMA    = 5;
@@ -99,10 +102,6 @@ const INTEGER_KEY_MAP = {
   daily_users:      "dailyUsers"
 };
 
-// Wrap the XHR factory so that tests can override with a mock
-var XHRequest = Components.Constructor("@mozilla.org/xmlextras/xmlhttprequest;1",
-                                       "nsIXMLHttpRequest");
-
 function convertHTMLToPlainText(html) {
   if (!html)
     return html;
@@ -122,36 +121,26 @@ function convertHTMLToPlainText(html) {
   return html;
 }
 
-function getAddonsToCache(aIds, aCallback) {
-  try {
-    var types = Services.prefs.getCharPref(PREF_GETADDONS_CACHE_TYPES);
-  }
-  catch (e) { }
-  if (!types)
-    types = DEFAULT_CACHE_TYPES;
+function getAddonsToCache(aIds) {
+  let types = Preferences.get(PREF_GETADDONS_CACHE_TYPES) || DEFAULT_CACHE_TYPES;
 
   types = types.split(",");
 
-  AddonManager.getAddonsByIDs(aIds, function(aAddons) {
+  return AddonManager.getAddonsByIDs(aIds).then(addons => {
     let enabledIds = [];
-    for (var i = 0; i < aIds.length; i++) {
+    for (let [i, addon] of addons.entries()) {
       var preference = PREF_GETADDONS_CACHE_ID_ENABLED.replace("%ID%", aIds[i]);
-      try {
-        if (!Services.prefs.getBoolPref(preference))
-          continue;
-      } catch (e) {
-        // If the preference doesn't exist caching is enabled by default
-      }
+      // If the preference doesn't exist caching is enabled by default
+      if (!Preferences.get(preference, true))
+        continue;
 
       // The add-ons manager may not know about this ID yet if it is a pending
       // install. In that case we'll just cache it regardless
-      if (aAddons[i] && (types.indexOf(aAddons[i].type) == -1))
-        continue;
-
-      enabledIds.push(aIds[i]);
+      if (!addon || types.includes(addon.type))
+        enabledIds.push(aIds[i]);
     }
 
-    aCallback(enabledIds);
+    return enabledIds;
   });
 }
 
@@ -610,14 +599,11 @@ this.AddonRepository = {
   _clearCache: function() {
     this._addons = null;
     return AddonDatabase.delete().then(() =>
-      new Promise((resolve, reject) =>
-        AddonManagerPrivate.updateAddonRepositoryData(resolve))
-    );
+      AddonManagerPrivate.updateAddonRepositoryData());
   },
 
   _repopulateCacheInternal: Task.async(function*(aSendPerformance, aTimeout) {
-    let allAddons = yield new Promise((resolve, reject) =>
-      AddonManager.getAllAddons(resolve));
+    let allAddons = yield AddonManager.getAllAddons();
 
     // Filter the hotfix out of our list of add-ons
     allAddons = allAddons.filter(a => a.id != AddonManager.hotfixID);
@@ -632,8 +618,7 @@ this.AddonRepository = {
     let ids = allAddons.map(a => a.id);
     logger.debug("Repopulate add-on cache with " + ids.toSource());
 
-    let addonsToCache = yield new Promise((resolve, reject) =>
-      getAddonsToCache(ids, resolve));
+    let addonsToCache = yield getAddonsToCache(ids);
 
     // Completely remove cache if there are no add-ons to cache
     if (addonsToCache.length == 0) {
@@ -658,8 +643,7 @@ this.AddonRepository = {
       }, aSendPerformance, aTimeout));
 
     // Always call AddonManager updateAddonRepositoryData after we refill the cache
-    yield new Promise((resolve, reject) =>
-      AddonManagerPrivate.updateAddonRepositoryData(resolve));
+    yield AddonManagerPrivate.updateAddonRepositoryData();
   }),
 
   /**
@@ -680,7 +664,7 @@ this.AddonRepository = {
       return;
     }
 
-    getAddonsToCache(aIds, aAddons => {
+    getAddonsToCache(aIds).then(aAddons => {
       // If there are no add-ons to cache, act as if caching is disabled
       if (aAddons.length == 0) {
         if (aCallback)
@@ -1447,7 +1431,7 @@ this.AddonRepository = {
 
     logger.debug("Requesting " + aURI);
 
-    this._request = new XHRequest();
+    this._request = new ServiceRequest();
     this._request.mozBackgroundRequest = true;
     this._request.open("GET", aURI, true);
     this._request.overrideMimeType("text/xml");

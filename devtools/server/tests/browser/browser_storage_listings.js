@@ -36,15 +36,6 @@ const storeMap = {
         host: "test1.example.org",
         isDomain: false,
         isSecure: true,
-      },
-      {
-        name: "uc1",
-        value: "foobar",
-        host: ".example.org",
-        path: "/",
-        expires: 0,
-        isDomain: true,
-        isSecure: true,
       }
     ],
     "sectest1.example.org": [
@@ -130,24 +121,24 @@ const storeMap = {
 const IDBValues = {
   listStoresResponse: {
     "http://test1.example.org": [
-      ["idb1", "obj1"], ["idb1", "obj2"], ["idb2", "obj3"]
+      ["idb1 (default)", "obj1"], ["idb1 (default)", "obj2"], ["idb2 (default)", "obj3"]
     ],
     "http://sectest1.example.org": [
     ],
     "https://sectest1.example.org": [
-      ["idb-s1", "obj-s1"], ["idb-s2", "obj-s2"]
+      ["idb-s1 (default)", "obj-s1"], ["idb-s2 (default)", "obj-s2"]
     ]
   },
-  dbDetails : {
+  dbDetails: {
     "http://test1.example.org": [
       {
-        db: "idb1",
+        db: "idb1 (default)",
         origin: "http://test1.example.org",
         version: 1,
         objectStores: 2
       },
       {
-        db: "idb2",
+        db: "idb2 (default)",
         origin: "http://test1.example.org",
         version: 1,
         objectStores: 1
@@ -157,13 +148,13 @@ const IDBValues = {
     ],
     "https://sectest1.example.org": [
       {
-        db: "idb-s1",
+        db: "idb-s1 (default)",
         origin: "https://sectest1.example.org",
         version: 1,
         objectStores: 1
       },
       {
-        db: "idb-s2",
+        db: "idb-s2 (default)",
         origin: "https://sectest1.example.org",
         version: 1,
         objectStores: 1
@@ -172,7 +163,7 @@ const IDBValues = {
   },
   objectStoreDetails: {
     "http://test1.example.org": {
-      idb1: [
+      "idb1 (default)": [
         {
           objectStore: "obj1",
           keyPath: "id",
@@ -199,7 +190,7 @@ const IDBValues = {
           indexes: []
         }
       ],
-      idb2: [
+      "idb2 (default)": [
         {
           objectStore: "obj3",
           keyPath: "id3",
@@ -217,7 +208,7 @@ const IDBValues = {
     },
     "http://sectest1.example.org" : {},
     "https://sectest1.example.org": {
-      "idb-s1": [
+      "idb-s1 (default)": [
         {
           objectStore: "obj-s1",
           keyPath: "id",
@@ -225,7 +216,7 @@ const IDBValues = {
           indexes: []
         },
       ],
-      "idb-s2": [
+      "idb-s2 (default)": [
         {
           objectStore: "obj-s2",
           keyPath: "id3",
@@ -245,7 +236,7 @@ const IDBValues = {
   },
   entries: {
     "http://test1.example.org": {
-      "idb1#obj1": [
+      "idb1 (default)#obj1": [
         {
           name: 1,
           value: {
@@ -271,7 +262,7 @@ const IDBValues = {
           }
         }
       ],
-      "idb1#obj2": [
+      "idb1 (default)#obj2": [
         {
           name: 1,
           value: {
@@ -282,11 +273,11 @@ const IDBValues = {
           }
         }
       ],
-      "idb2#obj3": []
+      "idb2 (default)#obj3": []
     },
     "http://sectest1.example.org" : {},
     "https://sectest1.example.org": {
-      "idb-s1#obj-s1": [
+      "idb-s1 (default)#obj-s1": [
         {
           name: 6,
           value: {
@@ -304,7 +295,7 @@ const IDBValues = {
           }
         }
       ],
-      "idb-s2#obj-s2": [
+      "idb-s2 (default)#obj-s2": [
         {
           name: 13,
           value: {
@@ -337,14 +328,22 @@ function* testStores(data) {
 }
 
 function testCookies(cookiesActor) {
-  is(Object.keys(cookiesActor.hosts).length, 2, "Correct number of host entries for cookies");
+  is(Object.keys(cookiesActor.hosts).length, 2,
+                 "Correct number of host entries for cookies");
   return testCookiesObjects(0, cookiesActor.hosts, cookiesActor);
 }
 
 var testCookiesObjects = Task.async(function* (index, hosts, cookiesActor) {
   let host = Object.keys(hosts)[index];
   let matchItems = data => {
-    is(data.total, storeMap.cookies[host].length,
+    let cookiesLength = 0;
+    for (let secureCookie of storeMap.cookies[host]) {
+      if (secureCookie.isSecure) {
+        ++cookiesLength;
+      }
+    }
+    // Any secure cookies did not get stored in the database.
+    is(data.total, storeMap.cookies[host].length - cookiesLength,
        "Number of cookies in host " + host + " matches");
     for (let item of data.data) {
       let found = false;
@@ -471,17 +470,17 @@ var testIndexedDBs = Task.async(function* (index, hosts, indexedDBActor) {
     for (let item of data.data) {
       let found = false;
       for (let toMatch of IDBValues.dbDetails[host]) {
-        if (item.db == toMatch.db) {
+        if (item.uniqueKey == toMatch.db) {
           found = true;
-          ok(true, "Found indexed db " + item.db + " in response");
+          ok(true, "Found indexed db " + item.uniqueKey + " in response");
           is(item.origin, toMatch.origin, "The origin matches.");
           is(item.version, toMatch.version, "The version matches.");
           is(item.objectStores, toMatch.objectStores,
-             "The numebr of object stores matches.");
+             "The number of object stores matches.");
           break;
         }
       }
-      ok(found, "indexed db " + item.name + " should exist in response");
+      ok(found, "indexed db " + item.uniqueKey + " should exist in response");
     }
   };
 

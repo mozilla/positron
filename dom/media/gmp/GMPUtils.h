@@ -38,7 +38,10 @@ SplitAt(const char* aDelims,
         nsTArray<nsCString>& aOutTokens);
 
 nsCString
-ToBase64(const nsTArray<uint8_t>& aBytes);
+ToHexString(const nsTArray<uint8_t>& aBytes);
+
+nsCString
+ToHexString(const uint8_t* aBytes, uint32_t aLength);
 
 bool
 FileExists(nsIFile* aFile);
@@ -79,6 +82,10 @@ bool
 ReadIntoString(nsIFile* aFile,
                nsCString& aOutDst,
                size_t aMaxLength);
+
+bool
+HaveGMPFor(const nsCString& aAPI,
+           nsTArray<nsCString>&& aTags);
 
 } // namespace mozilla
 

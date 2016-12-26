@@ -281,7 +281,7 @@
             let tmp = {};
             Components.utils.import("resource://gre/modules/WindowDraggingUtils.jsm", tmp);
             let draghandle = new tmp.WindowDraggingElement(this);
-            draghandle.mouseDownCheck = function () {
+            draghandle.mouseDownCheck = function() {
               return this._dragBindingAlive;
             }
           } catch (e) {}
@@ -374,19 +374,9 @@
         <body>
         <![CDATA[
           this.popupBoxObject.sizeTo(aWidth, aHeight);
-          if (this.state == "open")
+          if (this.state == "open") {
             this.adjustArrowPosition();
-        ]]>
-        </body>
-      </method>
-      <method name="moveTo">
-        <parameter name="aLeft"/>
-        <parameter name="aTop"/>
-        <body>
-        <![CDATA[
-          this.popupBoxObject.moveTo(aLeft, aTop);
-          if (this.state == "open")
-            this.adjustArrowPosition();
+          }
         ]]>
         </body>
       </method>
@@ -399,19 +389,14 @@
         <body>
         <![CDATA[
           this.popupBoxObject.moveToAnchor(aAnchorElement, aPosition, aX, aY, aAttributesOverride);
-          if (this.state == "open")
-            this.adjustArrowPosition();
         ]]>
         </body>
       </method>
       <method name="adjustArrowPosition">
         <body>
         <![CDATA[
-        var arrow = document.getAnonymousElementByAttribute(this, "anonid", "arrow");
-
         var anchor = this.anchorNode;
         if (!anchor) {
-          arrow.hidden = true;
           return;
         }
 
@@ -423,8 +408,6 @@
 
         this.setAttribute("arrowposition", position);
 
-        // if this panel has a "sliding" arrow, we may have previously set margins...
-        arrowbox.style.removeProperty("transform");
         if (position.indexOf("start_") == 0 || position.indexOf("end_") == 0) {
           container.orient = "horizontal";
           arrowbox.orient = "vertical";
@@ -466,8 +449,6 @@
             this.setAttribute("side", "top");
           }
         }
-
-        arrow.hidden = false;
         ]]>
         </body>
       </method>
@@ -475,7 +456,13 @@
     <handlers>
       <handler event="popupshowing" phase="target">
       <![CDATA[
+        var arrow = document.getAnonymousElementByAttribute(this, "anonid", "arrow");
+        arrow.hidden = this.anchorNode == null;
+        document.getAnonymousElementByAttribute(this, "anonid", "arrowbox")
+                .style.removeProperty("transform");
+
         this.adjustArrowPosition();
+
         if (this.getAttribute("animate") != "false") {
           this.setAttribute("animate", "open");
         }
@@ -517,6 +504,9 @@
         if (this.getAttribute("animate") != "false") {
           this.removeAttribute("animate");
         }
+      </handler>
+      <handler event="popuppositioned" phase="target">
+        this.adjustArrowPosition();
       </handler>
     </handlers>
   </binding>
@@ -578,7 +568,6 @@
     <handlers>
       <handler event="mouseover"><![CDATA[
         var rel = event.relatedTarget;
-        //dump("ENTERING " + (rel ? rel.localName : "null") + "\n");
         if (!rel)
           return;
 
@@ -596,7 +585,6 @@
 
       <handler event="mouseout"><![CDATA[
         var rel = event.relatedTarget;
-        //dump("LEAVING " + (rel ? rel.localName : "null") + "\n");
 
         // relatedTarget is null when the titletip is first shown: a mouseout event fires
         // because the mouse is exiting the main window and entering the titletip "window".

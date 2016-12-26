@@ -10,11 +10,9 @@
 #include "PSMContentListener.h"
 #include "SecretDecoderRing.h"
 #include "TransportSecurityInfo.h"
-#include "WeakCryptoOverride.h"
 #include "mozilla/ModuleUtils.h"
 #include "nsCURILoader.h"
 #include "nsCertOverrideService.h"
-#include "nsCertPicker.h"
 #include "nsCrypto.h"
 #include "nsCryptoHash.h"
 #include "nsDOMCID.h" // For the NS_CRYPTO_CONTRACTID define
@@ -201,7 +199,6 @@ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR_BYPROCESS(nssEnsureOnChromeOnly,
 NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCertTree)
 #endif
 NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsPkcs11)
-NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCertPicker)
 NS_NSS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nssEnsure, nsNTLMAuthModule, InitTest)
 NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsureChromeOrContent, nsCryptoHash)
 NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsureChromeOrContent, nsCryptoHMAC)
@@ -221,7 +218,6 @@ NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsCertOverrideService, Init)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsSecureBrowserUIImpl)
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(CertBlocklist, Init)
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsSiteSecurityService, Init)
-NS_GENERIC_FACTORY_CONSTRUCTOR(WeakCryptoOverride)
 
 NS_DEFINE_NAMED_CID(NS_NSSCOMPONENT_CID);
 NS_DEFINE_NAMED_CID(NS_SSLSOCKETPROVIDER_CID);
@@ -240,7 +236,6 @@ NS_DEFINE_NAMED_CID(NS_CERTTREE_CID);
 NS_DEFINE_NAMED_CID(NS_PKCS11_CID);
 NS_DEFINE_NAMED_CID(NS_CRYPTO_HASH_CID);
 NS_DEFINE_NAMED_CID(NS_CRYPTO_HMAC_CID);
-NS_DEFINE_NAMED_CID(NS_CERT_PICKER_CID);
 NS_DEFINE_NAMED_CID(NS_NTLMAUTHMODULE_CID);
 NS_DEFINE_NAMED_CID(NS_KEYMODULEOBJECT_CID);
 NS_DEFINE_NAMED_CID(NS_KEYMODULEOBJECTFACTORY_CID);
@@ -256,7 +251,6 @@ NS_DEFINE_NAMED_CID(NS_NSSVERSION_CID);
 NS_DEFINE_NAMED_CID(NS_SECURE_BROWSER_UI_CID);
 NS_DEFINE_NAMED_CID(NS_SITE_SECURITY_SERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_CERT_BLOCKLIST_CID);
-NS_DEFINE_NAMED_CID(NS_WEAKCRYPTOOVERRIDE_CID);
 
 static const mozilla::Module::CIDEntry kNSSCIDs[] = {
   { &kNS_NSSCOMPONENT_CID, false, nullptr, nsNSSComponentConstructor },
@@ -276,7 +270,6 @@ static const mozilla::Module::CIDEntry kNSSCIDs[] = {
   { &kNS_PKCS11_CID, false, nullptr, nsPkcs11Constructor },
   { &kNS_CRYPTO_HASH_CID, false, nullptr, nsCryptoHashConstructor },
   { &kNS_CRYPTO_HMAC_CID, false, nullptr, nsCryptoHMACConstructor },
-  { &kNS_CERT_PICKER_CID, false, nullptr, nsCertPickerConstructor },
   { &kNS_NTLMAUTHMODULE_CID, false, nullptr, nsNTLMAuthModuleConstructor },
   { &kNS_KEYMODULEOBJECT_CID, false, nullptr, nsKeyObjectConstructor },
   { &kNS_KEYMODULEOBJECTFACTORY_CID, false, nullptr, nsKeyObjectFactoryConstructor },
@@ -292,7 +285,6 @@ static const mozilla::Module::CIDEntry kNSSCIDs[] = {
   { &kNS_SECURE_BROWSER_UI_CID, false, nullptr, nsSecureBrowserUIImplConstructor },
   { &kNS_SITE_SECURITY_SERVICE_CID, false, nullptr, nsSiteSecurityServiceConstructor },
   { &kNS_CERT_BLOCKLIST_CID, false, nullptr, CertBlocklistConstructor},
-  { &kNS_WEAKCRYPTOOVERRIDE_CID, false, nullptr, WeakCryptoOverrideConstructor },
   { nullptr }
 };
 
@@ -315,7 +307,6 @@ static const mozilla::Module::ContractIDEntry kNSSContracts[] = {
   { NS_PKCS11_CONTRACTID, &kNS_PKCS11_CID },
   { NS_CRYPTO_HASH_CONTRACTID, &kNS_CRYPTO_HASH_CID },
   { NS_CRYPTO_HMAC_CONTRACTID, &kNS_CRYPTO_HMAC_CID },
-  { NS_CERT_PICKER_CONTRACTID, &kNS_CERT_PICKER_CID },
   { "@mozilla.org/uriloader/psm-external-content-listener;1", &kNS_PSMCONTENTLISTEN_CID },
   { NS_CRYPTO_FIPSINFO_SERVICE_CONTRACTID, &kNS_PKCS11MODULEDB_CID },
   { NS_NTLMAUTHMODULE_CONTRACTID, &kNS_NTLMAUTHMODULE_CID },
@@ -329,7 +320,6 @@ static const mozilla::Module::ContractIDEntry kNSSContracts[] = {
   { NS_SECURE_BROWSER_UI_CONTRACTID, &kNS_SECURE_BROWSER_UI_CID },
   { NS_SSSERVICE_CONTRACTID, &kNS_SITE_SECURITY_SERVICE_CID },
   { NS_CERTBLOCKLIST_CONTRACTID, &kNS_CERT_BLOCKLIST_CID },
-  { NS_WEAKCRYPTOOVERRIDE_CONTRACTID, &kNS_WEAKCRYPTOOVERRIDE_CID },
   { nullptr }
 };
 

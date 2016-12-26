@@ -113,19 +113,20 @@ TLSServerSocket::OnSocketListen()
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  ScopedCERTCertificate cert(mServerCert->GetCert());
+  UniqueCERTCertificate cert(mServerCert->GetCert());
   if (NS_WARN_IF(!cert)) {
     return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
   }
 
-  ScopedSECKEYPrivateKey key(PK11_FindKeyByAnyCert(cert, nullptr));
+  UniqueSECKEYPrivateKey key(PK11_FindKeyByAnyCert(cert.get(), nullptr));
   if (NS_WARN_IF(!key)) {
     return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
   }
 
-  SSLKEAType certKEA = NSS_FindCertKEAType(cert);
+  SSLKEAType certKEA = NSS_FindCertKEAType(cert.get());
 
-  nsresult rv = MapSECStatus(SSL_ConfigSecureServer(mFD, cert, key, certKEA));
+  nsresult rv = MapSECStatus(SSL_ConfigSecureServer(mFD, cert.get(), key.get(),
+                                                    certKEA));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -240,6 +241,23 @@ TLSServerSocket::SetCipherSuites(uint16_t* aCipherSuites, uint32_t aLength)
     if (SSL_CipherPrefSet(mFD, aCipherSuites[i], true) != SECSuccess) {
       return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
     }
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+TLSServerSocket::SetVersionRange(uint16_t aMinVersion, uint16_t aMaxVersion)
+{
+  // If AsyncListen was already called (and set mListener), it's too late to set
+  // this.
+  if (NS_WARN_IF(mListener)) {
+    return NS_ERROR_IN_PROGRESS;
+  }
+
+  SSLVersionRange range = {aMinVersion, aMaxVersion};
+  if (SSL_VersionRangeSet(mFD, &range) != SECSuccess) {
+    return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
   }
 
   return NS_OK;
@@ -440,7 +458,7 @@ TLSServerConnectionInfo::HandshakeCallback(PRFileDesc* aFD)
 {
   nsresult rv;
 
-  ScopedCERTCertificate clientCert(SSL_PeerCertificate(aFD));
+  UniqueCERTCertificate clientCert(SSL_PeerCertificate(aFD));
   if (clientCert) {
     nsCOMPtr<nsIX509CertDB> certDB =
       do_GetService(NS_X509CERTDB_CONTRACTID, &rv);

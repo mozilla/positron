@@ -5,8 +5,12 @@
 
 package org.mozilla.gecko.notifications;
 
+import java.io.File;
+import java.io.UnsupportedEncodingException;
+import java.net.URLConnection;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -23,6 +27,8 @@ import android.app.PendingIntent;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.support.v4.app.NotificationCompat;
@@ -38,7 +44,7 @@ public final class NotificationHelper implements GeckoEventListener {
     // Attributes mandatory to be used while sending a notification from js.
     private static final String TITLE_ATTR = "title";
     private static final String TEXT_ATTR = "text";
-    private static final String ID_ATTR = "id";
+    /* package */ static final String ID_ATTR = "id";
     private static final String SMALLICON_ATTR = "smallIcon";
 
     // Attributes that can be used while sending a notification from js.
@@ -63,7 +69,6 @@ public final class NotificationHelper implements GeckoEventListener {
 
     private static final String BUTTON_EVENT = "notification-button-clicked";
     private static final String CLICK_EVENT = "notification-clicked";
-    private static final String CLOSED_EVENT = "notification-closed";
     static final String CLEARED_EVENT = "notification-cleared";
 
     static final String ORIGINAL_EXTRA_COMPONENT = "originalComponent";
@@ -302,10 +307,22 @@ public final class NotificationHelper implements GeckoEventListener {
             }
         }
 
-        PendingIntent pi = buildNotificationPendingIntent(message, CLICK_EVENT);
-        builder.setContentIntent(pi);
-        PendingIntent deletePendingIntent = buildNotificationPendingIntent(message, CLEARED_EVENT);
-        builder.setDeleteIntent(deletePendingIntent);
+        // Bug 1320889 - Tapping the notification for a downloaded file shouldn't open firefox.
+        // If the gecko event is for download completion, we create another intent with different
+        // scheme to prevent Fennec from popping up.
+        final Intent viewFileIntent = createIntentIfDownloadCompleted(message);
+        if (builder != null && viewFileIntent != null && mContext != null) {
+            PendingIntent pIntent = PendingIntent.getActivity(mContext, 0, viewFileIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+            builder.setAutoCancel(true);
+            builder.setContentIntent(pIntent);
+
+        } else {
+            PendingIntent pi = buildNotificationPendingIntent(message, CLICK_EVENT);
+            builder.setContentIntent(pi);
+            PendingIntent deletePendingIntent = buildNotificationPendingIntent(message, CLEARED_EVENT);
+            builder.setDeleteIntent(deletePendingIntent);
+
+        }
 
         ((NotificationClient) GeckoAppShell.getNotificationListener()).add(id, builder.build());
 
@@ -315,6 +332,43 @@ public final class NotificationHelper implements GeckoEventListener {
         if (!persistent && !mClearableNotifications.containsKey(id)) {
             mClearableNotifications.put(id, message.toString());
         }
+    }
+
+
+    private Intent createIntentIfDownloadCompleted(JSONObject message) {
+        try {
+            if (message.has(HANDLER_ATTR) && message.get(HANDLER_ATTR).equals("downloads") &&
+                    message.has(ONGOING_ATTR) && !message.optBoolean(ONGOING_ATTR) &&
+                    message.has(COOKIE_ATTR) && message.getString(COOKIE_ATTR).split("http").length > 0) {
+
+                String fileName = message.getString(TEXT_ATTR);
+                String cookie = message.getString(COOKIE_ATTR);
+                if (cookie.contains(fileName)) {
+                    String filePath = cookie.substring(0, cookie.indexOf(fileName)).replace("\"", "");
+                    String filePathDecode = java.net.URLDecoder.decode(filePath, "UTF-8");
+                    Uri uri = Uri.fromFile(new File(filePathDecode + fileName));
+                    Intent intent = new Intent();
+                    intent.setAction(Intent.ACTION_VIEW);
+                    intent.setDataAndType(uri, URLConnection.guessContentTypeFromName(uri.toString()));
+
+                    // if no one can handle this intent, let the user decides
+                    PackageManager manager = mContext.getPackageManager();
+                    List<ResolveInfo> infos = manager.queryIntentActivities(intent, 0);
+                    if (infos.size() == 0) {
+                        intent.setDataAndType(uri, "*/*");
+                    }
+
+                    return intent;
+                }
+            }
+        } catch (JSONException je) {
+            Log.e(LOGTAG, "Error while parsing download complete event.", je);
+            return null;
+        } catch (UnsupportedEncodingException e) {
+            Log.e(LOGTAG, "Error while parsing download file path.", e);
+            return null;
+        }
+        return null;
     }
 
     private void hideNotification(JSONObject message) {
@@ -333,23 +387,8 @@ public final class NotificationHelper implements GeckoEventListener {
         hideNotification(id, handler, cookie);
     }
 
-    private void sendNotificationWasClosed(String id, String handlerKey, String cookie) {
-        final JSONObject args = new JSONObject();
-        try {
-            args.put(ID_ATTR, id);
-            args.put(HANDLER_ATTR, handlerKey);
-            args.put(COOKIE_ATTR, cookie);
-            args.put(EVENT_TYPE_ATTR, CLOSED_EVENT);
-            Log.i(LOGTAG, "Send " + args.toString());
-            GeckoAppShell.notifyObservers("Notification:Event", args.toString());
-        } catch (JSONException ex) {
-            Log.e(LOGTAG, "sendNotificationWasClosed: error building JSON notification arguments.", ex);
-        }
-    }
-
     private void closeNotification(String id, String handlerKey, String cookie) {
         ((NotificationClient) GeckoAppShell.getNotificationListener()).remove(id);
-        sendNotificationWasClosed(id, handlerKey, cookie);
     }
 
     public void hideNotification(String id, String handlerKey, String cookie) {

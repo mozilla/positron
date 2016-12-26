@@ -24,7 +24,7 @@ jobs:
             kind: test
             tier: 2
             symbol: tc(Mn-h)
-        worker-type: aws-provisioner-v1/desktop-test-xlarge
+        worker-type: aws-provisioner-v1/gecko-t-linux-xlarge
         worker:
             implementation: docker-worker
             docker-image: {in-tree: desktop-build}  # NOTE: better to use the lint image
@@ -32,8 +32,6 @@ jobs:
                 JOB_SCRIPT: "taskcluster/scripts/tester/harness-test-linux.sh"
                 MOZHARNESS_SCRIPT: "testing/mozharness/scripts/marionette_harness_tests.py"
                 TOOLS_DISABLE: "true"
-                TOOLTOOL_REPO: "https://github.com/mozilla/build-tooltool"
-                TOOLTOOL_REV: "master"
             artifacts:
               - name: public/logs/
                 path: /home/worker/workspace/mozharness_workspace/upload/logs/
@@ -41,7 +39,7 @@ jobs:
             command:
               - "bash"
               - "/home/worker/bin/build.sh"
-              - "--tests=testing/marionette/harness/marionette/tests/harness_unit"
+              - "--tests=testing/marionette/harness/marionette_harness/tests/harness_unit"
               - "--work-dir=mozharness_workspace"
             max-run-time: 1800
         when:

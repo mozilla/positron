@@ -8,6 +8,7 @@
 #define mozilla_dom_KeyframeEffect_h
 
 #include "nsWrapperCache.h"
+#include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/KeyframeEffectReadOnly.h"
 #include "mozilla/AnimationTarget.h" // For (Non)OwningAnimationTarget
 #include "mozilla/Maybe.h"
@@ -47,6 +48,11 @@ public:
               const UnrestrictedDoubleOrKeyframeEffectOptions& aOptions,
               ErrorResult& aRv);
 
+  static already_AddRefed<KeyframeEffect>
+  Constructor(const GlobalObject& aGlobal,
+              KeyframeEffectReadOnly& aSource,
+              ErrorResult& aRv);
+
   // Variant of Constructor that accepts a KeyframeAnimationOptions object
   // for use with for Animatable.animate.
   // Not exposed to content.
@@ -66,9 +72,20 @@ public:
   // GetStyleContextForElement.
   void SetTarget(const Nullable<ElementOrCSSPseudoElement>& aTarget);
 
-  void SetSpacing(JSContext* aCx, const nsAString& aSpacing, ErrorResult& aRv);
+  void GetSpacing(nsString& aRetVal, CallerType aCallerType)
+  {
+    KeyframeEffectReadOnly::GetSpacing(aRetVal);
+  }
+  void SetSpacing(JSContext* aCx, const nsAString& aSpacing,
+                  CallerType aCallerType, ErrorResult& aRv);
+  IterationCompositeOperation IterationComposite(CallerType aCallerType)
+  {
+    return KeyframeEffectReadOnly::IterationComposite();
+  }
   void SetIterationComposite(
-    const IterationCompositeOperation& aIterationComposite);
+    const IterationCompositeOperation& aIterationComposite,
+    CallerType aCallerType);
+  void SetComposite(const CompositeOperation& aComposite);
 };
 
 } // namespace dom

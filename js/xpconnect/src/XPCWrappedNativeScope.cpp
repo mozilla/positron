@@ -297,7 +297,7 @@ XPCWrappedNativeScope::EnsureContentXBLScope(JSContext* cx)
     principalAsArray.AppendElement(principal);
     nsCOMPtr<nsIExpandedPrincipal> ep =
         new nsExpandedPrincipal(principalAsArray,
-                                BasePrincipal::Cast(principal)->OriginAttributesRef());
+                                principal->OriginAttributesRef());
 
     // Create the sandbox.
     RootedValue v(cx);
@@ -524,7 +524,7 @@ XPCWrappedNativeScope::SuspectAllWrappers(XPCJSContext* cx,
 
         if (cur->mDOMExpandoSet) {
             for (DOMExpandoSet::Range r = cur->mDOMExpandoSet->all(); !r.empty(); r.popFront())
-                SuspectDOMExpandos(r.front(), cb);
+                SuspectDOMExpandos(r.front().unbarrieredGet(), cb);
         }
     }
 }

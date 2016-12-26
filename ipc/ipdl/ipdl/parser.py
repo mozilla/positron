@@ -7,11 +7,6 @@ from ply import lex, yacc
 
 from ipdl.ast import *
 
-def _getcallerpath():
-    '''Return the absolute path of the file containing the code that
-**CALLED** this function.'''
-    return os.path.abspath(sys._getframe(1).f_code.co_filename)
-
 ##-----------------------------------------------------------------------------
 
 class ParseError(Exception):
@@ -52,9 +47,8 @@ class Parser:
         self.parser = None
         self.tu = TranslationUnit(type, name)
         self.direction = None
-        self.errout = None
 
-    def parse(self, input, filename, includedirs, errout):
+    def parse(self, input, filename, includedirs):
         assert os.path.isabs(filename)
 
         if filename in Parser.parsed:
@@ -69,7 +63,6 @@ class Parser:
         self.filename = filename
         self.includedirs = includedirs
         self.tu.filename = filename
-        self.errout = errout
 
         Parser.parsed[filename] = self
         Parser.parseStack.append(Parser.current)
@@ -78,11 +71,9 @@ class Parser:
         try:
             ast = self.parser.parse(input=input, lexer=self.lexer,
                                     debug=self.debug)
-        except ParseError, p:
-            print >>errout, p
-            return None
+        finally:
+            Parser.current = Parser.parseStack.pop()
 
-        Parser.current = Parser.parseStack.pop()
         return ast
 
     def resolveIncludePath(self, filepath):
@@ -114,12 +105,10 @@ def locFromTok(p, num):
 ##-----------------------------------------------------------------------------
 
 reserved = set((
-        'answer',
         'as',
         'async',
         'both',
         'bridges',
-        'call',
         'child',
         'class',
         'compress',
@@ -127,31 +116,24 @@ reserved = set((
         '__delete__',
         'delete',                       # reserve 'delete' to prevent its use
         'from',
-        'goto',
-        'high',
         'include',
         'intr',
         'manager',
         'manages',
         'namespace',
-        'normal',
+        'nested',
         'nullable',
         'opens',
         'or',
         'parent',
         'prio',
         'protocol',
-        'recv',
         'returns',
-        'send',
         'spawns',
-        'start',
-        'state',
         'struct',
         'sync',
         'union',
         'upto',
-        'urgent',
         'using',
         'verify'))
 tokens = [
@@ -160,7 +142,7 @@ tokens = [
 
 t_COLONCOLON = '::'
 
-literals = '(){}[]<>;:,~'
+literals = '(){}[]<>;:,'
 t_ignore = ' \f\t\v'
 
 def t_linecomment(t):
@@ -259,7 +241,7 @@ def p_IncludeStmt(p):
     """IncludeStmt : INCLUDE PROTOCOL ID
                    | INCLUDE ID"""
     loc = locFromTok(p, 1)
- 
+
     Parser.current.loc = loc
     if 4 == len(p):
         id = p[3]
@@ -274,7 +256,7 @@ def p_IncludeStmt(p):
         raise ParseError(loc, "can't locate include file `%s'"% (
                 inc.file))
 
-    inc.tu = Parser(type, id).parse(open(path).read(), path, Parser.current.includedirs, Parser.current.errout)
+    inc.tu = Parser(type, id).parse(open(path).read(), path, Parser.current.includedirs)
     p[0] = inc
 
 def p_UsingStmt(p):
@@ -359,7 +341,7 @@ def p_ProtocolDefn(p):
     protocol = p[5]
     protocol.loc = locFromTok(p, 2)
     protocol.name = p[3]
-    protocol.priorityRange = p[1][0]
+    protocol.nestedRange = p[1][0]
     protocol.sendSemantics = p[1][1]
     p[0] = protocol
 
@@ -471,9 +453,10 @@ def p_ManagesStmt(p):
 
 def p_MessageDeclsOpt(p):
     """MessageDeclsOpt : MessageDeclThing MessageDeclsOpt
-                       | TransitionStmtsOpt"""
-    if 2 == len(p):
-        p[0] = p[1]
+                       | """
+    if 1 == len(p):
+        # we fill in |loc| in the Protocol rule
+        p[0] = Protocol(None)
     else:
         p[2].messageDecls.insert(0, p[1])
         p[0] = p[2]
@@ -502,8 +485,9 @@ def p_MessageDirectionLabel(p):
 def p_MessageDecl(p):
     """MessageDecl : SendSemanticsQual MessageBody"""
     msg = p[2]
-    msg.priority = p[1][0]
-    msg.sendSemantics = p[1][1]
+    msg.nested = p[1][0]
+    msg.prio = p[1][1]
+    msg.sendSemantics = p[1][2]
 
     if Parser.current.direction is None:
         _error(msg.loc, 'missing message direction')
@@ -526,12 +510,9 @@ def p_MessageBody(p):
 def p_MessageId(p):
     """MessageId : ID
                  | __DELETE__
-                 | DELETE
-                 | '~' ID"""
+                 | DELETE"""
     loc = locFromTok(p, 1)
-    if 3 == len(p):
-        _error(loc, "sorry, `%s()' destructor syntax is a relic from a bygone era.  Declare `__delete__()' in the `%s' protocol instead", p[1]+p[2], p[2])
-    elif 'delete' == p[1]:
+    if 'delete' == p[1]:
         _error(loc, "`delete' is a reserved identifier")
     p[0] = [ loc, p[1] ]
 
@@ -573,129 +554,85 @@ def p_MessageCompress(p):
                        | COMPRESSALL"""
     p[0] = p[1]
 
-##--------------------
-## State machine
-
-def p_TransitionStmtsOpt(p):
-    """TransitionStmtsOpt : TransitionStmt TransitionStmtsOpt
-                          |"""
-    if 1 == len(p):
-        # we fill in |loc| in the Protocol rule
-        p[0] = Protocol(None)
-    else:
-        p[2].transitionStmts.insert(0, p[1])
-        p[0] = p[2]
-
-def p_TransitionStmt(p):
-    """TransitionStmt : OptionalStart STATE State ':' Transitions"""
-    p[3].start = p[1]
-    p[0] = TransitionStmt(locFromTok(p, 2), p[3], p[5])
-
-def p_OptionalStart(p):
-    """OptionalStart : START
-                     | """
-    p[0] = (len(p) == 2)                # True iff 'start' specified
-
-def p_Transitions(p):
-    """Transitions : Transitions Transition
-                   | Transition"""
-    if 3 == len(p):
-        p[1].append(p[2])
-        p[0] = p[1]
-    else:
-        p[0] = [ p[1] ]
-
-def p_Transition(p):
-    """Transition : Trigger ID GOTO StateList ';'
-                  | Trigger __DELETE__ ';'
-                  | Trigger DELETE ';'"""
-    if 'delete' == p[2]:
-        _error(locFromTok(p, 1), "`delete' is a reserved identifier")
-    
-    loc, trigger = p[1]
-    if 6 == len(p):
-        nextstates = p[4]
-    else:
-        nextstates = [ State.DEAD ]
-    p[0] = Transition(loc, trigger, p[2], nextstates)
-
-def p_Trigger(p):
-    """Trigger : SEND
-               | RECV
-               | CALL
-               | ANSWER"""
-    p[0] = [ locFromTok(p, 1), Transition.nameToTrigger(p[1]) ]
-
-def p_StateList(p):
-    """StateList : StateList OR State
-                 | State"""
-    if 2 == len(p):
-        p[0] = [ p[1] ]
-    else:
-        p[1].append(p[3])
-        p[0] = p[1]
-
-def p_State(p):
-    """State : ID"""
-    p[0] = State(locFromTok(p, 1), p[1])
 
 ##--------------------
 ## Minor stuff
+def p_Nested(p):
+    """Nested : ID"""
+    kinds = {'not': 1,
+             'inside_sync': 2,
+             'inside_cpow': 3}
+    if p[1] not in kinds:
+        _error(locFromTok(p, 1), "Expected not, inside_sync, or inside_cpow for nested()")
+
+    p[0] = { 'nested': kinds[p[1]] }
+
 def p_Priority(p):
-    """Priority : NORMAL
-                | HIGH
-                | URGENT"""
-    prios = {'normal': 1,
-             'high': 2,
-             'urgent': 3}
-    p[0] = prios[p[1]]
+    """Priority : ID"""
+    kinds = {'normal': 1,
+             'high': 2}
+    if p[1] not in kinds:
+        _error(locFromTok(p, 1), "Expected normal or high for prio()")
+
+    p[0] = { 'prio': kinds[p[1]] }
+
+def p_SendQualifier(p):
+    """SendQualifier : NESTED '(' Nested ')'
+                     | PRIO '(' Priority ')'"""
+    p[0] = p[3]
+
+def p_SendQualifierList(p):
+    """SendQualifierList : SendQualifier SendQualifierList
+                         | """
+    if len(p) > 1:
+        p[0] = p[1]
+        p[0].update(p[2])
+    else:
+        p[0] = {}
 
 def p_SendSemanticsQual(p):
-    """SendSemanticsQual : ASYNC
-                         | SYNC
-                         | PRIO '(' Priority ')' ASYNC
-                         | PRIO '(' Priority ')' SYNC
+    """SendSemanticsQual : SendQualifierList ASYNC
+                         | SendQualifierList SYNC
                          | INTR"""
-    if p[1] == 'prio':
-        mtype = p[5]
-        prio = p[3]
+    quals = {}
+    if len(p) == 3:
+        quals = p[1]
+        mtype = p[2]
     else:
-        mtype = p[1]
-        prio = NORMAL_PRIORITY
+        mtype = 'intr'
 
     if mtype == 'async': mtype = ASYNC
     elif mtype == 'sync': mtype = SYNC
     elif mtype == 'intr': mtype = INTR
     else: assert 0
 
-    p[0] = [ prio, mtype ]
+    p[0] = [ quals.get('nested', NOT_NESTED), quals.get('prio', NORMAL_PRIORITY), mtype ]
 
 def p_OptionalProtocolSendSemanticsQual(p):
     """OptionalProtocolSendSemanticsQual : ProtocolSendSemanticsQual
                                          | """
     if 2 == len(p): p[0] = p[1]
-    else:           p[0] = [ (NORMAL_PRIORITY, NORMAL_PRIORITY), ASYNC ]
+    else:           p[0] = [ (NOT_NESTED, NOT_NESTED), ASYNC ]
 
 def p_ProtocolSendSemanticsQual(p):
     """ProtocolSendSemanticsQual : ASYNC
                                  | SYNC
-                                 | PRIO '(' Priority UPTO Priority ')' ASYNC
-                                 | PRIO '(' Priority UPTO Priority ')' SYNC
-                                 | PRIO '(' Priority UPTO Priority ')' INTR
+                                 | NESTED '(' UPTO Nested ')' ASYNC
+                                 | NESTED '(' UPTO Nested ')' SYNC
                                  | INTR"""
-    if p[1] == 'prio':
-        mtype = p[7]
-        prio = (p[3], p[5])
+    if p[1] == 'nested':
+        mtype = p[6]
+        nested = (NOT_NESTED, p[4])
     else:
         mtype = p[1]
-        prio = (NORMAL_PRIORITY, NORMAL_PRIORITY)
+        nested = (NOT_NESTED, NOT_NESTED)
 
     if mtype == 'async': mtype = ASYNC
     elif mtype == 'sync': mtype = SYNC
     elif mtype == 'intr': mtype = INTR
     else: assert 0
 
-    p[0] = [ prio, mtype ]
+    p[0] = [ nested, mtype ]
 
 def p_ParamList(p):
     """ParamList : ParamList ',' Param
@@ -720,27 +657,17 @@ def p_Type(p):
     p[0] = p[2]
 
 def p_BasicType(p):
-    """BasicType : ScalarType
-                 | ScalarType '[' ']'"""
+    """BasicType : CxxID
+                 | CxxID '[' ']'"""
+    # ID == CxxType; we forbid qnames here,
+    # in favor of the |using| declaration
+    if not isinstance(p[1], TypeSpec):
+        loc, id = p[1]
+        p[1] = TypeSpec(loc, QualifiedId(loc, id))
     if 4 == len(p):
         p[1].array = 1
     p[0] = p[1]
 
-def p_ScalarType(p):
-    """ScalarType : ActorType
-                  | CxxID"""    # ID == CxxType; we forbid qnames here,
-                                # in favor of the |using| declaration
-    if isinstance(p[1], TypeSpec):
-        p[0] = p[1]
-    else:
-        loc, id = p[1]
-        p[0] = TypeSpec(loc, QualifiedId(loc, id))
-
-def p_ActorType(p):
-    """ActorType : ID ':' State"""
-    loc = locFromTok(p, 1)
-    p[0] = TypeSpec(loc, QualifiedId(loc, p[1]), state=p[3])
- 
 def p_MaybeNullable(p):
     """MaybeNullable : NULLABLE
                      | """

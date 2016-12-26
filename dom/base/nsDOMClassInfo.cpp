@@ -19,6 +19,7 @@
 
 #include "xpcpublic.h"
 #include "xpcprivate.h"
+#include "xpc_make_class.h"
 #include "XPCWrapper.h"
 
 #include "mozilla/DOMEventTargetHelper.h"
@@ -100,10 +101,6 @@
 #include "nsWrapperCacheInlines.h"
 #include "mozilla/dom/HTMLCollectionBinding.h"
 
-#ifdef MOZ_B2G_FM
-#include "FMRadio.h"
-#endif
-
 #include "nsDebug.h"
 
 #include "mozilla/dom/BindingUtils.h"
@@ -138,6 +135,9 @@ using namespace mozilla::dom;
                                         _chromeOnly, _allowXBL)               \
   { #_class,                                                                  \
     nullptr,                                                                  \
+    XPC_MAKE_CLASS_OPS(_flags),                                               \
+    XPC_MAKE_CLASS(#_class, _flags,                                           \
+                   &sClassInfoData[eDOMClassInfo_##_class##_id].mClassOps),   \
     _helper::doCreate,                                                        \
     nullptr,                                                                  \
     nullptr,                                                                  \
@@ -598,7 +598,6 @@ nsDOMClassInfo::Init()
   DOM_CLASSINFO_MAP_END
 
   DOM_CLASSINFO_MAP_BEGIN_NO_CLASS_IF(ChromeMessageSender, nsISupports)
-    DOM_CLASSINFO_MAP_ENTRY(nsIProcessChecker)
     DOM_CLASSINFO_MAP_ENTRY(nsIFrameScriptLoader)
     DOM_CLASSINFO_MAP_ENTRY(nsIProcessScriptLoader)
     DOM_CLASSINFO_MAP_ENTRY(nsIMessageListenerManager)
@@ -788,22 +787,19 @@ nsDOMClassInfo::GetScriptableFlags()
   return mData->mScriptableFlags;
 }
 
+// virtual
+const js::Class*
+nsDOMClassInfo::GetClass()
+{
+    return &mData->mClass;
+}
+
 NS_IMETHODIMP
 nsDOMClassInfo::PreCreate(nsISupports *nativeObj, JSContext *cx,
                           JSObject *globalObj, JSObject **parentObj)
 {
   *parentObj = globalObj;
   return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDOMClassInfo::AddProperty(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
-                            JSObject *obj, jsid id, JS::Handle<JS::Value> val,
-                            bool *_retval)
-{
-  NS_WARNING("nsDOMClassInfo::AddProperty Don't call me!");
-
-  return NS_ERROR_UNEXPECTED;
 }
 
 NS_IMETHODIMP
@@ -1701,7 +1697,7 @@ nsWindowSH::NameStructEnabled(JSContext* aCx, nsGlobalWindow *aWin,
          OldBindingConstructorEnabled(nameStruct, aWin, aCx);
 }
 
-#ifdef RELEASE_BUILD
+#ifdef RELEASE_OR_BETA
 #define USE_CONTROLLERS_SHIM
 #endif
 
@@ -1967,16 +1963,6 @@ nsEventTargetSH::PreCreate(nsISupports *nativeObj, JSContext *cx,
   *parentObj = native_parent ? native_parent->GetGlobalJSObject() : globalObj;
 
   return *parentObj ? NS_OK : NS_ERROR_FAILURE;
-}
-
-NS_IMETHODIMP
-nsEventTargetSH::AddProperty(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
-                             JSObject *obj, jsid id, JS::Handle<JS::Value> val,
-                             bool *_retval)
-{
-  nsEventTargetSH::PreserveWrapper(GetNative(wrapper, obj));
-
-  return NS_OK;
 }
 
 void

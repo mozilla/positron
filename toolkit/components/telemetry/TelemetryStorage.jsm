@@ -50,7 +50,7 @@ XPCOMUtils.defineLazyGetter(this, "gDeletionPingFilePath", function() {
 XPCOMUtils.defineLazyModuleGetter(this, "CommonUtils",
                                   "resource://services-common/utils.js");
 // Maxmimum time, in milliseconds, archive pings should be retained.
-const MAX_ARCHIVED_PINGS_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;  // 180 days
+const MAX_ARCHIVED_PINGS_RETENTION_MS = 60 * 24 * 60 * 60 * 1000;  // 60 days
 
 // Maximum space the archive can take on disk (in Bytes).
 const ARCHIVE_QUOTA_BYTES = 120 * 1024 * 1024; // 120 MB
@@ -75,7 +75,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
  * This is thrown by |TelemetryStorage.loadPingFile| when reading the ping
  * from the disk fails.
  */
-function PingReadError(message="Error reading the ping file", becauseNoSuchFile = false) {
+function PingReadError(message = "Error reading the ping file", becauseNoSuchFile = false) {
   Error.call(this, message);
   let error = new Error();
   this.name = "PingReadError";
@@ -90,7 +90,7 @@ PingReadError.prototype.constructor = PingReadError;
  * This is thrown by |TelemetryStorage.loadPingFile| when parsing the ping JSON
  * content fails.
  */
-function PingParseError(message="Error parsing ping content") {
+function PingParseError(message = "Error parsing ping content") {
   Error.call(this, message);
   let error = new Error();
   this.name = "PingParseError";
@@ -486,7 +486,7 @@ SaveSerializer.prototype = {
    * @param {Function} aFunction The task function to enqueue. It must return a promise.
    * @return {Promise} A promise resolved when the enqueued task completes.
    */
-  enqueueTask: function (aFunction) {
+  enqueueTask: function(aFunction) {
     let promise = new Promise((resolve, reject) =>
       this._queuedOperations.push([aFunction, resolve, reject]));
 
@@ -500,7 +500,7 @@ SaveSerializer.prototype = {
    * Make sure to flush all the pending operations.
    * @return {Promise} A promise resolved when all the pending operations have completed.
    */
-  flushTasks: function () {
+  flushTasks: function() {
     let dummyTask = () => new Promise(resolve => resolve());
     return this.enqueueTask(dummyTask);
   },
@@ -509,7 +509,7 @@ SaveSerializer.prototype = {
    * Pop a task from the queue, executes it and continue to the next one.
    * This function recursively pops all the tasks.
    */
-  _popAndPerformQueuedOperation: function () {
+  _popAndPerformQueuedOperation: function() {
     if (!this._queuedOperations.length || this._queuedInProgress) {
       return;
     }
@@ -672,7 +672,7 @@ var TelemetryStorageImpl = {
     const filePath = getArchivedPingPath(ping.id, creationDate, ping.type) + "lz4";
     yield OS.File.makeDir(OS.Path.dirname(filePath), { ignoreExisting: true,
                                                        from: OS.Constants.Path.profileDir });
-    yield this.savePingToFile(ping, filePath, /*overwrite*/ true, /*compressed*/ true);
+    yield this.savePingToFile(ping, filePath, /* overwrite*/ true, /* compressed*/ true);
 
     this._archivedPings.set(ping.id, {
       timestampCreated: creationDate.getTime(),
@@ -717,7 +717,7 @@ var TelemetryStorageImpl = {
       // Try to load a compressed version of the archived ping first.
       this._log.trace("loadArchivedPing - loading ping from: " + pathCompressed);
       yield* checkSize(pathCompressed);
-      return yield this.loadPingFile(pathCompressed, /*compressed*/ true);
+      return yield this.loadPingFile(pathCompressed, /* compressed*/ true);
     } catch (ex) {
       if (!ex.becauseNoSuchFile) {
         throw ex;
@@ -725,7 +725,7 @@ var TelemetryStorageImpl = {
       // If that fails, look for the uncompressed version.
       this._log.trace("loadArchivedPing - compressed ping not found, loading: " + path);
       yield* checkSize(path);
-      return yield this.loadPingFile(path, /*compressed*/ false);
+      return yield this.loadPingFile(path, /* compressed*/ false);
     }
   }),
 
@@ -1387,7 +1387,7 @@ var TelemetryStorageImpl = {
    *
    * @param {Object<Promise>} The save promise to track.
    */
-  _trackPendingPingSaveTask: function (promise) {
+  _trackPendingPingSaveTask: function(promise) {
     let clear = () => this._activePendingPingSaves.delete(promise);
     promise.then(clear, clear);
     this._activePendingPingSaves.add(promise);
@@ -1398,7 +1398,7 @@ var TelemetryStorageImpl = {
    * @return {Object<Promise>} A promise resolved when all the pending pings save promises
    *         are resolved.
    */
-  promisePendingPingSaves: function () {
+  promisePendingPingSaves: function() {
     // Make sure to wait for all the promises, even if they reject. We don't need to log
     // the failures here, as they are already logged elsewhere.
     return waitForAll(this._activePendingPingSaves);
@@ -1783,7 +1783,7 @@ var TelemetryStorageImpl = {
   }),
 };
 
-///// Utility functions
+// Utility functions
 
 function pingFilePath(ping) {
   // Support legacy ping formats, who don't have an "id" field, but a "slug" field.

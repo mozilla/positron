@@ -175,7 +175,7 @@ function configureProfileURL(profile, responseStatus = 200) {
             "responseBody=" + responseBody +
             // This is a bit cheeky - the FxA code will just append "/profile"
             // to the preference value. We arrange for this to be seen by our
-            //.sjs as part of the query string.
+            // .sjs as part of the query string.
             "&path=";
 
   Services.prefs.setCharPref("identity.fxaccounts.remote.profile.uri", url);
@@ -183,10 +183,10 @@ function configureProfileURL(profile, responseStatus = 200) {
 
 function promiseObserver(topic, count = 1) {
   return new Promise(resolve => {
-    let obs = (subject, topic, data) => {
+    let obs = (aSubject, aTopic, aData) => {
       if (--count == 0) {
-        Services.obs.removeObserver(obs, topic);
-        resolve(subject);
+        Services.obs.removeObserver(obs, aTopic);
+        resolve(aSubject);
       }
     }
     Services.obs.addObserver(obs, topic, false);

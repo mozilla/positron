@@ -34,14 +34,6 @@ def get_method(method):
     return _target_task_methods[method]
 
 
-@_target_task('from_parameters')
-def target_tasks_from_parameters(full_task_graph, parameters):
-    """Get the target task set from parameters['target_tasks'].  This is
-    useful for re-running a decision task with the same target set as in an
-    earlier run, by copying `target_tasks.json` into `parameters.yml`."""
-    return parameters['target_tasks']
-
-
 @_target_task('try_option_syntax')
 def target_tasks_try_option_syntax(full_task_graph, parameters):
     """Generate a list of target tasks based on try syntax in
@@ -110,6 +102,37 @@ def target_tasks_ash(full_task_graph, parameters):
             return False
         return True
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+
+
+@_target_task('cedar_tasks')
+def target_tasks_cedar(full_task_graph, parameters):
+    """Target tasks that only run on the cedar branch."""
+    def filter(task):
+        platform = task.attributes.get('build_platform')
+        # only select platforms
+        if platform not in ['linux64']:
+            return False
+        if task.attributes.get('unittest_suite'):
+            if not (task.attributes['unittest_suite'].startswith('mochitest')
+                    or 'xpcshell' in task.attributes['unittest_suite']):
+                return False
+        return True
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+
+
+@_target_task('graphics_tasks')
+def target_tasks_graphics(full_task_graph, parameters):
+    """In addition to doing the filtering by project that the 'default'
+       filter does, also remove artifact builds because we have csets on
+       the graphics branch that aren't on the candidate branches of artifact
+       builds"""
+    filtered_for_project = target_tasks_default(full_task_graph, parameters)
+
+    def filter(task):
+        if task.attributes['kind'] == 'artifact-build':
+            return False
+        return True
+    return [l for l in filtered_for_project if filter(full_task_graph[l])]
 
 
 @_target_task('nightly_fennec')

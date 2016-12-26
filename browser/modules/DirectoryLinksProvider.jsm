@@ -34,10 +34,10 @@ XPCOMUtils.defineLazyServiceGetter(this, "eTLD",
 XPCOMUtils.defineLazyGetter(this, "gTextDecoder", () => {
   return new TextDecoder();
 });
-XPCOMUtils.defineLazyGetter(this, "gCryptoHash", function () {
+XPCOMUtils.defineLazyGetter(this, "gCryptoHash", function() {
   return Cc["@mozilla.org/security/hash;1"].createInstance(Ci.nsICryptoHash);
 });
-XPCOMUtils.defineLazyGetter(this, "gUnicodeConverter", function () {
+XPCOMUtils.defineLazyGetter(this, "gUnicodeConverter", function() {
   let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
                     .createInstance(Ci.nsIScriptableUnicodeConverter);
   converter.charset = 'utf8';
@@ -88,7 +88,7 @@ const DEFAULT_TOTAL_FREQUENCY_CAP = 10;
 
 // Default timeDelta to prune unused frequency cap objects
 // currently set to 10 days in milliseconds
-const DEFAULT_PRUNE_TIME_DELTA = 10*24*60*60*1000;
+const DEFAULT_PRUNE_TIME_DELTA = 10 * 24 * 60 * 60 * 1000;
 
 // The min number of visible (not blocked) history tiles to have before showing suggested tiles
 const MIN_VISIBLE_HISTORY_TILES = 8;
@@ -106,7 +106,7 @@ const INADJACENCY_SOURCE = "chrome://browser/content/newtab/newTab.inadjacent.js
 const FAKE_SUGGESTED_BLOCK_URL = "ignore://suggested_block";
 
 // Time before suggested tile is allowed to play again after block - default to 1 day
-const AFTER_SUGGESTED_BLOCK_DECAY_TIME = 24*60*60*1000;
+const AFTER_SUGGESTED_BLOCK_DECAY_TIME = 24 * 60 * 60 * 1000;
 
 /**
  * Singleton that serves as the provider of directory links.
@@ -331,7 +331,7 @@ var DirectoryLinksProvider = {
    * Downloads directory links if needed
    * @return promise resolved immediately if no download needed, or upon completion
    */
-  _fetchAndCacheLinksIfNecessary: function DirectoryLinksProvider_fetchAndCacheLinksIfNecessary(forceDownload=false) {
+  _fetchAndCacheLinksIfNecessary: function DirectoryLinksProvider_fetchAndCacheLinksIfNecessary(forceDownload = false) {
     if (this._downloadDeferred) {
       // fetching links already - just return the promise
       return this._downloadDeferred.promise;
@@ -361,7 +361,7 @@ var DirectoryLinksProvider = {
   /**
    * @return true if download is needed, false otherwise
    */
-  get _needsDownload () {
+  get _needsDownload() {
     // fail if last download occured less then 24 hours ago
     if ((Date.now() - this._lastDownloadMS) > this._downloadIntervalMS) {
       return true;
@@ -526,7 +526,6 @@ var DirectoryLinksProvider = {
    * @return download promise
    */
   reportSitesAction: function DirectoryLinksProvider_reportSitesAction(sites, action, triggeringSiteIndex) {
-    let pastImpressions;
     // Check if the suggested tile was shown
     if (action == "view") {
       sites.slice(0, triggeringSiteIndex + 1).filter(s => s).forEach(site => {
@@ -544,13 +543,6 @@ var DirectoryLinksProvider = {
       // suggested tile has targetedSite, or frecent_sites if it was pinned
       let {frecent_sites, targetedSite, url} = sites[triggeringSiteIndex].link;
       if (frecent_sites || targetedSite) {
-        // skip past_impressions for "unpin" to avoid chance of tracking
-        if (this._frequencyCaps[url] && action != "unpin") {
-          pastImpressions = {
-            total: this._frequencyCaps[url].totalViews,
-            daily: this._frequencyCaps[url].dailyViews
-          };
-        }
         this._setFrequencyCapClick(url);
       }
     }
@@ -776,7 +768,7 @@ var DirectoryLinksProvider = {
     return false;
   },
 
-  _populatePlacesLinks: function () {
+  _populatePlacesLinks: function() {
     NewTabUtils.links.populateProviderCache(NewTabUtils.placesProvider, () => {
       this._handleManyLinksChanged();
     });
@@ -798,7 +790,7 @@ var DirectoryLinksProvider = {
     });
   },
 
-  onLinkChanged: function (aProvider, aLink) {
+  onLinkChanged: function(aProvider, aLink) {
     // Make sure NewTabUtils.links handles the notification first.
     setTimeout(() => {
       if (this._handleLinkChanged(aLink) || this._shouldUpdateSuggestedTile()) {
@@ -807,7 +799,7 @@ var DirectoryLinksProvider = {
     }, 0);
   },
 
-  onManyLinksChanged: function () {
+  onManyLinksChanged: function() {
     // Make sure NewTabUtils.links handles the notification first.
     setTimeout(() => {
       this._handleManyLinksChanged();

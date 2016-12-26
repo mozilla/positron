@@ -8,6 +8,12 @@
 #include "mozilla/dom/ContentChild.h"
 #include "MediaPrefs.h"
 #include "nsThreadUtils.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/ipc/ProtocolUtils.h"
+#include "mozilla/layers/SynchronousTask.h"
+#include "mozilla/gfx/DataSurfaceHelpers.h"
+#include "mozilla/layers/ISurfaceAllocator.h"
+#include "base/task.h"
 
 namespace mozilla {
 namespace dom {
@@ -16,26 +22,18 @@ using namespace ipc;
 using namespace layers;
 using namespace gfx;
 
+// Only modified on the main-thread
 StaticRefPtr<nsIThread> sVideoDecoderChildThread;
 StaticRefPtr<AbstractThread> sVideoDecoderChildAbstractThread;
+
+// Only accessed from sVideoDecoderChildThread
 static StaticRefPtr<VideoDecoderManagerChild> sDecoderManager;
+static UniquePtr<nsTArray<RefPtr<Runnable>>> sRecreateTasks;
 
 /* static */ void
-VideoDecoderManagerChild::Initialize()
+VideoDecoderManagerChild::InitializeThread()
 {
   MOZ_ASSERT(NS_IsMainThread());
-
-  MediaPrefs::GetSingleton();
-
-#ifdef XP_WIN
-  if (!MediaPrefs::PDMUseGPUDecoder()) {
-    return;
-  }
-
-  // Can't run remote video decoding in the parent process.
-  if (!ContentChild::GetSingleton()) {
-    return;
-  }
 
   if (!sVideoDecoderChildThread) {
     RefPtr<nsIThread> childThread;
@@ -45,26 +43,16 @@ VideoDecoderManagerChild::Initialize()
 
     sVideoDecoderChildAbstractThread =
       AbstractThread::CreateXPCOMThreadWrapper(childThread, false);
+
+    sRecreateTasks = MakeUnique<nsTArray<RefPtr<Runnable>>>();
   }
+}
 
-  Endpoint<PVideoDecoderManagerChild> endpoint;
-  if (!ContentChild::GetSingleton()->SendInitVideoDecoderManager(&endpoint)) {
-    return;
-  }
-
-  if (!endpoint.IsValid()) {
-    return;
-  }
-
-  sDecoderManager = new VideoDecoderManagerChild();
-
-  RefPtr<Runnable> task = NewRunnableMethod<Endpoint<PVideoDecoderManagerChild>&&>(
-    sDecoderManager, &VideoDecoderManagerChild::Open, Move(endpoint));
-  sVideoDecoderChildThread->Dispatch(task.forget(), NS_DISPATCH_NORMAL);
-#else
-  return;
-#endif
-
+/* static */ void
+VideoDecoderManagerChild::InitForContent(Endpoint<PVideoDecoderManagerChild>&& aVideoManager)
+{
+  InitializeThread();
+  sVideoDecoderChildThread->Dispatch(NewRunnableFunction(&Open, Move(aVideoManager)), NS_DISPATCH_NORMAL);
 }
 
 /* static */ void
@@ -73,23 +61,40 @@ VideoDecoderManagerChild::Shutdown()
   MOZ_ASSERT(NS_IsMainThread());
 
   if (sVideoDecoderChildThread) {
-    MOZ_ASSERT(sDecoderManager);
-
     sVideoDecoderChildThread->Dispatch(NS_NewRunnableFunction([]() {
-      sDecoderManager->Close();
-    }), NS_DISPATCH_SYNC);
-
-    sDecoderManager = nullptr;
+      if (sDecoderManager && sDecoderManager->CanSend()) {
+        sDecoderManager->Close();
+        sDecoderManager = nullptr;
+      }
+    }), NS_DISPATCH_NORMAL);
 
     sVideoDecoderChildAbstractThread = nullptr;
     sVideoDecoderChildThread->Shutdown();
     sVideoDecoderChildThread = nullptr;
+
+    sRecreateTasks = nullptr;
   }
 }
+
+void
+VideoDecoderManagerChild::RunWhenRecreated(already_AddRefed<Runnable> aTask)
+{
+  MOZ_ASSERT(NS_GetCurrentThread() == GetManagerThread());
+
+  // If we've already been recreated, then run the task immediately.
+  if (sDecoderManager && sDecoderManager != this && sDecoderManager->CanSend()) {
+    RefPtr<Runnable> task = aTask;
+    task->Run();
+  } else {
+    sRecreateTasks->AppendElement(aTask);
+  }
+}
+
 
 /* static */ VideoDecoderManagerChild*
 VideoDecoderManagerChild::GetSingleton()
 {
+  MOZ_ASSERT(NS_GetCurrentThread() == GetManagerThread());
   return sDecoderManager;
 }
 
@@ -106,7 +111,9 @@ VideoDecoderManagerChild::GetManagerAbstractThread()
 }
 
 PVideoDecoderChild*
-VideoDecoderManagerChild::AllocPVideoDecoderChild()
+VideoDecoderManagerChild::AllocPVideoDecoderChild(const VideoInfo& aVideoInfo,
+                                                  const layers::TextureFactoryIdentifier& aIdentifier,
+                                                  bool* aSuccess)
 {
   return new VideoDecoderChild();
 }
@@ -122,17 +129,122 @@ VideoDecoderManagerChild::DeallocPVideoDecoderChild(PVideoDecoderChild* actor)
 void
 VideoDecoderManagerChild::Open(Endpoint<PVideoDecoderManagerChild>&& aEndpoint)
 {
-  if (!aEndpoint.Bind(this)) {
-    // We can't recover from this.
-    MOZ_CRASH("Failed to bind VideoDecoderChild to endpoint");
+  // Make sure we always dispatch everything in sRecreateTasks, even if we
+  // fail since this is as close to being recreated as we will ever be.
+  sDecoderManager = nullptr;
+  if (aEndpoint.IsValid()) {
+    RefPtr<VideoDecoderManagerChild> manager = new VideoDecoderManagerChild();
+    if (aEndpoint.Bind(manager)) {
+      sDecoderManager = manager;
+      manager->InitIPDL();
+    }
   }
-  AddRef();
+  for (Runnable* task : *sRecreateTasks) {
+    task->Run();
+  }
+  sRecreateTasks->Clear();
+}
+
+void
+VideoDecoderManagerChild::InitIPDL()
+{
+  mCanSend = true;
+  mIPDLSelfRef = this;
+}
+
+void
+VideoDecoderManagerChild::ActorDestroy(ActorDestroyReason aWhy)
+{
+  mCanSend = false;
 }
 
 void
 VideoDecoderManagerChild::DeallocPVideoDecoderManagerChild()
 {
-  Release();
+  mIPDLSelfRef = nullptr;
+}
+
+bool
+VideoDecoderManagerChild::CanSend()
+{
+  MOZ_ASSERT(NS_GetCurrentThread() == GetManagerThread());
+  return mCanSend;
+}
+
+bool
+VideoDecoderManagerChild::DeallocShmem(mozilla::ipc::Shmem& aShmem)
+{
+  if (NS_GetCurrentThread() != sVideoDecoderChildThread) {
+    RefPtr<VideoDecoderManagerChild> self = this;
+    mozilla::ipc::Shmem shmem = aShmem;
+    sVideoDecoderChildThread->Dispatch(NS_NewRunnableFunction([self, shmem]() {
+      if (self->CanSend()) {
+        mozilla::ipc::Shmem shmemCopy = shmem;
+        self->DeallocShmem(shmemCopy);
+      }
+    }), NS_DISPATCH_NORMAL);
+    return true;
+  }
+  return PVideoDecoderManagerChild::DeallocShmem(aShmem);
+}
+
+struct SurfaceDescriptorUserData
+{
+  SurfaceDescriptorUserData(VideoDecoderManagerChild* aAllocator, SurfaceDescriptor& aSD)
+    : mAllocator(aAllocator)
+    , mSD(aSD)
+  {}
+  ~SurfaceDescriptorUserData()
+  {
+    DestroySurfaceDescriptor(mAllocator, &mSD);
+  }
+
+  RefPtr<VideoDecoderManagerChild> mAllocator;
+  SurfaceDescriptor mSD;
+};
+
+void DeleteSurfaceDescriptorUserData(void* aClosure)
+{
+  SurfaceDescriptorUserData* sd = reinterpret_cast<SurfaceDescriptorUserData*>(aClosure);
+  delete sd;
+}
+
+already_AddRefed<SourceSurface>
+VideoDecoderManagerChild::Readback(const SurfaceDescriptorGPUVideo& aSD)
+{
+  // We can't use NS_DISPATCH_SYNC here since that can spin the event
+  // loop while it waits. This function can be called from JS and we
+  // don't want that to happen.
+  SynchronousTask task("Readback sync");
+
+  RefPtr<VideoDecoderManagerChild> ref = this;
+  SurfaceDescriptor sd;
+  sVideoDecoderChildThread->Dispatch(NS_NewRunnableFunction([&]() {
+    AutoCompleteTask complete(&task);
+    if (ref->CanSend()) {
+      ref->SendReadback(aSD, &sd);
+    }
+  }), NS_DISPATCH_NORMAL);
+
+  task.Wait();
+
+  if (!IsSurfaceDescriptorValid(sd)) {
+    return nullptr;
+  }
+
+  RefPtr<DataSourceSurface> source = GetSurfaceForDescriptor(sd);
+  if (!source) {
+    DestroySurfaceDescriptor(this, &sd);
+    NS_WARNING("Failed to map SurfaceDescriptor in Readback");
+    return nullptr;
+  }
+
+  static UserDataKey sSurfaceDescriptor;
+  source->AddUserData(&sSurfaceDescriptor,
+                      new SurfaceDescriptorUserData(this, sd),
+                      DeleteSurfaceDescriptorUserData);
+
+  return source.forget();
 }
 
 void
@@ -141,8 +253,16 @@ VideoDecoderManagerChild::DeallocateSurfaceDescriptorGPUVideo(const SurfaceDescr
   RefPtr<VideoDecoderManagerChild> ref = this;
   SurfaceDescriptorGPUVideo sd = Move(aSD);
   sVideoDecoderChildThread->Dispatch(NS_NewRunnableFunction([ref, sd]() {
-    ref->SendDeallocateSurfaceDescriptorGPUVideo(sd);
+    if (ref->CanSend()) {
+      ref->SendDeallocateSurfaceDescriptorGPUVideo(sd);
+    }
   }), NS_DISPATCH_NORMAL);
+}
+
+void
+VideoDecoderManagerChild::HandleFatalError(const char* aName, const char* aMsg) const
+{
+  dom::ContentChild::FatalErrorIfNotUsingGPUProcess(aName, aMsg, OtherPid());
 }
 
 } // namespace dom

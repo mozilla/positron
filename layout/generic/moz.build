@@ -8,6 +8,10 @@ with Files('nsBlock*'):
     # Parts of these files are really Layout: Floats
     BUG_COMPONENT = ('Core', 'Layout: Block and Inline')
 
+with Files('Block*'):
+    # Parts of these files are really Layout: Floats
+    BUG_COMPONENT = ('Core', 'Layout: Block and Inline')
+
 with Files('nsLine*'):
     # Parts of these files are really Layout: Floats
     BUG_COMPONENT = ('Core', 'Layout: Block and Inline')
@@ -15,7 +19,7 @@ with Files('nsLine*'):
 with Files('nsInlineFrame.*'):
     BUG_COMPONENT = ('Core', 'Layout: Block and Inline')
 
-with Files('nsBRFrame.*'):
+with Files('BRFrame.*'):
     BUG_COMPONENT = ('Core', 'Layout: Block and Inline')
 
 with Files('nsBulletFrame.*'):
@@ -54,11 +58,17 @@ with Files('nsImage*'):
 with Files('nsAbsoluteContainingBlock.*'):
     BUG_COMPONENT = ('Core', 'Layout: R & A Pos')
 
+with Files('Sticky*'):
+    BUG_COMPONENT = ('Core', 'Layout: R & A Pos')
+
 with Files('nsPluginFrame.*'):
     BUG_COMPONENT = ('Core', 'Plug-ins')
 
 with Files('nsVideoFrame.*'):
     BUG_COMPONENT = ('Core', 'Video/Audio')
+
+with Files('*Selection*'):
+    BUG_COMPONENT = ('Core', 'Selection')
 
 EXPORTS += [
     'AsyncScrollBase.h',
@@ -99,8 +109,10 @@ EXPORTS += [
 ]
 
 EXPORTS.mozilla += [
+    'CSSAlignUtils.h',
     'ReflowInput.h',
     'ReflowOutput.h',
+    'ViewportFrame.h',
     'WritingModes.h',
 ]
 
@@ -115,6 +127,8 @@ EXPORTS.mozilla.layout += [
 UNIFIED_SOURCES += [
     'AsyncScrollBase.cpp',
     'BlockReflowInput.cpp',
+    'BRFrame.cpp',
+    'CSSAlignUtils.cpp',
     'DetailsFrame.cpp',
     'FrameChildList.cpp',
     'MathMLTextRunFactory.cpp',
@@ -122,7 +136,6 @@ UNIFIED_SOURCES += [
     'nsBackdropFrame.cpp',
     'nsBlockFrame.cpp',
     'nsBlockReflowContext.cpp',
-    'nsBRFrame.cpp',
     'nsBulletFrame.cpp',
     'nsCanvasFrame.cpp',
     'nsColumnSetFrame.cpp',
@@ -162,7 +175,6 @@ UNIFIED_SOURCES += [
     'nsTextFrameUtils.cpp',
     'nsTextRunTransformations.cpp',
     'nsVideoFrame.cpp',
-    'nsViewportFrame.cpp',
     'ReflowInput.cpp',
     'ReflowOutput.cpp',
     'RubyUtils.cpp',
@@ -171,6 +183,7 @@ UNIFIED_SOURCES += [
     'ScrollVelocityQueue.cpp',
     'StickyScrollContainer.cpp',
     'TextOverflow.cpp',
+    'ViewportFrame.cpp',
 ]
 
 # nsLineLayout.cpp needs to be built separately because it uses plarena.h.
@@ -188,6 +201,7 @@ LOCAL_INCLUDES += [
     '../../dom/plugins/base',
     '../base',
     '../forms',
+    '../painting',
     '../style',
     '../svg',
     '../tables',

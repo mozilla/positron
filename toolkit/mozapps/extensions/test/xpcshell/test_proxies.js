@@ -39,11 +39,6 @@ var METADATA = {
 
 const ios = AM_Cc["@mozilla.org/network/io-service;1"].getService(AM_Ci.nsIIOService);
 
-const LocalFile = Components.Constructor("@mozilla.org/file/local;1",
-                                         "nsILocalFile", "initWithPath");
-const Process = Components.Constructor("@mozilla.org/process/util;1",
-                                       "nsIProcess", "init");
-
 const gHaveSymlinks = AppConstants.platform != "win";
 
 
@@ -123,9 +118,7 @@ function* run_proxy_tests() {
   // add-ons have been removed at startup.
   checkAddonsExist();
 
-  return new Promise(resolve => {
-    AddonManager.getAddonsByIDs(ADDONS.map(addon => addon.id), resolve);
-  }).then(addons => {
+  return AddonManager.getAddonsByIDs(ADDONS.map(addon => addon.id)).then(addons => {
     try {
       for (let [i, addon] of addons.entries()) {
         // Ensure that valid proxied add-ons were installed properly on
@@ -218,9 +211,7 @@ function* run_symlink_tests() {
 
   startupManager();
 
-  return new Promise(resolve => {
-    AddonManager.getAddonByID(METADATA.id, resolve);
-  }).then(addon => {
+  return AddonManager.getAddonByID(METADATA.id).then(addon => {
     do_check_neq(addon, null);
 
     addon.uninstall();

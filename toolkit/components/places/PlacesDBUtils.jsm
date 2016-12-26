@@ -15,22 +15,19 @@ Cu.import("resource://gre/modules/PlacesUtils.jsm");
 
 this.EXPORTED_SYMBOLS = [ "PlacesDBUtils" ];
 
-////////////////////////////////////////////////////////////////////////////////
-//// Constants
+// Constants
 
 const FINISHED_MAINTENANCE_TOPIC = "places-maintenance-finished";
 
 const BYTES_PER_MEBIBYTE = 1048576;
 
-////////////////////////////////////////////////////////////////////////////////
-//// Smart getters
+// Smart getters
 
 XPCOMUtils.defineLazyGetter(this, "DBConn", function() {
   return PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase).DBConnection;
 });
 
-////////////////////////////////////////////////////////////////////////////////
-//// PlacesDBUtils
+// PlacesDBUtils
 
 this.PlacesDBUtils = {
   /**
@@ -140,7 +137,7 @@ this.PlacesDBUtils = {
 
     // Send batch update notifications to update the UI.
     PlacesUtils.history.runInBatchMode({
-      runBatched: function (aUserData) {}
+      runBatched: function(aUserData) {}
     }, null);
     PlacesDBUtils._executeTasks(tasks);
   },
@@ -165,9 +162,9 @@ this.PlacesDBUtils = {
     let stmt = DBConn.createAsyncStatement("REINDEX");
     stmt.executeAsync({
       handleError: PlacesDBUtils._handleError,
-      handleResult: function () {},
+      handleResult: function() {},
 
-      handleCompletion: function (aReason)
+      handleCompletion: function(aReason)
       {
         if (aReason == Ci.mozIStorageStatementCallback.REASON_FINISHED) {
           tasks.log("+ The database has been reindexed");
@@ -211,13 +208,13 @@ this.PlacesDBUtils = {
       handleError: PlacesDBUtils._handleError,
 
       _corrupt: false,
-      handleResult: function (aResultSet)
+      handleResult: function(aResultSet)
       {
         let row = aResultSet.getNextRow();
         this._corrupt = row.getResultByIndex(0) != "ok";
       },
 
-      handleCompletion: function (aReason)
+      handleCompletion: function(aReason)
       {
         if (aReason == Ci.mozIStorageStatementCallback.REASON_FINISHED) {
           if (this._corrupt) {
@@ -263,9 +260,9 @@ this.PlacesDBUtils = {
     let stmts = PlacesDBUtils._getBoundCoherenceStatements();
     DBConn.executeAsync(stmts, stmts.length, {
       handleError: PlacesDBUtils._handleError,
-      handleResult: function () {},
+      handleResult: function() {},
 
-      handleCompletion: function (aReason)
+      handleCompletion: function(aReason)
       {
         if (aReason == Ci.mozIStorageStatementCallback.REASON_FINISHED) {
           tasks.log("+ The database is coherent");
@@ -751,9 +748,9 @@ this.PlacesDBUtils = {
     let stmt = DBConn.createAsyncStatement("VACUUM");
     stmt.executeAsync({
       handleError: PlacesDBUtils._handleError,
-      handleResult: function () {},
+      handleResult: function() {},
 
-      handleCompletion: function (aReason)
+      handleCompletion: function(aReason)
       {
         if (aReason == Ci.mozIStorageStatementCallback.REASON_FINISHED) {
           tasks.log("+ The database has been vacuumed");
@@ -787,7 +784,7 @@ this.PlacesDBUtils = {
     let expiration = Cc["@mozilla.org/places/expiration;1"].
                      getService(Ci.nsIObserver);
 
-    Services.obs.addObserver(function (aSubject, aTopic, aData) {
+    Services.obs.addObserver(function(aSubject, aTopic, aData) {
       Services.obs.removeObserver(arguments.callee, aTopic);
       tasks.log("+ Database cleaned up");
       PlacesDBUtils._executeTasks(tasks);
@@ -817,7 +814,7 @@ this.PlacesDBUtils = {
     , "cache_size"
     , "journal_mode"
     , "synchronous"
-    ].forEach(function (aPragma) {
+    ].forEach(function(aPragma) {
       let stmt = DBConn.createStatement("PRAGMA " + aPragma);
       stmt.executeStep();
       tasks.log(aPragma + " is " + stmt.getString(0));
@@ -932,7 +929,7 @@ this.PlacesDBUtils = {
                     )), 0)` },
 
       { histogram: "PLACES_DATABASE_FILESIZE_MB",
-        callback: function () {
+        callback: function() {
           let DBFile = Services.dirsvc.get("ProfD", Ci.nsILocalFile);
           DBFile.append("places.sqlite");
           return parseInt(DBFile.fileSize / BYTES_PER_MEBIBYTE);
@@ -944,7 +941,7 @@ this.PlacesDBUtils = {
 
       { histogram: "PLACES_DATABASE_SIZE_PER_PAGE_B",
         query:     "PRAGMA page_count",
-        callback: function (aDbPageCount) {
+        callback: function(aDbPageCount) {
           // Note that the database file size would not be meaningful for this
           // calculation, because the file grows in fixed-size chunks.
           let dbPageSize = probeValues.PLACES_DATABASE_PAGESIZE_B;
@@ -960,7 +957,7 @@ this.PlacesDBUtils = {
         query:     "SELECT count(*) FROM moz_annos" },
 
       { histogram: "PLACES_MAINTENANCE_DAYSFROMLAST",
-        callback: function () {
+        callback: function() {
           try {
             let lastMaintenance = Services.prefs.getIntPref("places.database.lastMaintenance");
             let nowSeconds = parseInt(Date.now() / 1000);
@@ -998,11 +995,11 @@ this.PlacesDBUtils = {
         try {
           stmt.executeAsync({
             handleError: reject,
-            handleResult: function (aResultSet) {
+            handleResult: function(aResultSet) {
               let row = aResultSet.getNextRow();
               resolve([probe, row.getResultByIndex(0)]);
             },
-            handleCompletion: function () {}
+            handleCompletion: function() {}
           });
         } finally {
           stmt.finalize();

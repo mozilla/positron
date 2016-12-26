@@ -50,8 +50,10 @@ from mozharness.mozilla.testing.errors import TinderBoxPrintRe
 from mozharness.mozilla.testing.unittest import tbox_print_summary
 from mozharness.mozilla.updates.balrog import BalrogMixin
 from mozharness.mozilla.taskcluster_helper import Taskcluster
-from mozharness.base.python import VirtualenvMixin
-from mozharness.base.python import InfluxRecordingMixin
+from mozharness.base.python import (
+    PerfherderResourceOptionsMixin,
+    VirtualenvMixin,
+)
 
 AUTOMATION_EXIT_CODES = EXIT_STATUS_DICT.values()
 AUTOMATION_EXIT_CODES.sort()
@@ -345,29 +347,34 @@ class BuildOptionParser(object):
         'asan': 'builds/releng_sub_%s_configs/%s_asan.py',
         'asan-tc': 'builds/releng_sub_%s_configs/%s_asan_tc.py',
         'tsan': 'builds/releng_sub_%s_configs/%s_tsan.py',
-        'b2g-debug': 'b2g/releng_sub_%s_configs/%s_debug.py',
         'cross-debug': 'builds/releng_sub_%s_configs/%s_cross_debug.py',
-        'cross-opt': 'builds/releng_sub_%s_configs/%s_cross_opt.py',
+        'cross-opt-st-an': 'builds/releng_sub_%s_configs/%s_cross_opt_st_an.py',
+        'cross-universal': 'builds/releng_sub_%s_configs/%s_cross_universal.py',
         'debug': 'builds/releng_sub_%s_configs/%s_debug.py',
         'asan-and-debug': 'builds/releng_sub_%s_configs/%s_asan_and_debug.py',
         'asan-tc-and-debug': 'builds/releng_sub_%s_configs/%s_asan_tc_and_debug.py',
         'stat-and-debug': 'builds/releng_sub_%s_configs/%s_stat_and_debug.py',
-        'mulet': 'builds/releng_sub_%s_configs/%s_mulet.py',
         'code-coverage': 'builds/releng_sub_%s_configs/%s_code_coverage.py',
-        'graphene': 'builds/releng_sub_%s_configs/%s_graphene.py',
-        'horizon': 'builds/releng_sub_%s_configs/%s_horizon.py',
         'source': 'builds/releng_sub_%s_configs/%s_source.py',
+        'stylo': 'builds/releng_sub_%s_configs/%s_stylo.py',
+        'stylo-debug': 'builds/releng_sub_%s_configs/%s_stylo_debug.py',
         'api-15-gradle-dependencies': 'builds/releng_sub_%s_configs/%s_api_15_gradle_dependencies.py',
         'api-15': 'builds/releng_sub_%s_configs/%s_api_15.py',
+        'api-15-artifact': 'builds/releng_sub_%s_configs/%s_api_15_artifact.py',
         'api-15-debug': 'builds/releng_sub_%s_configs/%s_api_15_debug.py',
+        'api-15-debug-artifact': 'builds/releng_sub_%s_configs/%s_api_15_debug_artifact.py',
         'api-15-gradle': 'builds/releng_sub_%s_configs/%s_api_15_gradle.py',
+        'api-15-gradle-artifact': 'builds/releng_sub_%s_configs/%s_api_15_gradle_artifact.py',
         'x86': 'builds/releng_sub_%s_configs/%s_x86.py',
+        'x86-artifact': 'builds/releng_sub_%s_configs/%s_x86_artifact.py',
         'api-15-partner-sample1': 'builds/releng_sub_%s_configs/%s_api_15_partner_sample1.py',
         'android-test': 'builds/releng_sub_%s_configs/%s_test.py',
         'android-checkstyle': 'builds/releng_sub_%s_configs/%s_checkstyle.py',
         'android-lint': 'builds/releng_sub_%s_configs/%s_lint.py',
+        'android-findbugs': 'builds/releng_sub_%s_configs/%s_findbugs.py',
         'valgrind' : 'builds/releng_sub_%s_configs/%s_valgrind.py',
         'artifact': 'builds/releng_sub_%s_configs/%s_artifact.py',
+        'debug-artifact': 'builds/releng_sub_%s_configs/%s_debug_artifact.py',
     }
     build_pool_cfg_file = 'builds/build_pool_specifics.py'
     branch_cfg_file = 'builds/branch_specifics.py'
@@ -591,7 +598,7 @@ def generate_build_UID():
 
 class BuildScript(BuildbotMixin, PurgeMixin, MockMixin, BalrogMixin,
                   SigningMixin, VirtualenvMixin, MercurialScript,
-                  InfluxRecordingMixin, SecretsMixin):
+                  SecretsMixin, PerfherderResourceOptionsMixin):
     def __init__(self, **kwargs):
         # objdir is referenced in _query_abs_dirs() so let's make sure we
         # have that attribute before calling BaseScript.__init__
@@ -819,7 +826,7 @@ or run without that action (ie: --no-{action})"
             return self.repo_path
         c = self.config
 
-        # unlike b2g, we actually supply the repo in mozharness so if it's in
+        # we actually supply the repo in mozharness so if it's in
         #  the config, we use that (automation does not require it in
         # buildbot props)
         if not c.get('repo_path'):
@@ -911,15 +918,15 @@ or run without that action (ie: --no-{action})"
         mach_env = {}
         if c.get('upload_env'):
             mach_env.update(c['upload_env'])
-            if 'UPLOAD_HOST' in mach_env:
+            if 'UPLOAD_HOST' in mach_env and 'stage_server' in c:
                 mach_env['UPLOAD_HOST'] = mach_env['UPLOAD_HOST'] % {
                     'stage_server': c['stage_server']
                 }
-            if 'UPLOAD_USER' in mach_env:
+            if 'UPLOAD_USER' in mach_env and 'stage_username' in c:
                 mach_env['UPLOAD_USER'] = mach_env['UPLOAD_USER'] % {
                     'stage_username': c['stage_username']
                 }
-            if 'UPLOAD_SSH_KEY' in mach_env:
+            if 'UPLOAD_SSH_KEY' in mach_env and 'stage_ssh_key' in c:
                 mach_env['UPLOAD_SSH_KEY'] = mach_env['UPLOAD_SSH_KEY'] % {
                     'stage_ssh_key': c['stage_ssh_key']
                 }
@@ -1154,8 +1161,6 @@ or run without that action (ie: --no-{action})"
          This method is used both to figure out what revision to check out and
          to figure out what revision *was* checked out.
         """
-        # this is basically a copy from b2g_build.py
-        # TODO get b2g_build.py to use this version of query_revision
         revision = None
         if 'revision' in self.buildbot_properties:
             revision = self.buildbot_properties['revision']
@@ -1206,7 +1211,7 @@ or run without that action (ie: --no-{action})"
             else:
                 self.warning(ERROR_MSGS['comments_undetermined'])
             self.set_buildbot_property('got_revision',
-                                       rev[:12],
+                                       rev,
                                        write_to_file=True)
 
     def _count_ctors(self):
@@ -1412,11 +1417,6 @@ or run without that action (ie: --no-{action})"
             task_id=self.buildbot_config['properties'].get('upload_to_task_id'),
         )
 
-        # TODO: Bug 1165980 - these should be in tree
-        routes.extend([
-            "%s.buildbot.branches.%s.%s" % (index, self.branch, self.stage_platform),
-            "%s.buildbot.revisions.%s.%s.%s" % (index, revision, self.branch, self.stage_platform),
-        ])
         task = tc.create_task(routes)
         tc.claim_task(task)
 
@@ -1819,6 +1819,9 @@ or run without that action (ie: --no-{action})"
                            self.generate_signing_manifest(abs_files))
 
     def check_test(self):
+        if self.config.get('forced_artifact_build'):
+            self.info('Skipping due to forced artifact build.')
+            return
         c = self.config
         dirs = self.query_abs_dirs()
 
@@ -1850,6 +1853,42 @@ or run without that action (ie: --no-{action})"
             self.error("'make -k check' did not run successfully. Please check "
                        "log for errors.")
 
+    def _load_build_resources(self):
+        p = self.config.get('build_resources_path') % self.query_abs_dirs()
+        if not os.path.exists(p):
+            self.info('%s does not exist; not loading build resources' % p)
+            return None
+
+        with open(p, 'rb') as fh:
+            resources = json.load(fh)
+
+        if 'duration' not in resources:
+            self.info('resource usage lacks duration; ignoring')
+            return None
+
+        data = {
+            'name': 'build times',
+            'value': resources['duration'],
+            'extraOptions': self.perfherder_resource_options(),
+            'subtests': [],
+        }
+
+        for phase in resources['phases']:
+            if 'duration' not in phase:
+                continue
+            data['subtests'].append({
+                'name': phase['name'],
+                'value': phase['duration'],
+            })
+
+        return data
+
+    def get_firefox_version(self):
+        versionFilePath = os.path.join(
+            self.query_abs_dirs()['abs_src_dir'], 'browser/config/version.txt')
+        with open(versionFilePath, 'r') as versionFile:
+            return versionFile.readline().strip()
+
     def generate_build_stats(self):
         """grab build stats following a compile.
 
@@ -1857,6 +1896,10 @@ or run without that action (ie: --no-{action})"
         and then posts to graph server the results.
         We only post to graph server for non nightly build
         """
+        if self.config.get('forced_artifact_build'):
+            self.info('Skipping due to forced artifact build.')
+            return
+
         import tarfile
         import zipfile
         c = self.config
@@ -1876,9 +1919,17 @@ or run without that action (ie: --no-{action})"
         # then assume we are using MOZ_SIMPLE_PACKAGE_NAME, which means the
         # package is named one of target.{tar.bz2,zip,dmg}.
         if not packageName:
+            firefox_version = self.get_firefox_version()
             dist_dir = os.path.join(dirs['abs_obj_dir'], 'dist')
             for ext in ['apk', 'dmg', 'tar.bz2', 'zip']:
                 name = 'target.' + ext
+                if os.path.exists(os.path.join(dist_dir, name)):
+                    packageName = name
+                    break
+                # if we are not using MOZ_SIMPLE_PACKAGE_NAME, check for the
+                # default package naming convention
+                name = 'firefox-{}.en-US.{}.{}'.format(
+                    firefox_version, c.get('platform'), ext)
                 if os.path.exists(os.path.join(dist_dir, name)):
                     packageName = name
                     break
@@ -1942,15 +1993,19 @@ or run without that action (ie: --no-{action})"
                 "alertThreshold": 0.25,
                 "subtests": size_measurements
             })
-        if (hasattr(self, "build_metrics_summary") and
-            self.build_metrics_summary):
-            perfherder_data["suites"].append(self.build_metrics_summary)
+
+        build_metrics = self._load_build_resources()
+        if build_metrics:
+            perfherder_data['suites'].append(build_metrics)
 
         if perfherder_data["suites"]:
             self.info('PERFHERDER_DATA: %s' % json.dumps(perfherder_data))
 
-
     def sendchange(self):
+        if os.environ.get('TASK_ID'):
+            self.info("We are not running this in buildbot; skipping")
+            return
+
         if self.config.get('enable_talos_sendchange'):
             self._do_sendchange('talos')
         else:
@@ -1982,7 +2037,7 @@ or run without that action (ie: --no-{action})"
         # Contains the url to a manifest describing the test packages required
         # for each unittest harness.
         # For the moment this property is only set on desktop builds. Android
-        # and b2g builds find the packages manifest based on the upload
+        # builds find the packages manifest based on the upload
         # directory of the installer.
         test_packages_url = self.query_buildbot_property('testPackagesUrl')
         pgo_build = c.get('pgo_build', False) or self._compile_against_pgo()
@@ -2044,6 +2099,9 @@ or run without that action (ie: --no-{action})"
 
     def update(self):
         """ submit balrog update steps. """
+        if self.config.get('forced_artifact_build'):
+            self.info('Skipping due to forced artifact build.')
+            return
         if not self.query_is_nightly():
             self.info("Not a nightly build, skipping balrog submission.")
             return

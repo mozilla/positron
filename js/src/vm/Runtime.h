@@ -23,9 +23,10 @@
 #include "jsscript.h"
 
 #ifdef XP_DARWIN
-# include "asmjs/WasmSignalHandlers.h"
+# include "wasm/WasmSignalHandlers.h"
 #endif
 #include "builtin/AtomicsObject.h"
+#include "builtin/Intl.h"
 #include "builtin/Promise.h"
 #include "ds/FixedSizeHash.h"
 #include "frontend/NameCollections.h"
@@ -86,6 +87,10 @@ namespace js {
 
 extern MOZ_COLD void
 ReportOutOfMemory(ExclusiveContext* cx);
+
+/* Different signature because the return type has MOZ_MUST_USE_TYPE. */
+extern MOZ_COLD mozilla::GenericErrorResult<OOM&>
+ReportOutOfMemoryResult(ExclusiveContext* cx);
 
 extern MOZ_COLD void
 ReportAllocationOverflow(ExclusiveContext* maybecx);
@@ -298,7 +303,15 @@ class PerThreadData
     // any pointers into the nursery.
     bool ionCompilingSafeForMinorGC;
 
-    // Whether this thread is currently sweeping GC things.
+    // Whether this thread is currently performing GC.  This thread could be the
+    // main thread or a helper thread while the main thread is running the
+    // collector.
+    bool performingGC;
+
+    // Whether this thread is currently sweeping GC things.  This thread could
+    // be the main thread or a helper thread while the main thread is running
+    // the mutator.  This is used to assert that destruction of GCPtr only
+    // happens when we are sweeping.
     bool gcSweeping;
 #endif
 
@@ -616,11 +629,11 @@ struct JSRuntime : public JS::shadow::Runtime,
         return &interrupt_;
     }
 
-    // Set when handling a segfault in the asm.js signal handler.
+    // Set when handling a segfault in the wasm signal handler.
     bool handlingSegFault;
 
   private:
-    // Set when we're handling an interrupt of JIT/asm.js code in
+    // Set when we're handling an interrupt of JIT/wasm code in
     // InterruptRunningJitCode.
     mozilla::Atomic<bool> handlingJitInterrupt_;
 
@@ -701,7 +714,7 @@ struct JSRuntime : public JS::shadow::Runtime,
     /* See comment for JS_AbortIfWrongThread in jsapi.h. */
     js::Thread::Id ownerThread_;
     size_t ownerThreadNative_;
-    friend bool js::CurrentThreadCanAccessRuntime(JSRuntime* rt);
+    friend bool js::CurrentThreadCanAccessRuntime(const JSRuntime* rt);
   public:
 
     size_t ownerThreadNative() const {
@@ -766,7 +779,7 @@ struct JSRuntime : public JS::shadow::Runtime,
 
     bool initSelfHosting(JSContext* cx);
     void finishSelfHosting();
-    void markSelfHostingGlobal(JSTracer* trc);
+    void traceSelfHostingGlobal(JSTracer* trc);
     bool isSelfHostingGlobal(JSObject* global) {
         return global == selfHostingGlobal_;
     }
@@ -801,6 +814,11 @@ struct JSRuntime : public JS::shadow::Runtime,
 
     /* Gets current default locale. String remains owned by context. */
     const char* getDefaultLocale();
+
+    /* Shared Intl data for this runtime. */
+    js::SharedIntlData sharedIntlData;
+
+    void traceSharedIntlData(JSTracer* trc);
 
     JSVersion defaultVersion() const { return defaultVersion_; }
     void setDefaultVersion(JSVersion v) { defaultVersion_ = v; }
@@ -1269,7 +1287,7 @@ struct JSRuntime : public JS::shadow::Runtime,
   private:
     /* The stack format for the current runtime.  Only valid on non-child
      * runtimes. */
-    js::StackFormat stackFormat_;
+    mozilla::Atomic<js::StackFormat, mozilla::ReleaseAcquire> stackFormat_;
 
   public:
     js::StackFormat stackFormat() const {
@@ -1286,6 +1304,10 @@ struct JSRuntime : public JS::shadow::Runtime,
         MOZ_ASSERT(format != js::StackFormat::Default);
         stackFormat_ = format;
     }
+
+    // For inherited heap state accessors.
+    friend class js::gc::AutoTraceSession;
+    friend class JS::AutoEnterCycleCollection;
 };
 
 namespace js {
@@ -1635,6 +1657,29 @@ class MOZ_RAII AutoEnterIonCompilation
 };
 
 namespace gc {
+
+// In debug builds, set/unset the performing GC flag for the current thread.
+struct MOZ_RAII AutoSetThreadIsPerformingGC
+{
+#ifdef DEBUG
+    AutoSetThreadIsPerformingGC()
+      : threadData_(js::TlsPerThreadData.get())
+    {
+        MOZ_ASSERT(!threadData_->performingGC);
+        threadData_->performingGC = true;
+    }
+
+    ~AutoSetThreadIsPerformingGC() {
+        MOZ_ASSERT(threadData_->performingGC);
+        threadData_->performingGC = false;
+    }
+
+  private:
+    PerThreadData* threadData_;
+#else
+    AutoSetThreadIsPerformingGC() {}
+#endif
+};
 
 // In debug builds, set/unset the GC sweeping flag for the current thread.
 struct MOZ_RAII AutoSetThreadIsSweeping

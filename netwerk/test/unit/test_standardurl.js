@@ -179,9 +179,9 @@ add_test(function test_ipv6()
 
   url = stringToURL("http://example.com");
   url.hostPort = "2001:1";
-  do_check_eq(url.host, "2001");
+  do_check_eq(url.host, "0.0.7.209");
   do_check_eq(url.port, 1);
-  do_check_eq(url.hostPort, "2001:1");
+  do_check_eq(url.hostPort, "0.0.7.209:1");
   run_next_test();
 });
 
@@ -329,16 +329,6 @@ add_test(function test_backslashReplacement()
   do_check_eq(url.spec, "http://test.com/example.org/path/to/file");
   do_check_eq(url.host, "test.com");
   do_check_eq(url.path, "/example.org/path/to/file");
-
-  run_next_test();
-});
-
-add_test(function test_authority_host()
-{
-  Assert.throws(() => { stringToURL("http:"); }, "TYPE_AUTHORITY should have host");
-  Assert.throws(() => { stringToURL("http:///"); }, "TYPE_AUTHORITY should have host");
-  Assert.throws(() => { stringToURL("http://u:p@/"); }, "User or password without host is not allowed");
-  Assert.throws(() => { stringToURL("http:@/"); }, "Must have a host");
 
   run_next_test();
 });

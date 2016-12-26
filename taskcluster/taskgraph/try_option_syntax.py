@@ -31,7 +31,6 @@ BUILD_KINDS = set([
     'valgrind',
     'static-analysis',
     'spidermonkey',
-    'b2g-device',
 ])
 
 # anything in this list is governed by -j
@@ -89,12 +88,12 @@ UNITTEST_ALIASES = {
     'mochitest-debug': alias_prefix('mochitest-debug-'),
     'mochitest-a11y': alias_contains('mochitest-a11y'),
     'mochitest-bc': alias_prefix('mochitest-browser-chrome'),
-    'mochitest-bc-e10s': alias_prefix('mochitest-browser-chrome-e10s'),
+    'mochitest-e10s-bc': alias_prefix('mochitest-e10s-browser-chrome'),
     'mochitest-browser-chrome': alias_prefix('mochitest-browser-chrome'),
-    'mochitest-browser-chrome-e10s': alias_prefix('mochitest-browser-chrome-e10s'),
+    'mochitest-e10s-browser-chrome': alias_prefix('mochitest-e10s-browser-chrome'),
     'mochitest-chrome': alias_contains('mochitest-chrome'),
     'mochitest-dt': alias_prefix('mochitest-devtools-chrome'),
-    'mochitest-dt-e10s': alias_prefix('mochitest-devtools-chrome-e10s'),
+    'mochitest-e10s-dt': alias_prefix('mochitest-e10s-devtools-chrome'),
     'mochitest-gl': alias_prefix('mochitest-webgl'),
     'mochitest-gl-e10s': alias_prefix('mochitest-webgl-e10s'),
     'mochitest-gpu': alias_prefix('mochitest-gpu'),
@@ -109,6 +108,7 @@ UNITTEST_ALIASES = {
     'reftest-no-accel': alias_matches(r'^(plain-)?reftest-no-accel.*$'),
     'reftests': alias_matches(r'^(plain-)?reftest.*$'),
     'reftests-e10s': alias_matches(r'^(plain-)?reftest-e10s.*$'),
+    'reftest-stylo': alias_matches(r'^(plain-)?reftest-stylo.*$'),
     'robocop': alias_prefix('robocop'),
     'web-platform-test': alias_prefix('web-platform-tests'),
     'web-platform-tests': alias_prefix('web-platform-tests'),
@@ -124,8 +124,9 @@ UNITTEST_ALIASES = {
 # substrings.  This is intended only for backward-compatibility.  New test
 # platforms should have their `test_platform` spelled out fully in try syntax.
 UNITTEST_PLATFORM_PRETTY_NAMES = {
-    'Ubuntu': ['linux', 'linux64'],
+    'Ubuntu': ['linux', 'linux64', 'linux64-asan'],
     'x64': ['linux64', 'linux64-asan'],
+    'Android 4.3': ['android-4.3-arm7-api-15'],
     # other commonly-used substrings for platforms not yet supported with
     # in-tree taskgraphs:
     # '10.10': [..TODO..],
@@ -133,7 +134,6 @@ UNITTEST_PLATFORM_PRETTY_NAMES = {
     # '10.6': [..TODO..],
     # '10.8': [..TODO..],
     # 'Android 2.3 API9': [..TODO..],
-    # 'Android 4.3 API15+': [..TODO..],
     # 'Windows 7':  [..TODO..],
     # 'Windows 7 VM': [..TODO..],
     # 'Windows 8':  [..TODO..],
@@ -164,6 +164,7 @@ RIDEALONG_BUILDS = {
         'sm-package',
         'sm-tsan',
         'sm-asan',
+        'sm-mozjs-sys',
         'sm-msan',
     ],
 }
@@ -496,30 +497,38 @@ class TryOptionSyntax(object):
     def task_matches(self, attributes):
         attr = attributes.get
 
+        def check_run_on_projects():
+            return set(['try', 'all']) & set(attr('run_on_projects', []))
+
         def match_test(try_spec, attr_name):
             if attr('build_type') not in self.build_types:
                 return False
             if self.platforms is not None:
                 if attr('build_platform') not in self.platforms:
                     return False
-            if try_spec is not None:
-                # TODO: optimize this search a bit
-                for test in try_spec:
-                    if attr(attr_name) == test['test']:
-                        break
-                else:
+            else:
+                if not check_run_on_projects():
                     return False
-                if 'platforms' in test and attr('test_platform') not in test['platforms']:
-                    return False
-                if 'only_chunks' in test and attr('test_chunk') not in test['only_chunks']:
-                    return False
+            if try_spec is None:
                 return True
+            # TODO: optimize this search a bit
+            for test in try_spec:
+                if attr(attr_name) == test['test']:
+                    break
+            else:
+                return False
+            if 'platforms' in test and attr('test_platform') not in test['platforms']:
+                return False
+            if 'only_chunks' in test and attr('test_chunk') not in test['only_chunks']:
+                return False
             return True
 
         if attr('kind') in ('desktop-test', 'android-test'):
-            return match_test(self.unittests, 'unittest_try_name')
+            return match_test(self.unittests, 'unittest_try_name') \
+                 or match_test(self.talos, 'talos_try_name')
         elif attr('kind') in JOB_KINDS:
-            if self.jobs is None:
+            # This will add 'job' tasks to the target set even if no try syntax was specified.
+            if not self.jobs:
                 return True
             if attr('build_platform') in self.jobs:
                 return True
@@ -528,7 +537,7 @@ class TryOptionSyntax(object):
                 return False
             elif self.platforms is None:
                 # for "-p all", look for try in the 'run_on_projects' attribute
-                return set(['try', 'all']) & set(attr('run_on_projects', []))
+                return check_run_on_projects()
             else:
                 if attr('build_platform') not in self.platforms:
                     return False
@@ -546,6 +555,7 @@ class TryOptionSyntax(object):
             "build_types: " + ", ".join(self.build_types),
             "platforms: " + none_for_all(self.platforms),
             "unittests: " + none_for_all(self.unittests),
+            "talos: " + none_for_all(self.talos),
             "jobs: " + none_for_all(self.jobs),
             "trigger_tests: " + str(self.trigger_tests),
             "interactive: " + str(self.interactive),

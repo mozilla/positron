@@ -21,14 +21,14 @@
 #include "jsprf.h"
 #include "jswrapper.h"
 
-#include "asmjs/AsmJS.h"
-#include "asmjs/WasmBinaryToExperimentalText.h"
-#include "asmjs/WasmBinaryToText.h"
-#include "asmjs/WasmJS.h"
-#include "asmjs/WasmSignalHandlers.h"
-#include "asmjs/WasmTextToBinary.h"
 #include "builtin/Promise.h"
 #include "builtin/SelfHostingDefines.h"
+#ifdef DEBUG
+#include "frontend/TokenStream.h"
+#include "irregexp/RegExpAST.h"
+#include "irregexp/RegExpEngine.h"
+#include "irregexp/RegExpParser.h"
+#endif
 #include "jit/InlinableNatives.h"
 #include "jit/JitFrameIterator.h"
 #include "js/Debug.h"
@@ -46,6 +46,13 @@
 #include "vm/Stack.h"
 #include "vm/StringBuffer.h"
 #include "vm/TraceLogging.h"
+#include "wasm/AsmJS.h"
+#include "wasm/WasmBinaryToExperimentalText.h"
+#include "wasm/WasmBinaryToText.h"
+#include "wasm/WasmJS.h"
+#include "wasm/WasmModule.h"
+#include "wasm/WasmSignalHandlers.h"
+#include "wasm/WasmTextToBinary.h"
 
 #include "jscntxtinlines.h"
 #include "jsobjinlines.h"
@@ -117,12 +124,12 @@ GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp)
     if (!JS_SetProperty(cx, info, "debug", value))
         return false;
 
-#ifdef RELEASE_BUILD
+#ifdef RELEASE_OR_BETA
     value = BooleanValue(true);
 #else
     value = BooleanValue(false);
 #endif
-    if (!JS_SetProperty(cx, info, "release", value))
+    if (!JS_SetProperty(cx, info, "release_or_beta", value))
         return false;
 
 #ifdef JS_HAS_CTYPES
@@ -133,7 +140,7 @@ GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp)
     if (!JS_SetProperty(cx, info, "has-ctypes", value))
         return false;
 
-#ifdef JS_CPU_X86
+#if defined(_M_IX86) || defined(__i386__)
     value = BooleanValue(true);
 #else
     value = BooleanValue(false);
@@ -141,7 +148,7 @@ GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp)
     if (!JS_SetProperty(cx, info, "x86", value))
         return false;
 
-#ifdef JS_CPU_X64
+#if defined(_M_X64) || defined(__x86_64__)
     value = BooleanValue(true);
 #else
     value = BooleanValue(false);
@@ -510,7 +517,7 @@ static bool
 WasmIsSupported(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    args.rval().setBoolean(wasm::HasCompilerSupport(cx));
+    args.rval().setBoolean(wasm::HasSupport(cx));
     return true;
 }
 
@@ -542,8 +549,8 @@ WasmTextToBinary(JSContext* cx, unsigned argc, Value* vp)
     wasm::Bytes bytes;
     UniqueChars error;
     if (!wasm::TextToBinary(twoByteChars.twoByteChars(), &bytes, &error)) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_WASM_TEXT_FAIL,
-                             error.get() ? error.get() : "out of memory");
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_WASM_TEXT_FAIL,
+                                  error.get() ? error.get() : "out of memory");
         return false;
     }
 
@@ -564,7 +571,7 @@ WasmBinaryToText(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     if (!args.get(0).isObject() || !args.get(0).toObject().is<TypedArrayObject>()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_WASM_BAD_BUF_ARG);
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_WASM_BAD_BUF_ARG);
         return false;
     }
 
@@ -574,7 +581,7 @@ WasmBinaryToText(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     if (code->isSharedMemory()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_WASM_BAD_BUF_ARG);
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_WASM_BAD_BUF_ARG);
         return false;
     }
 
@@ -617,6 +624,32 @@ WasmBinaryToText(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     args.rval().setString(result);
+    return true;
+}
+
+static bool
+WasmExtractCode(JSContext* cx, unsigned argc, Value* vp)
+{
+    MOZ_ASSERT(cx->options().wasm());
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    if (!args.get(0).isObject()) {
+        JS_ReportErrorASCII(cx, "argument is not an object");
+        return false;
+    }
+
+    JSObject* unwrapped = CheckedUnwrap(&args.get(0).toObject());
+    if (!unwrapped || !unwrapped->is<WasmModuleObject>()) {
+        JS_ReportErrorASCII(cx, "argument is not a WebAssembly.Module");
+        return false;
+    }
+
+    Rooted<WasmModuleObject*> module(cx, &unwrapped->as<WasmModuleObject>());
+    RootedValue result(cx);
+    if (!module->module().extractCode(cx, &result))
+        return false;
+
+    args.rval().set(result);
     return true;
 }
 
@@ -967,9 +1000,9 @@ NondeterministicGetWeakMapKeys(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
     if (!args[0].isObject()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_EXPECTED_TYPE,
-                             "nondeterministicGetWeakMapKeys", "WeakMap",
-                             InformalValueTypeName(args[0]));
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_NOT_EXPECTED_TYPE,
+                                  "nondeterministicGetWeakMapKeys", "WeakMap",
+                                  InformalValueTypeName(args[0]));
         return false;
     }
     RootedObject arr(cx);
@@ -977,9 +1010,9 @@ NondeterministicGetWeakMapKeys(JSContext* cx, unsigned argc, Value* vp)
     if (!JS_NondeterministicGetWeakMapKeys(cx, mapObj, &arr))
         return false;
     if (!arr) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_EXPECTED_TYPE,
-                             "nondeterministicGetWeakMapKeys", "WeakMap",
-                             args[0].toObject().getClass()->name);
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_NOT_EXPECTED_TYPE,
+                                  "nondeterministicGetWeakMapKeys", "WeakMap",
+                                  args[0].toObject().getClass()->name);
         return false;
     }
     args.rval().setObject(*arr);
@@ -1405,7 +1438,6 @@ OOMTest(JSContext* cx, unsigned argc, Value* vp)
 }
 #endif
 
-#ifdef SPIDERMONKEY_PROMISE
 static bool
 SettlePromiseNow(JSContext* cx, unsigned argc, Value* vp)
 {
@@ -1418,51 +1450,101 @@ SettlePromiseNow(JSContext* cx, unsigned argc, Value* vp)
     }
 
     RootedNativeObject promise(cx, &args[0].toObject().as<NativeObject>());
-    int32_t flags = promise->getFixedSlot(PROMISE_FLAGS_SLOT).toInt32();
-    promise->setFixedSlot(PROMISE_FLAGS_SLOT,
+    int32_t flags = promise->getFixedSlot(PromiseSlot_Flags).toInt32();
+    promise->setFixedSlot(PromiseSlot_Flags,
                           Int32Value(flags | PROMISE_FLAG_RESOLVED | PROMISE_FLAG_FULFILLED));
-    promise->setFixedSlot(PROMISE_REACTIONS_OR_RESULT_SLOT, UndefinedValue());
+    promise->setFixedSlot(PromiseSlot_ReactionsOrResult, UndefinedValue());
 
     JS::dbg::onPromiseSettled(cx, promise);
     return true;
 }
 
-#else
-
-static const js::Class FakePromiseClass = {
-    "Promise", JSCLASS_IS_ANONYMOUS
-};
-
 static bool
-MakeFakePromise(JSContext* cx, unsigned argc, Value* vp)
+GetWaitForAllPromise(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-
-    RootedObject obj(cx, NewObjectWithGivenProto(cx, &FakePromiseClass, nullptr));
-    if (!obj)
+    if (!args.requireAtLeast(cx, "getWaitForAllPromise", 1))
+        return false;
+    if (!args[0].isObject() || !IsPackedArray(&args[0].toObject())) {
+        JS_ReportErrorASCII(cx, "first argument must be a dense Array of Promise objects");
+        return false;
+    }
+    RootedNativeObject list(cx, &args[0].toObject().as<NativeObject>());
+    AutoObjectVector promises(cx);
+    uint32_t count = list->getDenseInitializedLength();
+    if (!promises.resize(count))
         return false;
 
-    JS::dbg::onNewPromise(cx, obj);
-    args.rval().setObject(*obj);
+    for (uint32_t i = 0; i < count; i++) {
+        RootedValue elem(cx, list->getDenseElement(i));
+        if (!elem.isObject() || !elem.toObject().is<PromiseObject>()) {
+            JS_ReportErrorASCII(cx, "Each entry in the passed-in Array must be a Promise");
+            return false;
+        }
+        promises[i].set(&elem.toObject());
+    }
+
+    RootedObject resultPromise(cx, JS::GetWaitForAllPromise(cx, promises));
+    if (!resultPromise)
+        return false;
+
+    args.rval().set(ObjectValue(*resultPromise));
     return true;
 }
 
 static bool
-SettleFakePromise(JSContext* cx, unsigned argc, Value* vp)
+ResolvePromise(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    if (!args.requireAtLeast(cx, "settleFakePromise", 1))
+    if (!args.requireAtLeast(cx, "resolvePromise", 2))
         return false;
-    if (!args[0].isObject() || args[0].toObject().getClass() != &FakePromiseClass) {
-        JS_ReportErrorASCII(cx, "first argument must be a (fake) Promise object");
+    if (!args[0].isObject() || !UncheckedUnwrap(&args[0].toObject())->is<PromiseObject>()) {
+        JS_ReportErrorASCII(cx, "first argument must be a maybe-wrapped Promise object");
         return false;
     }
 
     RootedObject promise(cx, &args[0].toObject());
-    JS::dbg::onPromiseSettled(cx, promise);
-    return true;
+    RootedValue resolution(cx, args[1]);
+    mozilla::Maybe<AutoCompartment> ac;
+    if (IsWrapper(promise)) {
+        promise = UncheckedUnwrap(promise);
+        ac.emplace(cx, promise);
+        if (!cx->compartment()->wrap(cx, &resolution))
+            return false;
+    }
+
+    bool result = JS::ResolvePromise(cx, promise, resolution);
+    if (result)
+        args.rval().setUndefined();
+    return result;
 }
-#endif // SPIDERMONKEY_PROMISE
+
+static bool
+RejectPromise(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (!args.requireAtLeast(cx, "rejectPromise", 2))
+        return false;
+    if (!args[0].isObject() || !UncheckedUnwrap(&args[0].toObject())->is<PromiseObject>()) {
+        JS_ReportErrorASCII(cx, "first argument must be a maybe-wrapped Promise object");
+        return false;
+    }
+
+    RootedObject promise(cx, &args[0].toObject());
+    RootedValue reason(cx, args[1]);
+    mozilla::Maybe<AutoCompartment> ac;
+    if (IsWrapper(promise)) {
+        promise = UncheckedUnwrap(promise);
+        ac.emplace(cx, promise);
+        if (!cx->compartment()->wrap(cx, &reason))
+            return false;
+    }
+
+    bool result = JS::RejectPromise(cx, promise, reason);
+    if (result)
+        args.rval().setUndefined();
+    return result;
+}
 
 static unsigned finalizeCount = 0;
 
@@ -1547,14 +1629,17 @@ DumpHeap(JSContext* cx, unsigned argc, Value* vp)
         Value v = args[i];
         if (v.isString()) {
             if (!fuzzingSafe) {
-                JSString* str = v.toString();
+                RootedString str(cx, v.toString());
                 JSAutoByteString fileNameBytes;
                 if (!fileNameBytes.encodeLatin1(cx, str))
                     return false;
                 const char* fileName = fileNameBytes.ptr();
                 dumpFile = fopen(fileName, "w");
                 if (!dumpFile) {
-                    JS_ReportError(cx, "can't open %s", fileName);
+                    fileNameBytes.clear();
+                    if (!fileNameBytes.encodeUtf8(cx, str))
+                        return false;
+                    JS_ReportErrorUTF8(cx, "can't open %s", fileNameBytes.ptr());
                     return false;
                 }
             }
@@ -1615,55 +1700,83 @@ ReadSPSProfilingStack(JSContext* cx, unsigned argc, Value* vp)
       return true;
     }
 
-    RootedObject inlineStack(cx);
-    RootedObject inlineFrameInfo(cx);
-    RootedString frameKind(cx);
-    RootedString frameLabel(cx);
-    RootedId idx(cx);
+    struct InlineFrameInfo
+    {
+        InlineFrameInfo(const char* kind, char* label)
+          : kind(kind), label(label) {}
+        const char* kind;
+        UniqueChars label;
+    };
+
+    Vector<Vector<InlineFrameInfo, 0, TempAllocPolicy>, 0, TempAllocPolicy> frameInfo(cx);
 
     JS::ProfilingFrameIterator::RegisterState state;
-    uint32_t physicalFrameNo = 0;
-    const unsigned propAttrs = JSPROP_ENUMERATE;
-    for (JS::ProfilingFrameIterator i(cx, state); !i.done(); ++i, ++physicalFrameNo) {
+    for (JS::ProfilingFrameIterator i(cx, state); !i.done(); ++i) {
         MOZ_ASSERT(i.stackAddress() != nullptr);
 
-        // Array holding all inline frames in a single physical jit stack frame.
-        inlineStack = NewDenseEmptyArray(cx);
-        if (!inlineStack)
+        if (!frameInfo.emplaceBack(cx))
             return false;
 
-        JS::ProfilingFrameIterator::Frame frames[16];
-        uint32_t nframes = i.extractStack(frames, 0, 16);
-        for (uint32_t inlineFrameNo = 0; inlineFrameNo < nframes; inlineFrameNo++) {
-
-            // Object holding frame info.
-            inlineFrameInfo = NewBuiltinClassInstance<PlainObject>(cx);
-            if (!inlineFrameInfo)
-                return false;
-
+        const size_t MaxInlineFrames = 16;
+        JS::ProfilingFrameIterator::Frame frames[MaxInlineFrames];
+        uint32_t nframes = i.extractStack(frames, 0, MaxInlineFrames);
+        MOZ_ASSERT(nframes <= MaxInlineFrames);
+        for (uint32_t i = 0; i < nframes; i++) {
             const char* frameKindStr = nullptr;
-            switch (frames[inlineFrameNo].kind) {
+            switch (frames[i].kind) {
               case JS::ProfilingFrameIterator::Frame_Baseline:
                 frameKindStr = "baseline";
                 break;
               case JS::ProfilingFrameIterator::Frame_Ion:
                 frameKindStr = "ion";
                 break;
-              case JS::ProfilingFrameIterator::Frame_AsmJS:
-                frameKindStr = "asmjs";
+              case JS::ProfilingFrameIterator::Frame_Wasm:
+                frameKindStr = "wasm";
                 break;
               default:
                 frameKindStr = "unknown";
             }
-            frameKind = NewStringCopyZ<CanGC>(cx, frameKindStr);
+
+            char* label = JS_strdup(cx, frames[i].label);
+            if (!label)
+                return false;
+
+            if (!frameInfo.back().emplaceBack(frameKindStr, label))
+                return false;
+        }
+    }
+
+    RootedObject inlineFrameInfo(cx);
+    RootedString frameKind(cx);
+    RootedString frameLabel(cx);
+    RootedId idx(cx);
+
+    const unsigned propAttrs = JSPROP_ENUMERATE;
+
+    uint32_t physicalFrameNo = 0;
+    for (auto& frame : frameInfo) {
+        // Array holding all inline frames in a single physical jit stack frame.
+        RootedObject inlineStack(cx, NewDenseEmptyArray(cx));
+        if (!inlineStack)
+            return false;
+
+        uint32_t inlineFrameNo = 0;
+        for (auto& inlineFrame : frame) {
+            // Object holding frame info.
+            RootedObject inlineFrameInfo(cx, NewBuiltinClassInstance<PlainObject>(cx));
+            if (!inlineFrameInfo)
+                return false;
+
+            frameKind = NewStringCopyZ<CanGC>(cx, inlineFrame.kind);
             if (!frameKind)
                 return false;
 
             if (!JS_DefineProperty(cx, inlineFrameInfo, "kind", frameKind, propAttrs))
                 return false;
 
-            auto chars = frames[inlineFrameNo].label.release();
-            frameLabel = NewString<CanGC>(cx, reinterpret_cast<Latin1Char*>(chars), strlen(chars));
+            size_t length = strlen(inlineFrame.label.get());
+            auto label = reinterpret_cast<Latin1Char*>(inlineFrame.label.release());
+            frameLabel = NewString<CanGC>(cx, label, length);
             if (!frameLabel)
                 return false;
 
@@ -1673,12 +1786,16 @@ ReadSPSProfilingStack(JSContext* cx, unsigned argc, Value* vp)
             idx = INT_TO_JSID(inlineFrameNo);
             if (!JS_DefinePropertyById(cx, inlineStack, idx, inlineFrameInfo, 0))
                 return false;
+
+            ++inlineFrameNo;
         }
 
         // Push inline array into main array.
         idx = INT_TO_JSID(physicalFrameNo);
         if (!JS_DefinePropertyById(cx, stack, idx, inlineStack, 0))
             return false;
+
+        ++physicalFrameNo;
     }
 
     args.rval().setObject(*stack);
@@ -1993,20 +2110,22 @@ GetJitCompilerOptions(JSContext* cx, unsigned argc, Value* vp)
     if (!info)
         return false;
 
+    uint32_t intValue = 0;
     RootedValue value(cx);
 
 #define JIT_COMPILER_MATCH(key, string)                                \
     opt = JSJITCOMPILER_ ## key;                                       \
-    value.setInt32(JS_GetGlobalJitCompilerOption(cx, opt));            \
-    if (!JS_SetProperty(cx, info, string, value))                      \
-        return false;
+    if (JS_GetGlobalJitCompilerOption(cx, opt, &intValue)) {           \
+        value.setInt32(intValue);                                      \
+        if (!JS_SetProperty(cx, info, string, value))                  \
+            return false;                                              \
+    }
 
     JSJitCompilerOption opt = JSJITCOMPILER_NOT_AN_OPTION;
     JIT_COMPILER_OPTIONS(JIT_COMPILER_MATCH);
 #undef JIT_COMPILER_MATCH
 
     args.rval().setObject(*info);
-
     return true;
 }
 
@@ -2192,7 +2311,37 @@ Serialize(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     JSAutoStructuredCloneBuffer clonebuf(JS::StructuredCloneScope::SameProcessSameThread, nullptr, nullptr);
-    if (!clonebuf.write(cx, args.get(0), args.get(1)))
+    JS::CloneDataPolicy policy;
+
+    if (!args.get(2).isUndefined()) {
+        RootedObject opts(cx, ToObject(cx, args.get(2)));
+        if (!opts)
+            return false;
+
+        RootedValue v(cx);
+        if (!JS_GetProperty(cx, opts, "SharedArrayBuffer", &v))
+            return false;
+
+        if (!v.isUndefined()) {
+            JSString* str = JS::ToString(cx, v);
+            if (!str)
+                return false;
+            JSAutoByteString poli(cx, str);
+            if (!poli)
+                return false;
+
+            if (strcmp(poli.ptr(), "allow") == 0) {
+                // default
+            } else if (strcmp(poli.ptr(), "deny") == 0) {
+                policy.denySharedArrayBuffer();
+            } else {
+                JS_ReportErrorASCII(cx, "Invalid policy value for 'SharedArrayBuffer'");
+                return false;
+            }
+        }
+    }
+
+    if (!clonebuf.write(cx, args.get(0), args.get(1), policy))
         return false;
 
     RootedObject obj(cx, CloneBufferObject::Create(cx, &clonebuf));
@@ -2395,7 +2544,7 @@ SharedAddress(JSContext* cx, unsigned argc, Value* vp)
 #else
     RootedObject obj(cx, CheckedUnwrap(&args[0].toObject()));
     if (!obj) {
-        JS_ReportErrorASCII(cx, "Permission denied to access object");
+        ReportAccessDenied(cx);
         return false;
     }
     if (!obj->is<SharedArrayBufferObject>()) {
@@ -2621,8 +2770,8 @@ FindPath(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     if (argc < 2) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, NULL, JSMSG_MORE_ARGS_NEEDED,
-                             "findPath", "1", "");
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, NULL, JSMSG_MORE_ARGS_NEEDED,
+                                  "findPath", "1", "");
         return false;
     }
 
@@ -2921,7 +3070,7 @@ EvalReturningScope(JSContext* cx, unsigned argc, Value* vp)
 
     mozilla::Range<const char16_t> chars = strChars.twoByteRange();
     size_t srclen = chars.length();
-    const char16_t* src = chars.start().get();
+    const char16_t* src = chars.begin().get();
 
     JS::AutoFilename filename;
     unsigned lineno;
@@ -3007,7 +3156,7 @@ ShellCloneAndExecuteScript(JSContext* cx, unsigned argc, Value* vp)
 
     mozilla::Range<const char16_t> chars = strChars.twoByteRange();
     size_t srclen = chars.length();
-    const char16_t* src = chars.start().get();
+    const char16_t* src = chars.begin().get();
 
     JS::AutoFilename filename;
     unsigned lineno;
@@ -3087,13 +3236,13 @@ ByteSizeOfScript(JSContext*cx, unsigned argc, Value* vp)
         return false;
     }
 
-    JSFunction* fun = &args[0].toObject().as<JSFunction>();
+    RootedFunction fun(cx, &args[0].toObject().as<JSFunction>());
     if (fun->isNative()) {
         JS_ReportErrorASCII(cx, "Argument must be a scripted function");
         return false;
     }
 
-    RootedScript script(cx, fun->getOrCreateScript(cx));
+    RootedScript script(cx, JSFunction::getOrCreateScript(cx, fun));
     if (!script)
         return false;
 
@@ -3181,9 +3330,9 @@ GetConstructorName(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     if (!args[0].isObject()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_EXPECTED_TYPE,
-                             "getConstructorName", "Object",
-                             InformalValueTypeName(args[0]));
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_NOT_EXPECTED_TYPE,
+                                  "getConstructorName", "Object",
+                                  InformalValueTypeName(args[0]));
         return false;
     }
 
@@ -3392,12 +3541,12 @@ GetLcovInfo(JSContext* cx, unsigned argc, Value* vp)
     if (args.hasDefined(0)) {
         global = ToObject(cx, args[0]);
         if (!global) {
-            JS_ReportErrorASCII(cx, "First argument should be an object");
+            JS_ReportErrorASCII(cx, "Permission denied to access global");
             return false;
         }
         global = CheckedUnwrap(global);
         if (!global) {
-            JS_ReportErrorASCII(cx, "Permission denied to access global");
+            ReportAccessDenied(cx);
             return false;
         }
         if (!global->is<GlobalObject>()) {
@@ -3534,6 +3683,390 @@ GetModuleEnvironmentValue(JSContext* cx, unsigned argc, Value* vp)
     return GetProperty(cx, env, env, id, args.rval());
 }
 
+#ifdef DEBUG
+static const char*
+AssertionTypeToString(irregexp::RegExpAssertion::AssertionType type)
+{
+    switch (type) {
+      case irregexp::RegExpAssertion::START_OF_LINE:
+        return "START_OF_LINE";
+      case irregexp::RegExpAssertion::START_OF_INPUT:
+        return "START_OF_INPUT";
+      case irregexp::RegExpAssertion::END_OF_LINE:
+        return "END_OF_LINE";
+      case irregexp::RegExpAssertion::END_OF_INPUT:
+        return "END_OF_INPUT";
+      case irregexp::RegExpAssertion::BOUNDARY:
+        return "BOUNDARY";
+      case irregexp::RegExpAssertion::NON_BOUNDARY:
+        return "NON_BOUNDARY";
+      case irregexp::RegExpAssertion::NOT_AFTER_LEAD_SURROGATE:
+        return "NOT_AFTER_LEAD_SURROGATE";
+      case irregexp::RegExpAssertion::NOT_IN_SURROGATE_PAIR:
+        return "NOT_IN_SURROGATE_PAIR";
+    }
+    MOZ_CRASH("unexpected AssertionType");
+}
+
+static JSObject*
+ConvertRegExpTreeToObject(JSContext* cx, irregexp::RegExpTree* tree)
+{
+    RootedObject obj(cx, JS_NewPlainObject(cx));
+    if (!obj)
+        return nullptr;
+
+    auto IntProp = [](JSContext* cx, HandleObject obj,
+                      const char* name, int32_t value) {
+        RootedValue val(cx, Int32Value(value));
+        return JS_SetProperty(cx, obj, name, val);
+    };
+
+    auto BooleanProp = [](JSContext* cx, HandleObject obj,
+                          const char* name, bool value) {
+        RootedValue val(cx, BooleanValue(value));
+        return JS_SetProperty(cx, obj, name, val);
+    };
+
+    auto StringProp = [](JSContext* cx, HandleObject obj,
+                         const char* name, const char* value) {
+        RootedString valueStr(cx, JS_NewStringCopyZ(cx, value));
+        if (!valueStr)
+            return false;
+
+        RootedValue val(cx, StringValue(valueStr));
+        return JS_SetProperty(cx, obj, name, val);
+    };
+
+    auto ObjectProp = [](JSContext* cx, HandleObject obj,
+                         const char* name, HandleObject value) {
+        RootedValue val(cx, ObjectValue(*value));
+        return JS_SetProperty(cx, obj, name, val);
+    };
+
+    auto CharVectorProp = [](JSContext* cx, HandleObject obj,
+                             const char* name, const irregexp::CharacterVector& data) {
+        RootedString valueStr(cx, JS_NewUCStringCopyN(cx, data.begin(), data.length()));
+        if (!valueStr)
+            return false;
+
+        RootedValue val(cx, StringValue(valueStr));
+        return JS_SetProperty(cx, obj, name, val);
+    };
+
+    auto TreeProp = [&ObjectProp](JSContext* cx, HandleObject obj,
+                                  const char* name, irregexp::RegExpTree* tree) {
+        RootedObject treeObj(cx, ConvertRegExpTreeToObject(cx, tree));
+        if (!treeObj)
+            return false;
+        return ObjectProp(cx, obj, name, treeObj);
+    };
+
+    auto TreeVectorProp = [&ObjectProp](JSContext* cx, HandleObject obj,
+                                        const char* name,
+                                        const irregexp::RegExpTreeVector& nodes) {
+        size_t len = nodes.length();
+        RootedObject array(cx, JS_NewArrayObject(cx, len));
+        if (!array)
+            return false;
+
+        for (size_t i = 0; i < len; i++) {
+            RootedObject child(cx, ConvertRegExpTreeToObject(cx, nodes[i]));
+            if (!child)
+                return false;
+
+            RootedValue childVal(cx, ObjectValue(*child));
+            if (!JS_SetElement(cx, array, i, childVal))
+                return false;
+        }
+        return ObjectProp(cx, obj, name, array);
+    };
+
+    auto CharRangesProp = [&ObjectProp](JSContext* cx, HandleObject obj,
+                                        const char* name,
+                                        const irregexp::CharacterRangeVector& ranges) {
+        size_t len = ranges.length();
+        RootedObject array(cx, JS_NewArrayObject(cx, len));
+        if (!array)
+            return false;
+
+        for (size_t i = 0; i < len; i++) {
+            const irregexp::CharacterRange& range = ranges[i];
+            RootedObject rangeObj(cx, JS_NewPlainObject(cx));
+            if (!rangeObj)
+                return false;
+
+            auto CharProp = [](JSContext* cx, HandleObject obj,
+                               const char* name, char16_t c) {
+                RootedString valueStr(cx, JS_NewUCStringCopyN(cx, &c, 1));
+                if (!valueStr)
+                    return false;
+                RootedValue val(cx, StringValue(valueStr));
+                return JS_SetProperty(cx, obj, name, val);
+            };
+
+            if (!CharProp(cx, rangeObj, "from", range.from()))
+                return false;
+            if (!CharProp(cx, rangeObj, "to", range.to()))
+                return false;
+
+            RootedValue rangeVal(cx, ObjectValue(*rangeObj));
+            if (!JS_SetElement(cx, array, i, rangeVal))
+                return false;
+        }
+        return ObjectProp(cx, obj, name, array);
+    };
+
+    auto ElemProp = [&ObjectProp](JSContext* cx, HandleObject obj,
+                                  const char* name, const irregexp::TextElementVector& elements) {
+        size_t len = elements.length();
+        RootedObject array(cx, JS_NewArrayObject(cx, len));
+        if (!array)
+            return false;
+
+        for (size_t i = 0; i < len; i++) {
+            const irregexp::TextElement& element = elements[i];
+            RootedObject elemTree(cx, ConvertRegExpTreeToObject(cx, element.tree()));
+            if (!elemTree)
+                return false;
+
+            RootedValue elemTreeVal(cx, ObjectValue(*elemTree));
+            if (!JS_SetElement(cx, array, i, elemTreeVal))
+                return false;
+        }
+        return ObjectProp(cx, obj, name, array);
+    };
+
+    if (tree->IsDisjunction()) {
+        if (!StringProp(cx, obj, "type", "Disjunction"))
+            return nullptr;
+        irregexp::RegExpDisjunction* t = tree->AsDisjunction();
+        if (!TreeVectorProp(cx, obj, "alternatives", t->alternatives()))
+            return nullptr;
+        return obj;
+    }
+    if (tree->IsAlternative()) {
+        if (!StringProp(cx, obj, "type", "Alternative"))
+            return nullptr;
+        irregexp::RegExpAlternative* t = tree->AsAlternative();
+        if (!TreeVectorProp(cx, obj, "nodes", t->nodes()))
+            return nullptr;
+        return obj;
+    }
+    if (tree->IsAssertion()) {
+        if (!StringProp(cx, obj, "type", "Assertion"))
+            return nullptr;
+        irregexp::RegExpAssertion* t = tree->AsAssertion();
+        if (!StringProp(cx, obj, "assertion_type", AssertionTypeToString(t->assertion_type())))
+            return nullptr;
+        return obj;
+    }
+    if (tree->IsCharacterClass()) {
+        if (!StringProp(cx, obj, "type", "CharacterClass"))
+            return nullptr;
+        irregexp::RegExpCharacterClass* t = tree->AsCharacterClass();
+        if (!BooleanProp(cx, obj, "is_negated", t->is_negated()))
+            return nullptr;
+        LifoAlloc* alloc = &cx->tempLifoAlloc();
+        if (!CharRangesProp(cx, obj, "ranges", t->ranges(alloc)))
+            return nullptr;
+        return obj;
+    }
+    if (tree->IsAtom()) {
+        if (!StringProp(cx, obj, "type", "Atom"))
+            return nullptr;
+        irregexp::RegExpAtom* t = tree->AsAtom();
+        if (!CharVectorProp(cx, obj, "data", t->data()))
+            return nullptr;
+        return obj;
+    }
+    if (tree->IsText()) {
+        if (!StringProp(cx, obj, "type", "Text"))
+            return nullptr;
+        irregexp::RegExpText* t = tree->AsText();
+        if (!ElemProp(cx, obj, "elements", t->elements()))
+            return nullptr;
+        return obj;
+    }
+    if (tree->IsQuantifier()) {
+        if (!StringProp(cx, obj, "type", "Quantifier"))
+            return nullptr;
+        irregexp::RegExpQuantifier* t = tree->AsQuantifier();
+        if (!IntProp(cx, obj, "min", t->min()))
+            return nullptr;
+        if (!IntProp(cx, obj, "max", t->max()))
+            return nullptr;
+        if (!StringProp(cx, obj, "quantifier_type",
+                        t->is_possessive() ? "POSSESSIVE"
+                        : t->is_non_greedy() ? "NON_GREEDY"
+                        : "GREEDY"))
+            return nullptr;
+        if (!TreeProp(cx, obj, "body", t->body()))
+            return nullptr;
+        return obj;
+    }
+    if (tree->IsCapture()) {
+        if (!StringProp(cx, obj, "type", "Capture"))
+            return nullptr;
+        irregexp::RegExpCapture* t = tree->AsCapture();
+        if (!IntProp(cx, obj, "index", t->index()))
+            return nullptr;
+        if (!TreeProp(cx, obj, "body", t->body()))
+            return nullptr;
+        return obj;
+    }
+    if (tree->IsLookahead()) {
+        if (!StringProp(cx, obj, "type", "Lookahead"))
+            return nullptr;
+        irregexp::RegExpLookahead* t = tree->AsLookahead();
+        if (!BooleanProp(cx, obj, "is_positive", t->is_positive()))
+            return nullptr;
+        if (!TreeProp(cx, obj, "body", t->body()))
+            return nullptr;
+        return obj;
+    }
+    if (tree->IsBackReference()) {
+        if (!StringProp(cx, obj, "type", "BackReference"))
+            return nullptr;
+        irregexp::RegExpBackReference* t = tree->AsBackReference();
+        if (!IntProp(cx, obj, "index", t->index()))
+            return nullptr;
+        return obj;
+    }
+    if (tree->IsEmpty()) {
+        if (!StringProp(cx, obj, "type", "Empty"))
+            return nullptr;
+        return obj;
+    }
+
+    MOZ_CRASH("unexpected RegExpTree type");
+}
+
+static bool
+ParseRegExp(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    RootedObject callee(cx, &args.callee());
+
+    if (args.length() == 0) {
+        ReportUsageErrorASCII(cx, callee, "Wrong number of arguments");
+        return false;
+    }
+
+    if (!args[0].isString()) {
+        ReportUsageErrorASCII(cx, callee, "First argument must be a String");
+        return false;
+    }
+
+    RegExpFlag flags = RegExpFlag(0);
+    if (!args.get(1).isUndefined()) {
+        if (!args.get(1).isString()) {
+            ReportUsageErrorASCII(cx, callee, "Second argument, if present, must be a String");
+            return false;
+        }
+        RootedString flagStr(cx, args[1].toString());
+        if (!ParseRegExpFlags(cx, flagStr, &flags))
+            return false;
+    }
+
+    bool match_only = false;
+    if (!args.get(2).isUndefined()) {
+        if (!args.get(2).isBoolean()) {
+            ReportUsageErrorASCII(cx, callee, "Third argument, if present, must be a Boolean");
+            return false;
+        }
+        match_only = args[2].toBoolean();
+    }
+
+    RootedAtom pattern(cx, AtomizeString(cx, args[0].toString()));
+    if (!pattern)
+        return false;
+
+    CompileOptions options(cx);
+    frontend::TokenStream dummyTokenStream(cx, options, nullptr, 0, nullptr);
+
+    irregexp::RegExpCompileData data;
+    if (!irregexp::ParsePattern(dummyTokenStream, cx->tempLifoAlloc(), pattern,
+                                flags & MultilineFlag, match_only,
+                                flags & UnicodeFlag, flags & IgnoreCaseFlag,
+                                flags & GlobalFlag, flags & StickyFlag,
+                                &data))
+    {
+        return false;
+    }
+
+    RootedObject obj(cx, ConvertRegExpTreeToObject(cx, data.tree));
+    if (!obj)
+        return false;
+
+    args.rval().setObject(*obj);
+    return true;
+}
+
+static bool
+DisRegExp(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    RootedObject callee(cx, &args.callee());
+
+    if (args.length() == 0) {
+        ReportUsageErrorASCII(cx, callee, "Wrong number of arguments");
+        return false;
+    }
+
+    if (!args[0].isObject() || !args[0].toObject().is<RegExpObject>()) {
+        ReportUsageErrorASCII(cx, callee, "First argument must be a RegExp");
+        return false;
+    }
+
+    Rooted<RegExpObject*> reobj(cx, &args[0].toObject().as<RegExpObject>());
+
+    bool match_only = false;
+    if (!args.get(1).isUndefined()) {
+        if (!args.get(1).isBoolean()) {
+            ReportUsageErrorASCII(cx, callee, "Second argument, if present, must be a Boolean");
+            return false;
+        }
+        match_only = args[1].toBoolean();
+    }
+
+    RootedLinearString input(cx, cx->runtime()->emptyString);
+    if (!args.get(2).isUndefined()) {
+        if (!args.get(2).isString()) {
+            ReportUsageErrorASCII(cx, callee, "Third argument, if present, must be a String");
+            return false;
+        }
+        RootedString inputStr(cx, args[2].toString());
+        input = inputStr->ensureLinear(cx);
+        if (!input)
+            return false;
+    }
+
+    if (!reobj->dumpBytecode(cx, match_only, input))
+        return false;
+
+    args.rval().setUndefined();
+    return true;
+}
+#endif // DEBUG
+
+static bool
+EnableForEach(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    JS::ContextOptionsRef(cx).setForEachStatement(true);
+    args.rval().setUndefined();
+    return true;
+}
+
+static bool
+DisableForEach(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    JS::ContextOptionsRef(cx).setForEachStatement(false);
+    args.rval().setUndefined();
+    return true;
+}
+
 static const JSFunctionSpecWithHelp TestingFunctions[] = {
     JS_FN_HELP("gc", ::GC, 0, 0,
 "gc([obj] | 'zone' [, 'shrinking'])",
@@ -3643,27 +4176,22 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "  This is also disabled when --fuzzing-safe is specified."),
 #endif
 
-#ifdef SPIDERMONKEY_PROMISE
     JS_FN_HELP("settlePromiseNow", SettlePromiseNow, 1, 0,
 "settlePromiseNow(promise)",
 "  'Settle' a 'promise' immediately. This just marks the promise as resolved\n"
 "  with a value of `undefined` and causes the firing of any onPromiseSettled\n"
 "  hooks set on Debugger instances that are observing the given promise's\n"
 "  global as a debuggee."),
-#else
-    JS_FN_HELP("makeFakePromise", MakeFakePromise, 0, 0,
-"makeFakePromise()",
-"  Create an object whose [[Class]] name is 'Promise' and call\n"
-"  JS::dbg::onNewPromise on it before returning it. It doesn't actually have\n"
-"  any of the other behavior associated with promises."),
-
-    JS_FN_HELP("settleFakePromise", SettleFakePromise, 1, 0,
-"settleFakePromise(promise)",
-"  'Settle' a 'promise' created by makeFakePromise(). This doesn't have any\n"
-"  observable effects outside of firing any onPromiseSettled hooks set on\n"
-"  Debugger instances that are observing the given promise's global as a\n"
-"  debuggee."),
-#endif // SPIDERMONKEY_PROMISE
+    JS_FN_HELP("getWaitForAllPromise", GetWaitForAllPromise, 1, 0,
+"getWaitForAllPromise(densePromisesArray)",
+"  Calls the 'GetWaitForAllPromise' JSAPI function and returns the result\n"
+"  Promise."),
+JS_FN_HELP("resolvePromise", ResolvePromise, 2, 0,
+"resolvePromise(promise, resolution)",
+"  Resolve a Promise by calling the JSAPI function JS::ResolvePromise."),
+JS_FN_HELP("rejectPromise", RejectPromise, 2, 0,
+"rejectPromise(promise, reason)",
+"  Reject a Promise by calling the JSAPI function JS::RejectPromise."),
 
     JS_FN_HELP("makeFinalizeObserver", MakeFinalizeObserver, 0, 0,
 "makeFinalizeObserver()",
@@ -3813,6 +4341,10 @@ gc::ZealModeHelpText),
 "wasmBinaryToText(bin)",
 "  Translates binary encoding to text format"),
 
+    JS_FN_HELP("wasmExtractCode", WasmExtractCode, 1, 0,
+"wasmExtractCode(module)",
+"  Extracts generated machine code from WebAssembly.Module."),
+
     JS_FN_HELP("isLazyFunction", IsLazyFunction, 1, 0,
 "isLazyFunction(fun)",
 "  True if fun is a lazy JSFunction."),
@@ -3865,12 +4397,16 @@ gc::ZealModeHelpText),
 "setIonCheckGraphCoherency(bool)",
 "  Set whether Ion should perform graph consistency (DEBUG-only) assertions. These assertions\n"
 "  are valuable and should be generally enabled, however they can be very expensive for large\n"
-"  (asm.js) programs."),
+"  (wasm) programs."),
 
     JS_FN_HELP("serialize", Serialize, 1, 0,
-"serialize(data, [transferables])",
+"serialize(data, [transferables, [policy]])",
 "  Serialize 'data' using JS_WriteStructuredClone. Returns a structured\n"
-"  clone buffer object."),
+"  clone buffer object. 'policy' must be an object. The following keys'\n"
+"  string values will be used to determine whether the corresponding types\n"
+"  may be serialized (value 'allow', the default) or not (value 'deny').\n"
+"  If denied types are encountered a TypeError will be thrown during cloning.\n"
+"  Valid keys: 'SharedArrayBuffer'."),
 
     JS_FN_HELP("deserialize", Deserialize, 1, 0,
 "deserialize(clonebuffer)",
@@ -4046,6 +4582,28 @@ gc::ZealModeHelpText),
 "getModuleEnvironmentValue(module, name)",
 "  Get the value of a bound name in a module environment.\n"),
 
+    JS_FN_HELP("enableForEach", EnableForEach, 0, 0,
+"enableForEach()",
+"  Enables the deprecated, non-standard for-each.\n"),
+
+    JS_FN_HELP("disableForEach", DisableForEach, 0, 0,
+"disableForEach()",
+"  Disables the deprecated, non-standard for-each.\n"),
+
+    JS_FS_HELP_END
+};
+
+static const JSFunctionSpecWithHelp FuzzingUnsafeTestingFunctions[] = {
+#ifdef DEBUG
+    JS_FN_HELP("parseRegExp", ParseRegExp, 3, 0,
+"parseRegExp(pattern[, flags[, match_only])",
+"  Parses a RegExp pattern and returns a tree, potentially throwing."),
+
+    JS_FN_HELP("disRegExp", DisRegExp, 3, 0,
+"disRegExp(regexp[, match_only[, input]])",
+"  Dumps RegExp bytecode."),
+#endif
+
     JS_FS_HELP_END
 };
 
@@ -4066,6 +4624,11 @@ js::DefineTestingFunctions(JSContext* cx, HandleObject obj, bool fuzzingSafe_,
 
     if (!JS_DefineProperties(cx, obj, TestingProperties))
         return false;
+
+    if (!fuzzingSafe) {
+        if (!JS_DefineFunctionsWithHelp(cx, obj, FuzzingUnsafeTestingFunctions))
+            return false;
+    }
 
     return JS_DefineFunctionsWithHelp(cx, obj, TestingFunctions);
 }

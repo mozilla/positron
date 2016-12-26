@@ -8,14 +8,12 @@ Cu.import("resource://gre/modules/TelemetryLog.jsm");
 var bsp = Cu.import("resource:///modules/experiments/Experiments.jsm");
 
 
-const FILE_MANIFEST            = "experiments.manifest";
 const MANIFEST_HANDLER         = "manifests/handler";
 
 const SEC_IN_ONE_DAY  = 24 * 60 * 60;
 const MS_IN_ONE_DAY   = SEC_IN_ONE_DAY * 1000;
 
 
-var gProfileDir          = null;
 var gHttpServer          = null;
 var gHttpRoot            = null;
 var gDataRoot            = null;
@@ -48,7 +46,6 @@ function run_test() {
 
 add_task(function* test_setup() {
   loadAddonManager();
-  gProfileDir = do_get_profile();
 
   gHttpServer = new HttpServer();
   gHttpServer.start(-1);
@@ -87,8 +84,6 @@ add_task(function* test_telemetryBasics() {
   // Check TelemetryLog instead of TelemetrySession.getPayload().log because
   // TelemetrySession gets Experiments.instance() and side-effects log entries.
 
-  const OBSERVER_TOPIC = "experiments-changed";
-  let observerFireCount = 0;
   let expectedLogLength = 0;
 
   // Dates the following tests are based on.
@@ -127,21 +122,6 @@ add_task(function* test_telemetryBasics() {
     ],
   };
 
-  // Data to compare the result of Experiments.getExperiments() against.
-
-  let experimentListData = [
-    {
-      id: EXPERIMENT2_ID,
-      name: "Test experiment 2",
-      description: "And yet another experiment that experiments experimentally.",
-    },
-    {
-      id: EXPERIMENT1_ID,
-      name: EXPERIMENT1_NAME,
-      description: "Yet another experiment that experiments experimentally.",
-    },
-  ];
-
   let experiments = new Experiments.Experiments(gPolicy);
 
   // Trigger update, clock set to before any activation.
@@ -158,9 +138,9 @@ add_task(function* test_telemetryBasics() {
   let log = TelemetryLog.entries();
   do_print("Telemetry log: " + JSON.stringify(log));
   Assert.equal(log.length, expectedLogLength, "Telemetry log should have " + expectedLogLength + " entries.");
-  checkEvent(log[log.length-2], TLOG.ACTIVATION_KEY,
+  checkEvent(log[log.length - 2], TLOG.ACTIVATION_KEY,
              [TLOG.ACTIVATION.REJECTED, EXPERIMENT1_ID, "startTime"]);
-  checkEvent(log[log.length-1], TLOG.ACTIVATION_KEY,
+  checkEvent(log[log.length - 1], TLOG.ACTIVATION_KEY,
              [TLOG.ACTIVATION.REJECTED, EXPERIMENT2_ID, "startTime"]);
 
   // Trigger update, clock set for experiment 1 to start.
@@ -175,7 +155,7 @@ add_task(function* test_telemetryBasics() {
   expectedLogLength += 1;
   log = TelemetryLog.entries();
   Assert.equal(log.length, expectedLogLength, "Telemetry log should have " + expectedLogLength + " entries. Got " + log.toSource());
-  checkEvent(log[log.length-1], TLOG.ACTIVATION_KEY,
+  checkEvent(log[log.length - 1], TLOG.ACTIVATION_KEY,
              [TLOG.ACTIVATION.ACTIVATED, EXPERIMENT1_ID]);
 
   // Trigger update, clock set for experiment 1 to stop.
@@ -190,9 +170,9 @@ add_task(function* test_telemetryBasics() {
   expectedLogLength += 2;
   log = TelemetryLog.entries();
   Assert.equal(log.length, expectedLogLength, "Telemetry log should have " + expectedLogLength + " entries.");
-  checkEvent(log[log.length-2], TLOG.TERMINATION_KEY,
+  checkEvent(log[log.length - 2], TLOG.TERMINATION_KEY,
              [TLOG.TERMINATION.EXPIRED, EXPERIMENT1_ID]);
-  checkEvent(log[log.length-1], TLOG.ACTIVATION_KEY,
+  checkEvent(log[log.length - 1], TLOG.ACTIVATION_KEY,
              [TLOG.ACTIVATION.REJECTED, EXPERIMENT2_ID, "startTime"]);
 
   // Trigger update, clock set for experiment 2 to start with invalid hash.
@@ -208,7 +188,7 @@ add_task(function* test_telemetryBasics() {
   expectedLogLength += 1;
   log = TelemetryLog.entries();
   Assert.equal(log.length, expectedLogLength, "Telemetry log should have " + expectedLogLength + " entries.");
-  checkEvent(log[log.length-1], TLOG.ACTIVATION_KEY,
+  checkEvent(log[log.length - 1], TLOG.ACTIVATION_KEY,
              [TLOG.ACTIVATION.INSTALL_FAILURE, EXPERIMENT2_ID]);
 
   // Trigger update, clock set for experiment 2 to properly start now.
@@ -224,7 +204,7 @@ add_task(function* test_telemetryBasics() {
   expectedLogLength += 1;
   log = TelemetryLog.entries();
   Assert.equal(log.length, expectedLogLength, "Telemetry log should have " + expectedLogLength + " entries.");
-  checkEvent(log[log.length-1], TLOG.ACTIVATION_KEY,
+  checkEvent(log[log.length - 1], TLOG.ACTIVATION_KEY,
              [TLOG.ACTIVATION.ACTIVATED, EXPERIMENT2_ID]);
 
   // Fake user uninstall of experiment via add-on manager.
@@ -239,7 +219,7 @@ add_task(function* test_telemetryBasics() {
   expectedLogLength += 1;
   log = TelemetryLog.entries();
   Assert.equal(log.length, expectedLogLength, "Telemetry log should have " + expectedLogLength + " entries.");
-  checkEvent(log[log.length-1], TLOG.TERMINATION_KEY,
+  checkEvent(log[log.length - 1], TLOG.TERMINATION_KEY,
              [TLOG.TERMINATION.ADDON_UNINSTALLED, EXPERIMENT2_ID]);
 
   // Trigger update with experiment 1a ready to start.
@@ -256,7 +236,7 @@ add_task(function* test_telemetryBasics() {
   expectedLogLength += 1;
   log = TelemetryLog.entries();
   Assert.equal(log.length, expectedLogLength, "Telemetry log should have " + expectedLogLength + " entries.");
-  checkEvent(log[log.length-1], TLOG.ACTIVATION_KEY,
+  checkEvent(log[log.length - 1], TLOG.ACTIVATION_KEY,
              [TLOG.ACTIVATION.ACTIVATED, EXPERIMENT3_ID]);
 
   // Trigger disable of an experiment via the API.
@@ -271,7 +251,7 @@ add_task(function* test_telemetryBasics() {
   expectedLogLength += 1;
   log = TelemetryLog.entries();
   Assert.equal(log.length, expectedLogLength, "Telemetry log should have " + expectedLogLength + " entries.");
-  checkEvent(log[log.length-1], TLOG.TERMINATION_KEY,
+  checkEvent(log[log.length - 1], TLOG.TERMINATION_KEY,
              [TLOG.TERMINATION.FROM_API, EXPERIMENT3_ID]);
 
   // Trigger update with experiment 1a ready to start.
@@ -288,7 +268,7 @@ add_task(function* test_telemetryBasics() {
   expectedLogLength += 1;
   log = TelemetryLog.entries();
   Assert.equal(log.length, expectedLogLength, "Telemetry log should have " + expectedLogLength + " entries.");
-  checkEvent(log[log.length-1], TLOG.ACTIVATION_KEY,
+  checkEvent(log[log.length - 1], TLOG.ACTIVATION_KEY,
              [TLOG.ACTIVATION.ACTIVATED, EXPERIMENT4_ID]);
 
   // Trigger experiment termination by something other than expiry via the manifest.
@@ -304,7 +284,7 @@ add_task(function* test_telemetryBasics() {
   expectedLogLength += 1;
   log = TelemetryLog.entries();
   Assert.equal(log.length, expectedLogLength, "Telemetry log should have " + expectedLogLength + " entries.");
-  checkEvent(log[log.length-1], TLOG.TERMINATION_KEY,
+  checkEvent(log[log.length - 1], TLOG.TERMINATION_KEY,
              [TLOG.TERMINATION.RECHECK, EXPERIMENT4_ID, "os"]);
 
   // Cleanup.

@@ -246,9 +246,15 @@ DynamicImage::Draw(gfxContext* aContext,
 }
 
 NS_IMETHODIMP
-DynamicImage::StartDecoding()
+DynamicImage::StartDecoding(uint32_t aFlags)
 {
   return NS_OK;
+}
+
+bool
+DynamicImage::StartDecodingWithResult(uint32_t aFlags)
+{
+  return true;
 }
 
 NS_IMETHODIMP

@@ -302,7 +302,9 @@ nsHTMLFramesetFrame::Init(nsIContent*       aContent,
       RefPtr<nsStyleContext> kidSC;
 
       kidSC = shell->StyleSet()->ResolveStyleFor(child->AsElement(),
-                                                 mStyleContext);
+                                                 mStyleContext,
+                                                 ConsumeStyleBehavior::DontConsume,
+                                                 LazyComputeBehavior::Allow);
       if (child->IsHTMLElement(nsGkAtoms::frameset)) {
         frame = NS_NewHTMLFramesetFrame(shell, kidSC);
 
@@ -662,6 +664,7 @@ nsresult
 nsHTMLFramesetFrame::GetCursor(const nsPoint&    aPoint,
                                nsIFrame::Cursor& aCursor)
 {
+  aCursor.mLoading = false;
   if (mDragger) {
     aCursor.mCursor = (mDragger->mVertical) ? NS_STYLE_CURSOR_EW_RESIZE : NS_STYLE_CURSOR_NS_RESIZE;
   } else {
@@ -1551,6 +1554,7 @@ nsresult
 nsHTMLFramesetBorderFrame::GetCursor(const nsPoint&    aPoint,
                                      nsIFrame::Cursor& aCursor)
 {
+  aCursor.mLoading = false;
   if (!mCanResize) {
     aCursor.mCursor = NS_STYLE_CURSOR_DEFAULT;
   } else {

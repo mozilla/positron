@@ -11,11 +11,12 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.os.IBinder;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import java.io.File;
 
-import org.mozilla.gecko.notifications.ServiceNotificationClient;
 import org.mozilla.gecko.util.NativeEventListener;
 import org.mozilla.gecko.util.NativeJSObject;
 import org.mozilla.gecko.util.EventCallback;
@@ -87,7 +88,6 @@ public class GeckoService extends Service {
     @Override // Service
     public void onCreate() {
         GeckoAppShell.ensureCrashHandling();
-        GeckoAppShell.setNotificationListener(new ServiceNotificationClient(getApplicationContext()));
         GeckoThread.onResume();
         super.onCreate();
 
@@ -150,8 +150,7 @@ public class GeckoService extends Service {
             throw new IllegalArgumentException("Intent must specify profile.");
         }
 
-        if (!GeckoThread.initWithProfile(profileName != null ? profileName : "",
-                                         profileDir != null ? new File(profileDir) : null)) {
+        if (!GeckoThread.initWithProfile(profileName, profileDir != null ? new File(profileDir) : null)) {
             Log.w(LOGTAG, "Ignoring due to profile mismatch: " +
                           profileName + " [" + profileDir + ']');
 
@@ -206,5 +205,31 @@ public class GeckoService extends Service {
     @Override // Service
     public IBinder onBind(final Intent intent) {
         return null;
+    }
+
+    public static void startGecko(final GeckoProfile profile, final String args, final Context context) {
+        if (GeckoThread.isLaunched()) {
+            if (DEBUG) {
+                Log.v(LOGTAG, "already launched");
+            }
+            return;
+        }
+
+        Handler handler = new Handler(Looper.getMainLooper());
+        handler.post(new Runnable() {
+            @Override
+            public void run() {
+                GeckoAppShell.ensureCrashHandling();
+                GeckoAppShell.setApplicationContext(context);
+                GeckoThread.onResume();
+
+                GeckoThread.init(profile, args, null, false);
+                GeckoThread.launch();
+
+                if (DEBUG) {
+                    Log.v(LOGTAG, "warmed up (launched)");
+                }
+            }
+        });
     }
 }

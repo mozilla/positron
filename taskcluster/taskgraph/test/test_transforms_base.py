@@ -81,6 +81,20 @@ class TestKeyedBy(unittest.TestCase):
         }
         self.assertEqual(get_keyed_by(test, 'option', 'x'), 20)
 
+    def test_by_value_regex(self):
+        test = {
+            'test-name': 'tname',
+            'option': {
+                'by-test-platform': {
+                    'macosx64/.*': 10,
+                    'linux64/debug': 20,
+                    'default': 5,
+                },
+            },
+            'test-platform': 'macosx64/debug',
+        }
+        self.assertEqual(get_keyed_by(test, 'option', 'x'), 10)
+
     def test_by_value_default(self):
         test = {
             'test-name': 'tname',
@@ -94,7 +108,7 @@ class TestKeyedBy(unittest.TestCase):
         }
         self.assertEqual(get_keyed_by(test, 'option', 'x'), 30)
 
-    def test_by_value_invalid_dict(self):
+    def test_by_value_dict(self):
         test = {
             'test-name': 'tname',
             'option': {
@@ -102,7 +116,7 @@ class TestKeyedBy(unittest.TestCase):
                 'by-other-value': {},
             },
         }
-        self.assertRaises(Exception, get_keyed_by, test, 'option', 'x')
+        self.assertEqual(get_keyed_by(test, 'option', 'x'), test['option'])
 
     def test_by_value_invalid_no_default(self):
         test = {
@@ -116,14 +130,14 @@ class TestKeyedBy(unittest.TestCase):
         }
         self.assertRaises(Exception, get_keyed_by, test, 'option', 'x')
 
-    def test_by_value_invalid_no_by(self):
+    def test_by_value_no_by(self):
         test = {
             'test-name': 'tname',
             'option': {
                 'other-value': {},
             },
         }
-        self.assertRaises(Exception, get_keyed_by, test, 'option', 'x')
+        self.assertEqual(get_keyed_by(test, 'option', 'x'), test['option'])
 
 if __name__ == '__main__':
     main()

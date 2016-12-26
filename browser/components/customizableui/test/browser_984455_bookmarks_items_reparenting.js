@@ -62,7 +62,6 @@ function checkPlacesContextMenu(aItemWithContextMenu) {
  */
 function checkSpecialContextMenus() {
   return Task.spawn(function* () {
-    let contextMenu = document.getElementById("placesContext");
     let bookmarksMenuButton = document.getElementById(kBookmarksButton);
     let bookmarksMenuPopup = document.getElementById("BMB_bookmarksPopup");
 
@@ -84,7 +83,7 @@ function checkSpecialContextMenus() {
       let menuItem = document.getElementById(menuID);
       let menuPopup = document.getElementById(kSpecialItemIDs[menuID]);
       info("Waiting to open menu for " + menuID);
-      let shownPromise = popupShown(menuPopup);
+      shownPromise = popupShown(menuPopup);
       menuPopup.openPopup(menuItem, null, 0, 0, false, false, null);
       yield shownPromise;
 

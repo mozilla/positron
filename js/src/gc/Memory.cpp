@@ -14,6 +14,7 @@
 
 #if defined(XP_WIN)
 
+#include "mozilla/Sprintf.h"
 #include "jswin.h"
 #include <psapi.h>
 
@@ -840,14 +841,24 @@ DeallocateMappedContent(void* p, size_t length)
 #error "Memory mapping functions are not defined for your OS."
 #endif
 
+#ifdef XP_WIN
+static char sCrashReason[256];
+#endif
+
 void
 ProtectPages(void* p, size_t size)
 {
     MOZ_ASSERT(size % pageSize == 0);
+    MOZ_RELEASE_ASSERT(size > 0);
+    MOZ_RELEASE_ASSERT(p);
 #if defined(XP_WIN)
     DWORD oldProtect;
-    if (!VirtualProtect(p, size, PAGE_NOACCESS, &oldProtect))
-        MOZ_CRASH("VirtualProtect(PAGE_NOACCESS) failed");
+    if (!VirtualProtect(p, size, PAGE_NOACCESS, &oldProtect)) {
+        SprintfLiteral(sCrashReason,
+            "MOZ_CRASH(VirtualProtect(PAGE_NOACCESS) failed! Error code: %u)", GetLastError());
+        MOZ_CRASH_ANNOTATE(sCrashReason);
+        MOZ_REALLY_CRASH();
+    }
     MOZ_ASSERT(oldProtect == PAGE_READWRITE);
 #else  // assume Unix
     if (mprotect(p, size, PROT_NONE))
@@ -859,10 +870,16 @@ void
 MakePagesReadOnly(void* p, size_t size)
 {
     MOZ_ASSERT(size % pageSize == 0);
+    MOZ_RELEASE_ASSERT(size > 0);
+    MOZ_RELEASE_ASSERT(p);
 #if defined(XP_WIN)
     DWORD oldProtect;
-    if (!VirtualProtect(p, size, PAGE_READONLY, &oldProtect))
-        MOZ_CRASH("VirtualProtect(PAGE_READONLY) failed");
+    if (!VirtualProtect(p, size, PAGE_READONLY, &oldProtect)) {
+        SprintfLiteral(sCrashReason,
+            "MOZ_CRASH(VirtualProtect(PAGE_READONLY) failed! Error code: %u)", GetLastError());
+        MOZ_CRASH_ANNOTATE(sCrashReason);
+        MOZ_REALLY_CRASH();
+    }
     MOZ_ASSERT(oldProtect == PAGE_READWRITE);
 #else  // assume Unix
     if (mprotect(p, size, PROT_READ))
@@ -874,10 +891,16 @@ void
 UnprotectPages(void* p, size_t size)
 {
     MOZ_ASSERT(size % pageSize == 0);
+    MOZ_RELEASE_ASSERT(size > 0);
+    MOZ_RELEASE_ASSERT(p);
 #if defined(XP_WIN)
     DWORD oldProtect;
-    if (!VirtualProtect(p, size, PAGE_READWRITE, &oldProtect))
-        MOZ_CRASH("VirtualProtect(PAGE_READWRITE) failed");
+    if (!VirtualProtect(p, size, PAGE_READWRITE, &oldProtect)) {
+        SprintfLiteral(sCrashReason,
+            "MOZ_CRASH(VirtualProtect(PAGE_READWRITE) failed! Error code: %u)", GetLastError());
+        MOZ_CRASH_ANNOTATE(sCrashReason);
+        MOZ_REALLY_CRASH();
+    }
     MOZ_ASSERT(oldProtect == PAGE_NOACCESS || oldProtect == PAGE_READONLY);
 #else  // assume Unix
     if (mprotect(p, size, PROT_READ | PROT_WRITE))

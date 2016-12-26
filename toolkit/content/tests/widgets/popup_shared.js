@@ -108,7 +108,7 @@ function eventOccurred(event)
   if (events) {
     if (events.length <= gTestEventIndex) {
       ok(false, "Extra " + event.type + " event fired for " + event.target.id +
-                  " " +gPopupTests[gTestIndex].testname);
+                  " " + gPopupTests[gTestIndex].testname);
       return;
     }
 
@@ -247,8 +247,11 @@ function goNextStepSync()
     test.test(test.testname, step);
 
     // no events to check for so just check the result
-    if (!("events" in test))
+    if (!("events" in test)) {
       checkResult();
+    } else if (typeof test.events == "function" && !test.events().length) {
+      checkResult();
+    }
   }
   else {
     finish();
@@ -365,8 +368,8 @@ function compareEdge(anchor, popup, edge, offsetX, offsetY, testname)
   var spaceIdx = edge.indexOf(" ");
   if (spaceIdx > 0) {
     let cornerX, cornerY;
-    let [anchor, align] = edge.split(" ");
-    switch (anchor) {
+    let [position, align] = edge.split(" ");
+    switch (position) {
       case "topleft": cornerX = anchorrect.left; cornerY = anchorrect.top; break;
       case "topcenter": cornerX = anchorrect.left + anchorrect.width / 2; cornerY = anchorrect.top; break;
       case "topright": cornerX = anchorrect.right; cornerY = anchorrect.top; break;

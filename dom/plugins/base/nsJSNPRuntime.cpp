@@ -539,7 +539,7 @@ NPVariantToJSVal(NPP npp, JSContext *cx, const NPVariant *variant)
 }
 
 bool
-JSValToNPVariant(NPP npp, JSContext *cx, JS::Value val, NPVariant *variant)
+JSValToNPVariant(NPP npp, JSContext *cx, const JS::Value& val, NPVariant *variant)
 {
   NS_ASSERTION(npp, "Must have an NPP to wrap a jsval!");
 
@@ -638,7 +638,7 @@ ThrowJSExceptionASCII(JSContext *cx, const char *message)
 
     PopException();
   } else {
-    ::JS_ReportErrorASCII(cx, message);
+    ::JS_ReportErrorASCII(cx, "%s", message);
   }
 }
 
@@ -1188,6 +1188,8 @@ GetNPObjectWrapper(JSContext *cx, JSObject *aObj, bool wrapResult = true)
       }
       return obj;
     }
+
+    JSAutoCompartment ac(cx, obj);
     if (!::JS_GetPrototype(cx, obj, &obj)) {
       return nullptr;
     }
@@ -1795,9 +1797,9 @@ NPObjWrapper_toPrimitive(JSContext *cx, unsigned argc, JS::Value *vp)
       return true;
   }
 
-  JS_ReportErrorNumber(cx, js::GetErrorMessage, nullptr, JSMSG_CANT_CONVERT_TO,
-                       JS_GetClass(obj)->name,
-                       "primitive type");
+  JS_ReportErrorNumberASCII(cx, js::GetErrorMessage, nullptr,
+                            JSMSG_CANT_CONVERT_TO,
+                            JS_GetClass(obj)->name, "primitive type");
   return false;
 }
 

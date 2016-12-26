@@ -127,9 +127,6 @@ if CONFIG['TARGET_XPCOM_ABI']:
     DEFINES['TARGET_OS_ABI'] = '"%s_%s"' % (CONFIG['OS_TARGET'],
                                             CONFIG['TARGET_XPCOM_ABI'])
 
-if CONFIG['WRAP_SYSTEM_INCLUDES']:
-    DEFINES['WRAP_SYSTEM_INCLUDES'] = True
-
 if CONFIG['OS_ARCH'] == 'Linux' and 'lib64' in CONFIG['libdir']:
     DEFINES['HAVE_USR_LIB64_DIR'] = True
 
@@ -155,6 +152,11 @@ if CONFIG['MOZ_SANDBOX'] and CONFIG['OS_ARCH'] == 'WINNT':
     LOCAL_INCLUDES += [
         '/security/sandbox/chromium',
         '/security/sandbox/chromium-shim',
+    ]
+
+if CONFIG['MOZ_SANDBOX'] and CONFIG['OS_ARCH'] == 'Linux':
+    USE_LIBS += [
+        'mozsandbox',
     ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':

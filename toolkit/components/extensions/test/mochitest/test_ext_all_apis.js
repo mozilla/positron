@@ -39,6 +39,8 @@ let expectedCommonApis = [
   // If you want to add a new powerful test API, please see bug 1287233.
   "test.assertEq",
   "test.assertFalse",
+  "test.assertRejects",
+  "test.assertThrows",
   "test.assertTrue",
   "test.fail",
   "test.log",
@@ -73,6 +75,8 @@ let expectedBackgroundApis = [
   "runtime.getBackgroundPage",
   "runtime.getBrowserInfo",
   "runtime.getPlatformInfo",
+  "runtime.onInstalled",
+  "runtime.onStartup",
   "runtime.onUpdateAvailable",
   "runtime.openOptionsPage",
   "runtime.reload",
@@ -105,7 +109,7 @@ function sendAllApis() {
       let val = obj[key];
       if (typeof val == "object" && val !== null && mayRecurse(key, val)) {
         diveDeeper(`${path}.${key}`, val);
-      } else {
+      } else if (val !== undefined) {
         results.push(`${path}.${key}`);
       }
     }

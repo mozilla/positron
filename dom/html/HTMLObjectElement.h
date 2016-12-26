@@ -48,6 +48,9 @@ public:
   // Element
   virtual bool IsInteractiveHTMLContent(bool aIgnoreTabindex) const override;
 
+  // EventTarget
+  virtual void AsyncEventRunning(AsyncEventDispatcher* aEvent) override;
+
   // nsIDOMHTMLObjectElement
   NS_DECL_NSIDOMHTMLOBJECTELEMENT
 
@@ -156,7 +159,10 @@ public:
     SetHTMLAttr(nsGkAtoms::height, aValue, aRv);
   }
   using nsObjectLoadingContent::GetContentDocument;
-  nsPIDOMWindowOuter* GetContentWindow();
+
+  nsPIDOMWindowOuter*
+  GetContentWindow(nsIPrincipal& aSubjectPrincipal);
+
   using nsIConstraintValidation::CheckValidity;
   using nsIConstraintValidation::ReportValidity;
   using nsIConstraintValidation::GetValidationMessage;
@@ -234,9 +240,11 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::border, aValue, aRv);
   }
-  nsIDocument* GetSVGDocument()
+
+  nsIDocument*
+  GetSVGDocument(nsIPrincipal& aSubjectPrincipal)
   {
-    return GetContentDocument();
+    return GetContentDocument(aSubjectPrincipal);
   }
 
 private:

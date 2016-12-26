@@ -277,7 +277,7 @@ var FullScreen = {
     this.cleanup();
   },
 
-  toggle: function () {
+  toggle: function() {
     var enterFS = window.fullScreen;
 
     // Toggle the View:FullScreen command, which controls elements like the
@@ -346,7 +346,7 @@ var FullScreen = {
     document.exitFullscreen();
   },
 
-  handleEvent: function (event) {
+  handleEvent: function(event) {
     switch (event.type) {
       case "fullscreen":
         this.toggle();
@@ -385,7 +385,10 @@ var FullScreen = {
         break;
       }
       case "DOMFullscreen:NewOrigin": {
-        PointerlockFsWarning.showFullScreen(aMessage.data.originNoSuffix);
+        // Don't show the warning if we've already exited fullscreen.
+        if (document.fullscreen) {
+          PointerlockFsWarning.showFullScreen(aMessage.data.originNoSuffix);
+        }
         break;
       }
       case "DOMFullscreen:Exit": {
@@ -410,6 +413,18 @@ var FullScreen = {
     // before transition.
     PointerlockFsWarning.close();
 
+    // If it is a remote browser, send a message to ask the content
+    // to enter fullscreen state. We don't need to do so if it is an
+    // in-process browser, since all related document should have
+    // entered fullscreen state at this point.
+    // This should be done before the active tab check below to ensure
+    // that the content document handles the pending request. Doing so
+    // before the check is fine since we also check the activeness of
+    // the requesting document in content-side handling code.
+    if (this._isRemoteBrowser(aBrowser)) {
+      aBrowser.messageManager.sendAsyncMessage("DOMFullscreen:Entered");
+    }
+
     // If we've received a fullscreen notification, we have to ensure that the
     // element that's requesting fullscreen belongs to the browser that's currently
     // active. If not, we exit fullscreen since the "full-screen document" isn't
@@ -422,14 +437,6 @@ var FullScreen = {
       // we have to avoid calling exitFullscreen synchronously here.
       setTimeout(() => document.exitFullscreen(), 0);
       return;
-    }
-
-    // If it is a remote browser, send a message to ask the content
-    // to enter fullscreen state. We don't need to do so if it is an
-    // in-process browser, since all related document should have
-    // entered fullscreen state at this point.
-    if (this._isRemoteBrowser(aBrowser)) {
-      aBrowser.messageManager.sendAsyncMessage("DOMFullscreen:Entered");
     }
 
     document.documentElement.setAttribute("inDOMFullscreen", true);
@@ -449,7 +456,7 @@ var FullScreen = {
     window.addEventListener("activate", this);
   },
 
-  cleanup: function () {
+  cleanup: function() {
     if (!window.fullScreen) {
       MousePosTracker.removeListener(this);
       document.removeEventListener("keypress", this._keyToggleCallback, false);
@@ -458,7 +465,7 @@ var FullScreen = {
     }
   },
 
-  cleanupDomFullscreen: function () {
+  cleanupDomFullscreen: function() {
     window.messageManager
           .broadcastAsyncMessage("DOMFullscreen:CleanUp");
 
@@ -471,7 +478,7 @@ var FullScreen = {
     document.documentElement.removeAttribute("inDOMFullscreen");
   },
 
-  _isRemoteBrowser: function (aBrowser) {
+  _isRemoteBrowser: function(aBrowser) {
     return gMultiProcessBrowser && aBrowser.getAttribute("remote") == "true";
   },
 
@@ -509,7 +516,7 @@ var FullScreen = {
   // Checks whether we are allowed to collapse the chrome
   _isPopupOpen: false,
   _isChromeCollapsed: false,
-  _safeToCollapse: function () {
+  _safeToCollapse: function() {
     if (!gPrefService.getBoolPref("browser.fullscreen.autohide"))
       return false;
 
@@ -584,7 +591,7 @@ var FullScreen = {
     this._isChromeCollapsed = false;
   },
 
-  hideNavToolbox: function (aAnimate = false) {
+  hideNavToolbox: function(aAnimate = false) {
     if (this._isChromeCollapsed || !this._safeToCollapse())
       return;
 
@@ -608,7 +615,7 @@ var FullScreen = {
     MousePosTracker.removeListener(this);
   },
 
-  _updateToolbars: function (aEnterFS) {
+  _updateToolbars: function(aEnterFS) {
     for (let el of document.querySelectorAll("toolbar[fullscreentoolbar=true]")) {
       if (aEnterFS) {
         // Give the main nav bar and the tab bar the fullscreen context menu,

@@ -69,14 +69,20 @@
 
       <!-- =================== nsIAutoCompleteInput =================== -->
 
-      <field name="popup"><![CDATA[
-        // Wrap in a block so that the let statements don't
-        // create properties on 'this' (bug 635252).
-        {
+      <field name="_popup">null</field>
+      <property name="popup" readonly="true">
+        <getter><![CDATA[
+          // Memoize the result in a field rather than replacing this property,
+          // so that it can be reset along with the binding.
+          if (this._popup) {
+            return this._popup;
+          }
+
           let popup = null;
           let popupId = this.getAttribute("autocompletepopup");
-          if (popupId)
+          if (popupId) {
             popup = document.getElementById(popupId);
+          }
           if (!popup) {
             popup = document.createElement("panel");
             popup.setAttribute("type", "autocomplete");
@@ -86,9 +92,10 @@
             popupset.appendChild(popup);
           }
           popup.mInput = this;
-          popup;
-        }
-      ]]></field>
+
+          return this._popup = popup;
+        ]]></getter>
+      </property>
 
       <property name="controller" onget="return this.mController;" readonly="true"/>
 
@@ -149,13 +156,19 @@
         parseInt(this.getAttribute("shrinkdelay")) || 0
       </field>
 
-      <field name="PrivateBrowsingUtils" readonly="true">
-        {
-          let utils = {};
-          Components.utils.import("resource://gre/modules/PrivateBrowsingUtils.jsm", utils);
-          utils.PrivateBrowsingUtils
-        }
-      </field>
+      <property name="PrivateBrowsingUtils" readonly="true">
+        <getter><![CDATA[
+          let module = {};
+          Components.utils.import("resource://gre/modules/PrivateBrowsingUtils.jsm", module);
+          Object.defineProperty(this, "PrivateBrowsingUtils", {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: module.PrivateBrowsingUtils
+          });
+          return module.PrivateBrowsingUtils;
+        ]]></getter>
+      </property>
 
       <property name="inPrivateContext" readonly="true"
                 onget="return this.PrivateBrowsingUtils.isWindowPrivate(window);"/>
@@ -175,23 +188,43 @@
         ]]></body>
       </method>
 
-      <property name="textValue"
-                onget="return this.value;">
-        <setter><![CDATA[
-          // Completing a result should simulate the user typing the result,
-          // so fire an input event.
-          // Trim popup selected values, but never trim results coming from
-          // autofill.
-          if (this.popup.selectedIndex == -1)
+      <method name="setTextValueWithReason">
+        <parameter name="aValue"/>
+        <parameter name="aReason"/>
+        <body><![CDATA[
+          if (aReason == Components.interfaces.nsIAutoCompleteInput
+                                   .TEXTVALUE_REASON_COMPLETEDEFAULT) {
             this._disableTrim = true;
-          this.value = val;
+          }
+          this.textValue = aValue;
           this._disableTrim = false;
+        ]]></body>
+      </method>
 
-          var evt = document.createEvent("UIEvents");
+      <property name="textValue">
+        <getter><![CDATA[
+          if (typeof this.onBeforeTextValueGet == "function") {
+            let result = this.onBeforeTextValueGet();
+            if (result) {
+              return result.value;
+            }
+          }
+          return this.value;
+        ]]></getter>
+        <setter><![CDATA[
+          if (typeof this.onBeforeTextValueSet == "function")
+            val = this.onBeforeTextValueSet(val);
+
+          this.value = val;
+
+          // Completing a result should simulate the user typing the result, so
+          // fire an input event.
+          let evt = document.createEvent("UIEvents");
           evt.initUIEvent("input", true, false, window, 0);
           this.mIgnoreInput = true;
           this.dispatchEvent(evt);
           this.mIgnoreInput = false;
+
           return this.value;
         ]]></setter>
       </property>
@@ -443,7 +476,7 @@
           if (aEvent.target.localName != "textbox")
             return true; // Let child buttons of autocomplete take input
 
-          //XXXpch this is so bogus...
+          // XXXpch this is so bogus...
           if (aEvent.defaultPrevented)
             return false;
 
@@ -626,8 +659,10 @@
 
       <handler event="focus" phase="capturing"><![CDATA[
         this.attachController();
-        if (window.gBrowser) {
-          this.userContextId = window.gBrowser.selectedBrowser.contentPrincipal.originAttributes.userContextId;
+        if (window.gBrowser && window.gBrowser.selectedBrowser.hasAttribute("usercontextid")) {
+          this.userContextId = parseInt(window.gBrowser.selectedBrowser.getAttribute("usercontextid"));
+        } else {
+          this.userContextId = 0;
         }
       ]]></handler>
 
@@ -837,7 +872,7 @@
         <body><![CDATA[
           try {
             var amount = aPage ? 5 : 1;
-            this.selectedIndex = this.getNextIndex(aReverse, amount, this.selectedIndex, this.tree.view.rowCount-1);
+            this.selectedIndex = this.getNextIndex(aReverse, amount, this.selectedIndex, this.tree.view.rowCount - 1);
             if (this.selectedIndex == -1) {
               this.input._focus();
             }
@@ -936,7 +971,7 @@ extends="chrome://global/content/bindings/popup.xml#popup">
           if (aMaxRow < 0)
             return -1;
 
-          var newIdx = aIndex + (aReverse?-1:1)*aAmount;
+          var newIdx = aIndex + (aReverse ? -1 : 1) * aAmount;
           if (aReverse && aIndex == -1 || newIdx > aMaxRow && aIndex != aMaxRow)
             newIdx = aMaxRow;
           else if (!aReverse && aIndex == -1 || newIdx < 0 && aIndex != 0)
@@ -1091,6 +1126,10 @@ extends="chrome://global/content/bindings/popup.xml#popup">
         <body>
           <![CDATA[
           if (!this.mPopupOpen) {
+            // It's possible that the panel is hidden initially
+            // to avoid impacting startup / new window performance
+            aInput.popup.hidden = false;
+
             this.mInput = aInput;
             // clear any previous selection, see bugs 400671 and 488357
             this.selectedIndex = -1;
@@ -1370,6 +1409,10 @@ extends="chrome://global/content/bindings/popup.xml#popup">
         </setter>
       </property>
 
+      <property name="overflowPadding"
+                onget="return Number(this.getAttribute('overflowpadding'))"
+                readonly="true" />
+
       <method name="selectBy">
         <parameter name="aReverse"/>
         <parameter name="aPage"/>
@@ -1411,6 +1454,69 @@ extends="chrome://global/content/bindings/popup.xml#popup">
       ]]>
       </handler>
     </handlers>
+  </binding>
+
+  <binding id="autocomplete-richlistitem-insecure-field" extends="chrome://global/content/bindings/autocomplete.xml#autocomplete-richlistitem">
+    <content align="center"
+             onoverflow="this._onOverflow();"
+             onunderflow="this._onUnderflow();">
+      <xul:image anonid="type-icon"
+                 class="ac-type-icon"
+                 xbl:inherits="selected,current,type"/>
+      <xul:image anonid="site-icon"
+                 class="ac-site-icon"
+                 xbl:inherits="src=image,selected,type"/>
+      <xul:vbox class="ac-title"
+                align="left"
+                xbl:inherits="">
+        <xul:description class="ac-text-overflow-container">
+          <xul:description anonid="title-text"
+                           class="ac-title-text"
+                           xbl:inherits="selected"/>
+        </xul:description>
+      </xul:vbox>
+      <xul:hbox anonid="tags"
+                class="ac-tags"
+                align="center"
+                xbl:inherits="selected">
+        <xul:description class="ac-text-overflow-container">
+          <xul:description anonid="tags-text"
+                           class="ac-tags-text"
+                           xbl:inherits="selected"/>
+        </xul:description>
+      </xul:hbox>
+      <xul:hbox anonid="separator"
+                class="ac-separator"
+                align="center"
+                xbl:inherits="selected,actiontype,type">
+        <xul:description class="ac-separator-text">—</xul:description>
+      </xul:hbox>
+      <xul:hbox class="ac-url"
+                align="center"
+                xbl:inherits="selected,actiontype">
+        <xul:description class="ac-text-overflow-container">
+          <xul:description anonid="url-text"
+                           class="ac-url-text"
+                           xbl:inherits="selected"/>
+        </xul:description>
+      </xul:hbox>
+      <xul:hbox class="ac-action"
+                align="center"
+                xbl:inherits="selected,actiontype">
+        <xul:description class="ac-text-overflow-container">
+          <xul:description anonid="action-text"
+                           class="ac-action-text"
+                           xbl:inherits="selected"/>
+        </xul:description>
+      </xul:hbox>
+    </content>
+    <implementation>
+      <constructor><![CDATA[
+        // Unlike other autocomplete items, the height of the insecure warning
+        // increases by wrapping.
+        this._handleOverflow();
+      ]]></constructor>
+    </implementation>
   </binding>
 
   <binding id="autocomplete-richlistitem" extends="chrome://global/content/bindings/richlistbox.xml#richlistitem">
@@ -1650,6 +1756,9 @@ extends="chrome://global/content/bindings/popup.xml#popup">
         <body>
           <![CDATA[
           // Get rid of all previous text
+          if (!aDescriptionElement) {
+            return;
+          }
           while (aDescriptionElement.hasChildNodes())
             aDescriptionElement.removeChild(aDescriptionElement.firstChild);
 
@@ -1895,6 +2004,7 @@ extends="chrome://global/content/bindings/popup.xml#popup">
           }
 
           let title = this.getAttribute("title");
+          let titleLooksLikeUrl = false;
 
           let displayUrl;
           let originalUrl = this.getAttribute("url");
@@ -2004,8 +2114,13 @@ extends="chrome://global/content/bindings/popup.xml#popup">
               emphasiseUrl = false;
               displayUrl = this._unescapeUrl(action.params.url);
               title = displayUrl;
+              titleLooksLikeUrl = true;
               let visitStr = this._stringBundle.GetStringFromName("visit");
               this._setUpDescription(this._actionText, visitStr, true);
+            } else if (action.type == "extension") {
+              let content = action.params.content;
+              displayUrl = content;
+              this._setUpDescription(this._actionText, content, true);
             }
           }
 
@@ -2025,6 +2140,7 @@ extends="chrome://global/content/bindings/popup.xml#popup">
           // Show the domain as the title if we don't have a title.
           if (!title) {
             title = displayUrl;
+            titleLooksLikeUrl = true;
             try {
               let uri = Services.io.newURI(originalUrl, null, null);
               // Not all valid URLs have a domain.
@@ -2075,6 +2191,12 @@ extends="chrome://global/content/bindings/popup.xml#popup">
           }
 
           this.setAttribute("type", type);
+
+          if (titleLooksLikeUrl) {
+            this._titleText.setAttribute("lookslikeurl", "true");
+          } else {
+            this._titleText.removeAttribute("lookslikeurl");
+          }
 
           if (Array.isArray(title)) {
             // For performance reasons we may want to limit the title size.
@@ -2153,14 +2275,15 @@ extends="chrome://global/content/bindings/popup.xml#popup">
             separatorRect.width + Math.max(urlRect.width, actionRect.width);
 
           // Total width for the title and URL/action is the width of the item
-          // minus the start of the title text minus a little extra padding.
+          // minus the start of the title text minus a little optional extra padding.
           // This extra padding amount is basically arbitrary but keeps the text
           // from getting too close to the popup's edge.
-          let extraPadding = 30;
           let dir = this.getAttribute("dir");
           let titleStart = dir == "rtl" ? itemRect.right - titleRect.right
                                         : titleRect.left - itemRect.left;
-          let itemWidth = itemRect.width - titleStart - extraPadding;
+
+          let popup = this.parentNode.parentNode;
+          let itemWidth = itemRect.width - titleStart - popup.overflowPadding;
 
           if (this._tags.hasAttribute("empty")) {
             // The tags box is not displayed in this case.

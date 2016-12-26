@@ -97,7 +97,12 @@ var HighlighterActor = exports.HighlighterActor = protocol.ActorClassWithSpec(hi
     this._highlighterHidden = this._highlighterHidden.bind(this);
     this._onNavigate = this._onNavigate.bind(this);
 
-    this._createHighlighter();
+    let doc = this._tabActor.window.document;
+    // Only try to create the highlighter when the document is loaded,
+    // otherwise, wait for the navigate event to fire.
+    if (doc.documentElement && doc.readyState != "uninitialized") {
+      this._createHighlighter();
+    }
 
     // Listen to navigation events to switch from the BoxModelHighlighter to the
     // SimpleOutlineHighlighter, and back, if the top level window changes.
@@ -191,7 +196,9 @@ var HighlighterActor = exports.HighlighterActor = protocol.ActorClassWithSpec(hi
    * Hide the box model highlighting if it was shown before
    */
   hideBoxModel: function () {
-    this._highlighter.hide();
+    if (this._highlighter) {
+      this._highlighter.hide();
+    }
   },
 
   /**
@@ -242,6 +249,13 @@ var HighlighterActor = exports.HighlighterActor = protocol.ActorClassWithSpec(hi
       this._preventContentEvent(event);
 
       if (!this._isEventAllowed(event)) {
+        return;
+      }
+
+      // If shift is pressed, this is only a preview click, send the event to
+      // the client, but don't stop picking.
+      if (event.shiftKey) {
+        events.emit(this._walker, "picker-node-previewed", this._findAndAttachElement(event));
         return;
       }
 
@@ -351,6 +365,16 @@ var HighlighterActor = exports.HighlighterActor = protocol.ActorClassWithSpec(hi
     this._startPickerListeners();
 
     return null;
+  },
+
+  /**
+   * This pick method also focuses the highlighter's target window.
+   */
+  pickAndFocus: function() {
+    // Go ahead and pass on the results to help future-proof this method.
+    let pickResults = this.pick();
+    this._highlighterEnv.window.focus();
+    return pickResults;
   },
 
   _findAndAttachElement: function (event) {
@@ -502,8 +526,8 @@ var CustomHighlighterActor = exports.CustomHighlighterActor = protocol.ActorClas
 /**
  * The HighlighterEnvironment is an object that holds all the required data for
  * highlighters to work: the window, docShell, event listener target, ...
- * It also emits "will-navigate" and "navigate" events, similarly to the
- * TabActor.
+ * It also emits "will-navigate", "navigate" and "window-ready" events,
+ * similarly to the TabActor.
  *
  * It can be initialized either from a TabActor (which is the most frequent way
  * of using it, since highlighters are usually initialized by the
@@ -513,6 +537,7 @@ var CustomHighlighterActor = exports.CustomHighlighterActor = protocol.ActorClas
  * instance from a gcli command).
  */
 function HighlighterEnvironment() {
+  this.relayTabActorWindowReady = this.relayTabActorWindowReady.bind(this);
   this.relayTabActorNavigate = this.relayTabActorNavigate.bind(this);
   this.relayTabActorWillNavigate = this.relayTabActorWillNavigate.bind(this);
 
@@ -524,6 +549,7 @@ exports.HighlighterEnvironment = HighlighterEnvironment;
 HighlighterEnvironment.prototype = {
   initFromTabActor: function (tabActor) {
     this._tabActor = tabActor;
+    events.on(this._tabActor, "window-ready", this.relayTabActorWindowReady);
     events.on(this._tabActor, "navigate", this.relayTabActorNavigate);
     events.on(this._tabActor, "will-navigate", this.relayTabActorWillNavigate);
   },
@@ -625,6 +651,10 @@ HighlighterEnvironment.prototype = {
     return this.docShell.chromeEventHandler;
   },
 
+  relayTabActorWindowReady: function (data) {
+    this.emit("window-ready", data);
+  },
+
   relayTabActorNavigate: function (data) {
     this.emit("navigate", data);
   },
@@ -635,6 +665,7 @@ HighlighterEnvironment.prototype = {
 
   destroy: function () {
     if (this._tabActor) {
+      events.off(this._tabActor, "window-ready", this.relayTabActorWindowReady);
       events.off(this._tabActor, "navigate", this.relayTabActorNavigate);
       events.off(this._tabActor, "will-navigate", this.relayTabActorWillNavigate);
     }

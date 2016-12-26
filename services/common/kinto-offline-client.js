@@ -17,361 +17,13 @@
  * This file is generated from kinto.js - do not modify directly.
  */
 
-this.EXPORTED_SYMBOLS = ["loadKinto"];
+this.EXPORTED_SYMBOLS = ["Kinto"];
 
 /*
- * Version 4.0.4 - 03f82da
+ * Version 6.0.0 - de9dd38
  */
 
-(function(f){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=f()}else if(typeof define==="function"&&define.amd){define([],f)}else{var g;if(typeof window!=="undefined"){g=window}else if(typeof global!=="undefined"){g=global}else if(typeof self!=="undefined"){g=self}else{g=this}g.loadKinto = f()}})(function(){var define,module,exports;return (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-
-var _base = require("../src/adapters/base");
-
-var _base2 = _interopRequireDefault(_base);
-
-var _utils = require("../src/utils");
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-/*
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-Components.utils.import("resource://gre/modules/Sqlite.jsm");
-Components.utils.import("resource://gre/modules/Task.jsm");
-
-const SQLITE_PATH = "kinto.sqlite";
-
-const statements = {
-  "createCollectionData": `
-    CREATE TABLE collection_data (
-      collection_name TEXT,
-      record_id TEXT,
-      record TEXT
-    );`,
-
-  "createCollectionMetadata": `
-    CREATE TABLE collection_metadata (
-      collection_name TEXT PRIMARY KEY,
-      last_modified INTEGER
-    ) WITHOUT ROWID;`,
-
-  "createCollectionDataRecordIdIndex": `
-    CREATE UNIQUE INDEX unique_collection_record
-      ON collection_data(collection_name, record_id);`,
-
-  "clearData": `
-    DELETE FROM collection_data
-      WHERE collection_name = :collection_name;`,
-
-  "createData": `
-    INSERT INTO collection_data (collection_name, record_id, record)
-      VALUES (:collection_name, :record_id, :record);`,
-
-  "updateData": `
-    INSERT OR REPLACE INTO collection_data (collection_name, record_id, record)
-      VALUES (:collection_name, :record_id, :record);`,
-
-  "deleteData": `
-    DELETE FROM collection_data
-      WHERE collection_name = :collection_name
-      AND record_id = :record_id;`,
-
-  "saveLastModified": `
-    REPLACE INTO collection_metadata (collection_name, last_modified)
-      VALUES (:collection_name, :last_modified);`,
-
-  "getLastModified": `
-    SELECT last_modified
-      FROM collection_metadata
-        WHERE collection_name = :collection_name;`,
-
-  "getRecord": `
-    SELECT record
-      FROM collection_data
-        WHERE collection_name = :collection_name
-        AND record_id = :record_id;`,
-
-  "listRecords": `
-    SELECT record
-      FROM collection_data
-        WHERE collection_name = :collection_name;`,
-
-  // N.B. we have to have a dynamic number of placeholders, which you
-  // can't do without building your own statement. See `execute` for details
-  "listRecordsById": `
-    SELECT record_id, record
-      FROM collection_data
-        WHERE collection_name = ?
-          AND record_id IN `,
-
-  "importData": `
-    REPLACE INTO collection_data (collection_name, record_id, record)
-      VALUES (:collection_name, :record_id, :record);`
-
-};
-
-const createStatements = ["createCollectionData", "createCollectionMetadata", "createCollectionDataRecordIdIndex"];
-
-const currentSchemaVersion = 1;
-
-/**
- * Firefox adapter.
- *
- * Uses Sqlite as a backing store.
- *
- * Options:
- *  - path: the filename/path for the Sqlite database. If absent, use SQLITE_PATH.
- */
-class FirefoxAdapter extends _base2.default {
-  constructor(collection, options = {}) {
-    super();
-    this.collection = collection;
-    this._connection = null;
-    this._options = options;
-  }
-
-  _init(connection) {
-    return Task.spawn(function* () {
-      yield connection.executeTransaction(function* doSetup() {
-        const schema = yield connection.getSchemaVersion();
-
-        if (schema == 0) {
-
-          for (let statementName of createStatements) {
-            yield connection.execute(statements[statementName]);
-          }
-
-          yield connection.setSchemaVersion(currentSchemaVersion);
-        } else if (schema != 1) {
-          throw new Error("Unknown database schema: " + schema);
-        }
-      });
-      return connection;
-    });
-  }
-
-  _executeStatement(statement, params) {
-    if (!this._connection) {
-      throw new Error("The storage adapter is not open");
-    }
-    return this._connection.executeCached(statement, params);
-  }
-
-  open() {
-    const self = this;
-    return Task.spawn(function* () {
-      const path = self._options.path || SQLITE_PATH;
-      const opts = { path, sharedMemoryCache: false };
-      if (!self._connection) {
-        self._connection = yield Sqlite.openConnection(opts).then(self._init);
-      }
-    });
-  }
-
-  close() {
-    if (this._connection) {
-      const promise = this._connection.close();
-      this._connection = null;
-      return promise;
-    }
-    return Promise.resolve();
-  }
-
-  clear() {
-    const params = { collection_name: this.collection };
-    return this._executeStatement(statements.clearData, params);
-  }
-
-  execute(callback, options = { preload: [] }) {
-    if (!this._connection) {
-      throw new Error("The storage adapter is not open");
-    }
-
-    let result;
-    const conn = this._connection;
-    const collection = this.collection;
-
-    return conn.executeTransaction(function* doExecuteTransaction() {
-      // Preload specified records from DB, within transaction.
-      const parameters = [collection, ...options.preload];
-      const placeholders = options.preload.map(_ => "?");
-      const stmt = statements.listRecordsById + "(" + placeholders.join(",") + ");";
-      const rows = yield conn.execute(stmt, parameters);
-
-      const preloaded = rows.reduce((acc, row) => {
-        const record = JSON.parse(row.getResultByName("record"));
-        acc[row.getResultByName("record_id")] = record;
-        return acc;
-      }, {});
-
-      const proxy = transactionProxy(collection, preloaded);
-      result = callback(proxy);
-
-      for (let { statement, params } of proxy.operations) {
-        yield conn.executeCached(statement, params);
-      }
-    }, conn.TRANSACTION_EXCLUSIVE).then(_ => result);
-  }
-
-  get(id) {
-    const params = {
-      collection_name: this.collection,
-      record_id: id
-    };
-    return this._executeStatement(statements.getRecord, params).then(result => {
-      if (result.length == 0) {
-        return;
-      }
-      return JSON.parse(result[0].getResultByName("record"));
-    });
-  }
-
-  list(params = { filters: {}, order: "" }) {
-    const parameters = {
-      collection_name: this.collection
-    };
-    return this._executeStatement(statements.listRecords, parameters).then(result => {
-      const records = [];
-      for (let k = 0; k < result.length; k++) {
-        const row = result[k];
-        records.push(JSON.parse(row.getResultByName("record")));
-      }
-      return records;
-    }).then(results => {
-      // The resulting list of records is filtered and sorted.
-      // XXX: with some efforts, this could be implemented using SQL.
-      return (0, _utils.reduceRecords)(params.filters, params.order, results);
-    });
-  }
-
-  /**
-   * Load a list of records into the local database.
-   *
-   * Note: The adapter is not in charge of filtering the already imported
-   * records. This is done in `Collection#loadDump()`, as a common behaviour
-   * between every adapters.
-   *
-   * @param  {Array} records.
-   * @return {Array} imported records.
-   */
-  loadDump(records) {
-    const connection = this._connection;
-    const collection_name = this.collection;
-    return Task.spawn(function* () {
-      yield connection.executeTransaction(function* doImport() {
-        for (let record of records) {
-          const params = {
-            collection_name: collection_name,
-            record_id: record.id,
-            record: JSON.stringify(record)
-          };
-          yield connection.execute(statements.importData, params);
-        }
-        const lastModified = Math.max(...records.map(record => record.last_modified));
-        const params = {
-          collection_name: collection_name
-        };
-        const previousLastModified = yield connection.execute(statements.getLastModified, params).then(result => {
-          return result.length > 0 ? result[0].getResultByName("last_modified") : -1;
-        });
-        if (lastModified > previousLastModified) {
-          const params = {
-            collection_name: collection_name,
-            last_modified: lastModified
-          };
-          yield connection.execute(statements.saveLastModified, params);
-        }
-      });
-      return records;
-    });
-  }
-
-  saveLastModified(lastModified) {
-    const parsedLastModified = parseInt(lastModified, 10) || null;
-    const params = {
-      collection_name: this.collection,
-      last_modified: parsedLastModified
-    };
-    return this._executeStatement(statements.saveLastModified, params).then(() => parsedLastModified);
-  }
-
-  getLastModified() {
-    const params = {
-      collection_name: this.collection
-    };
-    return this._executeStatement(statements.getLastModified, params).then(result => {
-      if (result.length == 0) {
-        return 0;
-      }
-      return result[0].getResultByName("last_modified");
-    });
-  }
-}
-
-exports.default = FirefoxAdapter;
-function transactionProxy(collection, preloaded) {
-  const _operations = [];
-
-  return {
-    get operations() {
-      return _operations;
-    },
-
-    create(record) {
-      _operations.push({
-        statement: statements.createData,
-        params: {
-          collection_name: collection,
-          record_id: record.id,
-          record: JSON.stringify(record)
-        }
-      });
-    },
-
-    update(record) {
-      _operations.push({
-        statement: statements.updateData,
-        params: {
-          collection_name: collection,
-          record_id: record.id,
-          record: JSON.stringify(record)
-        }
-      });
-    },
-
-    delete(id) {
-      _operations.push({
-        statement: statements.deleteData,
-        params: {
-          collection_name: collection,
-          record_id: id
-        }
-      });
-    },
-
-    get(id) {
-      // Gecko JS engine outputs undesired warnings if id is not in preloaded.
-      return id in preloaded ? preloaded[id] : undefined;
-    }
-  };
-}
-
-},{"../src/adapters/base":6,"../src/utils":8}],2:[function(require,module,exports){
+(function(f){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=f()}else if(typeof define==="function"&&define.amd){define([],f)}else{var g;if(typeof window!=="undefined"){g=window}else if(typeof global!=="undefined"){g=global}else if(typeof self!=="undefined"){g=self}else{g=this}g.Kinto = f()}})(function(){var define,module,exports;return (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
 /*
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -395,19 +47,9 @@ Object.defineProperty(exports, "__esModule", {
 
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
-exports.default = loadKinto;
-
-var _base = require("../src/adapters/base");
-
-var _base2 = _interopRequireDefault(_base);
-
 var _KintoBase = require("../src/KintoBase");
 
 var _KintoBase2 = _interopRequireDefault(_KintoBase);
-
-var _FirefoxStorage = require("./FirefoxStorage");
-
-var _FirefoxStorage2 = _interopRequireDefault(_FirefoxStorage);
 
 var _utils = require("../src/utils");
 
@@ -415,67 +57,47 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 
 const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
-function loadKinto() {
-  const { EventEmitter } = Cu.import("resource://devtools/shared/event-emitter.js", {});
-  const { generateUUID } = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
+Cu.import("resource://gre/modules/Timer.jsm");
+Cu.importGlobalProperties(["fetch"]);
+const { EventEmitter } = Cu.import("resource://devtools/shared/event-emitter.js", {});
+const { generateUUID } = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
 
-  // Use standalone kinto-http module landed in FFx.
-  const { KintoHttpClient } = Cu.import("resource://services-common/kinto-http-client.js");
+// Use standalone kinto-http module landed in FFx.
+const { KintoHttpClient } = Cu.import("resource://services-common/kinto-http-client.js");
 
-  Cu.import("resource://gre/modules/Timer.jsm");
-  Cu.importGlobalProperties(['fetch']);
+class Kinto extends _KintoBase2.default {
+  constructor(options = {}) {
+    const events = {};
+    EventEmitter.decorate(events);
 
-  // Leverage Gecko service to generate UUIDs.
-  function makeIDSchema() {
-    return {
+    const defaults = {
+      events,
+      ApiClass: KintoHttpClient
+    };
+    super(_extends({}, defaults, options));
+  }
+
+  collection(collName, options = {}) {
+    const idSchema = {
       validate: _utils.RE_UUID.test.bind(_utils.RE_UUID),
       generate: function () {
         return generateUUID().toString().replace(/[{}]/g, "");
       }
     };
+    return super.collection(collName, _extends({ idSchema }, options));
   }
-
-  class KintoFX extends _KintoBase2.default {
-    static get adapters() {
-      return {
-        BaseAdapter: _base2.default,
-        FirefoxAdapter: _FirefoxStorage2.default
-      };
-    }
-
-    constructor(options = {}) {
-      const emitter = {};
-      EventEmitter.decorate(emitter);
-
-      const defaults = {
-        events: emitter,
-        ApiClass: KintoHttpClient,
-        adapter: _FirefoxStorage2.default
-      };
-
-      const expandedOptions = _extends({}, defaults, options);
-      super(expandedOptions);
-    }
-
-    collection(collName, options = {}) {
-      const idSchema = makeIDSchema();
-      const expandedOptions = _extends({ idSchema }, options);
-      return super.collection(collName, expandedOptions);
-    }
-  }
-
-  return KintoFX;
 }
 
-// This fixes compatibility with CommonJS required by browserify.
+exports.default = Kinto; // This fixes compatibility with CommonJS required by browserify.
 // See http://stackoverflow.com/questions/33505992/babel-6-changes-how-it-exports-default/33683495#33683495
+
 if (typeof module === "object") {
-  module.exports = loadKinto;
+  module.exports = Kinto;
 }
 
-},{"../src/KintoBase":4,"../src/adapters/base":6,"../src/utils":8,"./FirefoxStorage":1}],3:[function(require,module,exports){
+},{"../src/KintoBase":3,"../src/utils":7}],2:[function(require,module,exports){
 
-},{}],4:[function(require,module,exports){
+},{}],3:[function(require,module,exports){
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
@@ -596,14 +218,12 @@ class KintoBase {
 }
 exports.default = KintoBase;
 
-},{"./adapters/base":6,"./collection":7}],5:[function(require,module,exports){
+},{"./adapters/base":5,"./collection":6}],4:[function(require,module,exports){
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
 var _base = require("./base.js");
 
@@ -613,6 +233,8 @@ var _utils = require("../utils");
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
+function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+
 const INDEXED_FIELDS = ["id", "_status", "last_modified"];
 
 /**
@@ -620,12 +242,14 @@ const INDEXED_FIELDS = ["id", "_status", "last_modified"];
  * @type {Object}
  */
 const cursorHandlers = {
-  all(done) {
+  all(filters, done) {
     const results = [];
     return function (event) {
       const cursor = event.target.result;
       if (cursor) {
-        results.push(cursor.value);
+        if ((0, _utils.filterObject)(filters, cursor.value)) {
+          results.push(cursor.value);
+        }
         cursor.continue();
       } else {
         done(results);
@@ -634,6 +258,9 @@ const cursorHandlers = {
   },
 
   in(values, done) {
+    if (values.length === 0) {
+      return done([]);
+    }
     const sortedValues = [].slice.call(values).sort();
     const results = [];
     return function (event) {
@@ -686,14 +313,15 @@ function findIndexedField(filters) {
  * @param  {IDBStore}         store      The IDB store.
  * @param  {String|undefined} indexField The indexed field to query, if any.
  * @param  {Any}              value      The value to filter, if any.
+ * @param  {Object}           filters    More filters.
  * @param  {Function}         done       The operation completion handler.
  * @return {IDBRequest}
  */
-function createListRequest(store, indexField, value, done) {
+function createListRequest(store, indexField, value, filters, done) {
   if (!indexField) {
     // Get all records.
     const request = store.openCursor();
-    request.onsuccess = cursorHandlers.all(done);
+    request.onsuccess = cursorHandlers.all(filters, done);
     return request;
   }
 
@@ -706,7 +334,7 @@ function createListRequest(store, indexField, value, done) {
 
   // WHERE field = value clause
   const request = store.index(indexField).openCursor(IDBKeyRange.only(value));
-  request.onsuccess = cursorHandlers.all(done);
+  request.onsuccess = cursorHandlers.all(filters, done);
   return request;
 }
 
@@ -732,12 +360,10 @@ class IDB extends _base2.default {
     this.dbname = dbname;
   }
 
-  _handleError(method) {
-    return err => {
-      const error = new Error(method + "() " + err.message);
-      error.stack = err.stack;
-      throw error;
-    };
+  _handleError(method, err) {
+    const error = new Error(method + "() " + err.message);
+    error.stack = err.stack;
+    throw error;
   }
 
   /**
@@ -822,14 +448,25 @@ class IDB extends _base2.default {
    * @return {Promise}
    */
   clear() {
-    return this.open().then(() => {
-      return new Promise((resolve, reject) => {
-        const { transaction, store } = this.prepare("readwrite");
-        store.clear();
-        transaction.onerror = event => reject(new Error(event.target.error));
-        transaction.oncomplete = () => resolve();
-      });
-    }).catch(this._handleError("clear"));
+    var _this = this;
+
+    return _asyncToGenerator(function* () {
+      try {
+        yield _this.open();
+        return new Promise(function (resolve, reject) {
+          const { transaction, store } = _this.prepare("readwrite");
+          store.clear();
+          transaction.onerror = function (event) {
+            return reject(new Error(event.target.error));
+          };
+          transaction.oncomplete = function () {
+            return resolve();
+          };
+        });
+      } catch (e) {
+        _this._handleError("clear", e);
+      }
+    })();
   }
 
   /**
@@ -863,46 +500,55 @@ class IDB extends _base2.default {
    * @return {Promise}
    */
   execute(callback, options = { preload: [] }) {
-    // Transactions in IndexedDB are autocommited when a callback does not
-    // perform any additional operation.
-    // The way Promises are implemented in Firefox (see https://bugzilla.mozilla.org/show_bug.cgi?id=1193394)
-    // prevents using within an opened transaction.
-    // To avoid managing asynchronocity in the specified `callback`, we preload
-    // a list of record in order to execute the `callback` synchronously.
-    // See also:
-    // - http://stackoverflow.com/a/28388805/330911
-    // - http://stackoverflow.com/a/10405196
-    // - https://jakearchibald.com/2015/tasks-microtasks-queues-and-schedules/
-    return this.open().then(_ => new Promise((resolve, reject) => {
-      // Start transaction.
-      const { transaction, store } = this.prepare("readwrite");
-      // Preload specified records using index.
-      const ids = options.preload;
-      store.index("id").openCursor().onsuccess = cursorHandlers.in(ids, records => {
-        // Store obtained records by id.
-        const preloaded = records.reduce((acc, record) => {
-          acc[record.id] = record;
-          return acc;
-        }, {});
-        // Expose a consistent API for every adapter instead of raw store methods.
-        const proxy = transactionProxy(store, preloaded);
-        // The callback is executed synchronously within the same transaction.
-        let result;
-        try {
-          result = callback(proxy);
-        } catch (e) {
-          transaction.abort();
-          reject(e);
-        }
-        if (result instanceof Promise) {
-          // XXX: investigate how to provide documentation details in error.
-          reject(new Error("execute() callback should not return a Promise."));
-        }
-        // XXX unsure if we should manually abort the transaction on error
-        transaction.onerror = event => reject(new Error(event.target.error));
-        transaction.oncomplete = event => resolve(result);
+    var _this2 = this;
+
+    return _asyncToGenerator(function* () {
+      // Transactions in IndexedDB are autocommited when a callback does not
+      // perform any additional operation.
+      // The way Promises are implemented in Firefox (see https://bugzilla.mozilla.org/show_bug.cgi?id=1193394)
+      // prevents using within an opened transaction.
+      // To avoid managing asynchronocity in the specified `callback`, we preload
+      // a list of record in order to execute the `callback` synchronously.
+      // See also:
+      // - http://stackoverflow.com/a/28388805/330911
+      // - http://stackoverflow.com/a/10405196
+      // - https://jakearchibald.com/2015/tasks-microtasks-queues-and-schedules/
+      yield _this2.open();
+      return new Promise(function (resolve, reject) {
+        // Start transaction.
+        const { transaction, store } = _this2.prepare("readwrite");
+        // Preload specified records using index.
+        const ids = options.preload;
+        store.index("id").openCursor().onsuccess = cursorHandlers.in(ids, function (records) {
+          // Store obtained records by id.
+          const preloaded = records.reduce(function (acc, record) {
+            acc[record.id] = record;
+            return acc;
+          }, {});
+          // Expose a consistent API for every adapter instead of raw store methods.
+          const proxy = transactionProxy(store, preloaded);
+          // The callback is executed synchronously within the same transaction.
+          let result;
+          try {
+            result = callback(proxy);
+          } catch (e) {
+            transaction.abort();
+            reject(e);
+          }
+          if (result instanceof Promise) {
+            // XXX: investigate how to provide documentation details in error.
+            reject(new Error("execute() callback should not return a Promise."));
+          }
+          // XXX unsure if we should manually abort the transaction on error
+          transaction.onerror = function (event) {
+            return reject(new Error(event.target.error));
+          };
+          transaction.oncomplete = function (event) {
+            return resolve(result);
+          };
+        });
       });
-    }));
+    })();
   }
 
   /**
@@ -913,14 +559,25 @@ class IDB extends _base2.default {
    * @return {Promise}
    */
   get(id) {
-    return this.open().then(() => {
-      return new Promise((resolve, reject) => {
-        const { transaction, store } = this.prepare();
-        const request = store.get(id);
-        transaction.onerror = event => reject(new Error(event.target.error));
-        transaction.oncomplete = () => resolve(request.result);
-      });
-    }).catch(this._handleError("get"));
+    var _this3 = this;
+
+    return _asyncToGenerator(function* () {
+      try {
+        yield _this3.open();
+        return new Promise(function (resolve, reject) {
+          const { transaction, store } = _this3.prepare();
+          const request = store.get(id);
+          transaction.onerror = function (event) {
+            return reject(new Error(event.target.error));
+          };
+          transaction.oncomplete = function () {
+            return resolve(request.result);
+          };
+        });
+      } catch (e) {
+        _this3._handleError("get", e);
+      }
+    })();
   }
 
   /**
@@ -930,29 +587,40 @@ class IDB extends _base2.default {
    * @return {Promise}
    */
   list(params = { filters: {} }) {
-    const { filters } = params;
-    const indexField = findIndexedField(filters);
-    const value = filters[indexField];
-    return this.open().then(() => {
-      return new Promise((resolve, reject) => {
-        let results = [];
-        const { transaction, store } = this.prepare();
-        createListRequest(store, indexField, value, _results => {
-          // we have received all requested records, parking them within
-          // current scope
-          results = _results;
+    var _this4 = this;
+
+    return _asyncToGenerator(function* () {
+      const { filters } = params;
+      const indexField = findIndexedField(filters);
+      const value = filters[indexField];
+      try {
+        yield _this4.open();
+        const results = yield new Promise(function (resolve, reject) {
+          let results = [];
+          // If `indexField` was used already, don't filter again.
+          const remainingFilters = (0, _utils.omitKeys)(filters, indexField);
+
+          const { transaction, store } = _this4.prepare();
+          createListRequest(store, indexField, value, remainingFilters, function (_results) {
+            // we have received all requested records, parking them within
+            // current scope
+            results = _results;
+          });
+          transaction.onerror = function (event) {
+            return reject(new Error(event.target.error));
+          };
+          transaction.oncomplete = function (event) {
+            return resolve(results);
+          };
         });
-        transaction.onerror = event => reject(new Error(event.target.error));
-        transaction.oncomplete = event => resolve(results);
-      });
-    }).then(results => {
-      // The resulting list of records is filtered and sorted.
-      const remainingFilters = _extends({}, filters);
-      // If `indexField` was used already, don't filter again.
-      delete remainingFilters[indexField];
-      // XXX: with some efforts, this could be fully implemented using IDB API.
-      return (0, _utils.reduceRecords)(remainingFilters, params.order, results);
-    }).catch(this._handleError("list"));
+
+        // The resulting list of records is sorted.
+        // XXX: with some efforts, this could be fully implemented using IDB API.
+        return params.order ? (0, _utils.sortObjects)(params.order, results) : results;
+      } catch (e) {
+        _this4._handleError("list", e);
+      }
+    })();
   }
 
   /**
@@ -963,15 +631,22 @@ class IDB extends _base2.default {
    * @return {Promise}
    */
   saveLastModified(lastModified) {
-    const value = parseInt(lastModified, 10) || null;
-    return this.open().then(() => {
-      return new Promise((resolve, reject) => {
-        const { transaction, store } = this.prepare("readwrite", "__meta__");
+    var _this5 = this;
+
+    return _asyncToGenerator(function* () {
+      const value = parseInt(lastModified, 10) || null;
+      yield _this5.open();
+      return new Promise(function (resolve, reject) {
+        const { transaction, store } = _this5.prepare("readwrite", "__meta__");
         store.put({ name: "lastModified", value: value });
-        transaction.onerror = event => reject(event.target.error);
-        transaction.oncomplete = event => resolve(value);
+        transaction.onerror = function (event) {
+          return reject(event.target.error);
+        };
+        transaction.oncomplete = function (event) {
+          return resolve(value);
+        };
       });
-    });
+    })();
   }
 
   /**
@@ -981,16 +656,21 @@ class IDB extends _base2.default {
    * @return {Promise}
    */
   getLastModified() {
-    return this.open().then(() => {
-      return new Promise((resolve, reject) => {
-        const { transaction, store } = this.prepare(undefined, "__meta__");
+    var _this6 = this;
+
+    return _asyncToGenerator(function* () {
+      yield _this6.open();
+      return new Promise(function (resolve, reject) {
+        const { transaction, store } = _this6.prepare(undefined, "__meta__");
         const request = store.get("lastModified");
-        transaction.onerror = event => reject(event.target.error);
-        transaction.oncomplete = event => {
+        transaction.onerror = function (event) {
+          return reject(event.target.error);
+        };
+        transaction.oncomplete = function (event) {
           resolve(request.result && request.result.value || null);
         };
       });
-    });
+    })();
   }
 
   /**
@@ -1000,14 +680,27 @@ class IDB extends _base2.default {
    * @return {Promise}
    */
   loadDump(records) {
-    return this.execute(transaction => {
-      records.forEach(record => transaction.update(record));
-    }).then(() => this.getLastModified()).then(previousLastModified => {
-      const lastModified = Math.max(...records.map(record => record.last_modified));
-      if (lastModified > previousLastModified) {
-        return this.saveLastModified(lastModified);
+    var _this7 = this;
+
+    return _asyncToGenerator(function* () {
+      try {
+        yield _this7.execute(function (transaction) {
+          records.forEach(function (record) {
+            return transaction.update(record);
+          });
+        });
+        const previousLastModified = yield _this7.getLastModified();
+        const lastModified = Math.max(...records.map(function (record) {
+          return record.last_modified;
+        }));
+        if (lastModified > previousLastModified) {
+          yield _this7.saveLastModified(lastModified);
+        }
+        return records;
+      } catch (e) {
+        _this7._handleError("loadDump", e);
       }
-    }).then(() => records).catch(this._handleError("loadDump"));
+    })();
   }
 }
 
@@ -1040,7 +733,7 @@ function transactionProxy(store, preloaded = []) {
   };
 }
 
-},{"../utils":8,"./base.js":6}],6:[function(require,module,exports){
+},{"../utils":7,"./base.js":5}],5:[function(require,module,exports){
 "use strict";
 
 /**
@@ -1150,7 +843,7 @@ class BaseAdapter {
 }
 exports.default = BaseAdapter;
 
-},{}],7:[function(require,module,exports){
+},{}],6:[function(require,module,exports){
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
@@ -1175,6 +868,8 @@ var _utils = require("./utils");
 var _uuid = require("uuid");
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
 const RECORD_FIELDS_TO_CLEAN = ["_status"];
 const AVAILABLE_HOOKS = ["incoming-changes"];
@@ -1239,7 +934,13 @@ class SyncResultObject {
     if (!Array.isArray(this[type])) {
       return;
     }
-    this[type] = this[type].concat(entries);
+    // Deduplicate entries by id. If the values don't have `id` attribute, just
+    // keep all.
+    const deduplicated = this[type].concat(entries).reduce((acc, cur) => {
+      const existing = acc.filter(r => cur.id && r.id ? cur.id != r.id : true);
+      return existing.concat(cur);
+    }, []);
+    this[type] = deduplicated;
     this.ok = this.errors.length + this.conflicts.length === 0;
     return this;
   }
@@ -1554,7 +1255,13 @@ class Collection {
    * @return {Promise}
    */
   clear() {
-    return this.db.clear().then(_ => this.db.saveLastModified(null)).then(_ => ({ data: [], permissions: {} }));
+    var _this = this;
+
+    return _asyncToGenerator(function* () {
+      yield _this.db.clear();
+      yield _this.db.saveLastModified(null);
+      return { data: [], permissions: {} };
+    })();
   }
 
   /**
@@ -1756,56 +1463,138 @@ class Collection {
    * @return {Promise}
    */
   list(params = {}, options = { includeDeleted: false }) {
-    params = _extends({ order: "-last_modified", filters: {} }, params);
-    return this.db.list(params).then(results => {
+    var _this2 = this;
+
+    return _asyncToGenerator(function* () {
+      params = _extends({ order: "-last_modified", filters: {} }, params);
+      const results = yield _this2.db.list(params);
       let data = results;
       if (!options.includeDeleted) {
-        data = results.filter(record => record._status !== "deleted");
+        data = results.filter(function (record) {
+          return record._status !== "deleted";
+        });
       }
       return { data, permissions: {} };
-    });
+    })();
   }
 
   /**
-   * Import changes into the local database.
-   *
+   * Imports remote changes into the local database.
+   * This method is in charge of detecting the conflicts, and resolve them
+   * according to the specified strategy.
    * @param  {SyncResultObject} syncResultObject The sync result object.
-   * @param  {Object}           changeObject     The change object.
+   * @param  {Array}            decodedChanges   The list of changes to import in the local database.
+   * @param  {String}           strategy         The {@link Collection.strategy} (default: MANUAL)
    * @return {Promise}
    */
-  importChanges(syncResultObject, changeObject) {
-    return Promise.all(changeObject.changes.map(change => {
-      return this._decodeRecord("remote", change);
-    })).then(decodedChanges => {
-      // No change, nothing to import.
-      if (decodedChanges.length === 0) {
-        return Promise.resolve(syncResultObject);
-      }
+  importChanges(syncResultObject, decodedChanges, strategy = Collection.strategy.MANUAL) {
+    var _this3 = this;
+
+    return _asyncToGenerator(function* () {
       // Retrieve records matching change ids.
-      return this.db.execute(transaction => {
-        return decodedChanges.map(remote => {
-          // Store remote change into local database.
-          return importChange(transaction, remote, this.localFields);
+      try {
+        const { imports, resolved } = yield _this3.db.execute(function (transaction) {
+          const imports = decodedChanges.map(function (remote) {
+            // Store remote change into local database.
+            return importChange(transaction, remote, _this3.localFields);
+          });
+          const conflicts = imports.filter(function (i) {
+            return i.type === "conflicts";
+          }).map(function (i) {
+            return i.data;
+          });
+          const resolved = _this3._handleConflicts(transaction, conflicts, strategy);
+          return { imports, resolved };
+        }, { preload: decodedChanges.map(function (record) {
+            return record.id;
+          }) });
+
+        // Lists of created/updated/deleted records
+        imports.forEach(function ({ type, data }) {
+          return syncResultObject.add(type, data);
         });
-      }, { preload: decodedChanges.map(record => record.id) }).catch(err => {
+
+        // Automatically resolved conflicts (if not manual)
+        if (resolved.length > 0) {
+          syncResultObject.reset("conflicts").add("resolved", resolved);
+        }
+      } catch (err) {
         const data = {
           type: "incoming",
           message: err.message,
           stack: err.stack
         };
         // XXX one error of the whole transaction instead of per atomic op
-        return [{ type: "errors", data }];
-      }).then(imports => {
-        for (let imported of imports) {
-          if (imported.type !== "void") {
-            syncResultObject.add(imported.type, imported.data);
-          }
-        }
-        return syncResultObject;
-      });
-    }).then(syncResultObject => {
-      syncResultObject.lastModified = changeObject.lastModified;
+        syncResultObject.add("errors", data);
+      }
+
       return syncResultObject;
+    })();
+  }
+
+  /**
+   * Imports the responses of pushed changes into the local database.
+   * Basically it stores the timestamp assigned by the server into the local
+   * database.
+   * @param  {SyncResultObject} syncResultObject The sync result object.
+   * @param  {Array}            toApplyLocally   The list of changes to import in the local database.
+   * @param  {Array}            conflicts        The list of conflicts that have to be resolved.
+   * @param  {String}           strategy         The {@link Collection.strategy}.
+   * @return {Promise}
+   */
+  _applyPushedResults(syncResultObject, toApplyLocally, conflicts, strategy = Collection.strategy.MANUAL) {
+    var _this4 = this;
+
+    return _asyncToGenerator(function* () {
+      const toDeleteLocally = toApplyLocally.filter(function (r) {
+        return r.deleted;
+      });
+      const toUpdateLocally = toApplyLocally.filter(function (r) {
+        return !r.deleted;
+      });
+
+      const { published, resolved } = yield _this4.db.execute(function (transaction) {
+        const updated = toUpdateLocally.map(function (record) {
+          const synced = markSynced(record);
+          transaction.update(synced);
+          return synced;
+        });
+        const deleted = toDeleteLocally.map(function (record) {
+          transaction.delete(record.id);
+          // Amend result data with the deleted attribute set
+          return { id: record.id, deleted: true };
+        });
+        const published = updated.concat(deleted);
+        // Handle conflicts, if any
+        const resolved = _this4._handleConflicts(transaction, conflicts, strategy);
+        return { published, resolved };
+      });
+
+      syncResultObject.add("published", published);
+
+      if (resolved.length > 0) {
+        syncResultObject.reset("conflicts").reset("resolved").add("resolved", resolved);
+      }
+      return syncResultObject;
+    })();
+  }
+
+  /**
+   * Handles synchronization conflicts according to specified strategy.
+   *
+   * @param  {SyncResultObject} result    The sync result object.
+   * @param  {String}           strategy  The {@link Collection.strategy}.
+   * @return {Promise}
+   */
+  _handleConflicts(transaction, conflicts, strategy) {
+    if (strategy === Collection.strategy.MANUAL) {
+      return [];
+    }
+    return conflicts.map(conflict => {
+      const resolution = strategy === Collection.strategy.CLIENT_WINS ? conflict.local : conflict.remote;
+      const updated = this._resolveRaw(conflict, resolution);
+      transaction.update(updated);
+      return updated;
     });
   }
 
@@ -1856,11 +1645,12 @@ class Collection {
    * @return {Promise} Resolves with the number of processed records.
    */
   resetSyncStatus() {
-    let _count;
-    return this.list({ filters: { _status: ["deleted", "synced"] }, order: "" }, { includeDeleted: true }).then(unsynced => {
-      return this.db.execute(transaction => {
-        _count = unsynced.data.length;
-        unsynced.data.forEach(record => {
+    var _this5 = this;
+
+    return _asyncToGenerator(function* () {
+      const unsynced = yield _this5.list({ filters: { _status: ["deleted", "synced"] }, order: "" }, { includeDeleted: true });
+      yield _this5.db.execute(function (transaction) {
+        unsynced.data.forEach(function (record) {
           if (record._status === "deleted") {
             // Garbage collect deleted records.
             transaction.delete(record.id);
@@ -1873,7 +1663,10 @@ class Collection {
           }
         });
       });
-    }).then(() => this.db.saveLastModified(null)).then(() => _count);
+      _this5._lastModified = null;
+      yield _this5.db.saveLastModified(null);
+      return unsynced.data.length;
+    })();
   }
 
   /**
@@ -1885,9 +1678,17 @@ class Collection {
    * @return {Promise}
    */
   gatherLocalChanges() {
-    return Promise.all([this.list({ filters: { _status: ["created", "updated"] }, order: "" }), this.list({ filters: { _status: "deleted" }, order: "" }, { includeDeleted: true })]).then(([unsynced, deleted]) => {
-      return Promise.all([Promise.all(unsynced.data.map(this._encodeRecord.bind(this, "remote"))), Promise.all(deleted.data.map(this._encodeRecord.bind(this, "remote")))]);
-    }).then(([toSync, toDelete]) => ({ toSync, toDelete }));
+    var _this6 = this;
+
+    return _asyncToGenerator(function* () {
+      const unsynced = yield _this6.list({ filters: { _status: ["created", "updated"] }, order: "" });
+      const deleted = yield _this6.list({ filters: { _status: "deleted" }, order: "" }, { includeDeleted: true });
+
+      const toSync = yield Promise.all(unsynced.data.map(_this6._encodeRecord.bind(_this6, "remote")));
+      const toDelete = yield Promise.all(deleted.data.map(_this6._encodeRecord.bind(_this6, "remote")));
+
+      return { toSync, toDelete };
+    })();
   }
 
   /**
@@ -1904,31 +1705,40 @@ class Collection {
    * @return {Promise}
    */
   pullChanges(client, syncResultObject, options = {}) {
-    if (!syncResultObject.ok) {
-      return Promise.resolve(syncResultObject);
-    }
-    options = _extends({ strategy: Collection.strategy.MANUAL,
-      lastModified: this.lastModified,
-      headers: {}
-    }, options);
+    var _this7 = this;
 
-    // Optionally ignore some records when pulling for changes.
-    // (avoid redownloading our own changes on last step of #sync())
-    let filters;
-    if (options.exclude) {
-      // Limit the list of excluded records to the first 50 records in order
-      // to remain under de-facto URL size limit (~2000 chars).
-      // http://stackoverflow.com/questions/417142/what-is-the-maximum-length-of-a-url-in-different-browsers/417184#417184
-      const exclude_id = options.exclude.slice(0, 50).map(r => r.id).join(",");
-      filters = { exclude_id };
-    }
-    // First fetch remote changes from the server
-    return client.listRecords({
-      // Since should be ETag (see https://github.com/Kinto/kinto.js/issues/356)
-      since: options.lastModified ? `${ options.lastModified }` : undefined,
-      headers: options.headers,
-      filters
-    }).then(({ data, last_modified }) => {
+    return _asyncToGenerator(function* () {
+      if (!syncResultObject.ok) {
+        return syncResultObject;
+      }
+
+      const since = _this7.lastModified ? _this7.lastModified : yield _this7.db.getLastModified();
+
+      options = _extends({
+        strategy: Collection.strategy.MANUAL,
+        lastModified: since,
+        headers: {}
+      }, options);
+
+      // Optionally ignore some records when pulling for changes.
+      // (avoid redownloading our own changes on last step of #sync())
+      let filters;
+      if (options.exclude) {
+        // Limit the list of excluded records to the first 50 records in order
+        // to remain under de-facto URL size limit (~2000 chars).
+        // http://stackoverflow.com/questions/417142/what-is-the-maximum-length-of-a-url-in-different-browsers/417184#417184
+        const exclude_id = options.exclude.slice(0, 50).map(function (r) {
+          return r.id;
+        }).join(",");
+        filters = { exclude_id };
+      }
+      // First fetch remote changes from the server
+      const { data, last_modified } = yield client.listRecords({
+        // Since should be ETag (see https://github.com/Kinto/kinto.js/issues/356)
+        since: options.lastModified ? `${ options.lastModified }` : undefined,
+        headers: options.headers,
+        filters
+      });
       // last_modified is the ETag header value (string).
       // For retro-compatibility with first kinto.js versions
       // parse it to integer.
@@ -1944,13 +1754,23 @@ class Collection {
         throw Error("Server has been flushed.");
       }
 
-      const payload = { lastModified: unquoted, changes: data };
-      return this.applyHook("incoming-changes", payload);
-    })
-    // Reflect these changes locally
-    .then(changes => this.importChanges(syncResultObject, changes))
-    // Handle conflicts, if any
-    .then(result => this._handleConflicts(result, options.strategy));
+      syncResultObject.lastModified = unquoted;
+
+      // Decode incoming changes.
+      const decodedChanges = yield Promise.all(data.map(function (change) {
+        return _this7._decodeRecord("remote", change);
+      }));
+      // Hook receives decoded records.
+      const payload = { lastModified: unquoted, changes: decodedChanges };
+      const afterHooks = yield _this7.applyHook("incoming-changes", payload);
+
+      // No change, nothing to import.
+      if (afterHooks.changes.length > 0) {
+        // Reflect these changes locally
+        yield _this7.importChanges(syncResultObject, afterHooks.changes, options.strategy);
+      }
+      return syncResultObject;
+    })();
   }
 
   applyHook(hookName, payload) {
@@ -1976,29 +1796,32 @@ class Collection {
    *
    * @param  {KintoClient.Collection} client           Kinto client Collection instance.
    * @param  {SyncResultObject}       syncResultObject The sync result object.
+   * @param  {Object}                 changes          The change object.
+   * @param  {Array}                  changes.toDelete The list of records to delete.
+   * @param  {Array}                  changes.toSync   The list of records to create/update.
    * @param  {Object}                 options          The options object.
    * @return {Promise}
    */
-  pushChanges(client, syncResultObject, options = {}) {
-    if (!syncResultObject.ok) {
-      return Promise.resolve(syncResultObject);
-    }
-    const safe = !options.strategy || options.strategy !== Collection.CLIENT_WINS;
-    let synced;
+  pushChanges(client, { toDelete = [], toSync }, syncResultObject, options = {}) {
+    var _this8 = this;
 
-    // Fetch local changes
-    return this.gatherLocalChanges().then(({ toDelete, toSync }) => {
-      // Send batch update requests
-      return client.batch(batch => {
-        toDelete.forEach(r => {
+    return _asyncToGenerator(function* () {
+      if (!syncResultObject.ok) {
+        return syncResultObject;
+      }
+      const safe = !options.strategy || options.strategy !== Collection.CLIENT_WINS;
+
+      // Perform a batch request with every changes.
+      const synced = yield client.batch(function (batch) {
+        toDelete.forEach(function (r) {
           // never published locally deleted records should not be pusblished
           if (r.last_modified) {
             batch.deleteRecord(r);
           }
         });
-        toSync.forEach(r => {
+        toSync.forEach(function (r) {
           // Clean local fields (like _status) before sending to server.
-          const published = this.cleanLocalFields(r);
+          const published = _this8.cleanLocalFields(r);
           if (r._status === "created") {
             batch.createRecord(published);
           } else {
@@ -2006,92 +1829,53 @@ class Collection {
           }
         });
       }, { headers: options.headers, safe, aggregate: true });
-    })
-    // Update published local records
-    .then(batchResult => {
-      synced = batchResult;
-      // Merge outgoing errors into sync result object
-      syncResultObject.add("errors", synced.errors.map(error => {
-        error.type = "outgoing";
-        return error;
+
+      // Store outgoing errors into sync result object
+      syncResultObject.add("errors", synced.errors.map(function (e) {
+        return _extends({}, e, { type: "outgoing" });
       }));
 
-      // The result of a batch returns data and permissions.
-      // XXX: permissions are ignored currently.
-      return Promise.all(synced.conflicts.map(({ type, local, remote }) => {
+      // Store outgoing conflicts into sync result object
+      const conflicts = [];
+      for (let { type, local, remote } of synced.conflicts) {
         // Note: we ensure that local data are actually available, as they may
         // be missing in the case of a published deletion.
-        const safeLocal = local && local.data || {};
-        return this._decodeRecord("remote", safeLocal).then(realLocal => {
-          return this._decodeRecord("remote", remote).then(realRemote => {
-            return { type, local: realLocal, remote: realRemote };
-          });
-        });
-      }));
-    }).then(conflicts => {
-      // Merge outgoing conflicts into sync result object
+        const safeLocal = local && local.data || { id: remote.id };
+        const realLocal = yield _this8._decodeRecord("remote", safeLocal);
+        const realRemote = yield _this8._decodeRecord("remote", remote);
+        const conflict = { type, local: realLocal, remote: realRemote };
+        conflicts.push(conflict);
+      }
       syncResultObject.add("conflicts", conflicts);
-
-      // Reflect publication results locally using the response from
-      // the batch request.
-      // For created and updated records, the last_modified coming from server
-      // will be stored locally.
-      const published = synced.published.map(c => c.data);
-      const skipped = synced.skipped.map(c => c.data);
 
       // Records that must be deleted are either deletions that were pushed
       // to server (published) or deleted records that were never pushed (skipped).
-      const missingRemotely = skipped.map(r => {
+      const missingRemotely = synced.skipped.map(function (r) {
         return _extends({}, r, { deleted: true });
+      });
+
+      // For created and updated records, the last_modified coming from server
+      // will be stored locally.
+      // Reflect publication results locally using the response from
+      // the batch request.
+      const published = synced.published.map(function (c) {
+        return c.data;
       });
       const toApplyLocally = published.concat(missingRemotely);
 
-      const toDeleteLocally = toApplyLocally.filter(r => r.deleted);
-      const toUpdateLocally = toApplyLocally.filter(r => !r.deleted);
-      // First, apply the decode transformers, if any
-      return Promise.all(toUpdateLocally.map(record => {
-        return this._decodeRecord("remote", record);
-      }))
-      // Process everything within a single transaction.
-      .then(results => {
-        return this.db.execute(transaction => {
-          const updated = results.map(record => {
-            const synced = markSynced(record);
-            transaction.update(synced);
-            return { data: synced };
-          });
-          const deleted = toDeleteLocally.map(record => {
-            transaction.delete(record.id);
-            // Amend result data with the deleted attribute set
-            return { data: { id: record.id, deleted: true } };
-          });
-          return updated.concat(deleted);
-        });
-      }).then(published => {
-        syncResultObject.add("published", published.map(res => res.data));
-        return syncResultObject;
-      });
-    })
-    // Handle conflicts, if any
-    .then(result => this._handleConflicts(result, options.strategy)).then(result => {
-      const resolvedUnsynced = result.resolved.filter(record => record._status !== "synced");
-      // No resolved conflict to reflect anywhere
-      if (resolvedUnsynced.length === 0 || options.resolved) {
-        return result;
-      } else if (options.strategy === Collection.strategy.CLIENT_WINS && !options.resolved) {
-        // We need to push local versions of the records to the server
-        return this.pushChanges(client, result, _extends({}, options, { resolved: true }));
-      } else if (options.strategy === Collection.strategy.SERVER_WINS) {
-        // If records have been automatically resolved according to strategy and
-        // are in non-synced status, mark them as synced.
-        return this.db.execute(transaction => {
-          resolvedUnsynced.forEach(record => {
-            transaction.update(markSynced(record));
-          });
-          return result;
-        });
+      // Apply the decode transformers, if any
+      const decoded = yield Promise.all(toApplyLocally.map(function (record) {
+        return _this8._decodeRecord("remote", record);
+      }));
+
+      // We have to update the local records with the responses of the server
+      // (eg. last_modified values etc.).
+      if (decoded.length > 0 || conflicts.length > 0) {
+        yield _this8._applyPushedResults(syncResultObject, decoded, conflicts, options.strategy);
       }
-    });
+
+      return syncResultObject;
+    })();
   }
 
   /**
@@ -2138,29 +1922,6 @@ class Collection {
   }
 
   /**
-   * Handles synchronization conflicts according to specified strategy.
-   *
-   * @param  {SyncResultObject} result    The sync result object.
-   * @param  {String}           strategy  The {@link Collection.strategy}.
-   * @return {Promise}
-   */
-  _handleConflicts(result, strategy = Collection.strategy.MANUAL) {
-    if (strategy === Collection.strategy.MANUAL || result.conflicts.length === 0) {
-      return Promise.resolve(result);
-    }
-    return this.db.execute(transaction => {
-      return result.conflicts.map(conflict => {
-        const resolution = strategy === Collection.strategy.CLIENT_WINS ? conflict.local : conflict.remote;
-        const updated = this._resolveRaw(conflict, resolution);
-        transaction.update(updated);
-        return updated;
-      });
-    }).then(imports => {
-      return result.reset("conflicts").add("resolved", imports);
-    });
-  }
-
-  /**
    * Synchronize remote and local data. The promise will resolve with a
    * {@link SyncResultObject}, though will reject:
    *
@@ -2188,40 +1949,60 @@ class Collection {
     collection: null,
     remote: null
   }) {
-    const previousRemote = this.api.remote;
-    if (options.remote) {
-      // Note: setting the remote ensures it's valid, throws when invalid.
-      this.api.remote = options.remote;
-    }
-    if (!options.ignoreBackoff && this.api.backoff > 0) {
-      const seconds = Math.ceil(this.api.backoff / 1000);
-      return Promise.reject(new Error(`Server is asking clients to back off; retry in ${ seconds }s or use the ignoreBackoff option.`));
-    }
+    var _this9 = this;
 
-    const client = this.api.bucket(options.bucket || this.bucket).collection(options.collection || this.name);
-    const result = new SyncResultObject();
-    const syncPromise = this.db.getLastModified().then(lastModified => this._lastModified = lastModified).then(_ => this.pullChanges(client, result, options)).then(result => this.pushChanges(client, result, options)).then(result => {
-      // Avoid performing a last pull if nothing has been published.
-      if (result.published.length === 0) {
-        return result;
+    return _asyncToGenerator(function* () {
+      const previousRemote = _this9.api.remote;
+      if (options.remote) {
+        // Note: setting the remote ensures it's valid, throws when invalid.
+        _this9.api.remote = options.remote;
       }
-      // Avoid redownloading our own changes during the last pull.
-      const pullOpts = _extends({}, options, { exclude: result.published });
-      return this.pullChanges(client, result, pullOpts);
-    }).then(syncResultObject => {
-      // Don't persist lastModified value if any conflict or error occured
-      if (!syncResultObject.ok) {
-        return syncResultObject;
+      if (!options.ignoreBackoff && _this9.api.backoff > 0) {
+        const seconds = Math.ceil(_this9.api.backoff / 1000);
+        return Promise.reject(new Error(`Server is asking clients to back off; retry in ${ seconds }s or use the ignoreBackoff option.`));
       }
-      // No conflict occured, persist collection's lastModified value
-      return this.db.saveLastModified(syncResultObject.lastModified).then(lastModified => {
-        this._lastModified = lastModified;
-        return syncResultObject;
-      });
-    });
 
-    // Ensure API default remote is reverted if a custom one's been used
-    return (0, _utils.pFinally)(syncPromise, () => this.api.remote = previousRemote);
+      const client = _this9.api.bucket(options.bucket || _this9.bucket).collection(options.collection || _this9.name);
+
+      const result = new SyncResultObject();
+      try {
+        // Fetch last changes from the server.
+        yield _this9.pullChanges(client, result, options);
+        const { lastModified } = result;
+
+        // Fetch local changes
+        const { toDelete, toSync } = yield _this9.gatherLocalChanges();
+
+        // Publish local changes and pull local resolutions
+        yield _this9.pushChanges(client, { toDelete, toSync }, result, options);
+
+        // Publish local resolution of push conflicts to server (on CLIENT_WINS)
+        const resolvedUnsynced = result.resolved.filter(function (r) {
+          return r._status !== "synced";
+        });
+        if (resolvedUnsynced.length > 0) {
+          const resolvedEncoded = yield Promise.all(resolvedUnsynced.map(_this9._encodeRecord.bind(_this9, "remote")));
+          yield _this9.pushChanges(client, { toSync: resolvedEncoded }, result, options);
+        }
+        // Perform a last pull to catch changes that occured after the last pull,
+        // while local changes were pushed. Do not do it nothing was pushed.
+        if (result.published.length > 0) {
+          // Avoid redownloading our own changes during the last pull.
+          const pullOpts = _extends({}, options, { lastModified, exclude: result.published });
+          yield _this9.pullChanges(client, result, pullOpts);
+        }
+
+        // Don't persist lastModified value if any conflict or error occured
+        if (result.ok) {
+          // No conflict occured, persist collection's lastModified value
+          _this9._lastModified = yield _this9.db.saveLastModified(result.lastModified);
+        }
+      } finally {
+        // Ensure API default remote is reverted if a custom one's been used
+        _this9.api.remote = previousRemote;
+      }
+      return result;
+    })();
   }
 
   /**
@@ -2234,33 +2015,35 @@ class Collection {
    * @return {Promise} with the effectively imported records.
    */
   loadDump(records) {
-    const reject = msg => Promise.reject(new Error(msg));
-    if (!Array.isArray(records)) {
-      return reject("Records is not an array.");
-    }
+    var _this10 = this;
 
-    for (let record of records) {
-      if (!record.hasOwnProperty("id") || !this.idSchema.validate(record.id)) {
-        return reject("Record has invalid ID: " + JSON.stringify(record));
+    return _asyncToGenerator(function* () {
+      if (!Array.isArray(records)) {
+        throw new Error("Records is not an array.");
       }
 
-      if (!record.last_modified) {
-        return reject("Record has no last_modified value: " + JSON.stringify(record));
+      for (let record of records) {
+        if (!record.hasOwnProperty("id") || !_this10.idSchema.validate(record.id)) {
+          throw new Error("Record has invalid ID: " + JSON.stringify(record));
+        }
+
+        if (!record.last_modified) {
+          throw new Error("Record has no last_modified value: " + JSON.stringify(record));
+        }
       }
-    }
 
-    // Fetch all existing records from local database,
-    // and skip those who are newer or not marked as synced.
+      // Fetch all existing records from local database,
+      // and skip those who are newer or not marked as synced.
 
-    // XXX filter by status / ids in records
+      // XXX filter by status / ids in records
 
-    return this.list({}, { includeDeleted: true }).then(res => {
-      return res.data.reduce((acc, record) => {
+      const { data } = yield _this10.list({}, { includeDeleted: true });
+      const existingById = data.reduce(function (acc, record) {
         acc[record.id] = record;
         return acc;
       }, {});
-    }).then(existingById => {
-      return records.filter(record => {
+
+      const newRecords = records.filter(function (record) {
         const localRecord = existingById[record.id];
         const shouldKeep =
         // No local record with this id.
@@ -2273,7 +2056,9 @@ class Collection {
         record.last_modified > localRecord.last_modified;
         return shouldKeep;
       });
-    }).then(newRecords => newRecords.map(markSynced)).then(newRecords => this.db.loadDump(newRecords));
+
+      return yield _this10.db.loadDump(newRecords.map(markSynced));
+    })();
   }
 }
 
@@ -2509,18 +2294,17 @@ class CollectionTransaction {
 }
 exports.CollectionTransaction = CollectionTransaction;
 
-},{"./adapters/IDB":5,"./adapters/base":6,"./utils":8,"uuid":3}],8:[function(require,module,exports){
+},{"./adapters/IDB":4,"./adapters/base":5,"./utils":7,"uuid":2}],7:[function(require,module,exports){
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
 exports.sortObjects = sortObjects;
+exports.filterObject = filterObject;
 exports.filterObjects = filterObjects;
-exports.reduceRecords = reduceRecords;
 exports.isUUID = isUUID;
 exports.waterfall = waterfall;
-exports.pFinally = pFinally;
 exports.deepEqual = deepEqual;
 exports.omitKeys = omitKeys;
 const RE_UUID = exports.RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2560,35 +2344,33 @@ function sortObjects(order, list) {
 }
 
 /**
+ * Test if a single object matches all given filters.
+ *
+ * @param  {Object} filters  The filters object.
+ * @param  {Object} entry    The object to filter.
+ * @return {Function}
+ */
+function filterObject(filters, entry) {
+  return Object.keys(filters).every(filter => {
+    const value = filters[filter];
+    if (Array.isArray(value)) {
+      return value.some(candidate => candidate === entry[filter]);
+    }
+    return entry[filter] === value;
+  });
+}
+
+/**
  * Filters records in a list matching all given filters.
  *
- * @param  {String} filters  The filters object.
+ * @param  {Object} filters  The filters object.
  * @param  {Array}  list     The collection to filter.
  * @return {Array}
  */
 function filterObjects(filters, list) {
   return list.filter(entry => {
-    return Object.keys(filters).every(filter => {
-      const value = filters[filter];
-      if (Array.isArray(value)) {
-        return value.some(candidate => candidate === entry[filter]);
-      }
-      return entry[filter] === value;
-    });
+    return filterObject(filters, entry);
   });
-}
-
-/**
- * Filter and sort list against provided filters and order.
- *
- * @param  {Object} filters  The filters to apply.
- * @param  {String} order    The order to apply.
- * @param  {Array}  list     The list to reduce.
- * @return {Array}
- */
-function reduceRecords(filters, order, list) {
-  const filtered = filters ? filterObjects(filters, list) : list;
-  return order ? sortObjects(order, filtered) : filtered;
 }
 
 /**
@@ -2616,20 +2398,6 @@ function waterfall(fns, init) {
   return fns.reduce((promise, nextFn) => {
     return promise.then(nextFn);
   }, Promise.resolve(init));
-}
-
-/**
- * Ensure a callback is always executed at the end of the passed promise flow.
- *
- * @link   https://github.com/domenic/promises-unwrapping/issues/18
- * @param  {Promise}  promise  The promise.
- * @param  {Function} fn       The callback.
- * @return {Promise}
- */
-function pFinally(promise, fn) {
-  return promise.then(value => Promise.resolve(fn()).then(() => value), reason => Promise.resolve(fn()).then(() => {
-    throw reason;
-  }));
 }
 
 /**
@@ -2677,5 +2445,5 @@ function omitKeys(obj, keys = []) {
   }, {});
 }
 
-},{}]},{},[2])(2)
+},{}]},{},[1])(1)
 });

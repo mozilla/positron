@@ -12,6 +12,7 @@
 #include "Matrix.h"
 #include "Quaternion.h"
 #include "UserData.h"
+#include <vector>
 
 // GenericRefCountedBase allows us to hold on to refcounted objects of any type
 // (contrary to RefCounted<T> which requires knowing the type T) and, in particular,
@@ -44,12 +45,13 @@ typedef _FcPattern FcPattern;
 struct ID3D11Texture2D;
 struct ID3D11Device;
 struct ID2D1Device;
+struct IDWriteFactory;
 struct IDWriteRenderingParams;
-struct IDWriteFont;
-struct IDWriteFontFamily;
 struct IDWriteFontFace;
 
 class GrContext;
+class SkCanvas;
+struct gfxFontStyle;
 
 struct CGContext;
 typedef struct CGContext *CGContextRef;
@@ -630,6 +632,10 @@ struct Glyph
   Point mPosition;
 };
 
+static inline bool operator==(const Glyph& aOne, const Glyph& aOther) {
+  return aOne.mIndex == aOther.mIndex && aOne.mPosition == aOther.mPosition;
+}
+
 /** This class functions as a glyph buffer that can be drawn to a DrawTarget.
  * @todo XXX - This should probably contain the guts of gfxTextRun in the future as
  * roc suggested. But for now it's a simple container for a glyph vector.
@@ -664,7 +670,7 @@ struct GlyphMetrics
  * at a particular size. It is passed into text drawing calls to describe
  * the font used for the drawing call.
  */
-class ScaledFont : public RefCounted<ScaledFont>
+class ScaledFont : public external::AtomicRefCounted<ScaledFont>
 {
 public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(ScaledFont)
@@ -694,7 +700,7 @@ public:
    * implementation in some backends, and more efficient implementation in
    * others.
    */
-  virtual void CopyGlyphsToBuilder(const GlyphBuffer &aBuffer, PathBuilder *aBuilder, BackendType aBackendType, const Matrix *aTransformHint = nullptr) = 0;
+  virtual void CopyGlyphsToBuilder(const GlyphBuffer &aBuffer, PathBuilder *aBuilder, const Matrix *aTransformHint = nullptr) = 0;
 
   /* This gets the metrics of a set of glyphs for the current font face.
    */
@@ -778,6 +784,7 @@ public:
   virtual BackendType GetBackendType() const = 0;
 
   virtual bool IsRecording() const { return false; }
+  virtual bool IsCaptureDT() const { return false; }
 
   /**
    * Returns a SourceSurface which is a snapshot of the current contents of the DrawTarget.
@@ -1272,6 +1279,17 @@ protected:
 
 class DrawTargetCapture : public DrawTarget
 {
+public:
+  virtual bool IsCaptureDT() const { return true; }
+
+  /**
+   * Returns true if the recording only contains FillGlyph calls with
+   * a single font and color. Returns the list of Glyphs along with
+   * the font and color as outparams if so.
+   */
+  virtual bool ContainsOnlyColoredGlyphs(RefPtr<ScaledFont>& aScaledFont,
+                                         Color& aColor,
+                                         std::vector<Glyph>& aGlyphs) = 0;
 };
 
 class DrawEventRecorder : public RefCounted<DrawEventRecorder>
@@ -1437,9 +1455,6 @@ public:
 
   static void SetGlobalEventRecorder(DrawEventRecorder *aRecorder);
 
-  // This is a little hacky at the moment, but we want to have this data. Bug 1068613.
-  static void SetLogForwarder(LogForwarder* aLogFwd);
-
   static uint32_t GetMaxSurfaceSize(BackendType aType);
 
   static LogForwarder* GetLogForwarder() { return sConfig ? sConfig->mLogForwarder : nullptr; }
@@ -1470,8 +1485,11 @@ public:
 
   static bool DoesBackendSupportDataDrawtarget(BackendType aType);
 
+#ifdef USE_SKIA
+  static already_AddRefed<DrawTarget> CreateDrawTargetWithSkCanvas(SkCanvas* aCanvas);
+#endif
+
 #ifdef XP_DARWIN
-  static already_AddRefed<DrawTarget> CreateDrawTargetForCairoCGContext(CGContextRef cg, const IntSize& aSize);
   static already_AddRefed<GlyphRenderingOptions>
     CreateCGGlyphRenderingOptions(const Color &aFontSmoothingBackgroundColor);
 #endif
@@ -1484,8 +1502,10 @@ public:
    * Returns true on success, or false on failure and leaves the D2D1/Direct3D11 devices unset.
    */
   static bool SetDirect3D11Device(ID3D11Device *aDevice);
+  static bool SetDWriteFactory(IDWriteFactory *aFactory);
   static ID3D11Device *GetDirect3D11Device();
   static ID2D1Device *GetD2D1Device();
+  static IDWriteFactory *GetDWriteFactory();
   static bool SupportsD2D1();
 
   static already_AddRefed<GlyphRenderingOptions>
@@ -1496,9 +1516,8 @@ public:
   static void D2DCleanup();
 
   static already_AddRefed<ScaledFont>
-    CreateScaledFontForDWriteFont(IDWriteFont* aFont,
-                                  IDWriteFontFamily* aFontFamily,
-                                  IDWriteFontFace* aFontFace,
+    CreateScaledFontForDWriteFont(IDWriteFontFace* aFontFace,
+                                  const gfxFontStyle* aStyle,
                                   Float aSize,
                                   bool aUseEmbeddedBitmap,
                                   bool aForceGDIMode);
@@ -1506,6 +1525,7 @@ public:
 private:
   static ID2D1Device *mD2D1Device;
   static ID3D11Device *mD3D11Device;
+  static IDWriteFactory *mDWriteFactory;
 #endif
 
   static DrawEventRecorder *mRecorder;

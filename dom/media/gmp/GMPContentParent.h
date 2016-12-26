@@ -27,7 +27,8 @@ public:
 
   explicit GMPContentParent(GMPParent* aParent = nullptr);
 
-  nsresult GetGMPVideoDecoder(GMPVideoDecoderParent** aGMPVD);
+  nsresult GetGMPVideoDecoder(GMPVideoDecoderParent** aGMPVD,
+                              uint32_t aDecryptorId);
   void VideoDecoderDestroyed(GMPVideoDecoderParent* aDecoder);
 
   nsresult GetGMPVideoEncoder(GMPVideoEncoderParent** aGMPVE);
@@ -61,12 +62,32 @@ public:
     return mPluginId;
   }
 
+  class CloseBlocker {
+  public:
+    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(CloseBlocker)
+
+    explicit CloseBlocker(GMPContentParent* aParent)
+      : mParent(aParent)
+    {
+      mParent->AddCloseBlocker();
+    }
+    RefPtr<GMPContentParent> mParent;
+  private:
+    ~CloseBlocker() {
+      mParent->RemoveCloseBlocker();
+    }
+  };
+
 private:
+
+  void AddCloseBlocker();
+  void RemoveCloseBlocker();
+
   ~GMPContentParent();
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
-  PGMPVideoDecoderParent* AllocPGMPVideoDecoderParent() override;
+  PGMPVideoDecoderParent* AllocPGMPVideoDecoderParent(const uint32_t& aDecryptorId) override;
   bool DeallocPGMPVideoDecoderParent(PGMPVideoDecoderParent* aActor) override;
 
   PGMPVideoEncoderParent* AllocPGMPVideoEncoderParent() override;
@@ -94,6 +115,7 @@ private:
   RefPtr<GMPParent> mParent;
   nsCString mDisplayName;
   uint32_t mPluginId;
+  uint32_t mCloseBlockerCount = 0;
 };
 
 } // namespace gmp

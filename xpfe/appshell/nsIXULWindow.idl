@@ -17,6 +17,7 @@ interface nsIDocShell;
 interface nsIDocShellTreeItem;
 interface nsIXULBrowserWindow;
 interface nsITabParent;
+interface mozIDOMWindowProxy;
 
 [scriptable, uuid(d6d7a014-e28d-4c9d-8727-1cf6d870619b)]
 interface nsIXULWindow : nsISupports
@@ -49,16 +50,6 @@ interface nsIXULWindow : nsISupports
 
   void tabParentAdded(in nsITabParent aTab, in boolean aPrimary);
   void tabParentRemoved(in nsITabParent aTab);
-
-  /**
-   * The content shell specified by the supplied id.
-   *
-   * Note that this is a docshell tree item and therefore can not be assured of
-   * what object it is.  It could be an editor, a docshell, or a browser object.
-   * Or down the road any other object that supports being a DocShellTreeItem
-   * Query accordingly to determine the capabilities.
-   */
-  nsIDocShellTreeItem getContentShellById(in wstring ID);
 
   /**
    * Tell this window that it has picked up a child XUL window
@@ -102,11 +93,6 @@ interface nsIXULWindow : nsISupports
 
   attribute unsigned long zLevel;
 
-  /**
-   * contextFlags are from nsIWindowCreator2
-   */
-  attribute uint32_t contextFlags;
-
   attribute uint32_t chromeFlags;
 
   /**
@@ -120,10 +106,12 @@ interface nsIXULWindow : nsISupports
    * @param aChromeFlags see nsIWebBrowserChrome
    * @param aOpeningTab the TabParent that requested this new window be opened.
    *                    Can be left null.
+   * @param aOpener The window which is requesting that this new window be opened.
    * @return the newly minted window
    */
   nsIXULWindow createNewWindow(in int32_t aChromeFlags,
-                               in nsITabParent aOpeningTab);
+                               in nsITabParent aOpeningTab,
+                               in mozIDOMWindowProxy aOpener);
 
   attribute nsIXULBrowserWindow XULBrowserWindow;
 

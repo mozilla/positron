@@ -5,6 +5,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 CppUnitTests([
+    'TestArray',
     'TestArrayUtils',
     'TestAtomics',
     'TestBinarySearch',
@@ -16,12 +17,11 @@ CppUnitTests([
     'TestCountPopulation',
     'TestCountZeroes',
     'TestEndian',
+    'TestEnumeratedArray',
     'TestEnumSet',
     'TestEnumTypeTraits',
     'TestFastBernoulliTrial',
     'TestFloatingPoint',
-    'TestFunction',
-    'TestInitializerList',
     'TestIntegerPrintfMacros',
     'TestIntegerRange',
     'TestJSONWriter',
@@ -32,7 +32,9 @@ CppUnitTests([
     'TestMaybe',
     'TestNotNull',
     'TestPair',
+    'TestRange',
     'TestRefPtr',
+    'TestResult',
     'TestRollingMean',
     'TestSaturate',
     'TestScopeExit',

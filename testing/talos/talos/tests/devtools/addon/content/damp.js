@@ -19,6 +19,9 @@ function Damp() {
   this._heapSnapshotFilePath = null;
   // HeapSnapshot instance. Set by readHeapSnapshot, used by takeCensus.
   this._snapshot = null;
+
+  // Use the old console for now: https://bugzilla.mozilla.org/show_bug.cgi?id=1306780
+  Services.prefs.setBoolPref("devtools.webconsole.new-frontend-enabled", false);
 }
 
 Damp.prototype = {
@@ -70,18 +73,17 @@ Damp.prototype = {
     });
   },
 
-  closeToolbox: function() {
+  closeToolbox: Task.async(function*() {
     let tab = getActiveTab(getMostRecentBrowserWindow());
     let target = devtools.TargetFactory.forTab(tab);
+    yield target.client.waitForRequestsToSettle();
     let startRecordTimestamp = performance.now();
-    let closePromise = gDevTools.closeToolbox(target);
-    return closePromise.then(() => {
-      let stopRecordTimestamp = performance.now();
-      return {
-        time: stopRecordTimestamp - startRecordTimestamp
-      };
-    });
-  },
+    yield gDevTools.closeToolbox(target);
+    let stopRecordTimestamp = performance.now();
+    return {
+      time: stopRecordTimestamp - startRecordTimestamp
+    };
+  }),
 
   saveHeapSnapshot: function(label) {
     let tab = getActiveTab(getMostRecentBrowserWindow());

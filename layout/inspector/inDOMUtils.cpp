@@ -9,9 +9,9 @@
 #include "inDOMUtils.h"
 #include "inLayoutUtils.h"
 
+#include "nsArray.h"
 #include "nsAutoPtr.h"
 #include "nsIServiceManager.h"
-#include "nsISupportsArray.h"
 #include "nsString.h"
 #include "nsIStyleSheetLinkingElement.h"
 #include "nsIContentInlines.h"
@@ -48,7 +48,8 @@
 #include "nsCSSProps.h"
 #include "nsCSSValue.h"
 #include "nsColor.h"
-#include "nsStyleSet.h"
+#include "mozilla/StyleSetHandle.h"
+#include "mozilla/StyleSetHandleInlines.h"
 #include "nsStyleUtil.h"
 #include "nsQueryObject.h"
 
@@ -77,7 +78,7 @@ inDOMUtils::GetAllStyleSheets(nsIDOMDocument *aDocument, uint32_t *aLength,
 {
   NS_ENSURE_ARG_POINTER(aDocument);
 
-  nsTArray<RefPtr<CSSStyleSheet>> sheets;
+  nsTArray<RefPtr<StyleSheet>> sheets;
 
   nsCOMPtr<nsIDocument> document = do_QueryInterface(aDocument);
   MOZ_ASSERT(document);
@@ -85,15 +86,8 @@ inDOMUtils::GetAllStyleSheets(nsIDOMDocument *aDocument, uint32_t *aLength,
   // Get the agent, then user and finally xbl sheets in the style set.
   nsIPresShell* presShell = document->GetShell();
 
-  if (presShell && presShell->StyleSet()->IsServo()) {
-    // XXXheycam ServoStyleSets don't have the ability to expose their
-    // sheets in a script-accessible way yet.
-    NS_ERROR("stylo: ServoStyleSets cannot expose their sheets to script yet");
-    return NS_ERROR_FAILURE;
-  }
-
   if (presShell) {
-    nsStyleSet* styleSet = presShell->StyleSet()->AsGecko();
+    StyleSetHandle styleSet = presShell->StyleSet();
     SheetType sheetType = SheetType::Agent;
     for (int32_t i = 0; i < styleSet->SheetCount(sheetType); i++) {
       sheets.AppendElement(styleSet->StyleSheetAt(sheetType, i));
@@ -102,24 +96,26 @@ inDOMUtils::GetAllStyleSheets(nsIDOMDocument *aDocument, uint32_t *aLength,
     for (int32_t i = 0; i < styleSet->SheetCount(sheetType); i++) {
       sheets.AppendElement(styleSet->StyleSheetAt(sheetType, i));
     }
-    AutoTArray<CSSStyleSheet*, 32> xblSheetArray;
-    styleSet->AppendAllXBLStyleSheets(xblSheetArray);
+    if (styleSet->IsGecko()) {
+      AutoTArray<CSSStyleSheet*, 32> xblSheetArray;
+      styleSet->AsGecko()->AppendAllXBLStyleSheets(xblSheetArray);
 
-    // The XBL stylesheet array will quite often be full of duplicates. Cope:
-    nsTHashtable<nsPtrHashKey<CSSStyleSheet>> sheetSet;
-    for (CSSStyleSheet* sheet : xblSheetArray) {
-      if (!sheetSet.Contains(sheet)) {
-        sheetSet.PutEntry(sheet);
-        sheets.AppendElement(sheet);
+      // The XBL stylesheet array will quite often be full of duplicates. Cope:
+      nsTHashtable<nsPtrHashKey<CSSStyleSheet>> sheetSet;
+      for (CSSStyleSheet* sheet : xblSheetArray) {
+        if (!sheetSet.Contains(sheet)) {
+          sheetSet.PutEntry(sheet);
+          sheets.AppendElement(sheet);
+        }
       }
+    } else {
+      NS_WARNING("stylo: XBL style sheets not supported yet");
     }
   }
 
   // Get the document sheets.
   for (int32_t i = 0; i < document->GetNumberOfStyleSheets(); i++) {
-    // XXXheycam ServoStyleSets don't have the ability to expose their
-    // sheets in a script-accessible way yet.
-    sheets.AppendElement(document->GetStyleSheetAt(i)->AsGecko());
+    sheets.AppendElement(document->GetStyleSheetAt(i));
   }
 
   nsISupports** ret = static_cast<nsISupports**>(moz_xmalloc(sheets.Length() *
@@ -225,7 +221,7 @@ inDOMUtils::GetChildrenForNode(nsIDOMNode* aNode,
 NS_IMETHODIMP
 inDOMUtils::GetCSSStyleRules(nsIDOMElement *aElement,
                              const nsAString& aPseudo,
-                             nsISupportsArray **_retval)
+                             nsIArrayExtensions **_retval)
 {
   NS_ENSURE_ARG_POINTER(aElement);
 
@@ -247,13 +243,14 @@ inDOMUtils::GetCSSStyleRules(nsIDOMElement *aElement,
     return NS_OK;
   }
 
-  nsCOMPtr<nsISupportsArray> rules;
-  nsresult rv = NS_NewISupportsArray(getter_AddRefs(rules));
-  if (NS_FAILED(rv)) {
-    return NS_ERROR_OUT_OF_MEMORY;
+  AutoTArray<nsRuleNode*, 16> ruleNodes;
+  while (!ruleNode->IsRoot()) {
+    ruleNodes.AppendElement(ruleNode);
+    ruleNode = ruleNode->GetParent();
   }
 
-  for ( ; !ruleNode->IsRoot(); ruleNode = ruleNode->GetParent()) {
+  nsCOMPtr<nsIMutableArray> rules = nsArray::Create();
+  for (nsRuleNode* ruleNode : Reversed(ruleNodes)) {
     RefPtr<Declaration> decl = do_QueryObject(ruleNode->GetRule());
     if (decl) {
       RefPtr<mozilla::css::StyleRule> styleRule =
@@ -261,7 +258,7 @@ inDOMUtils::GetCSSStyleRules(nsIDOMElement *aElement,
       if (styleRule) {
         nsCOMPtr<nsIDOMCSSRule> domRule = styleRule->GetDOMRule();
         if (domRule) {
-          rules->InsertElementAt(domRule, 0);
+          rules->AppendElement(domRule, /*weak =*/ false);
         }
       }
     }
@@ -332,7 +329,7 @@ inDOMUtils::GetRelativeRuleLine(nsIDOMCSSRule* aRule, uint32_t* _retval)
   }
 
   uint32_t lineNumber = rule->GetLineNumber();
-  CSSStyleSheet* sheet = rule->GetStyleSheet();
+  StyleSheet* sheet = rule->GetStyleSheet();
   if (sheet && lineNumber != 0) {
     nsINode* owningNode = sheet->GetOwnerNode();
     if (owningNode) {
@@ -798,17 +795,17 @@ PropertySupportsVariant(nsCSSPropertyID aPropertyID, uint32_t aVariant)
       case eCSSProperty_scroll_snap_destination:
       case eCSSProperty_transform_origin:
       case eCSSProperty_perspective_origin:
-      case eCSSProperty__moz_outline_radius_topLeft:
-      case eCSSProperty__moz_outline_radius_topRight:
-      case eCSSProperty__moz_outline_radius_bottomLeft:
-      case eCSSProperty__moz_outline_radius_bottomRight:
+      case eCSSProperty__moz_outline_radius_topleft:
+      case eCSSProperty__moz_outline_radius_topright:
+      case eCSSProperty__moz_outline_radius_bottomleft:
+      case eCSSProperty__moz_outline_radius_bottomright:
         supported = VARIANT_LP;
         break;
 
-      case eCSSProperty_border_bottom_colors:
-      case eCSSProperty_border_left_colors:
-      case eCSSProperty_border_right_colors:
-      case eCSSProperty_border_top_colors:
+      case eCSSProperty__moz_border_bottom_colors:
+      case eCSSProperty__moz_border_left_colors:
+      case eCSSProperty__moz_border_right_colors:
+      case eCSSProperty__moz_border_top_colors:
         supported = VARIANT_COLOR;
         break;
 

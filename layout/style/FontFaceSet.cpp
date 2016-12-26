@@ -97,26 +97,20 @@ NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 FontFaceSet::FontFaceSet(nsPIDOMWindowInner* aWindow, nsIDocument* aDocument)
   : DOMEventTargetHelper(aWindow)
   , mDocument(aDocument)
+  , mResolveLazilyCreatedReadyPromise(false)
   , mStatus(FontFaceSetLoadStatus::Loaded)
   , mNonRuleFacesDirty(false)
   , mHasLoadingFontFaces(false)
   , mHasLoadingFontFacesIsDirty(false)
   , mDelayedLoadCheck(false)
 {
-  MOZ_COUNT_CTOR(FontFaceSet);
-
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aWindow);
 
   // If the pref is not set, don't create the Promise (which the page wouldn't
   // be able to get to anyway) as it causes the window.FontFaceSet constructor
   // to be created.
   if (global && PrefEnabled()) {
-    ErrorResult rv;
-    mReady = Promise::Create(global, rv);
-  }
-
-  if (mReady) {
-    mReady->MaybeResolve(this);
+    mResolveLazilyCreatedReadyPromise = true;
   }
 
   if (!mDocument->DidFireDOMContentLoaded()) {
@@ -131,8 +125,6 @@ FontFaceSet::FontFaceSet(nsPIDOMWindowInner* aWindow, nsIDocument* aDocument)
 
 FontFaceSet::~FontFaceSet()
 {
-  MOZ_COUNT_DTOR(FontFaceSet);
-
   Disconnect();
   for (auto it = mLoaders.Iter(); !it.Done(); it.Next()) {
     it.Get()->GetKey()->Cancel();
@@ -386,8 +378,16 @@ Promise*
 FontFaceSet::GetReady(ErrorResult& aRv)
 {
   if (!mReady) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return nullptr;
+    nsCOMPtr<nsIGlobalObject> global = GetParentObject();
+    mReady = Promise::Create(global, aRv);
+    if (!mReady) {
+      aRv.Throw(NS_ERROR_FAILURE);
+      return nullptr;
+    }
+    if (mResolveLazilyCreatedReadyPromise) {
+      mReady->MaybeResolve(this);
+      mResolveLazilyCreatedReadyPromise = false;
+    }
   }
 
   FlushUserFontSet();
@@ -1260,7 +1260,7 @@ FontFaceSet::LogMessage(gfxUserFontEntry* aUserFontEntry,
   if (rule) {
     rv = rule->GetCssText(text);
     NS_ENSURE_SUCCESS(rv, rv);
-    CSSStyleSheet* sheet = rule->GetStyleSheet();
+    StyleSheet* sheet = rule->GetStyleSheet();
     // if the style sheet is removed while the font is loading can be null
     if (sheet) {
       nsCString spec = sheet->GetSheetURI()->GetSpecOrDefault();
@@ -1505,14 +1505,14 @@ FontFaceSet::CheckLoadingStarted()
                             false))->RunDOMEventWhenSafe();
 
   if (PrefEnabled()) {
-    RefPtr<Promise> ready;
-    if (GetParentObject()) {
-      ErrorResult rv;
-      ready = Promise::Create(GetParentObject(), rv);
+    if (mReady) {
+      if (GetParentObject()) {
+        ErrorResult rv;
+        mReady = Promise::Create(GetParentObject(), rv);
+      }
     }
-
-    if (ready) {
-      mReady.swap(ready);
+    if (!mReady) {
+      mResolveLazilyCreatedReadyPromise = false;
     }
   }
 }
@@ -1599,6 +1599,8 @@ FontFaceSet::CheckLoadingFinished()
   mStatus = FontFaceSetLoadStatus::Loaded;
   if (mReady) {
     mReady->MaybeResolve(this);
+  } else {
+    mResolveLazilyCreatedReadyPromise = true;
   }
 
   // Now dispatch the loadingdone/loadingerror events.

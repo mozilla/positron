@@ -94,11 +94,9 @@ var gEMEHandler = {
       case "cdm-not-supported":
         // Not to pop up user-level notification because they cannot do anything
         // about it.
-      case "error":
-        // Fall through and do the same for unknown messages:
+        return;
       default:
-        let typeOfIssue = status == "error" ? "error" : "message ('" + status + "')";
-        Cu.reportError("Unknown " + typeOfIssue + " dealing with EME key request: " + data);
+        Cu.reportError(new Error("Unknown message ('" + status + "') dealing with EME key request: " + data));
         return;
     }
 
@@ -145,9 +143,8 @@ var gEMEHandler = {
     // We're playing EME content! Remove any "we can't play because..." messages.
     var box = gBrowser.getNotificationBox(browser);
     ["drmContentDisabled",
-     "drmContentCDMInsufficientVersion",
      "drmContentCDMInstalling"
-     ].forEach(function (value) {
+     ].forEach(function(value) {
         var notification = box.getNotificationWithValue(value);
         if (notification)
           box.removeNotification(notification);
@@ -234,6 +231,10 @@ let gDecoderDoctorHandler = {
     if (type == "cannot-initialize-pulseaudio") {
       return gNavigatorBundle.getString("decoder.noPulseAudio.message");
     }
+    if (type == "unsupported-libavcodec" &&
+        AppConstants.platform == "linux") {
+      return gNavigatorBundle.getString("decoder.unsupportedLibavcodec.message");
+    }
     return "";
   },
 
@@ -302,9 +303,9 @@ let gDecoderDoctorHandler = {
         histogram.add(decoderDoctorReportId, TELEMETRY_DDSTAT_SHOWN_FIRST);
       } else {
         // Split existing formats into an array of strings.
-        let existing = formatsInPref.split(",").map(String.trim);
+        let existing = formatsInPref.split(",").map(x => x.trim());
         // Keep given formats that were not already recorded.
-        let newbies = formats.split(",").map(String.trim)
+        let newbies = formats.split(",").map(x => x.trim())
                       .filter(x => !existing.includes(x));
         // And rewrite pref with the added new formats (if any).
         if (newbies.length) {
@@ -352,9 +353,9 @@ let gDecoderDoctorHandler = {
   },
 }
 
-window.messageManager.addMessageListener("DecoderDoctor:Notification", gDecoderDoctorHandler);
-window.messageManager.addMessageListener("EMEVideo:ContentMediaKeysRequest", gEMEHandler);
+window.getGroupMessageManager("browsers").addMessageListener("DecoderDoctor:Notification", gDecoderDoctorHandler);
+window.getGroupMessageManager("browsers").addMessageListener("EMEVideo:ContentMediaKeysRequest", gEMEHandler);
 window.addEventListener("unload", function() {
-  window.messageManager.removeMessageListener("EMEVideo:ContentMediaKeysRequest", gEMEHandler);
-  window.messageManager.removeMessageListener("DecoderDoctor:Notification", gDecoderDoctorHandler);
+  window.getGroupMessageManager("browsers").removeMessageListener("EMEVideo:ContentMediaKeysRequest", gEMEHandler);
+  window.getGroupMessageManager("browsers").removeMessageListener("DecoderDoctor:Notification", gDecoderDoctorHandler);
 }, false);

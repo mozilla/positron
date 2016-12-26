@@ -35,6 +35,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "AddonManagerPrivate",
                                   "resource://gre/modules/AddonManager.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AddonRepository",
                                   "resource://gre/modules/addons/AddonRepository.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "ServiceRequest",
+                                  "resource://gre/modules/ServiceRequest.jsm");
+
 
 // Shared code for suppressing bad cert dialogs.
 XPCOMUtils.defineLazyGetter(this, "CertUtils", function() {
@@ -276,7 +279,6 @@ function parseRDFManifest(aId, aUpdateKey, aRequest, aManifestData) {
   if (aManifestData.documentElement.namespaceURI != PREFIX_NS_RDF) {
     throw Components.Exception("Update manifest had an unrecognised namespace: " +
                                aManifestData.documentElement.namespaceURI);
-    return undefined;
   }
 
   function EM_R(aProp) {
@@ -579,8 +581,7 @@ function UpdateParser(aId, aUpdateKey, aUrl, aObserver) {
 
   logger.debug("Requesting " + aUrl);
   try {
-    this.request = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"].
-                   createInstance(Ci.nsIXMLHttpRequest);
+    this.request = new ServiceRequest();
     this.request.open("GET", this.url, true);
     this.request.channel.notificationCallbacks = new CertUtils.BadCertHandler(!requireBuiltIn);
     this.request.channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE;

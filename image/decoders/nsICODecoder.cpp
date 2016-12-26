@@ -100,7 +100,6 @@ nsICODecoder::GetFinalStateFromContainedDecoder()
 
   // Make our state the same as the state of the contained decoder.
   mDecodeDone = mContainedDecoder->GetDecodeDone();
-  mDecodeAborted = mContainedDecoder->WasAborted();
   mProgress |= mContainedDecoder->TakeProgress();
   mInvalidRect.UnionRect(mInvalidRect, mContainedDecoder->TakeInvalidRect());
   mCurrentFrame = mContainedDecoder->GetCurrentFrameRef();
@@ -375,7 +374,7 @@ nsICODecoder::ReadBIH(const char* aData)
   // tells it to skip this, and pass in the required data (dataOffset) that
   // would have been present in the header.
   uint32_t dataOffset = bmp::FILE_HEADER_LENGTH + BITMAPINFOSIZE;
-  if (mDirEntry.mBitCount <= 8) {
+  if (mBPP <= 8) {
     // The color table is present only if BPP is <= 8.
     uint16_t numColors = GetNumColors();
     if (numColors == (uint16_t)-1) {

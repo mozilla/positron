@@ -4,16 +4,16 @@
 
 import time
 
+from firefox_puppeteer import PuppeteerMixin
 from marionette_driver import By, Wait
 from marionette_driver.errors import MarionetteException
+from marionette_harness import MarionetteTestCase
 
-from firefox_ui_harness.testcases import FirefoxTestCase
 
-
-class TestSecurityNotification(FirefoxTestCase):
+class TestSecurityNotification(PuppeteerMixin, MarionetteTestCase):
 
     def setUp(self):
-        FirefoxTestCase.setUp(self)
+        super(TestSecurityNotification, self).setUp()
 
         self.urls = [
             # Invalid cert page

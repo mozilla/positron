@@ -419,6 +419,7 @@ public:
   void HandleScrollbarStyleSwitching();
 
   nsIAtom* LastScrollOrigin() const { return mLastScrollOrigin; }
+  void AllowScrollOriginDowngrade() { mAllowScrollOriginDowngrade = true; }
   nsIAtom* LastSmoothScrollOrigin() const { return mLastSmoothScrollOrigin; }
   uint32_t CurrentScrollGeneration() const { return mScrollGeneration; }
   nsPoint LastScrollDestination() const { return mDestination; }
@@ -459,6 +460,8 @@ public:
     return mSuppressScrollbarRepaints;
   }
 
+  bool DragScroll(WidgetEvent* aEvent);
+
   // owning references to the nsIAnonymousContentCreator-built content
   nsCOMPtr<nsIContent> mHScrollbarContent;
   nsCOMPtr<nsIContent> mVScrollbarContent;
@@ -479,6 +482,7 @@ public:
   RefPtr<ScrollbarActivity> mScrollbarActivity;
   nsTArray<nsIScrollPositionListener*> mListeners;
   nsIAtom* mLastScrollOrigin;
+  bool mAllowScrollOriginDowngrade;
   nsIAtom* mLastSmoothScrollOrigin;
   Maybe<nsPoint> mApzSmoothScrollDestination;
   uint32_t mScrollGeneration;
@@ -722,6 +726,12 @@ public:
     return mHelper.ComputeCustomOverflow(aOverflowAreas);
   }
 
+  bool GetVerticalAlignBaseline(mozilla::WritingMode aWM,
+                                nscoord* aBaseline) const override {
+    *aBaseline = GetLogicalBaseline(aWM);
+    return true;
+  }
+
   // Recomputes the scrollable overflow area we store in the helper to take children
   // that are affected by perpsective set on the outer frame and scroll at different
   // rates.
@@ -901,6 +911,9 @@ public:
   virtual nsIAtom* LastScrollOrigin() override {
     return mHelper.LastScrollOrigin();
   }
+  virtual void AllowScrollOriginDowngrade() override {
+    mHelper.AllowScrollOriginDowngrade();
+  }
   virtual nsIAtom* LastSmoothScrollOrigin() override {
     return mHelper.LastSmoothScrollOrigin();
   }
@@ -1028,6 +1041,10 @@ public:
     return mHelper.GetScrollSnapInfo();
   }
 
+  virtual bool DragScroll(mozilla::WidgetEvent* aEvent) override {
+    return mHelper.DragScroll(aEvent);
+  }
+
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override;
 #endif
@@ -1103,6 +1120,12 @@ public:
 
   virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override {
     return mHelper.ComputeCustomOverflow(aOverflowAreas);
+  }
+
+  bool GetVerticalAlignBaseline(mozilla::WritingMode aWM,
+                                nscoord* aBaseline) const override {
+    *aBaseline = GetLogicalBaseline(aWM);
+    return true;
   }
 
   // Called to set the child frames. We typically have three: the scroll area,
@@ -1313,6 +1336,9 @@ public:
   virtual nsIAtom* LastScrollOrigin() override {
     return mHelper.LastScrollOrigin();
   }
+  virtual void AllowScrollOriginDowngrade() override {
+    mHelper.AllowScrollOriginDowngrade();
+  }
   virtual nsIAtom* LastSmoothScrollOrigin() override {
     return mHelper.LastSmoothScrollOrigin();
   }
@@ -1446,6 +1472,10 @@ public:
 
   ScrollSnapInfo GetScrollSnapInfo() const override {
     return mHelper.GetScrollSnapInfo();
+  }
+
+  virtual bool DragScroll(mozilla::WidgetEvent* aEvent) override {
+    return mHelper.DragScroll(aEvent);
   }
 
 #ifdef DEBUG_FRAME_DUMP

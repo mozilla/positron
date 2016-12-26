@@ -158,7 +158,7 @@ const FlyWebPermissionPromptIntegration = (base) => ({
           notificationIcon.setAttribute("aria-label",
                                         "View the publish-server request");
           notificationIcon.style.filter =
-            "url('chrome://browser/skin/filters.svg#fill')";
+            "url('chrome://global/skin/filters.svg#fill')";
           notificationIcon.style.fill = "currentcolor";
           notificationIcon.style.opacity = "0.4";
           notificationPopupBox.appendChild(notificationIcon);
@@ -237,7 +237,6 @@ let FlyWebView = {
       onViewShowing(aEvent) {
         let doc = aEvent.target.ownerDocument;
 
-        let panel = doc.getElementById("flyweb-panel");
         let items = doc.getElementById("flyweb-items");
         let empty = doc.getElementById("flyweb-items-empty");
 

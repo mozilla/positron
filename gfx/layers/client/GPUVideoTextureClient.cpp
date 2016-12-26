@@ -5,11 +5,24 @@
 
 #include "GPUVideoTextureClient.h"
 #include "mozilla/dom/VideoDecoderManagerChild.h"
+#include "mozilla/gfx/2D.h"
 
 namespace mozilla {
 namespace layers {
 
 using namespace gfx;
+
+GPUVideoTextureData::GPUVideoTextureData(dom::VideoDecoderManagerChild* aManager,
+                                         const SurfaceDescriptorGPUVideo& aSD,
+                                         const gfx::IntSize& aSize)
+  : mManager(aManager)
+  , mSD(aSD)
+  , mSize(aSize)
+{}
+
+GPUVideoTextureData::~GPUVideoTextureData()
+{
+}
 
 bool
 GPUVideoTextureData::Serialize(SurfaceDescriptor& aOutDescriptor)
@@ -32,10 +45,16 @@ GPUVideoTextureData::FillInfo(TextureData::Info& aInfo) const
   aInfo.canExposeMappedData = false;
 }
 
+already_AddRefed<SourceSurface>
+GPUVideoTextureData::GetAsSourceSurface()
+{
+  return mManager->Readback(mSD);
+}
+
 void
 GPUVideoTextureData::Deallocate(LayersIPCChannel* aAllocator)
 {
-  dom::VideoDecoderManagerChild::GetSingleton()->DeallocateSurfaceDescriptorGPUVideo(mSD);
+  mManager->DeallocateSurfaceDescriptorGPUVideo(mSD);
   mSD = SurfaceDescriptorGPUVideo();
 }
 

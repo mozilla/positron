@@ -20,8 +20,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "Deprecated",
   ["gBrowser",          "content"],
   ["gViewSourceBundle", "viewSourceBundle"],
   ["gContextMenu",      "viewSourceContextMenu"]
-].forEach(function ([name, id]) {
-  window.__defineGetter__(name, function () {
+].forEach(function([name, id]) {
+  window.__defineGetter__(name, function() {
     var element = document.getElementById(id);
     if (!element)
       return null;
@@ -515,7 +515,7 @@ ViewSourceChrome.prototype = {
     // set the dropEffect to 'none'. This prevents the drop even if some
     // other listener cancelled the event.
     let types = event.dataTransfer.types;
-    if (types.contains("text/x-moz-text-internal") && !types.contains("text/plain")) {
+    if (types.includes("text/x-moz-text-internal") && !types.includes("text/plain")) {
         event.dataTransfer.dropEffect = "none";
         event.stopPropagation();
         event.preventDefault();
@@ -666,9 +666,12 @@ ViewSourceChrome.prototype = {
    *        True if the browser should be made remote. If the browsers
    *        remoteness already matches this value, this function does
    *        nothing.
+   * @param remoteType
+   *        The type of remote browser process.
    */
-  updateBrowserRemoteness(shouldBeRemote) {
-    if (this.browser.isRemoteBrowser == shouldBeRemote) {
+  updateBrowserRemoteness(shouldBeRemote, remoteType) {
+    if (this.browser.isRemoteBrowser == shouldBeRemote &&
+        this.browser.remoteType == remoteType) {
       return;
     }
 
@@ -685,8 +688,10 @@ ViewSourceChrome.prototype = {
     this.browser.remove();
     if (shouldBeRemote) {
       this.browser.setAttribute("remote", "true");
+      this.browser.setAttribute("remoteType", remoteType);
     } else {
       this.browser.removeAttribute("remote");
+      this.browser.removeAttribute("remoteType");
     }
 
     this.browser.relatedBrowser = relatedBrowser;
@@ -768,7 +773,7 @@ function getBrowser() {
   return gBrowser;
 }
 
-this.__defineGetter__("gPageLoader", function () {
+this.__defineGetter__("gPageLoader", function() {
   var webnav = viewSourceChrome.webNav;
   if (!webnav)
     return null;
@@ -790,7 +795,7 @@ function ViewSourceSavePage()
 // Below are old deprecated functions and variables left behind for
 // compatibility reasons. These will be removed soon via bug 1159293.
 
-this.__defineGetter__("gLastLineFound", function () {
+this.__defineGetter__("gLastLineFound", function() {
   Deprecated.warning("gLastLineFound is deprecated - please use " +
                      "viewSourceChrome.lastLineFound instead.",
                      "https://developer.mozilla.org/en-US/Add-ons/Code_snippets/View_Source_for_XUL_Applications");

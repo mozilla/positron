@@ -14,8 +14,10 @@ const {
   COLOR_TAKING_FUNCTIONS,
   CSS_TYPES
 } = require("devtools/shared/css/properties-db");
+const Services = require("Services");
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
+const CSS_GRID_ENABLED_PREF = "layout.css.grid.enabled";
 
 /**
  * This module is used to process text for output by developer tools. This means
@@ -25,7 +27,7 @@ const HTML_NS = "http://www.w3.org/1999/xhtml";
  * border radius, cubic-bezier etc.).
  *
  * Usage:
- *   const {OutputParser} = require("devtools/client/shared/output-parser");
+ *   const OutputParser = require("devtools/client/shared/output-parser");
  *
  *   let parser = new OutputParser(document, supportsType);
  *
@@ -38,8 +40,11 @@ const HTML_NS = "http://www.w3.org/1999/xhtml";
  *                   where CSS_TYPES is defined in devtools/shared/css/properties-db.js
  * @param {Function} isValidOnClient - A function that checks if a css property
  *                   name/value combo is valid.
+ * @param {Function} supportsCssColor4ColorFunction - A function for checking
+ *                   the supporting of css-color-4 color function.
  */
-function OutputParser(document, {supportsType, isValidOnClient}) {
+function OutputParser(document,
+                      {supportsType, isValidOnClient, supportsCssColor4ColorFunction}) {
   this.parsed = [];
   this.doc = document;
   this.supportsType = supportsType;
@@ -48,9 +53,9 @@ function OutputParser(document, {supportsType, isValidOnClient}) {
   this.angleSwatches = new WeakMap();
   this._onColorSwatchMouseDown = this._onColorSwatchMouseDown.bind(this);
   this._onAngleSwatchMouseDown = this._onAngleSwatchMouseDown.bind(this);
-}
 
-exports.OutputParser = OutputParser;
+  this.cssColor4 = supportsCssColor4ColorFunction();
+}
 
 OutputParser.prototype = {
   /**
@@ -70,6 +75,7 @@ OutputParser.prototype = {
     options = this._mergeOptions(options);
 
     options.expectCubicBezier = this.supportsType(name, CSS_TYPES.TIMING_FUNCTION);
+    options.expectDisplay = name === "display";
     options.expectFilter = name === "filter";
     options.supportsColor = this.supportsType(name, CSS_TYPES.COLOR) ||
                             this.supportsType(name, CSS_TYPES.GRADIENT);
@@ -185,7 +191,8 @@ OutputParser.prototype = {
 
             if (options.expectCubicBezier && token.text === "cubic-bezier") {
               this._appendCubicBezier(functionText, options);
-            } else if (colorOK() && colorUtils.isValidCSSColor(functionText)) {
+            } else if (colorOK() &&
+                       colorUtils.isValidCSSColor(functionText, this.cssColor4)) {
               this._appendColor(functionText, options);
             } else {
               this._appendTextNode(functionText);
@@ -198,7 +205,12 @@ OutputParser.prototype = {
           if (options.expectCubicBezier &&
               BEZIER_KEYWORDS.indexOf(token.text) >= 0) {
             this._appendCubicBezier(token.text, options);
-          } else if (colorOK() && colorUtils.isValidCSSColor(token.text)) {
+          } else if (Services.prefs.getBoolPref(CSS_GRID_ENABLED_PREF) &&
+                     options.expectDisplay && token.text === "grid" &&
+                     text === token.text) {
+            this._appendGrid(token.text, options);
+          } else if (colorOK() &&
+                     colorUtils.isValidCSSColor(token.text, this.cssColor4)) {
             this._appendColor(token.text, options);
           } else if (angleOK(token.text)) {
             this._appendAngle(token.text, options);
@@ -211,7 +223,7 @@ OutputParser.prototype = {
         case "id":
         case "hash": {
           let original = text.substring(token.startOffset, token.endOffset);
-          if (colorOK() && colorUtils.isValidCSSColor(original)) {
+          if (colorOK() && colorUtils.isValidCSSColor(original, this.cssColor4)) {
             this._appendColor(original, options);
           } else {
             this._appendTextNode(original);
@@ -283,6 +295,31 @@ OutputParser.prototype = {
       class: options.bezierClass
     }, bezier);
 
+    container.appendChild(value);
+    this.parsed.push(container);
+  },
+
+  /**
+   * Append a CSS Grid highlighter toggle icon next to the value in a
+   * 'display: grid' declaration
+   *
+   * @param {String} grid
+   *        The grid text value to append
+   * @param {Object} options
+   *        Options object. For valid options and default values see
+   *        _mergeOptions()
+   */
+  _appendGrid: function (grid, options) {
+    let container = this._createNode("span", {});
+
+    let toggle = this._createNode("span", {
+      class: options.gridClass
+    });
+
+    let value = this._createNode("span", {});
+    value.textContent = grid;
+
+    container.appendChild(toggle);
     container.appendChild(value);
     this.parsed.push(container);
   },
@@ -362,7 +399,7 @@ OutputParser.prototype = {
    *         _mergeOptions().
    */
   _appendColor: function (color, options = {}) {
-    let colorObj = new colorUtils.CssColor(color);
+    let colorObj = new colorUtils.CssColor(color, this.cssColor4);
 
     if (this._isValidColor(colorObj)) {
       let container = this._createNode("span", {
@@ -617,40 +654,42 @@ OutputParser.prototype = {
    *         Valid options are:
    *           - defaultColorType: true // Convert colors to the default type
    *                                    // selected in the options panel.
-   *           - colorSwatchClass: ""   // The class to use for color swatches.
-   *           - colorClass: ""         // The class to use for the color value
-   *                                    // that follows the swatch.
-   *           - bezierSwatchClass: ""  // The class to use for bezier swatches.
-   *           - bezierClass: ""        // The class to use for the bezier value
-   *                                    // that follows the swatch.
-   *           - angleSwatchClass: ""   // The class to use for angle swatches.
    *           - angleClass: ""         // The class to use for the angle value
    *                                    // that follows the swatch.
-   *           - supportsColor: false   // Does the CSS property support colors?
-   *           - urlClass: ""           // The class to be used for url() links.
-   *           - baseURI: undefined     // A string used to resolve
-   *                                    // relative links.
+   *           - angleSwatchClass: ""   // The class to use for angle swatches.
+   *           - bezierClass: ""        // The class to use for the bezier value
+   *                                    // that follows the swatch.
+   *           - bezierSwatchClass: ""  // The class to use for bezier swatches.
+   *           - colorClass: ""         // The class to use for the color value
+   *                                    // that follows the swatch.
+   *           - colorSwatchClass: ""   // The class to use for color swatches.
    *           - filterSwatch: false    // A special case for parsing a
    *                                    // "filter" property, causing the
    *                                    // parser to skip the call to
    *                                    // _wrapFilter.  Used only for
    *                                    // previewing with the filter swatch.
+   *           - gridClass: ""          // The class to use for the grid icon.
+   *           - supportsColor: false   // Does the CSS property support colors?
+   *           - urlClass: ""           // The class to be used for url() links.
+   *           - baseURI: undefined     // A string used to resolve
+   *                                    // relative links.
    * @return {Object}
    *         Overridden options object
    */
   _mergeOptions: function (overrides) {
     let defaults = {
       defaultColorType: true,
-      colorSwatchClass: "",
-      colorClass: "",
-      bezierSwatchClass: "",
-      bezierClass: "",
-      angleSwatchClass: "",
       angleClass: "",
+      angleSwatchClass: "",
+      bezierClass: "",
+      bezierSwatchClass: "",
+      colorClass: "",
+      colorSwatchClass: "",
+      filterSwatch: false,
+      gridClass: "",
       supportsColor: false,
       urlClass: "",
       baseURI: undefined,
-      filterSwatch: false
     };
 
     for (let item in overrides) {
@@ -659,3 +698,5 @@ OutputParser.prototype = {
     return defaults;
   }
 };
+
+module.exports = OutputParser;

@@ -7,17 +7,17 @@
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 const Services = require("Services");
-const {gDevTools} = require("devtools/client/framework/devtools");
-const {HTMLTooltip} = require("devtools/client/shared/widgets/HTMLTooltip");
+const {HTMLTooltip} = require("devtools/client/shared/widgets/tooltip/HTMLTooltip");
 const EventEmitter = require("devtools/shared/event-emitter");
+const {PrefObserver} = require("devtools/client/shared/prefs");
 
 let itemIdCounter = 0;
 /**
  * Autocomplete popup UI implementation.
  *
  * @constructor
- * @param {Toolbox} toolbox
- *        The devtools toolbox required to instanciate the HTMLTooltip.
+ * @param {Document} toolboxDoc
+ *        The toolbox document to attach the autocomplete popup panel.
  * @param {Object} options
  *        An object consiting any of the following options:
  *        - listId {String} The id for the list <LI> element.
@@ -29,10 +29,10 @@ let itemIdCounter = 0;
  *        - onClick {String} Callback called when the autocomplete popup receives a click
  *          event. The selectedIndex will already be updated if need be.
  */
-function AutocompletePopup(toolbox, options = {}) {
+function AutocompletePopup(toolboxDoc, options = {}) {
   EventEmitter.decorate(this);
 
-  this._document = toolbox.doc;
+  this._document = toolboxDoc;
 
   this.autoSelect = options.autoSelect || false;
   this.position = options.position || "bottom";
@@ -47,11 +47,13 @@ function AutocompletePopup(toolbox, options = {}) {
     this.autoThemeEnabled = true;
     // Setup theme change listener.
     this._handleThemeChange = this._handleThemeChange.bind(this);
-    gDevTools.on("pref-changed", this._handleThemeChange);
+    this._prefObserver = new PrefObserver("devtools.");
+    this._prefObserver.on("devtools.theme", this._handleThemeChange);
+    this._currentTheme = theme;
   }
 
   // Create HTMLTooltip instance
-  this._tooltip = new HTMLTooltip(toolbox);
+  this._tooltip = new HTMLTooltip(this._document);
   this._tooltip.panel.classList.add(
     "devtools-autocomplete-popup",
     "devtools-monospace",
@@ -84,7 +86,6 @@ function AutocompletePopup(toolbox, options = {}) {
 
   this.selectedIndex = -1;
 }
-exports.AutocompletePopup = AutocompletePopup;
 
 AutocompletePopup.prototype = {
   _document: null,
@@ -194,7 +195,8 @@ AutocompletePopup.prototype = {
     this._list.removeEventListener("click", this.onClick, false);
 
     if (this.autoThemeEnabled) {
-      gDevTools.off("pref-changed", this._handleThemeChange);
+      this._prefObserver.off("devtools.theme", this._handleThemeChange);
+      this._prefObserver.destroy();
     }
 
     this._list.remove();
@@ -562,25 +564,17 @@ AutocompletePopup.prototype = {
 
   /**
    * Manages theme switching for the popup based on the devtools.theme pref.
-   *
-   * @private
-   *
-   * @param {String} event
-   *        The name of the event. In this case, "pref-changed".
-   * @param {Object} data
-   *        An object passed by the emitter of the event. In this case, the
-   *        object consists of three properties:
-   *        - pref {String} The name of the preference that was modified.
-   *        - newValue {Object} The new value of the preference.
-   *        - oldValue {Object} The old value of the preference.
    */
-  _handleThemeChange: function (event, data) {
-    if (data.pref === "devtools.theme") {
-      this._tooltip.panel.classList.toggle(data.oldValue + "-theme", false);
-      this._tooltip.panel.classList.toggle(data.newValue + "-theme", true);
-      this._list.classList.toggle(data.oldValue + "-theme", false);
-      this._list.classList.toggle(data.newValue + "-theme", true);
-    }
+  _handleThemeChange: function () {
+    const oldValue = this._currentTheme;
+    const newValue = Services.prefs.getCharPref("devtools.theme");
+
+    this._tooltip.panel.classList.toggle(oldValue + "-theme", false);
+    this._tooltip.panel.classList.toggle(newValue + "-theme", true);
+    this._list.classList.toggle(oldValue + "-theme", false);
+    this._list.classList.toggle(newValue + "-theme", true);
+
+    this._currentTheme = newValue;
   },
 
   /**
@@ -597,3 +591,5 @@ AutocompletePopup.prototype = {
     return this._document.defaultView;
   },
 };
+
+module.exports = AutocompletePopup;

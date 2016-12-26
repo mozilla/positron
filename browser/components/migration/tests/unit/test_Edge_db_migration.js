@@ -40,6 +40,7 @@ function createColumnCreationWrapper({name, type, cbMax}) {
   switch (type) {
     case COLUMN_TYPES.JET_coltypText:
       fallback = 255;
+      // Intentional fall-through
     case COLUMN_TYPES.JET_coltypLongText:
       wrapper.column.cbMax = cbMax || fallback || 64 * 1024;
       break;
@@ -53,7 +54,7 @@ function createColumnCreationWrapper({name, type, cbMax}) {
       wrapper.column.cbMax = 8;
       break;
     default:
-      throw "Unknown column type!";
+      throw new Error("Unknown column type!");
   }
 
   wrapper.column.columnid = new ESE.JET_COLUMNID();
@@ -236,8 +237,8 @@ let eseDBWritingHelpers = {
           columnIdMap.set(column.szColumnName.readString(), column);
           columnsPassed = columnsPassed.increment();
         }
-        let rv = ESE.ManualMove(this._sessionId, this._tableId,
-                                -2147483648 /* JET_MoveFirst */, 0);
+        ESE.ManualMove(this._sessionId, this._tableId,
+                       -2147483648 /* JET_MoveFirst */, 0);
         ESE.BeginTransaction(this._sessionId);
         for (let row of rows) {
           ESE.PrepareUpdate(this._sessionId, this._tableId, 0 /* JET_prepInsert */);
@@ -260,7 +261,6 @@ let eseDBWritingHelpers = {
         Cu.reportError(ex);
       }
     }
-
   },
 
   _close() {
@@ -387,6 +387,9 @@ add_task(function*() {
   let bookmarksMigrator = migrator.wrappedJSObject.getESEMigratorForTesting(db);
   Assert.ok(bookmarksMigrator.exists, "Should recognize table we just created");
 
+  let source = MigrationUtils.getLocalizedString("sourceNameEdge");
+  let sourceLabel = MigrationUtils.getLocalizedString("importedBookmarksFolder", [source]);
+
   let seenBookmarks = [];
   let bookmarkObserver = {
     onItemAdded(itemId, parentId, index, itemType, url, title, dateAdded, itemGuid, parentGuid) {
@@ -401,7 +404,7 @@ add_task(function*() {
     onItemChanged() {},
     onItemVisited() {},
     onItemMoved() {},
-  }
+  };
   PlacesUtils.bookmarks.addObserver(bookmarkObserver, false);
 
   let migrateResult = yield new Promise(resolve => bookmarksMigrator.migrate(resolve)).catch(ex => {
@@ -412,6 +415,9 @@ add_task(function*() {
   PlacesUtils.bookmarks.removeObserver(bookmarkObserver);
   Assert.ok(migrateResult, "Migration should succeed");
   Assert.equal(seenBookmarks.length, 7, "Should have seen 7 items being bookmarked.");
+  Assert.equal(seenBookmarks.filter(bm => bm.title != sourceLabel).length,
+               MigrationUtils._importQuantities.bookmarks,
+               "Telemetry should have items except for 'From Microsoft Edge' folders");
 
   let menuParents = seenBookmarks.filter(item => item.parentGuid == PlacesUtils.bookmarks.menuGuid);
   Assert.equal(menuParents.length, 1, "Should have a single folder added to the menu");
@@ -452,7 +458,7 @@ add_task(function*() {
       Assert.equal(parent && parent.title, "Folder", "Subfoldered item should be in subfolder labeled 'Folder'");
     }
 
-    let dbItem = itemsInDB.find(dbItem => bookmark.title == dbItem.Title);
+    let dbItem = itemsInDB.find(someItem => bookmark.title == someItem.Title);
     if (!dbItem) {
       Assert.equal(bookmark.title, importParentFolderName, "Only the extra layer of folders isn't in the input we stuck in the DB.");
       Assert.ok([menuParentGuid, toolbarParentGuid].includes(bookmark.itemGuid), "This item should be one of the containers");

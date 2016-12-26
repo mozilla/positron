@@ -50,6 +50,9 @@
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "chrome/common/child_process.h"
+#if defined(MOZ_WIDGET_ANDROID)
+#include "chrome/common/ipc_channel.h"
+#endif //  defined(MOZ_WIDGET_ANDROID)
 
 #include "mozilla/ipc/BrowserProcessSubThread.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
@@ -81,6 +84,11 @@
 
 #if defined(MOZ_CONTENT_SANDBOX) && !defined(MOZ_WIDGET_GONK)
 #include "mozilla/Preferences.h"
+#endif
+
+#if defined(XP_LINUX) && defined(MOZ_GMP_SANDBOX)
+#include "mozilla/Sandbox.h"
+#include "mozilla/SandboxInfo.h"
 #endif
 
 #ifdef MOZ_IPDL_TESTS
@@ -222,6 +230,17 @@ GeckoProcessType sChildProcessType = GeckoProcessType_Default;
 } // namespace startup
 } // namespace mozilla
 
+#if defined(MOZ_WIDGET_ANDROID)
+void
+XRE_SetAndroidChildFds (int crashFd, int ipcFd)
+{
+#if defined(MOZ_CRASHREPORTER)
+  CrashReporter::SetNotificationPipeForChild(crashFd);
+#endif // defined(MOZ_CRASHREPORTER)
+  IPC::Channel::SetClientChannelFd(ipcFd);
+}
+#endif // defined(MOZ_WIDGET_ANDROID)
+
 void
 XRE_SetProcessType(const char* aProcessTypeString)
 {
@@ -309,6 +328,29 @@ AddContentSandboxLevelAnnotation()
 #endif /* MOZ_CONTENT_SANDBOX && !MOZ_WIDGET_GONK */
 #endif /* MOZ_CRASHREPORTER */
 
+#if defined (XP_LINUX) && defined(MOZ_GMP_SANDBOX)
+namespace {
+class LinuxSandboxStarter : public mozilla::gmp::SandboxStarter {
+  LinuxSandboxStarter() { }
+public:
+  static SandboxStarter* Make() {
+    if (mozilla::SandboxInfo::Get().CanSandboxMedia()) {
+      return new LinuxSandboxStarter();
+    } else {
+      // Sandboxing isn't possible, but the parent has already
+      // checked that this plugin doesn't require it.  (Bug 1074561)
+      return nullptr;
+    }
+    return nullptr;
+  }
+  virtual bool Start(const char *aLibPath) override {
+    mozilla::SetMediaPluginSandbox(aLibPath);
+    return true;
+  }
+};
+} // anonymous namespace
+#endif // XP_LINUX && MOZ_GMP_SANDBOX
+
 nsresult
 XRE_InitChildProcess(int aArgc,
                      char* aArgv[],
@@ -319,21 +361,34 @@ XRE_InitChildProcess(int aArgc,
   NS_ENSURE_ARG_POINTER(aArgv[0]);
   MOZ_ASSERT(aChildData);
 
+#if defined(XP_LINUX) && defined(MOZ_SANDBOX)
+    // This has to happen while we're still single-threaded.
+    mozilla::SandboxEarlyInit(XRE_GetProcessType());
+#endif
+
 #ifdef MOZ_JPROF
   // Call the code to install our handler
   setupProfilingStuff();
 #endif
 
-#if !defined(MOZ_WIDGET_ANDROID) && !defined(MOZ_WIDGET_GONK)
-  // On non-Fennec Gecko, the GMPLoader code resides in plugin-container,
-  // and we must forward it through to the GMP code here.
-  GMPProcessChild::SetGMPLoader(aChildData->gmpLoader.get());
-#else
+#ifdef XP_LINUX
   // On Fennec, the GMPLoader's code resides inside XUL (because for the time
   // being GMPLoader relies upon NSPR, which we can't use in plugin-container
   // on Android), so we create it here inside XUL and pass it to the GMP code.
-  UniquePtr<GMPLoader> loader = CreateGMPLoader(nullptr);
+  //
+  // On desktop Linux, the sandbox code lives in a shared library, and
+  // the GMPLoader is in libxul instead of executables to avoid unwanted
+  // library dependencies.
+  mozilla::gmp::SandboxStarter* starter = nullptr;
+#ifdef MOZ_GMP_SANDBOX
+  starter = LinuxSandboxStarter::Make();
+#endif
+  UniquePtr<GMPLoader> loader = CreateGMPLoader(starter);
   GMPProcessChild::SetGMPLoader(loader.get());
+#else
+  // On non-Linux platforms, the GMPLoader code resides in plugin-container,
+  // and we must forward it through to the GMP code here.
+  GMPProcessChild::SetGMPLoader(aChildData->gmpLoader.get());
 #endif
 
 #if defined(XP_WIN)
@@ -367,7 +422,7 @@ XRE_InitChildProcess(int aArgc,
 #endif
 
   // NB: This must be called before profiler_init
-  NS_LogInit();
+  ScopedLogging logger;
 
   // This is needed by Telemetry to initialize histogram collection.
   // NB: This must be called after NS_LogInit().
@@ -380,7 +435,7 @@ XRE_InitChildProcess(int aArgc,
   mozilla::LogModule::Init();
 
   char aLocal;
-  profiler_init(&aLocal);
+  GeckoProfilerInitRAII profiler(&aLocal);
 
   PROFILER_LABEL("Startup", "XRE_InitChildProcess",
     js::ProfileEntry::Category::OTHER);
@@ -559,8 +614,6 @@ XRE_InitChildProcess(int aArgc,
 
   nsresult rv = XRE_InitCommandLine(aArgc, aArgv);
   if (NS_FAILED(rv)) {
-    profiler_shutdown();
-    NS_LogTerm();
     return NS_ERROR_FAILURE;
   }
 
@@ -596,7 +649,7 @@ XRE_InitChildProcess(int aArgc,
 
       switch (XRE_GetProcessType()) {
       case GeckoProcessType_Default:
-        NS_RUNTIMEABORT("This makes no sense");
+        MOZ_CRASH("This makes no sense");
         break;
 
       case GeckoProcessType_Plugin:
@@ -652,7 +705,7 @@ XRE_InitChildProcess(int aArgc,
 #ifdef MOZ_IPDL_TESTS
         process = new IPDLUnitTestProcessChild(parentPID);
 #else 
-        NS_RUNTIMEABORT("rebuild with --enable-ipdl-tests");
+        MOZ_CRASH("rebuild with --enable-ipdl-tests");
 #endif
         break;
 
@@ -665,12 +718,10 @@ XRE_InitChildProcess(int aArgc,
         break;
 
       default:
-        NS_RUNTIMEABORT("Unknown main thread class");
+        MOZ_CRASH("Unknown main thread class");
       }
 
       if (!process->Init()) {
-        profiler_shutdown();
-        NS_LogTerm();
         return NS_ERROR_FAILURE;
       }
 
@@ -717,8 +768,6 @@ XRE_InitChildProcess(int aArgc,
   }
 
   Telemetry::DestroyStatisticsRecorder();
-  profiler_shutdown();
-  NS_LogTerm();
   return XRE_DeinitCommandLine();
 }
 

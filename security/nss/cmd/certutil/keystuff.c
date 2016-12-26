@@ -52,9 +52,10 @@ static int
 UpdateRNG(void)
 {
     char randbuf[RAND_BUF_SIZE];
-    int fd, count;
+    int fd;
     int c;
     int rv = 0;
+    size_t count;
 #ifdef XP_UNIX
     cc_t orig_cc_min;
     cc_t orig_cc_time;
@@ -392,9 +393,6 @@ typedef struct curveNameTagPairStr {
     char *curveName;
     SECOidTag curveOidTag;
 } CurveNameTagPair;
-
-#define DEFAULT_CURVE_OID_TAG SEC_OID_SECG_EC_SECP192R1
-/* #define DEFAULT_CURVE_OID_TAG  SEC_OID_SECG_EC_SECP160R1 */
 
 static CurveNameTagPair nameTagPair[] =
     {

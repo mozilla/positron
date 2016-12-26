@@ -9,6 +9,7 @@
 
 #include "mozilla/a11y/DocAccessible.h"
 #include "mozilla/a11y/PDocAccessibleChild.h"
+#include "mozilla/Unused.h"
 #include "nsISupportsImpl.h"
 
 namespace mozilla {
@@ -38,10 +39,9 @@ public:
     MOZ_COUNT_DTOR(DocAccessibleChildBase);
   }
 
-  void Shutdown()
+  virtual void Shutdown()
   {
-    mDoc->SetIPCDoc(nullptr);
-    mDoc = nullptr;
+    DetachDocument();
     SendShutdown();
   }
 
@@ -60,10 +60,17 @@ public:
 protected:
   static uint32_t InterfacesFor(Accessible* aAcc);
   static void SerializeTree(Accessible* aRoot, nsTArray<AccessibleData>& aTree);
-#if defined(XP_WIN)
-  static void SetMsaaIds(Accessible* aRoot, uint32_t& aMsaaIdIndex,
-                         const nsTArray<MsaaMapping>& aNewMsaaIds);
-#endif
+
+  virtual void MaybeSendShowEvent(ShowEventData& aData, bool aFromUser)
+  { Unused << SendShowEvent(aData, aFromUser); }
+
+  void DetachDocument()
+  {
+    if (mDoc) {
+      mDoc->SetIPCDoc(nullptr);
+      mDoc = nullptr;
+    }
+  }
 
   DocAccessible*  mDoc;
 };

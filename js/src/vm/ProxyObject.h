@@ -104,11 +104,11 @@ class ProxyObject : public ShapedObject
   public:
     static unsigned grayLinkExtraSlot(JSObject* obj);
 
-    void renew(JSContext* cx, const BaseProxyHandler* handler, Value priv);
+    void renew(JSContext* cx, const BaseProxyHandler* handler, const Value& priv);
 
     static void trace(JSTracer* trc, JSObject* obj);
 
-    void nuke(const BaseProxyHandler* handler);
+    void nuke();
 
     // There is no class_ member to force specialization of JSObject::is<T>().
     // The implementation in JSObject is incorrect for proxies since it doesn't

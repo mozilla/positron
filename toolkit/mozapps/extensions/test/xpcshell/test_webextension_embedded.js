@@ -18,7 +18,6 @@ const { Management } = Components.utils.import("resource://gre/modules/Extension
 
 const {
   EmbeddedExtensionManager,
-  LegacyExtensionsUtils,
 } = Components.utils.import("resource://gre/modules/LegacyExtensionsUtils.jsm");
 
 // Wait the startup of the embedded webextension.
@@ -52,6 +51,77 @@ const EMBEDDED_WEBEXT_MANIFEST = JSON.stringify({
   name: "embedded webextension addon",
   manifest_version: 2,
   version: "1.0",
+});
+
+/**
+ *  This test case checks that an hasEmbeddedWebExtension addon property
+ *  is persisted and restored correctly across restarts.
+ */
+add_task(function* has_embedded_webextension_persisted() {
+  const ID = "embedded-webextension-addon-persist@tests.mozilla.org";
+
+  const xpiFile = createTempXPIFile({
+    id: ID,
+    name: "Test Add-on",
+    version: "1.0",
+    bootstrap: true,
+    hasEmbeddedWebExtension: true,
+    targetApplications: [{
+      id: "xpcshell@tests.mozilla.org",
+      minVersion: "1",
+      maxVersion: "1.9.2"
+    }]
+  }, {
+    "bootstrap.js": BOOTSTRAP,
+    "webextension/manifest.json": EMBEDDED_WEBEXT_MANIFEST,
+  });
+
+  yield promiseInstallFile(xpiFile);
+
+  let addon = yield promiseAddonByID(ID);
+
+  notEqual(addon, null, "Got an addon object as expected");
+  equal(addon.version, "1.0", "Got the expected version");
+  equal(addon.hasEmbeddedWebExtension, true,
+        "Got the expected hasEmbeddedWebExtension value");
+
+  // Check that the addon has been installed and started.
+  BootstrapMonitor.checkAddonInstalled(ID, "1.0");
+  BootstrapMonitor.checkAddonStarted(ID, "1.0");
+
+  let startupInfo = BootstrapMonitor.started.get(ID);
+  ok(("webExtension" in startupInfo.data),
+     "Got an webExtension property in the startup bootstrap method params");
+  ok(("startup" in startupInfo.data.webExtension),
+     "Got the expected 'startup' property in the webExtension object");
+
+  // After restarting the manager, the add-on should still have the
+  // hasEmbeddedWebExtension property as expected.
+  yield promiseRestartManager();
+
+  let persisted = JSON.parse(Services.prefs.getCharPref("extensions.bootstrappedAddons"));
+  ok(ID in persisted, "Hybrid add-on persisted to bootstrappedAddons.");
+  equal(persisted[ID].hasEmbeddedWebExtension, true,
+        "hasEmbeddedWebExtension flag persisted to bootstrappedAddons.");
+
+  // Check that the addon has been installed and started.
+  BootstrapMonitor.checkAddonInstalled(ID, "1.0");
+  BootstrapMonitor.checkAddonStarted(ID, "1.0");
+
+  addon = yield promiseAddonByID(ID);
+  notEqual(addon, null, "Got an addon object as expected");
+  equal(addon.hasEmbeddedWebExtension, true, "Got the expected hasEmbeddedWebExtension value");
+
+  // Check that the addon has been installed and started.
+  let newStartupInfo = BootstrapMonitor.started.get(ID);
+  ok(("webExtension" in newStartupInfo.data),
+     "Got an webExtension property in the startup bootstrap method params");
+  ok(("startup" in newStartupInfo.data.webExtension),
+     "Got the expected 'startup' property in the webExtension object");
+
+  let waitUninstall = promiseAddonEvent("onUninstalled");
+  addon.uninstall();
+  yield waitUninstall;
 });
 
 /**

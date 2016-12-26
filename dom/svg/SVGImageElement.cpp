@@ -137,6 +137,15 @@ SVGImageElement::LoadSVGImage(bool aForce, bool aNotify)
 }
 
 //----------------------------------------------------------------------
+// EventTarget methods:
+
+void
+SVGImageElement::AsyncEventRunning(AsyncEventDispatcher* aEvent)
+{
+  nsImageLoadingContent::AsyncEventRunning(aEvent);
+}
+
+//----------------------------------------------------------------------
 // nsIContent methods:
 
 nsresult
@@ -226,7 +235,7 @@ SVGImageElement::IsAttributeMapped(const nsIAtom* name) const
 }
 
 //----------------------------------------------------------------------
-// nsSVGPathGeometryElement methods
+// SVGGeometryElement methods
 
 /* For the purposes of the update/invalidation logic pretend to
    be a rectangle. */

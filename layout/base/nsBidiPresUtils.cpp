@@ -186,7 +186,7 @@ struct BidiParagraphData {
   nsBidiLevel GetParaLevel()
   {
     nsBidiLevel paraLevel = mParaLevel;
-    if (IS_DEFAULT_LEVEL(paraLevel)) {
+    if (paraLevel == NSBIDI_DEFAULT_LTR || paraLevel == NSBIDI_DEFAULT_RTL) {
       mBidiEngine->GetParaLevel(&paraLevel);
     }
     return paraLevel;
@@ -692,7 +692,7 @@ nsBidiPresUtils::Resolve(nsBlockFrame* aBlockFrame)
   for (nsBlockFrame* block = aBlockFrame; block;
        block = static_cast<nsBlockFrame*>(block->GetNextContinuation())) {
     block->RemoveStateBits(NS_BLOCK_NEEDS_BIDI_RESOLUTION);
-    nsBlockInFlowLineIterator lineIter(block, block->begin_lines());
+    nsBlockInFlowLineIterator lineIter(block, block->LinesBegin());
     bpd.mPrevFrame = nullptr;
     TraverseFrames(aBlockFrame, &lineIter, block->PrincipalChildList().FirstChild(), &bpd);
     // XXX what about overflow lines?
@@ -761,7 +761,7 @@ nsBidiPresUtils::ResolveParagraph(nsBlockFrame* aBlockFrame,
     // so we can't do this optimization), and we're done.
     nsIFrame* frame = aBpd->FrameAt(0);
     if (frame != NS_BIDI_CONTROL_FRAME) {
-      FrameBidiData bidiData = nsBidi::GetBidiData(frame);
+      FrameBidiData bidiData = frame->GetBidiData();
       if (!bidiData.embeddingLevel && !bidiData.baseLevel) {
 #ifdef DEBUG
 #ifdef NOISY_BIDI
@@ -794,7 +794,7 @@ nsBidiPresUtils::ResolveParagraph(nsBlockFrame* aBlockFrame,
     }
     precedingControl = kBidiLevelNone;
     lastEmbedingLevel = embeddingLevel;
-    propTable->Set(frame, nsBidi::BidiDataProperty(), bidiData);
+    propTable->Set(frame, nsIFrame::BidiDataProperty(), bidiData);
   };
 
   for (; ;) {
@@ -1272,13 +1272,13 @@ nsBidiPresUtils::GetFirstLeaf(nsIFrame* aFrame)
 FrameBidiData
 nsBidiPresUtils::GetFrameBidiData(nsIFrame* aFrame)
 {
-  return nsBidi::GetBidiData(GetFirstLeaf(aFrame));
+  return GetFirstLeaf(aFrame)->GetBidiData();
 }
 
 nsBidiLevel
 nsBidiPresUtils::GetFrameEmbeddingLevel(nsIFrame* aFrame)
 {
-  return nsBidi::GetEmbeddingLevel(GetFirstLeaf(aFrame));
+  return GetFirstLeaf(aFrame)->GetEmbeddingLevel();
 }
 
 nsBidiLevel
@@ -1288,7 +1288,7 @@ nsBidiPresUtils::GetFrameBaseLevel(nsIFrame* aFrame)
   while (!IsBidiLeaf(firstLeaf)) {
     firstLeaf = firstLeaf->PrincipalChildList().FirstChild();
   }
-  return nsBidi::GetBaseLevel(firstLeaf);
+  return firstLeaf->GetBaseLevel();
 }
 
 void
@@ -1755,14 +1755,14 @@ nsBidiPresUtils::RemoveBidiContinuation(BidiParagraphData *aBpd,
                                         int32_t         aFirstIndex,
                                         int32_t         aLastIndex)
 {
-  FrameBidiData bidiData = nsBidi::GetBidiData(aFrame);
+  FrameBidiData bidiData = aFrame->GetBidiData();
   bidiData.precedingControl = kBidiLevelNone;
   for (int32_t index = aFirstIndex + 1; index <= aLastIndex; index++) {
     nsIFrame* frame = aBpd->FrameAt(index);
     if (frame != NS_BIDI_CONTROL_FRAME) {
       // Make the frame and its continuation ancestors fluid,
       // so they can be reused or deleted by normal reflow code
-      frame->Properties().Set(nsBidi::BidiDataProperty(), bidiData);
+      frame->Properties().Set(nsIFrame::BidiDataProperty(), bidiData);
       frame->AddStateBits(NS_FRAME_IS_BIDI);
       while (frame) {
         nsIFrame* prev = frame->GetPrevContinuation();
@@ -1909,18 +1909,24 @@ nsBidiPresUtils::CalculateCharType(nsBidi* aBidiEngine,
 
   aCharType = eCharType_OtherNeutral;
 
-  for (offset = aOffset; offset < aCharTypeLimit; offset++) {
+  int32_t charLen;
+  for (offset = aOffset; offset < aCharTypeLimit; offset += charLen) {
     // Make sure we give RTL chartype to all characters that would be classified
     // as Right-To-Left by a bidi platform.
     // (May differ from the UnicodeData, eg we set RTL chartype to some NSMs.)
-    if (IS_HEBREW_CHAR(aText[offset]) ) {
+    charLen = 1;
+    uint32_t ch = aText[offset];
+    if (IS_HEBREW_CHAR(ch) ) {
       charType = eCharType_RightToLeft;
-    }
-    else if (IS_ARABIC_ALPHABETIC(aText[offset]) ) {
+    } else if (IS_ARABIC_ALPHABETIC(ch) ) {
       charType = eCharType_RightToLeftArabic;
-    }
-    else {
-      aBidiEngine->GetCharTypeAt(offset, &charType);
+    } else {
+      if (NS_IS_HIGH_SURROGATE(ch) && offset + 1 < aCharTypeLimit &&
+          NS_IS_LOW_SURROGATE(aText[offset + 1])) {
+        ch = SURROGATE_TO_UCS4(ch, aText[offset + 1]);
+        charLen = 2;
+      }
+      charType = unicode::GetBidiCat(ch);
     }
 
     if (!CHARTYPE_IS_WEAK(charType) ) {

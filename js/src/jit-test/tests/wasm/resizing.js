@@ -1,10 +1,10 @@
-// |jit-test| test-also-wasm-baseline
 load(libdir + "wasm.js");
 
 const Module = WebAssembly.Module;
 const Instance = WebAssembly.Instance;
 const Table = WebAssembly.Table;
 const Memory = WebAssembly.Memory;
+const RuntimeError = WebAssembly.RuntimeError;
 
 // ======
 // MEMORY
@@ -13,7 +13,7 @@ const Memory = WebAssembly.Memory;
 // Test for stale heap pointers after resize
 
 // Grow directly from builtin call:
-assertEq(wasmEvalText(`(module
+wasmFullPass(`(module
     (memory 1)
     (func $test (result i32)
         (i32.store (i32.const 0) (i32.const 1))
@@ -25,10 +25,10 @@ assertEq(wasmEvalText(`(module
             (i32.add
                 (i32.load (i32.const 65532))
                 (i32.load (i32.const 6553596)))))
-    (export "test" $test)
-)`).exports.test(), 111);
+    (export "run" $test)
+)`, 111);
 
-// Grow during call_import:
+// Grow during import call:
 var exports = wasmEvalText(`(module
     (import $imp "" "imp")
     (memory 1)
@@ -64,7 +64,7 @@ var exports1 = wasmEvalText(`(module
     (export "grow" $grow)
 )`, {"":{mem}}).exports;
 var exports2 = wasmEvalText(`(module
-    (import "" "tbl" (table 1))
+    (import "" "tbl" (table 1 anyfunc))
     (import "" "mem" (memory 1))
     (type $v2v (func))
     (func $test (result i32)
@@ -118,17 +118,26 @@ assertEq(exp2.load(3*64*1024), 99);
 assertEq(mem.buffer.byteLength, 4*64*1024);
 assertEq(new Int32Array(mem.buffer)[3*64*1024/4], 99);
 
+// Fail at maximum
+
+var mem = new Memory({initial:1, maximum:2});
+assertEq(mem.buffer.byteLength, 1 * 64*1024);
+assertEq(mem.grow(1), 1);
+assertEq(mem.buffer.byteLength, 2 * 64*1024);
+assertErrorMessage(() => mem.grow(1), RangeError, /failed to grow memory/);
+assertEq(mem.buffer.byteLength, 2 * 64*1024);
+
 // ======
 // TABLE
 // ======
 
 // Test for stale table base pointers after resize
 
-// Grow during call_import:
+// Grow during import call:
 var exports = wasmEvalText(`(module
     (type $v2i (func (result i32)))
     (import $grow "" "grow")
-    (table (resizable 1))
+    (table (export "tbl") 1 anyfunc)
     (func $test (result i32)
         (i32.add
             (call_indirect $v2i (i32.const 0))
@@ -138,7 +147,6 @@ var exports = wasmEvalText(`(module
     (func $one (result i32) (i32.const 1))
     (elem (i32.const 0) $one)
     (func $two (result i32) (i32.const 2))
-    (export "tbl" table)
     (export "test" $test)
     (export "two" $two)
 )`, {"":{grow() { exports.tbl.grow(1); exports.tbl.set(1, exports.two) }}}).exports;
@@ -160,7 +168,7 @@ var exports2 = wasmEvalText(`(module
     (type $v2i (func (result i32)))
     (import $imp "" "imp")
     (elem (i32.const 0) $imp)
-    (table (resizable 2))
+    (table 2 anyfunc)
     (func $test (result i32)
         (i32.add
             (call_indirect $v2i (i32.const 1))
@@ -191,26 +199,35 @@ tbl.set(0, src.one);
 
 var mod = new Module(wasmTextToBinary(`(module
     (type $v2i (func (result i32)))
-    (import "" "tbl" (table 1))
+    (table (import "" "tbl") 1 anyfunc)
     (func $ci (param i32) (result i32) (call_indirect $v2i (get_local 0)))
     (export "call_indirect" $ci)
 )`));
 var exp1 = new Instance(mod, {"":{tbl}}).exports;
 var exp2 = new Instance(mod, {"":{tbl}}).exports;
 assertEq(exp1.call_indirect(0), 1);
-assertErrorMessage(() => exp1.call_indirect(1), Error, /out-of-range/);
+assertErrorMessage(() => exp1.call_indirect(1), RuntimeError, /index out of bounds/);
 assertEq(exp2.call_indirect(0), 1);
-assertErrorMessage(() => exp2.call_indirect(1), Error, /out-of-range/);
+assertErrorMessage(() => exp2.call_indirect(1), RuntimeError, /index out of bounds/);
 assertEq(tbl.grow(1), 1);
 assertEq(tbl.length, 2);
 assertEq(exp1.call_indirect(0), 1);
 assertErrorMessage(() => exp1.call_indirect(1), Error, /indirect call to null/);
 tbl.set(1, src.two);
 assertEq(exp1.call_indirect(1), 2);
-assertErrorMessage(() => exp1.call_indirect(2), Error, /out-of-range/);
+assertErrorMessage(() => exp1.call_indirect(2), RuntimeError, /index out of bounds/);
 assertEq(tbl.grow(2), 2);
 assertEq(tbl.length, 4);
 assertEq(exp2.call_indirect(0), 1);
 assertEq(exp2.call_indirect(1), 2);
 assertErrorMessage(() => exp2.call_indirect(2), Error, /indirect call to null/);
 assertErrorMessage(() => exp2.call_indirect(3), Error, /indirect call to null/);
+
+// Fail at maximum
+
+var tbl = new Table({initial:1, maximum:2, element:"anyfunc"});
+assertEq(tbl.length, 1);
+assertEq(tbl.grow(1), 1);
+assertEq(tbl.length, 2);
+assertErrorMessage(() => tbl.grow(1), RangeError, /failed to grow table/);
+assertEq(tbl.length, 2);

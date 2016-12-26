@@ -32,7 +32,6 @@ var Change = {
   onLoad: function Change_onLoad() {
     /* Load labels */
     let introText = document.getElementById("introText");
-    let introText2 = document.getElementById("introText2");
     let warningText = document.getElementById("warningText");
 
     // load some other elements & info from the window
@@ -142,15 +141,13 @@ var Change = {
       case "UpdatePassphrase":
       case "ResetPassphrase":
         return this.doChangePassphrase();
-        break;
       case "ChangePassword":
         return this.doChangePassword();
-        break;
     }
     return undefined;
   },
 
-  doGeneratePassphrase: function () {
+  doGeneratePassphrase: function() {
     let passphrase = Weave.Utils.generatePassphrase();
     this._passphraseBox.value = Weave.Utils.hyphenatePassphrase(passphrase);
     this._dialog.getButton("finish").disabled = false;
@@ -204,7 +201,7 @@ var Change = {
     return false;
   },
 
-  validate: function (event) {
+  validate: function(event) {
     let valid = false;
     let errorString = "";
 

@@ -9,10 +9,12 @@
 #include "nsTArrayForwardDeclare.h"
 template<class T> class nsCOMArray;
 class nsCString;
+namespace mozilla { namespace net { class nsHttpChannel; } }
 %}
 [ptr] native StringArray(nsTArray<nsCString>);
 [ref] native StringArrayRef(const nsTArray<nsCString>);
 [ref] native securityMessagesArray(nsCOMArray<nsISecurityConsoleMessage>);
+[ptr] native nsHttpChannelPtr(mozilla::net::nsHttpChannel);
 
 interface nsIAsyncInputStream;
 interface nsIAsyncOutputStream;
@@ -205,6 +207,13 @@ interface nsIHttpChannelInternal : nsISupports
      */
     attribute boolean allowAltSvc;
 
+    /**
+     * If true, do not use newer protocol features that might have interop problems
+     * on the Internet. Intended only for use with critical infra like the updater.
+     * default is false.
+     */
+    attribute boolean beConservative;
+
     readonly attribute PRTime lastModifiedTime;
 
     /**
@@ -296,4 +305,10 @@ interface nsIHttpChannelInternal : nsISupports
      * The connection info's hash key. We use it to test connection separation.
      */
     readonly attribute ACString connectionInfoHashKey;
+
+    /**
+     * Returns nsHttpChannel (self) when this actually is implementing nsHttpChannel.
+     */
+    [noscript, notxpcom, nostdcall]
+    nsHttpChannelPtr queryHttpChannelImpl();
 };

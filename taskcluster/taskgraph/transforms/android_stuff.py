@@ -7,8 +7,8 @@ Set dynamic task description properties of the android stuff.  Temporary!
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-import time
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.transforms.job.common import SECRET_SCOPE
 
 transforms = TransformSequence()
 
@@ -23,8 +23,7 @@ def setup_task(config, tasks):
             'GECKO_HEAD_REF': config.params['head_rev'],
             'GECKO_HEAD_REPOSITORY': config.params['head_repository'],
             'GECKO_HEAD_REV': config.params['head_rev'],
-            'MOZ_BUILD_DATE': time.strftime("%Y%m%d%H%M%S",
-                                            time.gmtime(config.params['pushdate'])),
+            'MOZ_BUILD_DATE': config.params['moz_build_date'],
             'MOZ_SCM_LEVEL': config.params['level'],
             'MH_BRANCH': config.params['project'],
         })
@@ -43,6 +42,11 @@ def setup_task(config, tasks):
                     config.params['level'], config.params['project'], task['name']),
                 'mount-point': "/home/worker/workspace",
             })
+
+        # Need appropriate scopes for secrets, from the 'build' section
+        task['worker']['taskcluster-proxy'] = True
+        task['scopes'].append(SECRET_SCOPE.format(
+            'build', config.params['level'], '*'))
 
         del task['name']
         yield task

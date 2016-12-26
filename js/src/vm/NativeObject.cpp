@@ -25,6 +25,7 @@
 
 using namespace js;
 
+using JS::AutoCheckCannotGC;
 using JS::GenericNaN;
 using mozilla::ArrayLength;
 using mozilla::DebugOnly;
@@ -95,6 +96,7 @@ ObjectElements::MakeElementsCopyOnWrite(ExclusiveContext* cx, NativeObject* obj)
     // Note: this method doesn't update type information to indicate that the
     // elements might be copy on write. Handling this is left to the caller.
     MOZ_ASSERT(!header->isCopyOnWrite());
+    MOZ_ASSERT(!header->isFrozen());
     header->flags |= COPY_ON_WRITE;
 
     header->ownerObject().init(obj);
@@ -138,22 +140,23 @@ js::NativeObject::checkShapeConsistency()
     Shape* shape = lastProperty();
     Shape* prev = nullptr;
 
+    AutoCheckCannotGC nogc;
     if (inDictionaryMode()) {
-        MOZ_ASSERT(shape->hasTable());
+        if (ShapeTable* table = shape->maybeTable(nogc)) {
+            for (uint32_t fslot = table->freeList();
+                 fslot != SHAPE_INVALID_SLOT;
+                 fslot = getSlot(fslot).toPrivateUint32())
+            {
+                MOZ_ASSERT(fslot < slotSpan());
+            }
 
-        ShapeTable& table = shape->table();
-        for (uint32_t fslot = table.freeList();
-             fslot != SHAPE_INVALID_SLOT;
-             fslot = getSlot(fslot).toPrivateUint32())
-        {
-            MOZ_ASSERT(fslot < slotSpan());
-        }
+            for (int n = throttle; --n >= 0 && shape->parent; shape = shape->parent) {
+                MOZ_ASSERT_IF(lastProperty() != shape, !shape->hasTable());
 
-        for (int n = throttle; --n >= 0 && shape->parent; shape = shape->parent) {
-            MOZ_ASSERT_IF(lastProperty() != shape, !shape->hasTable());
-
-            ShapeTable::Entry& entry = table.search<MaybeAdding::NotAdding>(shape->propid());
-            MOZ_ASSERT(entry.shape() == shape);
+                ShapeTable::Entry& entry = table->search<MaybeAdding::NotAdding>(shape->propid(),
+                                                                                 nogc);
+                MOZ_ASSERT(entry.shape() == shape);
+            }
         }
 
         shape = lastProperty();
@@ -169,11 +172,11 @@ js::NativeObject::checkShapeConsistency()
         }
     } else {
         for (int n = throttle; --n >= 0 && shape->parent; shape = shape->parent) {
-            if (shape->hasTable()) {
-                ShapeTable& table = shape->table();
+            if (ShapeTable* table = shape->maybeTable(nogc)) {
                 MOZ_ASSERT(shape->parent);
                 for (Shape::Range<NoGC> r(shape); !r.empty(); r.popFront()) {
-                    ShapeTable::Entry& entry = table.search<MaybeAdding::NotAdding>(r.front().propid());
+                    ShapeTable::Entry& entry =
+                        table->search<MaybeAdding::NotAdding>(r.front().propid(), nogc);
                     MOZ_ASSERT(entry.shape() == &r.front());
                 }
             }
@@ -250,8 +253,7 @@ Shape*
 js::NativeObject::lookup(ExclusiveContext* cx, jsid id)
 {
     MOZ_ASSERT(isNative());
-    ShapeTable::Entry* entry;
-    return Shape::search(cx, lastProperty(), id, &entry);
+    return Shape::search(cx, lastProperty(), id);
 }
 
 Shape*
@@ -259,6 +261,24 @@ js::NativeObject::lookupPure(jsid id)
 {
     MOZ_ASSERT(isNative());
     return Shape::searchNoHashify(lastProperty(), id);
+}
+
+uint32_t
+js::NativeObject::numFixedSlotsForCompilation() const
+{
+    // This is an alternative method for getting the number of fixed slots in an
+    // object. It requires more logic and memory accesses than numFixedSlots()
+    // but is safe to be called from the compilation thread, even if the main
+    // thread is actively mutating the VM.
+
+    // The compiler does not have access to nursery things.
+    MOZ_ASSERT(!IsInsideNursery(this));
+
+    if (this->is<ArrayObject>())
+        return 0;
+
+    gc::AllocKind kind = asTenured().getAllocKind();
+    return gc::GetGCKindSlots(kind, getClass());
 }
 
 uint32_t
@@ -480,8 +500,10 @@ NativeObject::shrinkSlots(ExclusiveContext* cx, uint32_t oldCount, uint32_t newC
     MOZ_ASSERT_IF(!is<ArrayObject>(), newCount >= SLOT_CAPACITY_MIN);
 
     HeapSlot* newslots = ReallocateObjectBuffer<HeapSlot>(cx, this, slots_, oldCount, newCount);
-    if (!newslots)
+    if (!newslots) {
+        cx->recoverFromOutOfMemory();
         return;  /* Leave slots at its old size. */
+    }
 
     slots_ = newslots;
 }
@@ -498,8 +520,24 @@ NativeObject::sparsifyDenseElement(ExclusiveContext* cx, HandleNativeObject obj,
     removeDenseElementForSparseIndex(cx, obj, index);
 
     uint32_t slot = obj->slotSpan();
-    if (!obj->addDataProperty(cx, INT_TO_JSID(index), slot, JSPROP_ENUMERATE)) {
-        obj->setDenseElement(index, value);
+
+    RootedId id(cx, INT_TO_JSID(index));
+
+    AutoKeepShapeTables keep(cx);
+    ShapeTable::Entry* entry = nullptr;
+    if (obj->inDictionaryMode()) {
+        ShapeTable* table = obj->lastProperty()->ensureTableForDictionary(cx, keep);
+        if (!table)
+            return false;
+        entry = &table->search<MaybeAdding::Adding>(id, keep);
+    }
+
+    // NOTE: We don't use addDataProperty because we don't want the
+    // extensibility check if we're, for example, sparsifying frozen objects..
+    if (!addPropertyInternal(cx, obj, id, nullptr, nullptr, slot,
+                             obj->getElementsHeader()->elementAttributes(),
+                             0, entry, true, keep)) {
+        obj->setDenseElementUnchecked(index, value);
         return false;
     }
 
@@ -527,7 +565,7 @@ NativeObject::sparsifyDenseElements(js::ExclusiveContext* cx, HandleNativeObject
     }
 
     if (initialized)
-        obj->setDenseInitializedLength(0);
+        obj->setDenseInitializedLengthUnchecked(0);
 
     /*
      * Reduce storage for dense elements which are now holes. Explicitly mark
@@ -780,6 +818,7 @@ NativeObject::growElements(ExclusiveContext* cx, uint32_t reqCapacity)
 {
     MOZ_ASSERT(nonProxyIsExtensible());
     MOZ_ASSERT(canHaveNonEmptyElements());
+    MOZ_ASSERT(!denseElementsAreFrozen());
     if (denseElementsAreCopyOnWrite())
         MOZ_CRASH();
 
@@ -874,6 +913,7 @@ NativeObject::shrinkElements(ExclusiveContext* cx, uint32_t reqCapacity)
 NativeObject::CopyElementsForWrite(ExclusiveContext* cx, NativeObject* obj)
 {
     MOZ_ASSERT(obj->denseElementsAreCopyOnWrite());
+    MOZ_ASSERT(!obj->denseElementsAreFrozen());
 
     // The original owner of a COW elements array should never be modified.
     MOZ_ASSERT(obj->getElementsHeader()->ownerObject() != obj);
@@ -912,26 +952,28 @@ NativeObject::allocSlot(ExclusiveContext* cx, HandleNativeObject obj, uint32_t* 
     uint32_t slot = obj->slotSpan();
     MOZ_ASSERT(slot >= JSSLOT_FREE(obj->getClass()));
 
-    /*
-     * If this object is in dictionary mode, try to pull a free slot from the
-     * shape table's slot-number freelist.
-     */
+    // If this object is in dictionary mode, try to pull a free slot from the
+    // shape table's slot-number free list. Shapes without a ShapeTable have an
+    // empty free list, because we only purge ShapeTables with an empty free
+    // list.
     if (obj->inDictionaryMode()) {
-        ShapeTable& table = obj->lastProperty()->table();
-        uint32_t last = table.freeList();
-        if (last != SHAPE_INVALID_SLOT) {
+        AutoCheckCannotGC nogc;
+        if (ShapeTable* table = obj->lastProperty()->maybeTable(nogc)) {
+            uint32_t last = table->freeList();
+            if (last != SHAPE_INVALID_SLOT) {
 #ifdef DEBUG
-            MOZ_ASSERT(last < slot);
-            uint32_t next = obj->getSlot(last).toPrivateUint32();
-            MOZ_ASSERT_IF(next != SHAPE_INVALID_SLOT, next < slot);
+                MOZ_ASSERT(last < slot);
+                uint32_t next = obj->getSlot(last).toPrivateUint32();
+                MOZ_ASSERT_IF(next != SHAPE_INVALID_SLOT, next < slot);
 #endif
 
-            *slotp = last;
+                *slotp = last;
 
-            const Value& vref = obj->getSlot(last);
-            table.setFreeList(vref.toPrivateUint32());
-            obj->setSlot(last, UndefinedValue());
-            return true;
+                const Value& vref = obj->getSlot(last);
+                table->setFreeList(vref.toPrivateUint32());
+                obj->setSlot(last, UndefinedValue());
+                return true;
+            }
         }
     }
 
@@ -949,26 +991,33 @@ NativeObject::allocSlot(ExclusiveContext* cx, HandleNativeObject obj, uint32_t* 
 }
 
 void
-NativeObject::freeSlot(uint32_t slot)
+NativeObject::freeSlot(ExclusiveContext* cx, uint32_t slot)
 {
     MOZ_ASSERT(slot < slotSpan());
 
     if (inDictionaryMode()) {
-        ShapeTable& table = lastProperty()->table();
-        uint32_t last = table.freeList();
+        // Ensure we have a ShapeTable as it stores the object's free list (the
+        // list of available slots in dictionary objects).
+        AutoCheckCannotGC nogc;
+        if (ShapeTable* table = lastProperty()->ensureTableForDictionary(cx, nogc)) {
+            uint32_t last = table->freeList();
 
-        /* Can't afford to check the whole freelist, but let's check the head. */
-        MOZ_ASSERT_IF(last != SHAPE_INVALID_SLOT, last < slotSpan() && last != slot);
+            // Can't afford to check the whole free list, but let's check the head.
+            MOZ_ASSERT_IF(last != SHAPE_INVALID_SLOT, last < slotSpan() && last != slot);
 
-        /*
-         * Place all freed slots other than reserved slots (bug 595230) on the
-         * dictionary's free list.
-         */
-        if (JSSLOT_FREE(getClass()) <= slot) {
-            MOZ_ASSERT_IF(last != SHAPE_INVALID_SLOT, last < slotSpan());
-            setSlot(slot, PrivateUint32Value(last));
-            table.setFreeList(slot);
-            return;
+            // Place all freed slots other than reserved slots (bug 595230) on the
+            // dictionary's free list.
+            if (JSSLOT_FREE(getClass()) <= slot) {
+                MOZ_ASSERT_IF(last != SHAPE_INVALID_SLOT, last < slotSpan());
+                setSlot(slot, PrivateUint32Value(last));
+                table->setFreeList(slot);
+                return;
+            }
+        } else {
+            // OOM while creating the ShapeTable holding the free list. We can
+            // recover from it - it just means we won't be able to reuse this
+            // slot later.
+            cx->recoverFromOutOfMemory();
         }
     }
     setSlot(slot, UndefinedValue());
@@ -985,7 +1034,7 @@ NativeObject::addDataProperty(ExclusiveContext* cx, jsid idArg, uint32_t slot, u
 
 Shape*
 NativeObject::addDataProperty(ExclusiveContext* cx, HandlePropertyName name,
-                          uint32_t slot, unsigned attrs)
+                              uint32_t slot, unsigned attrs)
 {
     MOZ_ASSERT(!(attrs & (JSPROP_GETTER | JSPROP_SETTER)));
     RootedNativeObject self(cx, this);
@@ -1009,7 +1058,7 @@ js::NativeLookupOwnProperty<CanGC>(ExclusiveContext* cx, HandleNativeObject obj,
                                    MutableHandleShape propp);
 
 template bool
-js::NativeLookupOwnProperty<NoGC>(ExclusiveContext* cx, NativeObject* obj, jsid id,
+js::NativeLookupOwnProperty<NoGC>(ExclusiveContext* cx, NativeObject* const& obj, const jsid& id,
                                   FakeMutableHandle<Shape*> propp);
 
 /*** [[DefineOwnProperty]] ***********************************************************************/
@@ -1323,8 +1372,7 @@ js::NativeDefineProperty(ExclusiveContext* cx, HandleNativeObject obj, HandleId 
 {
     desc_.assertValid();
 
-    // Section numbers and step numbers below refer to ES6 draft rev 36
-    // (17 March 2015).
+    // Section numbers and step numbers below refer to ES2016.
     //
     // This function aims to implement 9.1.6 [[DefineOwnProperty]] as well as
     // the [[DefineOwnProperty]] methods described in 9.4.2.1 (arrays), 9.4.4.2
@@ -1335,6 +1383,10 @@ js::NativeDefineProperty(ExclusiveContext* cx, HandleNativeObject obj, HandleId 
         // 9.4.2.1 step 2. Redefining an array's length is very special.
         Rooted<ArrayObject*> arr(cx, &obj->as<ArrayObject>());
         if (id == NameToId(cx->names().length)) {
+            // 9.1.6.3 ValidateAndApplyPropertyDescriptor, step 7.a.
+            if (desc_.isAccessorDescriptor())
+                return result.fail(JSMSG_CANT_REDEFINE_PROP);
+
             if (!cx->shouldBeJSContext())
                 return false;
             return ArraySetLength(cx->asJSContext(), arr, id, desc_.attributes(), desc_.value(),
@@ -1374,7 +1426,7 @@ js::NativeDefineProperty(ExclusiveContext* cx, HandleNativeObject obj, HandleId 
         }
     }
 
-    // 9.1.6.1 OrdinaryDefineOwnProperty steps 1-2.
+    // 9.1.6.1 OrdinaryDefineOwnProperty step 1.
     RootedShape shape(cx);
     if (desc_.attributes() & JSPROP_RESOLVING) {
         // We are being called from a resolve or enumerate hook to reify a
@@ -1961,7 +2013,7 @@ GetNonexistentProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
 
 /* The NoGC version of GetNonexistentProperty, present only to make types line up. */
 bool
-GetNonexistentProperty(JSContext* cx, NativeObject* obj, jsid id, Value& receiver,
+GetNonexistentProperty(JSContext* cx, NativeObject* const& obj, const jsid& id, const Value& receiver,
                        IsNameLookup nameLookup, FakeMutableHandle<Value> vp)
 {
     return false;
@@ -2086,7 +2138,7 @@ js::GetPropertyForNameLookup(JSContext* cx, HandleObject obj, HandleId id, Mutab
 /*** [[Set]] *************************************************************************************/
 
 static bool
-MaybeReportUndeclaredVarAssignment(JSContext* cx, JSString* propname)
+MaybeReportUndeclaredVarAssignment(JSContext* cx, HandleString propname)
 {
     unsigned flags;
     {
@@ -2105,10 +2157,11 @@ MaybeReportUndeclaredVarAssignment(JSContext* cx, JSString* propname)
             return true;
     }
 
-    JSAutoByteString bytes(cx, propname);
-    return !!bytes &&
-           JS_ReportErrorFlagsAndNumber(cx, flags, GetErrorMessage, nullptr,
-                                        JSMSG_UNDECLARED_VAR, bytes.ptr());
+    JSAutoByteString bytes;
+    if (!bytes.encodeUtf8(cx, propname))
+        return false;
+    return JS_ReportErrorFlagsAndNumberUTF8(cx, flags, GetErrorMessage, nullptr,
+                                            JSMSG_UNDECLARED_VAR, bytes.ptr());
 }
 
 /*
@@ -2269,7 +2322,8 @@ SetNonexistentProperty(JSContext* cx, HandleId id, HandleValue v, HandleValue re
                        QualifiedBool qualified, ObjectOpResult& result)
 {
     if (!qualified && receiver.isObject() && receiver.toObject().isUnqualifiedVarObj()) {
-        if (!MaybeReportUndeclaredVarAssignment(cx, JSID_TO_STRING(id)))
+        RootedString idStr(cx, JSID_TO_STRING(id));
+        if (!MaybeReportUndeclaredVarAssignment(cx, idStr))
             return false;
     }
 

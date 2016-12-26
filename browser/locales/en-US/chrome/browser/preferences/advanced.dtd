@@ -57,6 +57,13 @@
 
 <!ENTITY offlineStorage2.label           "Offline Web Content and User Data">
 
+<!--  Site Data section manages sites using Storage API and is under Network -->
+<!ENTITY siteData.label                  "Site Data">
+<!ENTITY clearSiteData.label             "Clear All Data">
+<!ENTITY clearSiteData.accesskey         "l">
+<!ENTITY siteDataSettings.label          "Settings…">
+<!ENTITY siteDataSettings.accesskey      "i">
+
 <!-- LOCALIZATION NOTE:
   The entities limitCacheSizeBefore.label and limitCacheSizeAfter.label appear on a single
   line in preferences as follows:
@@ -75,7 +82,7 @@
 
 <!ENTITY updateTab.label                 "Update">
 
-<!ENTITY updateApp.label                 "&brandShortName; updates:">
+<!ENTITY updateApplication.label         "&brandShortName; updates">
 <!ENTITY updateAuto1.label               "Automatically install updates (recommended: improved security)">
 <!ENTITY updateAuto1.accesskey           "A">
 <!ENTITY updateCheck.label               "Check for updates, but let me choose whether to install them">
@@ -89,7 +96,7 @@
 <!ENTITY useService.label                "Use a background service to install updates">
 <!ENTITY useService.accesskey            "b">
 
-<!ENTITY updateOthers.label              "Automatically update:">
+<!ENTITY autoUpdateOthers.label          "Automatically update">
 <!ENTITY enableSearchUpdate.label        "Search Engines">
 <!ENTITY enableSearchUpdate.accesskey    "E">
 

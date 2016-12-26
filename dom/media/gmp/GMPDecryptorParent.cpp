@@ -40,6 +40,17 @@ GMPDecryptorParent::~GMPDecryptorParent()
 {
 }
 
+mozilla::ipc::IPCResult
+GMPDecryptorParent::RecvSetDecryptorId(const uint32_t& aId)
+{
+  if (!mIsOpen) {
+    NS_WARNING("Trying to use a dead GMP decrypter!");
+    return IPC_FAIL_NO_REASON(this);
+  }
+  mCallback->SetDecryptorId(aId);
+  return IPC_OK();
+}
+
 nsresult
 GMPDecryptorParent::Init(GMPDecryptorProxyCallback* aCallback,
                          bool aDistinctiveIdentifierRequired,
@@ -67,7 +78,7 @@ GMPDecryptorParent::CreateSession(uint32_t aCreateSessionToken,
                                   GMPSessionType aSessionType)
 {
   LOGD(("GMPDecryptorParent[%p]::CreateSession(token=%u, promiseId=%u, aInitData='%s')",
-        this, aCreateSessionToken, aPromiseId, ToBase64(aInitData).get()));
+        this, aCreateSessionToken, aPromiseId, ToHexString(aInitData).get()));
 
   if (!mIsOpen) {
     NS_WARNING("Trying to use a dead GMP decrypter!");
@@ -99,7 +110,7 @@ GMPDecryptorParent::UpdateSession(uint32_t aPromiseId,
                                   const nsTArray<uint8_t>& aResponse)
 {
   LOGD(("GMPDecryptorParent[%p]::UpdateSession(sessionId='%s', promiseId=%u response='%s')",
-        this, aSessionId.get(), aPromiseId, ToBase64(aResponse).get()));
+        this, aSessionId.get(), aPromiseId, ToHexString(aResponse).get()));
 
   if (!mIsOpen) {
     NS_WARNING("Trying to use a dead GMP decrypter!");
@@ -187,7 +198,7 @@ GMPDecryptorParent::Decrypt(uint32_t aId,
   }
 }
 
-bool
+mozilla::ipc::IPCResult
 GMPDecryptorParent::RecvSetSessionId(const uint32_t& aCreateSessionId,
                                      const nsCString& aSessionId)
 {
@@ -196,13 +207,13 @@ GMPDecryptorParent::RecvSetSessionId(const uint32_t& aCreateSessionId,
 
   if (!mIsOpen) {
     NS_WARNING("Trying to use a dead GMP decrypter!");
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
   mCallback->SetSessionId(aCreateSessionId, aSessionId);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 GMPDecryptorParent::RecvResolveLoadSessionPromise(const uint32_t& aPromiseId,
                                                   const bool& aSuccess)
 {
@@ -211,13 +222,13 @@ GMPDecryptorParent::RecvResolveLoadSessionPromise(const uint32_t& aPromiseId,
 
   if (!mIsOpen) {
     NS_WARNING("Trying to use a dead GMP decrypter!");
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
   mCallback->ResolveLoadSessionPromise(aPromiseId, aSuccess);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 GMPDecryptorParent::RecvResolvePromise(const uint32_t& aPromiseId)
 {
   LOGD(("GMPDecryptorParent[%p]::RecvResolvePromise(promiseId=%u)",
@@ -225,10 +236,10 @@ GMPDecryptorParent::RecvResolvePromise(const uint32_t& aPromiseId)
 
   if (!mIsOpen) {
     NS_WARNING("Trying to use a dead GMP decrypter!");
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
   mCallback->ResolvePromise(aPromiseId);
-  return true;
+  return IPC_OK();
 }
 
 nsresult
@@ -245,11 +256,12 @@ GMPExToNsresult(GMPDOMException aDomException) {
     case kGMPAbortError: return NS_ERROR_DOM_ABORT_ERR;
     case kGMPQuotaExceededError: return NS_ERROR_DOM_QUOTA_EXCEEDED_ERR;
     case kGMPTimeoutError: return NS_ERROR_DOM_TIMEOUT_ERR;
+    case kGMPTypeError: return NS_ERROR_DOM_TYPE_ERR;
     default: return NS_ERROR_DOM_UNKNOWN_ERR;
   }
 }
 
-bool
+mozilla::ipc::IPCResult
 GMPDecryptorParent::RecvRejectPromise(const uint32_t& aPromiseId,
                                       const GMPDOMException& aException,
                                       const nsCString& aMessage)
@@ -259,10 +271,10 @@ GMPDecryptorParent::RecvRejectPromise(const uint32_t& aPromiseId,
 
   if (!mIsOpen) {
     NS_WARNING("Trying to use a dead GMP decrypter!");
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
   mCallback->RejectPromise(aPromiseId, GMPExToNsresult(aException), aMessage);
-  return true;
+  return IPC_OK();
 }
 
 
@@ -277,38 +289,38 @@ ToMediaKeyMessageType(GMPSessionMessageType aMessageType) {
   };
 };
 
-bool
+mozilla::ipc::IPCResult
 GMPDecryptorParent::RecvSessionMessage(const nsCString& aSessionId,
                                        const GMPSessionMessageType& aMessageType,
                                        nsTArray<uint8_t>&& aMessage)
 {
   LOGD(("GMPDecryptorParent[%p]::RecvSessionMessage(sessionId='%s', type=%d, msg='%s')",
-        this, aSessionId.get(), aMessageType, ToBase64(aMessage).get()));
+        this, aSessionId.get(), aMessageType, ToHexString(aMessage).get()));
 
   if (!mIsOpen) {
     NS_WARNING("Trying to use a dead GMP decrypter!");
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
   mCallback->SessionMessage(aSessionId, ToMediaKeyMessageType(aMessageType), aMessage);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 GMPDecryptorParent::RecvExpirationChange(const nsCString& aSessionId,
-                                         const double& aExpiryTime)
+                                         const double& aSecondsSinceEpoch)
 {
   LOGD(("GMPDecryptorParent[%p]::RecvExpirationChange(sessionId='%s', expiry=%lf)",
-        this, aSessionId.get(), aExpiryTime));
+        this, aSessionId.get(), aSecondsSinceEpoch));
 
   if (!mIsOpen) {
     NS_WARNING("Trying to use a dead GMP decrypter!");
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
-  mCallback->ExpirationChange(aSessionId, aExpiryTime);
-  return true;
+  mCallback->ExpirationChange(aSessionId, aSecondsSinceEpoch);
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 GMPDecryptorParent::RecvSessionClosed(const nsCString& aSessionId)
 {
   LOGD(("GMPDecryptorParent[%p]::RecvSessionClosed(sessionId='%s')",
@@ -316,13 +328,13 @@ GMPDecryptorParent::RecvSessionClosed(const nsCString& aSessionId)
 
   if (!mIsOpen) {
     NS_WARNING("Trying to use a dead GMP decrypter!");
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
   mCallback->SessionClosed(aSessionId);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 GMPDecryptorParent::RecvSessionError(const nsCString& aSessionId,
                                      const GMPDOMException& aException,
                                      const uint32_t& aSystemCode,
@@ -334,13 +346,13 @@ GMPDecryptorParent::RecvSessionError(const nsCString& aSessionId,
 
   if (!mIsOpen) {
     NS_WARNING("Trying to use a dead GMP decrypter!");
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
   mCallback->SessionError(aSessionId,
                           GMPExToNsresult(aException),
                           aSystemCode,
                           aMessage);
-  return true;
+  return IPC_OK();
 }
 
 static dom::MediaKeyStatus
@@ -357,31 +369,30 @@ ToMediaKeyStatus(GMPMediaKeyStatus aStatus) {
   }
 }
 
-bool
-GMPDecryptorParent::RecvKeyStatusChanged(const nsCString& aSessionId,
-                                         InfallibleTArray<uint8_t>&& aKeyId,
-                                         const GMPMediaKeyStatus& aStatus)
+mozilla::ipc::IPCResult
+GMPDecryptorParent::RecvBatchedKeyStatusChanged(const nsCString& aSessionId,
+                                                InfallibleTArray<GMPKeyInformation>&& aKeyInfos)
 {
-  LOGD(("GMPDecryptorParent[%p]::RecvKeyStatusChanged(sessionId='%s', keyId=%s, status=%d)",
-        this, aSessionId.get(), ToBase64(aKeyId).get(), aStatus));
+  LOGD(("GMPDecryptorParent[%p]::RecvBatchedKeyStatusChanged(sessionId='%s', KeyInfos len='%d')",
+        this, aSessionId.get(), aKeyInfos.Length()));
 
   if (mIsOpen) {
-    mCallback->KeyStatusChanged(aSessionId, aKeyId, ToMediaKeyStatus(aStatus));
+    nsTArray<CDMKeyInfo> cdmKeyInfos(aKeyInfos.Length());
+    for (uint32_t i = 0; i < aKeyInfos.Length(); i++) {
+      LOGD(("GMPDecryptorParent[%p]::RecvBatchedKeyStatusChanged(keyId=%s, gmp-status=%d)",
+            this, ToHexString(aKeyInfos[i].keyId()).get(), aKeyInfos[i].status()));
+      // If the status is kGMPUnknown, we're going to forget(remove) that key info.
+      if (aKeyInfos[i].status() != kGMPUnknown) {
+        auto status = ToMediaKeyStatus(aKeyInfos[i].status());
+        cdmKeyInfos.AppendElement(CDMKeyInfo(aKeyInfos[i].keyId(),
+                                             dom::Optional<dom::MediaKeyStatus>(status)));
+      } else {
+        cdmKeyInfos.AppendElement(CDMKeyInfo(aKeyInfos[i].keyId()));
+      }
+    }
+    mCallback->BatchedKeyStatusChanged(aSessionId, cdmKeyInfos);
   }
-  return true;
-}
-
-bool
-GMPDecryptorParent::RecvForgetKeyStatus(const nsCString& aSessionId,
-                                        InfallibleTArray<uint8_t>&& aKeyId)
-{
-  LOGD(("GMPDecryptorParent[%p]::RecvForgetKeyStatus(sessionId='%s', keyId=%s)",
-        this, aSessionId.get(), ToBase64(aKeyId).get()));
-
-  if (mIsOpen) {
-    mCallback->ForgetKeyStatus(aSessionId, aKeyId);
-  }
-  return true;
+  return IPC_OK();
 }
 
 DecryptStatus
@@ -395,7 +406,7 @@ ToDecryptStatus(GMPErr aError)
   }
 }
 
-bool
+mozilla::ipc::IPCResult
 GMPDecryptorParent::RecvDecrypted(const uint32_t& aId,
                                   const GMPErr& aErr,
                                   InfallibleTArray<uint8_t>&& aBuffer)
@@ -405,19 +416,19 @@ GMPDecryptorParent::RecvDecrypted(const uint32_t& aId,
 
   if (!mIsOpen) {
     NS_WARNING("Trying to use a dead GMP decrypter!");
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
   mCallback->Decrypted(aId, ToDecryptStatus(aErr), aBuffer);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 GMPDecryptorParent::RecvShutdown()
 {
   LOGD(("GMPDecryptorParent[%p]::RecvShutdown()", this));
 
   Shutdown();
-  return true;
+  return IPC_OK();
 }
 
 // Note: may be called via Terminated()
@@ -481,7 +492,7 @@ GMPDecryptorParent::ActorDestroy(ActorDestroyReason aWhy)
   MaybeDisconnect(aWhy == AbnormalShutdown);
 }
 
-bool
+mozilla::ipc::IPCResult
 GMPDecryptorParent::Recv__delete__()
 {
   LOGD(("GMPDecryptorParent[%p]::Recv__delete__()", this));
@@ -490,7 +501,7 @@ GMPDecryptorParent::Recv__delete__()
     mPlugin->DecryptorDestroyed(this);
     mPlugin = nullptr;
   }
-  return true;
+  return IPC_OK();
 }
 
 } // namespace gmp

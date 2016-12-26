@@ -24,7 +24,7 @@ var gTests = [
       return new Promise(function(resolve, reject) {
         let tab;
         let channel = new WebChannel("generic", Services.io.newURI(HTTP_PATH, null, null));
-        channel.listen(function (id, message, target) {
+        channel.listen(function(id, message, target) {
           is(id, "generic");
           is(message.something.nested, "hello");
           channel.stopListening();
@@ -37,13 +37,33 @@ var gTests = [
     }
   },
   {
+    desc: "WebChannel generic message in a private window.",
+    run: function* () {
+      let promiseTestDone = new Promise(function(resolve, reject) {
+        let channel = new WebChannel("generic", Services.io.newURI(HTTP_PATH, null, null));
+        channel.listen(function(id, message, target) {
+          is(id, "generic");
+          is(message.something.nested, "hello");
+          channel.stopListening();
+          resolve();
+        });
+      });
+
+      const url = HTTP_PATH + HTTP_ENDPOINT + "?generic";
+      let privateWindow = yield BrowserTestUtils.openNewBrowserWindow({private: true});
+      yield BrowserTestUtils.openNewForegroundTab(privateWindow.gBrowser, url);
+      yield promiseTestDone;
+      yield BrowserTestUtils.closeWindow(privateWindow);
+    }
+  },
+  {
     desc: "WebChannel two way communication",
     run: function* () {
       return new Promise(function(resolve, reject) {
         let tab;
         let channel = new WebChannel("twoway", Services.io.newURI(HTTP_PATH, null, null));
 
-        channel.listen(function (id, message, sender) {
+        channel.listen(function(id, message, sender) {
           is(id, "twoway", "bad id");
           ok(message.command, "command not ok");
 
@@ -68,12 +88,12 @@ var gTests = [
     run: function* () {
       let parentChannel = new WebChannel("echo", Services.io.newURI(HTTP_PATH, null, null));
       let iframeChannel = new WebChannel("twoway", Services.io.newURI(HTTP_IFRAME_PATH, null, null));
-      let promiseTestDone = new Promise(function (resolve, reject) {
-        parentChannel.listen(function (id, message, sender) {
+      let promiseTestDone = new Promise(function(resolve, reject) {
+        parentChannel.listen(function(id, message, sender) {
           reject(new Error("WebChannel message incorrectly sent to parent"));
         });
 
-        iframeChannel.listen(function (id, message, sender) {
+        iframeChannel.listen(function(id, message, sender) {
           is(id, "twoway", "bad id (2)");
           ok(message.command, "command not ok (2)");
 
@@ -126,23 +146,23 @@ var gTests = [
       let preRedirectChannel = new WebChannel("pre_redirect", Services.io.newURI(HTTP_IFRAME_PATH, null, null));
       let postRedirectChannel = new WebChannel("post_redirect", Services.io.newURI(HTTP_REDIRECTED_IFRAME_PATH, null, null));
 
-      let promiseTestDone = new Promise(function (resolve, reject) {
-        preRedirectChannel.listen(function (id, message, preRedirectSender) {
+      let promiseTestDone = new Promise(function(resolve, reject) {
+        preRedirectChannel.listen(function(id, message, preRedirectSender) {
           if (message.command === "redirecting") {
 
-            postRedirectChannel.listen(function (id, message, postRedirectSender) {
-              is(id, "post_redirect");
-              isnot(message.command, "no_response_expected");
+            postRedirectChannel.listen(function(aId, aMessage, aPostRedirectSender) {
+              is(aId, "post_redirect");
+              isnot(aMessage.command, "no_response_expected");
 
-              if (message.command === "loaded") {
+              if (aMessage.command === "loaded") {
                 // The message should not be received on the preRedirectChannel
                 // because the target window has redirected.
                 preRedirectChannel.send({ command: "no_response_expected" }, preRedirectSender);
-                postRedirectChannel.send({ command: "done" }, postRedirectSender);
-              } else if (message.command === "done") {
+                postRedirectChannel.send({ command: "done" }, aPostRedirectSender);
+              } else if (aMessage.command === "done") {
                 resolve();
               } else {
-                reject(new Error(`Unexpected command ${message.command}`));
+                reject(new Error(`Unexpected command ${aMessage.command}`));
               }
             });
           } else {
@@ -168,7 +188,7 @@ var gTests = [
         let tab;
         let channel = new WebChannel("multichannel", Services.io.newURI(HTTP_PATH, null, null));
 
-        channel.listen(function (id, message, sender) {
+        channel.listen(function(id, message, sender) {
           is(id, "multichannel");
           gBrowser.removeTab(tab);
           resolve();
@@ -186,8 +206,8 @@ var gTests = [
       // an unsolicted message is sent from Chrome->Content which is then
       // echoed back. If the echo is received here, then the content
       // received the message.
-      let messagePromise = new Promise(function (resolve, reject) {
-        channel.listen(function (id, message, sender) {
+      let messagePromise = new Promise(function(resolve, reject) {
+        channel.listen(function(id, message, sender) {
           is(id, "echo");
           is(message.command, "unsolicited");
 
@@ -217,8 +237,8 @@ var gTests = [
       // an unsolicted message is sent from Chrome->Content which is then
       // echoed back. If the echo is received here, then the content
       // received the message.
-      let messagePromise = new Promise(function (resolve, reject) {
-        channel.listen(function (id, message, sender) {
+      let messagePromise = new Promise(function(resolve, reject) {
+        channel.listen(function(id, message, sender) {
           is(id, "echo");
           is(message.command, "unsolicited");
 
@@ -251,8 +271,8 @@ var gTests = [
       // `unsolicited_no_response_expected` is sent to the wrong principal
       // and should not be echoed back. The second, `done`, is sent to the
       // correct principal and should be echoed back.
-      let messagePromise = new Promise(function (resolve, reject) {
-        channel.listen(function (id, message, sender) {
+      let messagePromise = new Promise(function(resolve, reject) {
+        channel.listen(function(id, message, sender) {
           is(id, "echo");
 
           if (message.command === "done") {
@@ -307,8 +327,8 @@ var gTests = [
        */
       let channel = new WebChannel("not_a_window", Services.io.newURI(HTTP_PATH, null, null));
 
-      let testDonePromise = new Promise(function (resolve, reject) {
-        channel.listen(function (id, message, sender) {
+      let testDonePromise = new Promise(function(resolve, reject) {
+        channel.listen(function(id, message, sender) {
           if (message.command === "start") {
             channel.send({ command: "done" }, sender);
           } else if (message.command === "done") {
@@ -396,16 +416,77 @@ var gTests = [
         channel.stopListening();
       });
     }
-  }
+  },
+  {
+    desc: "WebChannel errors handling the message are delivered back to content",
+    run: function* () {
+      const ERRNO_UNKNOWN_ERROR              = 999; // WebChannel.jsm doesn't export this.
+
+      // The channel where we purposely fail responding to a command.
+      let channel = new WebChannel("error", Services.io.newURI(HTTP_PATH, null, null));
+      // The channel where we see the response when the content sees the error
+      let echoChannel = new WebChannel("echo", Services.io.newURI(HTTP_PATH, null, null));
+
+      let testDonePromise = new Promise((resolve, reject) => {
+        // listen for the confirmation that content saw the error.
+        echoChannel.listen((id, message, sender) => {
+          is(id, "echo");
+          is(message.error, "oh no");
+          is(message.errno, ERRNO_UNKNOWN_ERROR);
+          resolve();
+        });
+
+        // listen for a message telling us to simulate an error.
+        channel.listen((id, message, sender) => {
+          is(id, "error");
+          is(message.command, "oops");
+          throw new Error("oh no");
+        });
+      });
+      yield BrowserTestUtils.withNewTab({
+        gBrowser,
+        url: HTTP_PATH + HTTP_ENDPOINT + "?error_thrown"
+      }, function* () {
+        yield testDonePromise;
+        channel.stopListening();
+        echoChannel.stopListening();
+      });
+    }
+  },
+  {
+    desc: "WebChannel errors due to an invalid channel are delivered back to content",
+    run: function* () {
+      const ERRNO_NO_SUCH_CHANNEL            = 2; // WebChannel.jsm doesn't export this.
+      // The channel where we see the response when the content sees the error
+      let echoChannel = new WebChannel("echo", Services.io.newURI(HTTP_PATH, null, null));
+
+      let testDonePromise = new Promise((resolve, reject) => {
+        // listen for the confirmation that content saw the error.
+        echoChannel.listen((id, message, sender) => {
+          is(id, "echo");
+          is(message.error, "No Such Channel");
+          is(message.errno, ERRNO_NO_SUCH_CHANNEL);
+          resolve();
+        });
+      });
+      yield BrowserTestUtils.withNewTab({
+        gBrowser,
+        url: HTTP_PATH + HTTP_ENDPOINT + "?error_invalid_channel"
+      }, function* () {
+        yield testDonePromise;
+        echoChannel.stopListening();
+      });
+    }
+  },
 ]; // gTests
 
 function test() {
   waitForExplicitFinish();
 
   Task.spawn(function* () {
-    for (let test of gTests) {
-      info("Running: " + test.desc);
-      yield test.run();
+    for (let testCase of gTests) {
+      info("Running: " + testCase.desc);
+      yield testCase.run();
     }
   }).then(finish, ex => {
     ok(false, "Unexpected Exception: " + ex);

@@ -9,10 +9,10 @@
 
 #include "jsscript.h"
 
-#include "asmjs/AsmJS.h"
 #include "jit/BaselineJIT.h"
 #include "jit/IonAnalysis.h"
 #include "vm/EnvironmentObject.h"
+#include "wasm/AsmJS.h"
 
 #include "jscompartmentinlines.h"
 
@@ -78,7 +78,8 @@ inline JSFunction*
 LazyScript::functionDelazifying(JSContext* cx) const
 {
     Rooted<const LazyScript*> self(cx, this);
-    if (self->function_ && !self->function_->getOrCreateScript(cx))
+    RootedFunction fun(cx, self->function_);
+    if (self->function_ && !JSFunction::getOrCreateScript(cx, fun))
         return nullptr;
     return self->function_;
 }

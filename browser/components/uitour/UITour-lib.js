@@ -220,6 +220,10 @@ if (typeof Mozilla == 'undefined') {
     });
   };
 
+  Mozilla.UITour.showNewTab = function() {
+    _sendEvent('showNewTab');
+  };
+
   Mozilla.UITour.getConfiguration = function(configName, callback) {
     _sendEvent('getConfiguration', {
       callbackID: _waitForCallback(callback),
@@ -254,7 +258,7 @@ if (typeof Mozilla == 'undefined') {
     _sendEvent('resetFirefox');
   };
 
-  Mozilla.UITour.addNavBarWidget= function(name, callback) {
+  Mozilla.UITour.addNavBarWidget = function(name, callback) {
     _sendEvent('addNavBarWidget', {
       name: name,
       callbackID: _waitForCallback(callback),

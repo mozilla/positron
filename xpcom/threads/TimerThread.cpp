@@ -149,6 +149,8 @@ public:
     return NS_OK;
   }
 
+  NS_IMETHOD GetName(nsACString& aName) override;
+
   nsTimerEvent()
     : mTimer()
     , mGeneration(0)
@@ -268,9 +270,22 @@ nsTimerEvent::DeleteAllocatorIfNeeded()
 }
 
 NS_IMETHODIMP
+nsTimerEvent::GetName(nsACString& aName)
+{
+  bool current;
+  MOZ_RELEASE_ASSERT(NS_SUCCEEDED(mTimer->mEventTarget->IsOnCurrentThread(&current)) && current);
+
+  mTimer->GetName(aName);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsTimerEvent::Run()
 {
-  MOZ_ASSERT(mTimer);
+  if (!mTimer) {
+    MOZ_ASSERT(false);
+    return NS_OK;
+  }
 
   if (mGeneration != mTimer->GetGeneration()) {
     return NS_OK;
@@ -567,6 +582,10 @@ TimerThread::AddTimer(nsTimerImpl* aTimer)
 {
   MonitorAutoLock lock(mMonitor);
 
+  if (!aTimer->mEventTarget) {
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+
   // Add the timer to our list.
   int32_t i = AddTimerInternal(aTimer);
   if (i < 0) {
@@ -583,7 +602,7 @@ TimerThread::AddTimer(nsTimerImpl* aTimer)
 }
 
 nsresult
-TimerThread::RemoveTimer(nsTimerImpl* aTimer)
+TimerThread::RemoveTimer(nsTimerImpl* aTimer, bool aDisable)
 {
   MonitorAutoLock lock(mMonitor);
 
@@ -592,6 +611,10 @@ TimerThread::RemoveTimer(nsTimerImpl* aTimer)
 
   if (!RemoveTimerInternal(aTimer)) {
     return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  if (aDisable) {
+    aTimer->mEventTarget = nullptr;
   }
 
   // Awaken the timer thread.
@@ -690,7 +713,7 @@ TimerThread::PostTimerEvent(already_AddRefed<nsTimerImpl> aTimerRef)
   (timer->GetTracedTask()).SetTLSTraceInfo();
 #endif
 
-  nsIEventTarget* target = timer->mEventTarget;
+  nsCOMPtr<nsIEventTarget> target = timer->mEventTarget;
   event->SetTimer(timer.forget());
 
   nsresult rv;

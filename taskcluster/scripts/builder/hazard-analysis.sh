@@ -10,6 +10,8 @@ ANALYSIS_SRCDIR=$JS_SRCDIR/devtools/rootAnalysis
 
 export CC="$TOOLTOOL_DIR/gcc/bin/gcc"
 export CXX="$TOOLTOOL_DIR/gcc/bin/g++"
+export RUSTC="$TOOLTOOL_DIR/rustc/bin/rustc"
+export CARGO="$TOOLTOOL_DIR/rustc/bin/cargo"
 
 PYTHON=python2.7
 if ! which $PYTHON; then
@@ -18,11 +20,13 @@ fi
 
 
 function check_commit_msg () {
+    ( set +e;
     if [[ -n "$AUTOMATION" ]]; then
         hg --cwd "$GECKO_DIR" log -r. --template '{desc}\n' | grep -F -q -- "$1"
     else
         echo -- "$SCRIPT_FLAGS" | grep -F -q -- "$1"
     fi
+    )
 }
 
 if check_commit_msg "--dep"; then

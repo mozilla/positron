@@ -47,7 +47,7 @@ const kURIs = [
 
 var gProgressListener = {
   _runCount: 0,
-  onStateChange: function (aBrowser, aWebProgress, aRequest, aStateFlags, aStatus) {
+  onStateChange: function(aBrowser, aWebProgress, aRequest, aStateFlags, aStatus) {
     if ((aStateFlags & kCompleteState) == kCompleteState) {
       if (++this._runCount != kURIs.length)
         return;
@@ -63,10 +63,12 @@ var gProgressListener = {
 function test() {
   todo(false, "temp. disabled");
   return; /* FIXME */
+  /*
   waitForExplicitFinish();
   // Wait for all tabs to finish loading
   gBrowser.addTabsProgressListener(gProgressListener);
   loadOneOrMoreURIs(kURIs.join("|"));
+  */
 }
 
 function finishTest() {
@@ -84,7 +86,7 @@ function finishTest() {
   gBrowser.removeTabsProgressListener(gProgressListener);
 
   // Close opened tabs
-  for (var i = gBrowser.tabs.length-1; i > 0; i--)
+  for (var i = gBrowser.tabs.length - 1; i > 0; i--)
     gBrowser.removeTab(gBrowser.tabs[i]);
 
   finish();

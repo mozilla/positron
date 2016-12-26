@@ -17,10 +17,9 @@ tags:
 
 scopes:
   # Bug 1269443: cache scopes, etc. must be listed explicitly
-  - "docker-worker:cache:level-1-*"
   - "docker-worker:cache:tooltool-cache"
   - "secrets:get:project/taskcluster/gecko/hgfingerprint"
-  - "assume:repo:hg.mozilla.org/try:*"
+  - {{repo_scope}}
 
 routes:
   - "tc-treeherder.v2.{{project}}.{{head_rev}}.{{pushlog_id}}"
@@ -32,9 +31,9 @@ payload:
     GECKO_HEAD_REPOSITORY: '{{{head_repository}}}'
     GECKO_HEAD_REF: '{{head_ref}}'
     GECKO_HEAD_REV: '{{head_rev}}'
+    HG_STORE_PATH: /home/worker/checkouts/hg-store
 
   cache:
-    level-{{level}}-hg-shared: /home/worker/hg-shared
     level-{{level}}-checkouts: /home/worker/checkouts
 
   features:
@@ -42,7 +41,7 @@ payload:
 
   # Note: This task is built server side without the context or tooling that
   # exist in tree so we must hard code the version
-  image: 'taskcluster/decision:0.1.6'
+  image: 'taskcluster/decision:0.1.7'
 
   # Virtually no network or other potentially risky operations happen as part
   # of the task timeout aside from the initial clone. We intentionally have
@@ -59,9 +58,7 @@ payload:
     - >
         cd /home/worker/checkouts/gecko &&
         ln -s /home/worker/artifacts artifacts &&
-        ./mach --log-no-times taskgraph action-task
-        --decision-id='{{decision_task_id}}'
-        --task-label='{{task_labels}}'
+        ./mach --log-no-times taskgraph {{action}} {{action_args}}
 
   artifacts:
     'public':

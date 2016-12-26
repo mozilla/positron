@@ -11,6 +11,7 @@ define(function (require, exports, module) {
   const { createFactories } = require("devtools/client/shared/components/reps/rep-utils");
   const TreeView = createFactory(require("devtools/client/shared/components/tree/tree-view"));
   const { Rep } = createFactories(require("devtools/client/shared/components/reps/rep"));
+  const { MODE } = require("devtools/client/shared/components/reps/constants");
   const { SearchBox } = createFactories(require("./search-box"));
   const { Toolbar, ToolbarButton } = createFactories(require("./reps/toolbar"));
 
@@ -59,7 +60,7 @@ define(function (require, exports, module) {
       }
 
       let json = JSON.stringify(object).toLowerCase();
-      return json.indexOf(this.props.searchFilter) >= 0;
+      return json.indexOf(this.props.searchFilter.toLowerCase()) >= 0;
     },
 
     getExpandedNodes: function (object, path = "", level = 0) {
@@ -115,7 +116,7 @@ define(function (require, exports, module) {
       // Render tree component.
       return TreeView({
         object: this.props.data,
-        mode: "tiny",
+        mode: MODE.TINY,
         onFilter: this.onFilter,
         columns: columns,
         renderValue: this.renderValue,

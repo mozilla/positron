@@ -49,7 +49,7 @@ interface nsIJSRAIIHelper;
 interface nsIContentPermissionRequest;
 interface nsIObserver;
 
-[scriptable, uuid(46b44e33-13c2-4eb3-bf80-76a4e0857ccc)]
+[scriptable, uuid(c471d440-004b-4c50-a6f2-747db5f443b6)]
 interface nsIDOMWindowUtils : nsISupports {
 
   /**
@@ -1760,6 +1760,13 @@ interface nsIDOMWindowUtils : nsISupports {
   readonly attribute boolean isHandlingUserInput;
 
   /**
+   * Returns milliseconds elapsed since last user input was started
+   *
+   * This relies on EventStateManager::LatestUserInputStart()
+   */
+  readonly attribute double millisSinceLastUserInput;
+
+  /**
    * After calling the method, the window for which this DOMWindowUtils
    * was created can be closed using scripts.
    */
@@ -1803,8 +1810,6 @@ interface nsIDOMWindowUtils : nsISupports {
    * Supported properties:
    *   "overdraw": Report a percentage between 0 and 999 indicate how many times
    *               each pixels on the destination window have been touched.
-   *   "missed_hwc": Report a bool if hardware composer is supported but was
-   *                 not used for the last frame.
    */
   float requestCompositorProperty(in AString aProperty);
 
@@ -1958,6 +1963,28 @@ interface nsIDOMWindowUtils : nsISupports {
    */
   void forceReflowInterrupt();
 
+  /**
+   * Terminate the GPU process. Used for testing GPU process restarts.
+   */
+  void terminateGPUProcess();
+
+  /**
+    * Returns the GPU process pid, or -1 if there is no GPU process.
+    */
+  readonly attribute int32_t gpuProcessPid;
+
+  /**
+   * Returns true if the given timeout ID is in the list of tracking
+   * timeouts.
+   */
+  boolean isTimeoutTracking(in unsigned long timeoutId);
+
+  // Match WidgetMouseEventBase::buttonType.
+  const long MOUSE_BUTTON_LEFT_BUTTON   = 0;
+  const long MOUSE_BUTTON_MIDDLE_BUTTON = 1;
+  const long MOUSE_BUTTON_RIGHT_BUTTON  = 2;
+
+  // Match WidgetMouseEventBase::buttonsFlag.
   const long MOUSE_BUTTONS_NO_BUTTON = 0x00;
   const long MOUSE_BUTTONS_LEFT_BUTTON = 0x01;
   const long MOUSE_BUTTONS_RIGHT_BUTTON = 0x02;

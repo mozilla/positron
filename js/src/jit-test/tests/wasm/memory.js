@@ -1,12 +1,14 @@
-// |jit-test| test-also-wasm-baseline
+// |jit-test| test-also-wasm-check-bce
 load(libdir + "wasm.js");
+
+const RuntimeError = WebAssembly.RuntimeError;
 
 function loadModule(type, ext, offset, align) {
     return wasmEvalText(
     `(module
        (memory 1)
-       (data 0 "\\00\\01\\02\\03\\04\\05\\06\\07\\08\\09\\0a\\0b\\0c\\0d\\0e\\0f")
-       (data 16 "\\f0\\f1\\f2\\f3\\f4\\f5\\f6\\f7\\f8\\f9\\fa\\fb\\fc\\fd\\fe\\ff")
+       (data (i32.const 0) "\\00\\01\\02\\03\\04\\05\\06\\07\\08\\09\\0a\\0b\\0c\\0d\\0e\\0f")
+       (data (i32.const 16) "\\f0\\f1\\f2\\f3\\f4\\f5\\f6\\f7\\f8\\f9\\fa\\fb\\fc\\fd\\fe\\ff")
        (func (param i32) (result ${type})
          (${type}.load${ext}
           offset=${offset}
@@ -22,8 +24,8 @@ function storeModule(type, ext, offset, align) {
     return wasmEvalText(
     `(module
        (memory 1)
-       (data 0 "\\00\\01\\02\\03\\04\\05\\06\\07\\08\\09\\0a\\0b\\0c\\0d\\0e\\0f")
-       (data 16 "\\f0\\f1\\f2\\f3\\f4\\f5\\f6\\f7\\f8\\f9\\fa\\fb\\fc\\fd\\fe\\ff")
+       (data (i32.const 0) "\\00\\01\\02\\03\\04\\05\\06\\07\\08\\09\\0a\\0b\\0c\\0d\\0e\\0f")
+       (data (i32.const 16) "\\f0\\f1\\f2\\f3\\f4\\f5\\f6\\f7\\f8\\f9\\fa\\fb\\fc\\fd\\fe\\ff")
        (func (param i32) (param ${type})
          (${type}.store${ext}
           offset=${offset}
@@ -47,8 +49,8 @@ function storeModuleCst(type, ext, offset, align, value) {
     return wasmEvalText(
     `(module
        (memory 1)
-       (data 0 "\\00\\01\\02\\03\\04\\05\\06\\07\\08\\09\\0a\\0b\\0c\\0d\\0e\\0f")
-       (data 16 "\\f0\\f1\\f2\\f3\\f4\\f5\\f6\\f7\\f8\\f9\\fa\\fb\\fc\\fd\\fe\\ff")
+       (data (i32.const 0) "\\00\\01\\02\\03\\04\\05\\06\\07\\08\\09\\0a\\0b\\0c\\0d\\0e\\0f")
+       (data (i32.const 16) "\\f0\\f1\\f2\\f3\\f4\\f5\\f6\\f7\\f8\\f9\\fa\\fb\\fc\\fd\\fe\\ff")
        (func (param i32)
          (${type}.store${ext}
           offset=${offset}
@@ -75,7 +77,7 @@ function testLoad(type, ext, base, offset, align, expect) {
 }
 
 function testLoadOOB(type, ext, base, offset, align) {
-    assertErrorMessage(() => loadModule(type, ext, offset, align)(base), Error, /invalid or out-of-range index/);
+    assertErrorMessage(() => loadModule(type, ext, offset, align)(base), RuntimeError, /index out of bounds/);
 }
 
 function testStore(type, ext, base, offset, align, value) {
@@ -98,7 +100,7 @@ function testStore(type, ext, base, offset, align, value) {
 function testStoreOOB(type, ext, base, offset, align, value) {
     if (type === 'i64')
         value = createI64(value);
-    assertErrorMessage(() => storeModule(type, ext, offset, align).store(base, value), Error, /invalid or out-of-range index/);
+    assertErrorMessage(() => storeModule(type, ext, offset, align).store(base, value), RuntimeError, /index out of bounds/);
 }
 
 function badLoadModule(type, ext) {
@@ -281,8 +283,8 @@ for (var foldOffsets = 0; foldOffsets <= 1; foldOffsets++) {
         assertEq(wasmEvalText(
             `(module
               (memory 1)
-              (data 0 "\\00\\01\\02\\03\\04\\05\\06\\07\\08\\09\\0a\\0b\\0c\\0d\\0e\\0f")
-              (data 16 "\\f0\\f1\\f2\\f3\\f4\\f5\\f6\\f7\\f8\\f9\\fa\\fb\\fc\\fd\\fe\\ff")
+              (data (i32.const 0) "\\00\\01\\02\\03\\04\\05\\06\\07\\08\\09\\0a\\0b\\0c\\0d\\0e\\0f")
+              (data (i32.const 16) "\\f0\\f1\\f2\\f3\\f4\\f5\\f6\\f7\\f8\\f9\\fa\\fb\\fc\\fd\\fe\\ff")
               (func (param i32) (local i32 i32 i32 i32 f32 f64) (result i32)
                (set_local 1 (i32.load8_s offset=4 (get_local 0)))
                (set_local 2 (i32.load16_s (get_local 1)))

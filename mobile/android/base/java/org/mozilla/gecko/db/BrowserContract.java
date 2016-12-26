@@ -45,13 +45,14 @@ public class BrowserContract {
     public static final String PARAM_PROFILE_PATH = "profilePath";
     public static final String PARAM_LIMIT = "limit";
     public static final String PARAM_SUGGESTEDSITES_LIMIT = "suggestedsites_limit";
-    public static final String PARAM_TOPSITES_DISABLE_PINNED = "topsites_disable_pinned";
+    public static final String PARAM_TOPSITES_EXCLUDE_REMOTE_ONLY = "topsites_exclude_remote_only";
     public static final String PARAM_IS_SYNC = "sync";
     public static final String PARAM_SHOW_DELETED = "show_deleted";
     public static final String PARAM_IS_TEST = "test";
     public static final String PARAM_INSERT_IF_NEEDED = "insert_if_needed";
     public static final String PARAM_INCREMENT_VISITS = "increment_visits";
     public static final String PARAM_INCREMENT_REMOTE_AGGREGATES = "increment_remote_aggregates";
+    public static final String PARAM_NON_POSITIONED_PINS = "non_positioned_pins";
     public static final String PARAM_EXPIRE_PRIORITY = "priority";
     public static final String PARAM_DATASET_ID = "dataset_id";
     public static final String PARAM_GROUP_BY = "group_by";
@@ -181,6 +182,13 @@ public class BrowserContract {
         public static final String IS_LOCAL = "is_local";
     }
 
+    public interface PageMetadataColumns {
+        public static final String HISTORY_GUID = "history_guid";
+        public static final String DATE_CREATED = "created";
+        public static final String HAS_IMAGE = "has_image";
+        public static final String JSON = "json";
+    }
+
     public interface DeletedColumns {
         public static final String ID = "id";
         public static final String GUID = "guid";
@@ -234,6 +242,10 @@ public class BrowserContract {
         public static final int FIXED_PINNED_LIST_ID = -3;
         public static final int FIXED_SCREENSHOT_FOLDER_ID = -4;
         public static final int FAKE_READINGLIST_SMARTFOLDER_ID = -5;
+
+        // Fixed position used by Activity Stream pins. A-S displays pins in front of other top sites,
+        // so position is constant for all pins.
+        public static final int FIXED_AS_PIN_POSITION = -1;
 
         /**
          * This ID and the following negative IDs are reserved for bookmarks from Android's partner
@@ -424,7 +436,7 @@ public class BrowserContract {
 
     public static final class Clients implements CommonColumns {
         private Clients() {}
-        public static final Uri CONTENT_RECENCY_URI = Uri.withAppendedPath(TABS_AUTHORITY_URI, "clients_recency");
+        public static final Uri CONTENT_NO_STALE_SORTED_URI = Uri.withAppendedPath(TABS_AUTHORITY_URI, "clients_no_stale_sorted");
         public static final Uri CONTENT_URI = Uri.withAppendedPath(TABS_AUTHORITY_URI, "clients");
         public static final String CONTENT_TYPE = "vnd.android.cursor.dir/client";
         public static final String CONTENT_ITEM_TYPE = "vnd.android.cursor.item/client";
@@ -594,6 +606,7 @@ public class BrowserContract {
         public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, "highlights");
 
         public static final String DATE = "date";
+        public static final String METADATA = "metadata";
     }
 
     @RobocopTarget
@@ -613,6 +626,16 @@ public class BrowserContract {
         private SuggestedSites() {}
 
         public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, "suggestedsites");
+    }
+
+    public static final class ActivityStreamBlocklist implements CommonColumns {
+        private ActivityStreamBlocklist() {}
+
+        public static final String TABLE_NAME = "activity_stream_blocklist";
+        public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, TABLE_NAME);
+
+        public static final String URL = "url";
+        public static final String CREATED = "created";
     }
 
     @RobocopTarget
@@ -749,6 +772,14 @@ public class BrowserContract {
         public static final String TABLE_DISABLED_HOSTS = "logins_disabled_hosts";
 
         public static final String HOSTNAME = "hostname";
+    }
+
+    @RobocopTarget
+    public static final class PageMetadata implements CommonColumns, PageMetadataColumns {
+        private PageMetadata() {}
+
+        public static final String TABLE_NAME = "page_metadata";
+        public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, "page_metadata");
     }
 
     // We refer to the service by name to decouple services from the rest of the code base.

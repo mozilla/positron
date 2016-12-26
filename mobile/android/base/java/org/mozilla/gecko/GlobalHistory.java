@@ -13,6 +13,7 @@ import java.util.Set;
 
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.reader.ReaderModeUtils;
+import org.mozilla.gecko.util.GeckoBundle;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import android.content.ContentResolver;
@@ -24,6 +25,9 @@ import android.util.Log;
 
 class GlobalHistory {
     private static final String LOGTAG = "GeckoGlobalHistory";
+
+    public static final String EVENT_URI_AVAILABLE_IN_HISTORY = "URI_INSERTED_TO_HISTORY";
+    public static final String EVENT_PARAM_URI = "uri";
 
     private static final String TELEMETRY_HISTOGRAM_ADD = "FENNEC_GLOBALHISTORY_ADD_MS";
     private static final String TELEMETRY_HISTOGRAM_UPDATE = "FENNEC_GLOBALHISTORY_UPDATE_MS";
@@ -128,6 +132,7 @@ class GlobalHistory {
         final long took = end - start;
         Telemetry.addToHistogram(TELEMETRY_HISTOGRAM_ADD, (int) Math.min(took, Integer.MAX_VALUE));
         addToGeckoOnly(uriToStore);
+        dispatchUriAvailableMessage(uri);
     }
 
     @SuppressWarnings("static-method")
@@ -163,5 +168,11 @@ class GlobalHistory {
                 mHandler.postDelayed(runnable, BATCHING_DELAY_MS);
             }
         });
+    }
+
+    private void dispatchUriAvailableMessage(String uri) {
+        final GeckoBundle message = new GeckoBundle();
+        message.putString(EVENT_PARAM_URI, uri);
+        EventDispatcher.getInstance().dispatch(EVENT_URI_AVAILABLE_IN_HISTORY, message);
     }
 }

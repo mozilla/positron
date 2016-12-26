@@ -131,8 +131,6 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared
     static bool byteLengthGetterImpl(JSContext* cx, const CallArgs& args);
     static bool fun_slice_impl(JSContext* cx, const CallArgs& args);
 
-    static const ClassOps classOps_;
-
   public:
     static const uint8_t DATA_SLOT = 0;
     static const uint8_t BYTE_LENGTH_SLOT = 1;
@@ -231,11 +229,7 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared
     };
 
     static const Class class_;
-
-    static const Class protoClass;
-    static const JSFunctionSpec jsfuncs[];
-    static const JSFunctionSpec jsstaticfuncs[];
-    static const JSPropertySpec jsstaticprops[];
+    static const Class protoClass_;
 
     static bool byteLengthGetter(JSContext* cx, unsigned argc, Value* vp);
 
@@ -260,12 +254,12 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared
     // initialize()d to become a real, content-visible ArrayBufferObject.
     static ArrayBufferObject* createEmpty(JSContext* cx);
 
+    // Also valid when the buffer is a SharedArrayBuffer.
     static bool createDataViewForThisImpl(JSContext* cx, const CallArgs& args);
     static bool createDataViewForThis(JSContext* cx, unsigned argc, Value* vp);
 
     template<typename T>
     static bool createTypedArrayFromBufferImpl(JSContext* cx, const CallArgs& args);
-
     template<typename T>
     static bool createTypedArrayFromBuffer(JSContext* cx, unsigned argc, Value* vp);
 
@@ -440,7 +434,7 @@ class ArrayBufferViewObject : public JSObject
 
     // By construction we only need unshared variants here.  See
     // comments in ArrayBufferObject.cpp.
-    uint8_t* dataPointerUnshared();
+    uint8_t* dataPointerUnshared(const JS::AutoRequireNoGC&);
     void setDataPointerUnshared(uint8_t* data);
 
     static void trace(JSTracer* trc, JSObject* obj);
@@ -457,6 +451,15 @@ bool IsArrayBuffer(HandleObject obj);
 bool IsArrayBuffer(JSObject* obj);
 ArrayBufferObject& AsArrayBuffer(HandleObject obj);
 ArrayBufferObject& AsArrayBuffer(JSObject* obj);
+
+/*
+ * Ditto for ArrayBufferObjectMaybeShared.
+ */
+bool IsArrayBufferMaybeShared(HandleValue v);
+bool IsArrayBufferMaybeShared(HandleObject obj);
+bool IsArrayBufferMaybeShared(JSObject* obj);
+ArrayBufferObjectMaybeShared& AsArrayBufferMaybeShared(HandleObject obj);
+ArrayBufferObjectMaybeShared& AsArrayBufferMaybeShared(JSObject* obj);
 
 extern uint32_t JS_FASTCALL
 ClampDoubleToUint8(const double x);
@@ -634,9 +637,6 @@ class WeakCacheBase<InnerViewTable>
         return table().sizeOfExcludingThis(mallocSizeOf);
     }
 };
-
-extern JSObject*
-InitArrayBufferClass(JSContext* cx, HandleObject obj);
 
 } // namespace js
 

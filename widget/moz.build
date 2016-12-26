@@ -75,7 +75,7 @@ XPIDL_SOURCES += [
     'nsIGfxInfoDebug.idl',
     'nsIIdleService.idl',
     'nsIIdleServiceInternal.idl',
-    'nsIPrintOptions.idl',
+    'nsIPrinterEnumerator.idl',
     'nsIPrintSession.idl',
     'nsIPrintSettings.idl',
     'nsIPrintSettingsService.idl',
@@ -162,7 +162,6 @@ UNIFIED_SOURCES += [
     'nsScreenManagerProxy.cpp',
     'nsTransferable.cpp',
     'nsXPLookAndFeel.cpp',
-    'PluginWidgetProxy.cpp',
     'PuppetBidiKeyboard.cpp',
     'PuppetWidget.cpp',
     'ScreenProxy.cpp',
@@ -194,9 +193,12 @@ if CONFIG['MOZ_XUL'] and CONFIG['NS_PRINTING']:
 
 # nsBaseWidget.cpp needs to be built separately because of name clashes in the OS X headers
 # nsBaseDragService.cpp moved out of UNIFIED to fix xgill crash (bug 1259850) after moving widget/ContentHelper -> apz/util/TouchActionHelper
+# PluginWidgetProxy includes MacOS system headers which define a Point struct
+# that conflicts with mozilla::gfx::Point
 SOURCES += [
     'nsBaseDragService.cpp',
-    'nsBaseWidget.cpp'
+    'nsBaseWidget.cpp',
+    'PluginWidgetProxy.cpp',
 ]
 
 if CONFIG['MOZ_INSTRUMENT_EVENT_LOOP']:
@@ -247,6 +249,7 @@ LOCAL_INCLUDES += [
     '/layout/base',
     '/layout/forms',
     '/layout/generic',
+    '/layout/painting',
     '/layout/xul',
     '/view',
     '/widget',
@@ -282,6 +285,3 @@ if CONFIG['MOZ_ENABLE_D3D10_LAYER']:
     DEFINES['MOZ_ENABLE_D3D10_LAYER'] = True
 
 CXXFLAGS += CONFIG['TK_CFLAGS']
-
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wno-error=shadow']

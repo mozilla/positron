@@ -47,6 +47,118 @@ class TextMetrics;
 class CanvasFilterChainObserver;
 class CanvasPath;
 
+template<class T>
+struct MaybeNotNull
+{
+  MOZ_IMPLICIT MaybeNotNull() : mWrapped(nullptr), mEnsure(false) {}
+  MOZ_IMPLICIT MaybeNotNull(T&& aValue) : mWrapped(aValue), mEnsure(false) {}
+  ~MaybeNotNull() {}
+
+  void BeginNotNull() {
+    mEnsure = true;
+  }
+
+  void EndNotNull() {
+    mEnsure = false;
+  }
+
+  void MaybeCheckWrapped() {
+    if (mEnsure && !mWrapped) {
+      MOZ_CRASH("GFX: Setting mTarget to nullptr?");
+    }
+  }
+
+  typename T::element_type* operator->() const {
+    return mWrapped.get();
+  }
+
+  already_AddRefed<typename T::element_type> forget() {
+    already_AddRefed<typename T::element_type>&& ret = mWrapped.forget();
+    MaybeCheckWrapped();
+    return Move(ret);
+  }
+
+  MOZ_IMPLICIT operator bool () {
+    return mWrapped;
+  }
+
+  operator T&() {
+    return mWrapped;
+  }
+
+  operator typename T::element_type*() {
+    return mWrapped.get();
+  }
+
+  bool operator!() const {
+    return !mWrapped;
+  }
+
+  MaybeNotNull& operator=(decltype(nullptr)) {
+    mWrapped = nullptr;
+    MaybeCheckWrapped();
+    return *this;
+  }
+
+  template<class U>
+  MaybeNotNull& operator=(U& aOther){
+    mWrapped = aOther;
+    MaybeCheckWrapped();
+    return *this;
+  }
+
+  template<class U>
+  MaybeNotNull& operator=(U&& aOther){
+    mWrapped = aOther;
+    MaybeCheckWrapped();
+    return *this;
+  }
+
+  struct AutoNotNull
+  {
+    MOZ_IMPLICIT AutoNotNull(MaybeNotNull* aMaybe) : mMaybe(aMaybe)
+    {
+      mMaybe->BeginNotNull();
+    }
+
+    ~AutoNotNull()
+    {
+      mMaybe->EndNotNull();
+    }
+
+    MaybeNotNull* mMaybe;
+  };
+
+  AutoNotNull MakeAuto()
+  {
+    return AutoNotNull(this);
+  }
+
+  T mWrapped;
+
+  bool mEnsure;
+};
+
+template<class T, class U>
+  bool operator!=(const MaybeNotNull<T>& aT, const U& aU) {
+  return aT.mWrapped != aU;
+}
+
+template<class T, class U>
+  bool operator==(const MaybeNotNull<T>& aT, const U& aU) {
+  return aT.mWrapped == aU;
+}
+
+template<class T, class U>
+  bool operator||(const MaybeNotNull<T>& aT, const U& aU) {
+  return aT.mWrapped || aU;
+}
+
+template<class T, class U>
+  bool operator||(const T& aT, const MaybeNotNull<U>& aU) {
+  return aT || aU.mWrapped;
+}
+
 extern const mozilla::gfx::Float SIGMA_MAX;
 
 template<typename T> class Optional;
@@ -66,13 +178,13 @@ class CanvasRenderingContext2D final :
   virtual ~CanvasRenderingContext2D();
 
 public:
-  CanvasRenderingContext2D();
+  explicit CanvasRenderingContext2D(layers::LayersBackend aCompositorBackend);
 
   virtual JSObject* WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   HTMLCanvasElement* GetCanvas() const
   {
-    if (mCanvasElement->IsInNativeAnonymousSubtree()) {
+    if (!mCanvasElement || mCanvasElement->IsInNativeAnonymousSubtree()) {
       return nullptr;
     }
 
@@ -353,22 +465,18 @@ public:
 
   void GetMozCurrentTransform(JSContext* aCx,
                               JS::MutableHandle<JSObject*> aResult,
-                              mozilla::ErrorResult& aError) const;
+                              mozilla::ErrorResult& aError);
   void SetMozCurrentTransform(JSContext* aCx,
                               JS::Handle<JSObject*> aCurrentTransform,
                               mozilla::ErrorResult& aError);
   void GetMozCurrentTransformInverse(JSContext* aCx,
                                      JS::MutableHandle<JSObject*> aResult,
-                                     mozilla::ErrorResult& aError) const;
+                                     mozilla::ErrorResult& aError);
   void SetMozCurrentTransformInverse(JSContext* aCx,
                                      JS::Handle<JSObject*> aCurrentTransform,
                                      mozilla::ErrorResult& aError);
   void GetFillRule(nsAString& aFillRule);
   void SetFillRule(const nsAString& aFillRule);
-  void GetMozDash(JSContext* aCx, JS::MutableHandle<JS::Value> aRetval,
-                  mozilla::ErrorResult& aError);
-  void SetMozDash(JSContext* aCx, const JS::Value& aMozDash,
-                  mozilla::ErrorResult& aError);
 
   void SetLineDash(const Sequence<double>& aSegments,
                    mozilla::ErrorResult& aRv);
@@ -376,12 +484,6 @@ public:
 
   void SetLineDashOffset(double aOffset);
   double LineDashOffset() const;
-
-  double MozDashOffset()
-  {
-    return CurrentState().dashOffset;
-  }
-  void SetMozDashOffset(double aMozDashOffset);
 
   void GetMozTextStyle(nsAString& aMozTextStyle)
   {
@@ -548,6 +650,10 @@ public:
   bool GetHitRegionRect(Element* aElement, nsRect& aRect) override;
 
   void OnShutdown();
+
+  // Check the global setup, as well as the compositor type:
+  bool AllowOpenGLCanvas() const;
+
 protected:
   nsresult GetImageDataArray(JSContext* aCx, int32_t aX, int32_t aY,
                              uint32_t aWidth, uint32_t aHeight,
@@ -557,6 +663,10 @@ protected:
                                  dom::Uint8ClampedArray* aArray,
                                  bool aHasDirtyRect, int32_t aDirtyX, int32_t aDirtyY,
                                  int32_t aDirtyWidth, int32_t aDirtyHeight);
+
+  bool CopyBufferProvider(layers::PersistentBufferProvider& aOld,
+                          gfx::DrawTarget& aTarget,
+                          gfx::IntRect aCopyRect);
 
   /**
    * Internal method to complete initialisation, expects mTarget to have been set
@@ -688,7 +798,7 @@ protected:
    * Check if the target is valid after calling EnsureTarget.
    */
   bool IsTargetValid() const {
-    return (sErrorTarget == nullptr || mTarget != sErrorTarget) && (mBufferProvider != nullptr || mTarget);
+    return !!mTarget && mTarget != sErrorTarget;
   }
 
   /**
@@ -706,6 +816,7 @@ protected:
   /**
    * Update CurrentState().filter with the filter description for
    * CurrentState().filterChain.
+   * Flushes the PresShell, so the world can change if you call this function.
    */
   void UpdateFilter();
 
@@ -742,6 +853,8 @@ protected:
 
   RenderingMode mRenderingMode;
 
+  layers::LayersBackend mCompositorBackend;
+
   // Member vars
   int32_t mWidth, mHeight;
 
@@ -770,7 +883,7 @@ protected:
   // This is created lazily so it is necessary to call EnsureTarget before
   // accessing it. In the event of an error it will be equal to
   // sErrorTarget.
-  RefPtr<mozilla::gfx::DrawTarget> mTarget;
+  MaybeNotNull<RefPtr<mozilla::gfx::DrawTarget>> mTarget;
 
   RefPtr<mozilla::layers::PersistentBufferProvider> mBufferProvider;
 
@@ -883,13 +996,12 @@ protected:
    * last call to UpdateFilter and now.
    */
   const gfx::FilterDescription& EnsureUpdatedFilter() {
-    const ContextState& state = CurrentState();
     bool isWriteOnly = mCanvasElement && mCanvasElement->IsWriteOnly();
-    if (state.filterSourceGraphicTainted != isWriteOnly) {
+    if (CurrentState().filterSourceGraphicTainted != isWriteOnly) {
       UpdateFilter();
     }
-    MOZ_ASSERT(state.filterSourceGraphicTainted == isWriteOnly);
-    return state.filter;
+    MOZ_ASSERT(CurrentState().filterSourceGraphicTainted == isWriteOnly);
+    return CurrentState().filter;
   }
 
   bool NeedToCalculateBounds()
@@ -1092,6 +1204,18 @@ protected:
     RefPtr<nsSVGFilterChainObserver> filterChainObserver;
     mozilla::gfx::FilterDescription filter;
     nsTArray<RefPtr<mozilla::gfx::SourceSurface>> filterAdditionalImages;
+
+    // This keeps track of whether the canvas was "tainted" or not when
+    // we last used a filter. This is a security measure, whereby the
+    // canvas is flipped to write-only if a cross-origin image is drawn to it.
+    // This is to stop bad actors from reading back data they shouldn't have
+    // access to.
+    //
+    // This also limits what filters we can apply to the context; in particular
+    // feDisplacementMap is restricted.
+    //
+    // We keep track of this to ensure that if this gets out of sync with the
+    // tainted state of the canvas itself, we update our filters accordingly.
     bool filterSourceGraphicTainted;
 
     bool imageSmoothingEnabled;

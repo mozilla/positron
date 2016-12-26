@@ -5,8 +5,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "RemoteCompositorSession.h"
+#include "mozilla/VsyncDispatcher.h"
 #include "mozilla/layers/APZChild.h"
 #include "mozilla/layers/APZCTreeManagerChild.h"
+#include "mozilla/Unused.h"
 #include "nsBaseWidget.h"
 
 namespace mozilla {
@@ -34,6 +36,13 @@ RemoteCompositorSession::~RemoteCompositorSession()
 {
   // This should have been shutdown first.
   MOZ_ASSERT(!mCompositorBridgeChild);
+}
+
+void
+RemoteCompositorSession::NotifyDeviceReset(uint64_t aSeqNo)
+{
+  MOZ_ASSERT(mWidget);
+  mWidget->OnRenderingDeviceReset(aSeqNo);
 }
 
 void
@@ -75,6 +84,16 @@ RefPtr<IAPZCTreeManager>
 RemoteCompositorSession::GetAPZCTreeManager() const
 {
   return mAPZ;
+}
+
+bool
+RemoteCompositorSession::Reset(const nsTArray<LayersBackend>& aBackendHints,
+                               uint64_t aSeqNo,
+                               TextureFactoryIdentifier* aOutIdentifier)
+{
+  bool didReset;
+  Unused << mCompositorBridgeChild->SendReset(aBackendHints, aSeqNo, &didReset, aOutIdentifier);
+  return didReset;
 }
 
 void

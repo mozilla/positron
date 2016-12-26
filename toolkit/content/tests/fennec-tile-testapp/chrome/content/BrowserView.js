@@ -175,17 +175,11 @@ function() {
     };
   }
 
-  function clampViewportWH(width, height, visibleRect) {
-    let minW = visibleRect.width;
-    let minH = visibleRect.height;
-    return [Math.max(width, minW), Math.max(height, minH)];
-  }
-
-  function initContainer(container, visibleRect) {
-    container.style.width    = visibleRect.width  + 'px';
-    container.style.height   = visibleRect.height + 'px';
-    container.style.overflow = '-moz-hidden-unscrollable';
-  }
+  // function clampViewportWH(width, height, visibleRect) {
+  //   let minW = visibleRect.width;
+  //   let minH = visibleRect.height;
+  //   return [Math.max(width, minW), Math.max(height, minH)];
+  // }
 
   function resizeContainerToViewport(container, viewportRect) {
     container.style.width  = viewportRect.width  + 'px';
@@ -241,7 +235,7 @@ function() {
         bvs.visibleY = vr.top;
 
         // reclamp minimally to the new visible rect
-        //this.setViewportDimensions(bvs.viewportRect.right, bvs.viewportRect.bottom);
+        // this.setViewportDimensions(bvs.viewportRect.right, bvs.viewportRect.bottom);
       } else
         this._viewportChanged(false, false);
     },
@@ -257,12 +251,11 @@ function() {
 
     setViewportDimensions: function setViewportDimensions(width, height, causedByZoom) {
       let bvs = this._browserViewportState;
-      let vis = this._visibleRect;
 
       if (!bvs)
         return;
 
-      //[width, height] = clampViewportWH(width, height, vis);
+      // [width, height] = clampViewportWH(width, height, vis);
       bvs.viewportRect.right  = width;
       bvs.viewportRect.bottom = height;
 
@@ -330,9 +323,6 @@ function() {
     },
 
     moveVisibleBy: function moveVisibleBy(dx, dy) {
-      let vr = this._visibleRect;
-      let vs = this._browserViewportState;
-
       this.onBeforeVisibleMove(dx, dy);
       this.onAfterVisibleMove(dx, dy);
     },
@@ -419,7 +409,8 @@ function() {
 
       this._restoreBrowser(browser);
 
-      browser.setAttribute("type", "content-primary");
+      browser.setAttribute("type", "content");
+      browser.setAttribute("primary", "true");
 
       this.beginBatchOperation();
 
@@ -636,7 +627,7 @@ function() {
 
       this._container.appendChild(canvas);
 
-      //dump('++ ' + tile.toString(true) + endl);
+      // dump('++ ' + tile.toString(true) + endl);
     },
 
     _removeTile: function _removeTile(tile) {
@@ -644,7 +635,7 @@ function() {
 
       this._container.removeChild(canvas);
 
-      //dump('-- ' + tile.toString(true) + endl);
+      // dump('-- ' + tile.toString(true) + endl);
     }
 
   };
@@ -691,4 +682,3 @@ BrowserView.BrowserViewportState.prototype = {
   }
 
 };
-

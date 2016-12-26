@@ -9,8 +9,7 @@
 
 "use strict";
 
-////////////////////////////////////////////////////////////////////////////////
-//// Globals
+// Globals
 
 var Cc = Components.classes;
 var Ci = Components.interfaces;
@@ -34,8 +33,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "OS",
 
 const TEST_TARGET_FILE_NAME_PDF = "test-download.pdf";
 
-////////////////////////////////////////////////////////////////////////////////
-//// Support functions
+// Support functions
 
 // While the previous test file should have deleted all the temporary files it
 // used, on Windows these might still be pending deletion on the physical file
@@ -68,7 +66,7 @@ function getTempFile(aLeafName)
   let file = FileUtils.getFile("TmpD", [leafName]);
   ok(!file.exists(), "Temp file does not exist");
 
-  registerCleanupFunction(function () {
+  registerCleanupFunction(function() {
     if (file.exists()) {
       file.remove(false);
     }

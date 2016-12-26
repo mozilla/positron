@@ -71,6 +71,14 @@ public:
     already_AddRefed<gfxContext> CreateRenderingContext();
 
     /**
+     * Create a reference rendering context and initialize it.  Only call this
+     * method on device contexts that were initialized for printing.
+     *
+     * @return the new rendering context.
+     */
+    already_AddRefed<gfxContext> CreateReferenceRenderingContext();
+
+    /**
      * Gets the number of app units in one CSS pixel; this number is global,
      * not unique to each device context.
      */
@@ -254,13 +262,20 @@ public:
     /**
      * True if this device context was created for printing.
      */
-    bool IsPrinterSurface();
+    bool IsPrinterContext();
 
     mozilla::DesktopToLayoutDeviceScale GetDesktopToDeviceScale();
 
 private:
     // Private destructor, to discourage deletion outside of Release():
     ~nsDeviceContext();
+
+    /**
+     * Implementation shared by CreateRenderingContext and
+     * CreateReferenceRenderingContext.
+     */
+    already_AddRefed<gfxContext>
+    CreateRenderingContextCommon(bool aWantReferenceContext);
 
     void SetDPI(double* aScale = nullptr);
     void ComputeClientRectUsingScreen(nsRect *outRect);
@@ -285,8 +300,8 @@ private:
     nsCOMPtr<nsIScreenManager>     mScreenManager;
     nsCOMPtr<nsIDeviceContextSpec> mDeviceContextSpec;
     RefPtr<PrintTarget>            mPrintTarget;
-#ifdef XP_MACOSX
-    RefPtr<PrintTarget>            mCachedPrintTarget;
+#ifdef DEBUG
+    bool mIsInitialized;
 #endif
 };
 

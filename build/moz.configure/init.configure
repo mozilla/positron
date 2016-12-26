@@ -12,6 +12,7 @@ option(env='DIST', nargs=1, help='DIST directory')
 # Do not allow objdir == srcdir builds.
 # ==============================================================
 @depends('--help', 'DIST')
+@imports(_from='os.path', _import='exists')
 def check_build_environment(help, dist):
     topobjdir = os.path.realpath(os.path.abspath('.'))
     topsrcdir = os.path.realpath(os.path.abspath(
@@ -46,7 +47,7 @@ def check_build_environment(help, dist):
     # Check for a couple representative files in the source tree
     conflict_files = [
         '*         %s' % f for f in ('Makefile', 'config/autoconf.mk')
-        if os.path.exists(os.path.join(topsrcdir, f))
+        if exists(os.path.join(topsrcdir, f))
     ]
     if conflict_files:
         die('  ***\n'
@@ -70,6 +71,14 @@ set_config('MOZ_BUILD_ROOT', delayed_getattr(check_build_environment,
                                              'topobjdir'))
 set_config('DIST', delayed_getattr(check_build_environment, 'dist'))
 
+add_old_configure_assignment(
+    '_topsrcdir', delayed_getattr(check_build_environment, 'topsrcdir'))
+add_old_configure_assignment(
+    '_objdir', delayed_getattr(check_build_environment, 'topobjdir'))
+add_old_configure_assignment(
+    'MOZ_BUILD_ROOT', delayed_getattr(check_build_environment, 'topobjdir'))
+add_old_configure_assignment(
+    'DIST', delayed_getattr(check_build_environment, 'dist'))
 
 option(env='MOZ_AUTOMATION', help='Enable options for automated builds')
 set_config('MOZ_AUTOMATION', depends_if('MOZ_AUTOMATION')(lambda x: True))
@@ -120,44 +129,6 @@ def mozconfig(current_project, mozconfig, old_configure, build_env, help):
     return mozconfig
 
 set_config('MOZCONFIG', depends(mozconfig)(lambda m: m['path']))
-
-
-# Hacks related to old-configure
-# ==============================
-
-@dependable
-def old_configure_assignments():
-    return []
-
-@dependable
-def extra_old_configure_args():
-    return []
-
-@template
-def add_old_configure_assignment(var, value):
-    var = dependable(var)
-    value = dependable(value)
-
-    @depends(old_configure_assignments, var, value)
-    @imports(_from='mozbuild.shellutil', _import='quote')
-    def add_assignment(assignments, var, value):
-        if var is None or value is None:
-            return
-        if value is True:
-            assignments.append('%s=1' % var)
-        elif value is False:
-            assignments.append('%s=' % var)
-        else:
-            if isinstance(value, (list, tuple)):
-                value = quote(*value)
-            assignments.append('%s=%s' % (var, quote(str(value))))
-
-@template
-def add_old_configure_arg(arg):
-    @depends(extra_old_configure_args, arg)
-    def add_arg(args, arg):
-        if arg:
-            args.append(arg)
 
 
 option(env='PYTHON', nargs=1, help='Python interpreter')
@@ -260,6 +231,7 @@ early_options = early_options()
 @depends(mozconfig, '--help')
 # This gives access to the sandbox. Don't copy this blindly.
 @imports('__sandbox__')
+@imports('os')
 def mozconfig_options(mozconfig, help):
     if mozconfig['path']:
         helper = __sandbox__._helper
@@ -279,8 +251,10 @@ def mozconfig_options(mozconfig, help):
 
         for key, value in mozconfig['env']['added'].iteritems():
             add(key, value)
+            os.environ[key] = value
         for key, (_, value) in mozconfig['env']['modified'].iteritems():
             add(key, value)
+            os.environ[key] = value
         for key, value in mozconfig['vars']['added'].iteritems():
             # mozconfig_loader adds _IS_SET variables that are irrelevant
             if not key.endswith('_IS_SET'):
@@ -488,8 +462,8 @@ def host_for_old_configure(host):
 
 add_old_configure_arg(host_for_old_configure)
 
-@depends(host, target)
-def target_for_old_configure(host, target):
+@depends(target)
+def target_for_old_configure(target):
     target_alias = target.alias
     # old-configure does plenty of tests against $target and $target_os
     # and expects darwin for iOS, so make it happy.
@@ -554,6 +528,7 @@ def host_variables(host):
         HOST_OS_ARCH=os_arch,
     )
 
+set_config('HOST_CPU_ARCH', delayed_getattr(host, 'cpu'))
 set_config('HOST_OS_ARCH', delayed_getattr(host_variables, 'HOST_OS_ARCH'))
 add_old_configure_assignment('HOST_OS_ARCH',
                              delayed_getattr(host_variables, 'HOST_OS_ARCH'))
@@ -630,6 +605,7 @@ option('--with-external-source-dir', env='EXTERNAL_SOURCE_DIR', nargs=1,
 
 @depends('--enable-project', '--with-external-source-dir',
          check_build_environment, '--help')
+@imports(_from='os.path', _import='exists')
 def include_project_configure(project, external_source_dir, build_env, help):
     if not project:
         die('--enable-project is required.')
@@ -639,7 +615,7 @@ def include_project_configure(project, external_source_dir, build_env, help):
         base_dir = os.path.join(base_dir, external_source_dir[0])
 
     path = os.path.join(base_dir, project[0], 'moz.configure')
-    if not os.path.exists(path):
+    if not exists(path):
         die('Cannot find project %s', project[0])
     return path
 
@@ -663,11 +639,11 @@ set_define('MOZ_BUILD_APP', build_project)
 add_old_configure_assignment('MOZ_BUILD_APP', build_project)
 
 
-# set RELEASE_BUILD and NIGHTLY_BUILD variables depending on the cycle we're in
+# set RELEASE_OR_BETA and NIGHTLY_BUILD variables depending on the cycle we're in
 # The logic works like this:
 # - if we have "a1" in GRE_MILESTONE, we're building Nightly (define NIGHTLY_BUILD)
 # - otherwise, if we have "a" in GRE_MILESTONE, we're building Nightly or Aurora
-# - otherwise, we're building Release/Beta (define RELEASE_BUILD)
+# - otherwise, we're building Release/Beta (define RELEASE_OR_BETA)
 @depends(check_build_environment, '--help')
 @imports(_from='__builtin__', _import='open')
 def milestone(build_env, _):
@@ -677,26 +653,26 @@ def milestone(build_env, _):
     with open(milestone_path, 'r') as fh:
         milestone = fh.read().splitlines()[-1]
 
-    is_nightly = is_release = None
+    is_nightly = is_release_or_beta = None
 
     if 'a1' in milestone:
         is_nightly = True
     elif 'a' not in milestone:
-        is_release = True
+        is_release_or_beta = True
 
     return namespace(version=milestone,
                      is_nightly=is_nightly,
-                     is_release=is_release)
+                     is_release_or_beta=is_release_or_beta)
 
 set_config('GRE_MILESTONE', delayed_getattr(milestone, 'version'))
 set_config('NIGHTLY_BUILD', delayed_getattr(milestone, 'is_nightly'))
 set_define('NIGHTLY_BUILD', delayed_getattr(milestone, 'is_nightly'))
 add_old_configure_assignment('NIGHTLY_BUILD',
                              delayed_getattr(milestone, 'is_nightly'))
-set_config('RELEASE_BUILD', delayed_getattr(milestone, 'is_release'))
-set_define('RELEASE_BUILD', delayed_getattr(milestone, 'is_release'))
-add_old_configure_assignment('RELEASE_BUILD',
-                             delayed_getattr(milestone, 'is_release'))
+set_config('RELEASE_OR_BETA', delayed_getattr(milestone, 'is_release_or_beta'))
+set_define('RELEASE_OR_BETA', delayed_getattr(milestone, 'is_release_or_beta'))
+add_old_configure_assignment('RELEASE_OR_BETA',
+                             delayed_getattr(milestone, 'is_release_or_beta'))
 
 # The app update channel is 'default' when not supplied. The value is used in
 # the application's confvars.sh (and is made available to a project specific
@@ -754,10 +730,10 @@ def enabled_in_nightly(milestone, _):
 
 # Set the MOZ_CONFIGURE_OPTIONS variable with all the options that
 # were passed somehow (environment, command line, mozconfig)
-@depends(mozconfig_options)
+@dependable
 @imports(_from='mozbuild.shellutil', _import='quote')
 @imports('__sandbox__')
-def all_configure_options(_):
+def all_configure_options():
     result = []
     previous = None
     for option in __sandbox__._options.itervalues():
@@ -773,7 +749,7 @@ def all_configure_options(_):
         # We only want options that were explicitly given on the command
         # line, the environment, or mozconfig, and that differ from the
         # defaults.
-        if (value.origin not in ('default', 'implied') and
+        if (value is not None and value.origin not in ('default', 'implied') and
                 value != option.default):
             result.append(__sandbox__._raw_options[option])
         # We however always include options that are sent to old configure
@@ -803,18 +779,11 @@ def js_option(*args, **kwargs):
     add_old_configure_arg(js_option)
 
 
-include('pkg.configure')
-# Make this assignment here rather than in pkg.configure to avoid
-# requiring this file in unit tests.
-add_old_configure_assignment('PKG_CONFIG', pkg_config)
-
 # Bug 1278542: This function is a workaround to resolve
 # |android_ndk_include|'s dependency on 'gonkdir.' The
 # actual implementation is located in b2g/moz.configure.
 # Remove this function as soon as 'android_ndk_include'
 # depends on 'target.'
-@dependable
-def gonkdir():
+@depends('--help')
+def gonkdir(_):
     return None
-
-include(include_project_configure)

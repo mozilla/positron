@@ -56,14 +56,14 @@ function fieldForUrl(aURI, aFieldName, aCallback)
 function NavHistoryObserver() {}
 
 NavHistoryObserver.prototype = {
-  onBeginUpdateBatch: function () {},
-  onEndUpdateBatch: function () {},
-  onVisit: function () {},
-  onTitleChanged: function () {},
-  onDeleteURI: function () {},
-  onClearHistory: function () {},
-  onPageChanged: function () {},
-  onDeleteVisits: function () {},
+  onBeginUpdateBatch: function() {},
+  onEndUpdateBatch: function() {},
+  onVisit: function() {},
+  onTitleChanged: function() {},
+  onDeleteURI: function() {},
+  onClearHistory: function() {},
+  onPageChanged: function() {},
+  onDeleteVisits: function() {},
   QueryInterface: XPCOMUtils.generateQI([
     Ci.nsINavHistoryObserver,
   ])
@@ -125,7 +125,6 @@ function waitForFaviconChanged(aExpectedPageURI, aExpectedFaviconURI, aWindow,
  *        The stack frame used to report errors.
  */
 function addVisits(aPlaceInfo, aWindow, aCallback, aStack) {
-  let stack = aStack || Components.stack.caller;
   let places = [];
   if (aPlaceInfo instanceof Ci.nsIURI) {
     places.push({ uri: aPlaceInfo });
@@ -156,7 +155,7 @@ function addVisits(aPlaceInfo, aWindow, aCallback, aStack) {
       handleError: function AAV_handleError() {
         throw ("Unexpected error in adding visit.");
       },
-      handleResult: function () {},
+      handleResult: function() {},
       handleCompletion: function UP_handleCompletion() {
         if (aCallback)
           aCallback();
@@ -180,7 +179,7 @@ function addVisits(aPlaceInfo, aWindow, aCallback, aStack) {
 function checkFaviconDataForPage(aPageURI, aExpectedMimeType, aExpectedData,
   aWindow, aCallback) {
   aWindow.PlacesUtils.favicons.getFaviconDataForPage(aPageURI,
-    function (aURI, aDataLen, aData, aMimeType) {
+    function(aURI, aDataLen, aData, aMimeType) {
       is(aExpectedMimeType, aMimeType, "Check expected MimeType");
       is(aExpectedData.length, aData.length,
         "Check favicon data for the given page matches the provided data");
@@ -288,7 +287,7 @@ function whenNewWindowLoaded(aOptions, aCallback) {
  */
 function promiseIsURIVisited(aURI, aExpectedValue) {
   return new Promise(resolve => {
-    PlacesUtils.asyncHistory.isURIVisited(aURI, function(aURI, aIsVisited) {
+    PlacesUtils.asyncHistory.isURIVisited(aURI, function(unused, aIsVisited) {
       resolve(aIsVisited);
     });
   });

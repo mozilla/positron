@@ -52,6 +52,9 @@
   <preference id="browser.formfill.enable"
               name="browser.formfill.enable"
               type="bool"/>
+  <preference id="privacy.history.custom"
+              name="privacy.history.custom"
+              type="bool"/>
   <!-- Cookies -->
   <preference id="network.cookie.cookieBehavior"
               name="network.cookie.cookieBehavior"
@@ -289,8 +292,20 @@
       <label id="browserContainersLearnMore" class="text-link"
              value="&browserContainersLearnMore.label;"/>
     </label></caption>
-    <checkbox id="browserContainersCheckbox"
-              label="&browserContainersEnabled.label;"
-              accesskey="&browserContainersEnabled.accesskey;" />
+    <hbox align="start">
+      <vbox>
+        <checkbox id="browserContainersCheckbox"
+                  label="&browserContainersEnabled.label;"
+                  accesskey="&browserContainersEnabled.accesskey;"
+                  preference="privacy.userContext.enabled"
+                  onsyncfrompreference="return gPrivacyPane.readBrowserContainersCheckbox();"/>
+      </vbox>
+      <spacer flex="1"/>
+      <vbox>
+        <button id="browserContainersSettings"
+                label="&browserContainersSettings.label;"
+                accesskey="&browserContainersSettings.accesskey;"/>
+      </vbox>
+    </hbox>
   </vbox>
 </groupbox>

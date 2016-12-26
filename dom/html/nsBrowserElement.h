@@ -34,7 +34,7 @@ class ErrorResult;
 class nsBrowserElement
 {
 public:
-  nsBrowserElement() : mOwnerIsWidget(false) {}
+  nsBrowserElement() {}
   virtual ~nsBrowserElement() {}
 
   void SetVisible(bool aVisible, ErrorResult& aRv);
@@ -105,17 +105,11 @@ public:
   void RemoveNextPaintListener(dom::BrowserElementNextPaintEventCallback& listener,
                                ErrorResult& aRv);
 
-  already_AddRefed<dom::DOMRequest> SetInputMethodActive(bool isActive,
-                                                         ErrorResult& aRv);
-
   already_AddRefed<dom::DOMRequest> ExecuteScript(const nsAString& aScript,
                                                   const dom::BrowserElementExecuteScriptOptions& aOptions,
                                                   ErrorResult& aRv);
 
   already_AddRefed<dom::DOMRequest> GetWebManifest(ErrorResult& aRv);
-
-  void SetNFCFocus(bool isFocus,
-                   ErrorResult& aRv);
 
   // Helper
   static void GenerateAllowedAudioChannels(
@@ -127,7 +121,6 @@ public:
 
 protected:
   NS_IMETHOD_(already_AddRefed<nsFrameLoader>) GetFrameLoader() = 0;
-  NS_IMETHOD GetParentApplication(mozIApplication** aApplication) = 0;
 
   void InitBrowserElementAPI();
   void DestroyBrowserElementFrameScripts();
@@ -136,8 +129,6 @@ protected:
 
 private:
   bool IsBrowserElementOrThrow(ErrorResult& aRv);
-  bool IsNotWidgetOrThrow(ErrorResult& aRv);
-  bool mOwnerIsWidget;
 };
 
 } // namespace mozilla

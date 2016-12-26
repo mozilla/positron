@@ -16,7 +16,6 @@
 #include "nsICSSDeclaration.h"
 #include "nsIDocument.h"
 #include "nsIDOMMutationEvent.h"
-#include "nsSVGPathGeometryElement.h"
 #include "mozilla/InternalMutationEvent.h"
 #include "nsError.h"
 #include "nsIPresShell.h"
@@ -45,6 +44,7 @@
 #include "SVGAnimatedPointList.h"
 #include "SVGAnimatedPathSegList.h"
 #include "SVGContentUtils.h"
+#include "SVGGeometryElement.h"
 #include "nsIFrame.h"
 #include "nsQueryObject.h"
 #include <stdarg.h>
@@ -258,7 +258,7 @@ nsSVGElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
   }
   const nsAttrValue* oldVal = mAttrsAndChildren.GetAttr(nsGkAtoms::style);
 
-  if (oldVal && oldVal->Type() == nsAttrValue::eGeckoCSSDeclaration) {
+  if (oldVal && oldVal->Type() == nsAttrValue::eCSSDeclaration) {
     // we need to force a reparse because the baseURI of the document
     // may have changed, and in particular because we may be clones of
     // XBL anonymous content now being bound to the document we should

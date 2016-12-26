@@ -24,6 +24,7 @@ namespace js {
 
 class AutoLockGC;
 class AutoLockHelperThreadState;
+class SliceBudget;
 class VerifyPreTracer;
 
 namespace gc {
@@ -721,13 +722,6 @@ class GCRuntime
         --noNurseryAllocationCheck;
     }
 
-    bool isInsideUnsafeRegion() { return inUnsafeRegion != 0; }
-    void enterUnsafeRegion() { ++inUnsafeRegion; }
-    void leaveUnsafeRegion() {
-        MOZ_ASSERT(inUnsafeRegion > 0);
-        --inUnsafeRegion;
-    }
-
     bool isStrictProxyCheckingEnabled() { return disableStrictProxyCheckingCount == 0; }
     void disableStrictProxyChecking() { ++disableStrictProxyCheckingCount; }
     void enableStrictProxyChecking() {
@@ -735,6 +729,23 @@ class GCRuntime
         --disableStrictProxyCheckingCount;
     }
 #endif // DEBUG
+
+    bool isInsideUnsafeRegion() { return inUnsafeRegion != 0; }
+    void enterUnsafeRegion() {
+        MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt));
+        ++inUnsafeRegion;
+    }
+    void leaveUnsafeRegion() {
+        MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt));
+        MOZ_ASSERT(inUnsafeRegion > 0);
+        --inUnsafeRegion;
+    }
+
+    void verifyIsSafeToGC() {
+        MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt));
+        MOZ_DIAGNOSTIC_ASSERT(!isInsideUnsafeRegion(),
+                              "[AutoAssertNoGC] possible GC in GC-unsafe region");
+    }
 
     void setAlwaysPreserveCode() { alwaysPreserveCode = true; }
 
@@ -783,14 +794,6 @@ class GCRuntime
     void callDoCycleCollectionCallback(JSContext* cx);
 
     void setFullCompartmentChecks(bool enable);
-
-    bool isManipulatingDeadZones() { return manipulatingDeadZones; }
-    void setManipulatingDeadZones(bool value) { manipulatingDeadZones = value; }
-    unsigned objectsMarkedInDeadZonesCount() { return objectsMarkedInDeadZones; }
-    void incObjectsMarkedInDeadZone() {
-        MOZ_ASSERT(manipulatingDeadZones);
-        ++objectsMarkedInDeadZones;
-    }
 
     JS::Zone* getCurrentZoneGroup() { return currentZoneGroup; }
     void setFoundBlackGrayEdges(TenuredCell& target) {
@@ -858,6 +861,19 @@ class GCRuntime
     bool isVerifyPreBarriersEnabled() const { return false; }
 #endif
 
+    // GC interrupt callbacks.
+    bool addInterruptCallback(JS::GCInterruptCallback callback);
+    void requestInterruptCallback();
+
+    bool checkInterruptCallback(JSContext* cx) {
+        if (interruptCallbackRequested) {
+            invokeInterruptCallback(cx);
+            return true;
+        }
+        return false;
+    }
+    void invokeInterruptCallback(JSContext* cx);
+
     // Free certain LifoAlloc blocks when it is safe to do so.
     void freeUnusedLifoBlocksAfterSweeping(LifoAlloc* lifo);
     void freeAllLifoBlocksAfterSweeping(LifoAlloc* lifo);
@@ -898,7 +914,8 @@ class GCRuntime
     friend class ArenaLists;
     Chunk* pickChunk(const AutoLockGC& lock,
                      AutoMaybeStartBackgroundAllocation& maybeStartBGAlloc);
-    Arena* allocateArena(Chunk* chunk, Zone* zone, AllocKind kind, const AutoLockGC& lock);
+    Arena* allocateArena(Chunk* chunk, Zone* zone, AllocKind kind,
+                         ShouldCheckThresholds checkThresholds, const AutoLockGC& lock);
     void arenaAllocatedDuringGC(JS::Zone* zone, Arena* arena);
 
     // Allocator internals
@@ -927,8 +944,9 @@ class GCRuntime
 
     void requestMajorGC(JS::gcreason::Reason reason);
     SliceBudget defaultBudget(JS::gcreason::Reason reason, int64_t millis);
-    void budgetIncrementalGC(SliceBudget& budget, AutoLockForExclusiveAccess& lock);
-    void resetIncrementalGC(const char* reason, AutoLockForExclusiveAccess& lock);
+    void budgetIncrementalGC(JS::gcreason::Reason reason, SliceBudget& budget,
+                             AutoLockForExclusiveAccess& lock);
+    void resetIncrementalGC(AbortReason reason, AutoLockForExclusiveAccess& lock);
 
     // Assert if the system state is such that we should never
     // receive a request to do GC work.
@@ -942,6 +960,7 @@ class GCRuntime
     void collect(bool nonincrementalByAPI, SliceBudget budget, JS::gcreason::Reason reason) JS_HAZ_GC_CALL;
     MOZ_MUST_USE bool gcCycle(bool nonincrementalByAPI, SliceBudget& budget,
                               JS::gcreason::Reason reason);
+    bool shouldRepeatForDeadZone(JS::gcreason::Reason reason);
     void incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason reason,
                                  AutoLockForExclusiveAccess& lock);
 
@@ -1069,6 +1088,13 @@ class GCRuntime
      */
     mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire> numArenasFreeCommitted;
     VerifyPreTracer* verifyPreData;
+
+    // GC interrupt callbacks.
+    using GCInterruptCallbackVector = js::Vector<JS::GCInterruptCallback, 2, js::SystemAllocPolicy>;
+    GCInterruptCallbackVector interruptCallbacks;
+
+    mozilla::Atomic<bool, mozilla::Relaxed> interruptCallbackRequested;
+    SliceBudget* currentBudget;
 
   private:
     bool chunkAllocationSinceLastGC;
@@ -1258,23 +1284,6 @@ class GCRuntime
      */
     unsigned compactingDisabledCount;
 
-    /*
-     * This is true if we are in the middle of a brain transplant (e.g.,
-     * JS_TransplantObject) or some other operation that can manipulate
-     * dead zones.
-     */
-    bool manipulatingDeadZones;
-
-    /*
-     * This field is incremented each time we mark an object inside a
-     * zone with no incoming cross-compartment pointers. Typically if
-     * this happens it signals that an incremental GC is marking too much
-     * stuff. At various times we check this counter and, if it has changed, we
-     * run an immediate, non-incremental GC to clean up the dead
-     * zones. This should happen very rarely.
-     */
-    unsigned objectsMarkedInDeadZones;
-
     bool poked;
 
     /*
@@ -1344,7 +1353,6 @@ class GCRuntime
     /* Always preserve JIT code during GCs, for testing. */
     bool alwaysPreserveCode;
 
-#ifdef DEBUG
     /*
      * Some regions of code are hard for the static rooting hazard analysis to
      * understand. In those cases, we trade the static analysis for a dynamic
@@ -1353,6 +1361,7 @@ class GCRuntime
      */
     int inUnsafeRegion;
 
+#ifdef DEBUG
     size_t noGCOrAllocationCheck;
     size_t noNurseryAllocationCheck;
 

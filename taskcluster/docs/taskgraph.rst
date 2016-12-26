@@ -91,8 +91,8 @@ Graph generation, as run via ``mach taskgraph decision``, proceeds as follows:
 #. For all kinds, generate all tasks.  The result is the "full task set"
 #. Create dependency links between tasks using kind-specific mechanisms.  The
    result is the "full task graph".
-#. Select the target tasks (based on try syntax or a tree-specific
-   specification).  The result is the "target task set".
+#. Filter the target tasks (based on a series of filters, such as try syntax,
+   tree-specific specifications, etc). The result is the "target task set".
 #. Based on the full task graph, calculate the transitive closure of the target
    task set.  That is, the target tasks and all requirements of those tasks.
    The result is the "target task graph".
@@ -168,7 +168,9 @@ So for instance, if you had already requested a build task in the ``try`` comman
 and you wish to add a test which depends on this build, the original build task
 is re-used.
 
-This feature is only present on ``try`` pushes for now.
+Action Tasks are currently scheduled by
+[pulse_actions](https://github.com/mozilla/pulse_actions). This feature is only
+present on ``try`` pushes for now.
 
 Mach commands
 -------------
@@ -219,12 +221,6 @@ using simple parameterized values, as follows:
     the named dependency substituted for ``<dep-name>`` in the string.
     Multiple labels may be substituted in a single string, and ``<<>`` can be
     used to escape a literal ``<``.
-
-
-The ``mach taskgraph action-task`` subcommand is used by Action Tasks to
-create a task graph of the requested jobs and its non-optimized dependencies.
-Action Tasks are currently scheduled by
-[pulse_actions](https://github.com/mozilla/pulse_actions)
 
 Taskgraph JSON Format
 ---------------------

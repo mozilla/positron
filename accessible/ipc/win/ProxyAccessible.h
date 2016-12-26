@@ -25,11 +25,8 @@ class ProxyAccessible : public ProxyAccessibleBase<ProxyAccessible>
 {
 public:
   ProxyAccessible(uint64_t aID, ProxyAccessible* aParent,
-                  DocAccessibleParent* aDoc, role aRole, uint32_t aInterfaces,
-                  const RefPtr<IAccessible>& aIAccessible)
+                  DocAccessibleParent* aDoc, role aRole, uint32_t aInterfaces)
     : ProxyAccessibleBase(aID, aParent, aDoc, aRole, aInterfaces)
-    , mCOMProxy(aIAccessible)
-
   {
     MOZ_COUNT_CTOR(ProxyAccessible);
   }
@@ -46,7 +43,7 @@ public:
 protected:
   explicit ProxyAccessible(DocAccessibleParent* aThisAsDoc)
     : ProxyAccessibleBase(aThisAsDoc)
-  { MOZ_COUNT_CTOR(ProxyAccessibleBase); }
+  { MOZ_COUNT_CTOR(ProxyAccessible); }
 
   void SetCOMInterface(const RefPtr<IAccessible>& aIAccessible)
   { mCOMProxy = aIAccessible; }

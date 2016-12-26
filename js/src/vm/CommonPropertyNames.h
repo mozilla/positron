@@ -23,15 +23,21 @@
     macro(ArrayIteratorNext, ArrayIteratorNext, "ArrayIteratorNext") \
     macro(ArraySpecies, ArraySpecies, "ArraySpecies") \
     macro(ArraySpeciesCreate, ArraySpeciesCreate, "ArraySpeciesCreate") \
+    macro(ArrayToLocaleString, ArrayToLocaleString, "ArrayToLocaleString") \
     macro(ArrayType, ArrayType, "ArrayType") \
     macro(ArrayValues, ArrayValues, "ArrayValues") \
     macro(ArrayValuesAt, ArrayValuesAt, "ArrayValuesAt") \
     macro(as, as, "as") \
     macro(Async, Async, "Async") \
+    macro(AsyncFunction, AsyncFunction, "AsyncFunction") \
+    macro(AsyncWrapped, AsyncWrapped, "AsyncWrapped") \
+    macro(async, async, "async") \
+    macro(await, await, "await") \
     macro(Bool8x16, Bool8x16, "Bool8x16") \
     macro(Bool16x8, Bool16x8, "Bool16x8") \
     macro(Bool32x4, Bool32x4, "Bool32x4") \
     macro(Bool64x2, Bool64x2, "Bool64x2") \
+    macro(boundWithSpace, boundWithSpace, "bound ") \
     macro(breakdown, breakdown, "breakdown") \
     macro(buffer, buffer, "buffer") \
     macro(builder, builder, "builder") \
@@ -67,9 +73,9 @@
     macro(currencyDisplay, currencyDisplay, "currencyDisplay") \
     macro(DateTimeFormat, DateTimeFormat, "DateTimeFormat") \
     macro(DateTimeFormatFormatGet, DateTimeFormatFormatGet, "Intl_DateTimeFormat_format_get") \
-    macro(DateTimeFormatFormatToParts, DateTimeFormatFormatToParts, "Intl_DateTimeFormat_formatToParts") \
     macro(day, day, "day") \
     macro(dayPeriod, dayPeriod, "dayPeriod") \
+    macro(decimal, decimal, "decimal") \
     macro(decodeURI, decodeURI, "decodeURI") \
     macro(decodeURIComponent, decodeURIComponent, "decodeURIComponent") \
     macro(DefaultBaseClassConstructor, DefaultBaseClassConstructor, "DefaultBaseClassConstructor") \
@@ -116,10 +122,11 @@
     macro(forceInterpreter, forceInterpreter, "forceInterpreter") \
     macro(forEach, forEach, "forEach") \
     macro(format, format, "format") \
+    macro(formatToParts, formatToParts, "formatToParts") \
+    macro(fraction, fraction, "fraction") \
     macro(frame, frame, "frame") \
     macro(from, from, "from") \
     macro(fulfilled, fulfilled, "fulfilled") \
-    macro(fulfillHandler, fulfillHandler, "fulfillHandler") \
     macro(futexNotEqual, futexNotEqual, "not-equal") \
     macro(futexOK, futexOK, "ok") \
     macro(futexTimedOut, futexTimedOut, "timed-out") \
@@ -134,6 +141,7 @@
     macro(getPropertyDescriptor, getPropertyDescriptor, "getPropertyDescriptor") \
     macro(getPrototypeOf, getPrototypeOf, "getPrototypeOf") \
     macro(global, global, "global") \
+    macro(group, group, "group") \
     macro(Handle, Handle, "Handle") \
     macro(has, has, "has") \
     macro(hasOwn, hasOwn, "hasOwn") \
@@ -144,10 +152,12 @@
     macro(includes, includes, "includes") \
     macro(incumbentGlobal, incumbentGlobal, "incumbentGlobal") \
     macro(index, index, "index") \
+    macro(infinity, infinity, "infinity") \
     macro(Infinity, Infinity, "Infinity") \
     macro(InitializeCollator, InitializeCollator, "InitializeCollator") \
     macro(InitializeDateTimeFormat, InitializeDateTimeFormat, "InitializeDateTimeFormat") \
     macro(InitializeNumberFormat, InitializeNumberFormat, "InitializeNumberFormat") \
+    macro(InitializePluralRules, InitializePluralRules, "InitializePluralRules") \
     macro(innermost, innermost, "innermost") \
     macro(inNursery, inNursery, "inNursery") \
     macro(input, input, "input") \
@@ -157,12 +167,14 @@
     macro(Int8x16, Int8x16, "Int8x16") \
     macro(Int16x8, Int16x8, "Int16x8") \
     macro(Int32x4, Int32x4, "Int32x4") \
+    macro(integer, integer, "integer") \
     macro(InterpretGeneratorResume, InterpretGeneratorResume, "InterpretGeneratorResume") \
     macro(isEntryPoint, isEntryPoint, "isEntryPoint") \
     macro(isExtensible, isExtensible, "isExtensible") \
     macro(isFinite, isFinite, "isFinite") \
     macro(isNaN, isNaN, "isNaN") \
     macro(isPrototypeOf, isPrototypeOf, "isPrototypeOf") \
+    macro(IterableToList, IterableToList, "IterableToList") \
     macro(iterate, iterate, "iterate") \
     macro(iteratorIntrinsic, iteratorIntrinsic, "__iterator__") \
     macro(join, join, "join") \
@@ -180,6 +192,7 @@
     macro(locale, locale, "locale") \
     macro(lookupGetter, lookupGetter, "__lookupGetter__") \
     macro(lookupSetter, lookupSetter, "__lookupSetter__") \
+    macro(MapConstructorInit, MapConstructorInit, "MapConstructorInit") \
     macro(MapIterator, MapIterator, "Map Iterator") \
     macro(maximumFractionDigits, maximumFractionDigits, "maximumFractionDigits") \
     macro(maximumSignificantDigits, maximumSignificantDigits, "maximumSignificantDigits") \
@@ -188,6 +201,7 @@
     macro(minimumFractionDigits, minimumFractionDigits, "minimumFractionDigits") \
     macro(minimumIntegerDigits, minimumIntegerDigits, "minimumIntegerDigits") \
     macro(minimumSignificantDigits, minimumSignificantDigits, "minimumSignificantDigits") \
+    macro(minusSign, minusSign, "minusSign") \
     macro(minute, minute, "minute") \
     macro(missingArguments, missingArguments, "missingArguments") \
     macro(module, module, "module") \
@@ -197,6 +211,7 @@
     macro(month, month, "month") \
     macro(multiline, multiline, "multiline") \
     macro(name, name, "name") \
+    macro(nan, nan, "nan") \
     macro(NaN, NaN, "NaN") \
     macro(NegativeInfinity, NegativeInfinity, "-Infinity") \
     macro(new, new_, "new") \
@@ -210,6 +225,7 @@
     macro(noStack, noStack, "noStack") \
     macro(NumberFormat, NumberFormat, "NumberFormat") \
     macro(NumberFormatFormatGet, NumberFormatFormatGet, "Intl_NumberFormat_format_get") \
+    macro(NumberFormatFormatToParts, NumberFormatFormatToParts, "Intl_NumberFormat_formatToParts") \
     macro(numeric, numeric, "numeric") \
     macro(objectArguments, objectArguments, "[object Arguments]") \
     macro(objectArray, objectArray, "[object Array]") \
@@ -233,6 +249,10 @@
     macro(parseInt, parseInt, "parseInt") \
     macro(pattern, pattern, "pattern") \
     macro(pending, pending, "pending") \
+    macro(PluralRules, PluralRules, "PluralRules") \
+    macro(PluralRulesSelect, PluralRulesSelect, "Intl_PluralRules_Select") \
+    macro(percentSign, percentSign, "percentSign") \
+    macro(plusSign, plusSign, "plusSign") \
     macro(preventExtensions, preventExtensions, "preventExtensions") \
     macro(promise, promise, "promise") \
     macro(propertyIsEnumerable, propertyIsEnumerable, "propertyIsEnumerable") \
@@ -242,6 +262,7 @@
     macro(raw, raw, "raw") \
     macro(reason, reason, "reason") \
     macro(RegExpBuiltinExec, RegExpBuiltinExec, "RegExpBuiltinExec") \
+    macro(RegExpFlagsGetter, RegExpFlagsGetter, "RegExpFlagsGetter") \
     macro(RegExpMatcher, RegExpMatcher, "RegExpMatcher") \
     macro(RegExpSearcher, RegExpSearcher, "RegExpSearcher") \
     macro(RegExpTester, RegExpTester, "RegExpTester") \
@@ -249,7 +270,6 @@
     macro(Reify, Reify, "Reify") \
     macro(reject, reject, "reject") \
     macro(rejected, rejected, "rejected") \
-    macro(rejectHandler, rejectHandler, "rejectHandler") \
     macro(RequireObjectCoercible, RequireObjectCoercible, "RequireObjectCoercible") \
     macro(resolve, resolve, "resolve") \
     macro(resumeGenerator, resumeGenerator, "resumeGenerator") \
@@ -261,6 +281,7 @@
     macro(selfHosted, selfHosted, "self-hosted") \
     macro(sensitivity, sensitivity, "sensitivity") \
     macro(set, set, "set") \
+    macro(SetConstructorInit, SetConstructorInit, "SetConstructorInit") \
     macro(SetIterator, SetIterator, "Set Iterator") \
     macro(setPrefix, setPrefix, "set ") \
     macro(setPrototypeOf, setPrototypeOf, "setPrototypeOf") \
@@ -271,6 +292,8 @@
     macro(stack, stack, "stack") \
     macro(star, star, "*") \
     macro(starDefaultStar, starDefaultStar, "*default*") \
+    macro(StarGeneratorNext, StarGeneratorNext, "StarGeneratorNext") \
+    macro(StarGeneratorThrow, StarGeneratorThrow, "StarGeneratorThrow") \
     macro(startTimestamp, startTimestamp, "startTimestamp") \
     macro(state, state, "state") \
     macro(static, static_, "static") \
@@ -325,6 +348,8 @@
     macro(void0, void0, "(void 0)") \
     macro(wasm, wasm, "wasm") \
     macro(watch, watch, "watch") \
+    macro(WeakMapConstructorInit, WeakMapConstructorInit, "WeakMapConstructorInit") \
+    macro(WeakSetConstructorInit, WeakSetConstructorInit, "WeakSetConstructorInit") \
     macro(WeakSet_add, WeakSet_add, "WeakSet_add") \
     macro(weekday, weekday, "weekday") \
     macro(weekendEnd, weekendEnd, "weekendEnd") \

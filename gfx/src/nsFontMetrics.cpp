@@ -129,12 +129,13 @@ nsFontMetrics::nsFontMetrics(const nsFont& aFont, const Params& aParams,
                        aParams.explicitLanguage,
                        aFont.sizeAdjust,
                        aFont.systemFont,
-                       mDeviceContext->IsPrinterSurface(),
+                       mDeviceContext->IsPrinterContext(),
                        aFont.synthesis & NS_FONT_SYNTHESIS_WEIGHT,
                        aFont.synthesis & NS_FONT_SYNTHESIS_STYLE,
                        aFont.languageOverride);
 
     aFont.AddFontFeaturesToStyle(&style);
+    aFont.AddFontVariationsToStyle(&style);
 
     gfxFloat devToCssSize = gfxFloat(mP2A) /
         gfxFloat(mDeviceContext->AppUnitsPerCSSPixel());

@@ -51,8 +51,8 @@ add_task(function*() {
   let addon = yield promiseAddonByID(ID);
   do_check_neq(addon, null);
 
-  function check_icons(addon) {
-    deepEqual(addon.icons, {
+  function check_icons(addon_copy) {
+    deepEqual(addon_copy.icons, {
         16: uri + "icon16.png",
         32: uri + "icon32.png",
         48: uri + "icon48.png",
@@ -153,8 +153,6 @@ add_task(function*() {
   let addon = yield promiseAddonByID(ID);
   do_check_neq(addon, null);
 
-  let uri = do_get_addon_root_uri(profileDir, ID);
-
   deepEqual(addon.icons, {});
 
   equal(addon.iconURL, null);
@@ -166,4 +164,3 @@ add_task(function*() {
 
   yield promiseRestartManager();
 });
-

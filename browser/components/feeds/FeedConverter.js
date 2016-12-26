@@ -1,4 +1,4 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */ 
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -227,7 +227,7 @@ FeedConverter.prototype = {
                 let feedReader = safeGetCharPref(getPrefActionForType(feedType), "bookmarks");
                 feedService.addToClientReader(result.uri.spec, title, desc, feed.type, feedReader);
                 return;
-              } catch(ex) { /* fallback to preview mode */ }
+              } catch (ex) { /* fallback to preview mode */ }
           }
         }
       }
@@ -299,7 +299,9 @@ FeedConverter.prototype = {
         request.cancel(Cr.NS_BINDING_ABORTED);
         return;
       }
-      let noSniff = httpChannel.getResponseHeader("X-Moz-Is-Feed");
+
+      // Note: this throws if the header is not set.
+      httpChannel.getResponseHeader("X-Moz-Is-Feed");
     }
     catch (ex) {
       this._sniffed = true;
@@ -340,7 +342,7 @@ FeedConverter.prototype = {
     if (iid.equals(Ci.nsIFeedResultListener) ||
         iid.equals(Ci.nsIStreamConverter) ||
         iid.equals(Ci.nsIStreamListener) ||
-        iid.equals(Ci.nsIRequestObserver)||
+        iid.equals(Ci.nsIRequestObserver) ||
         iid.equals(Ci.nsISupports))
       return this;
     throw Cr.NS_ERROR_NO_INTERFACE;

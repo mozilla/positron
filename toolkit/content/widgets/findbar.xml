@@ -139,7 +139,7 @@
       ]]></handler>
 
       <handler event="dragover"><![CDATA[
-        if (event.dataTransfer.types.contains("text/plain"))
+        if (event.dataTransfer.types.includes("text/plain"))
           event.preventDefault();
       ]]></handler>
 
@@ -366,16 +366,12 @@
         this._findStatusIcon = this.getElement("find-status-icon");
         this._findStatusDesc = this.getElement("find-status");
 
-        this._foundURL = null;
-
         let prefsvc = this._prefsvc;
 
         this._quickFindTimeoutLength =
           prefsvc.getIntPref("accessibility.typeaheadfind.timeout");
         this._flashFindBar =
           prefsvc.getIntPref("accessibility.typeaheadfind.flashBar");
-        this._matchesCountLimit =
-          prefsvc.getIntPref("accessibility.typeaheadfind.matchesCountLimit");
         this._useModalHighlight = prefsvc.getBoolPref("findbar.modalHighlight");
 
         prefsvc.addObserver("accessibility.typeaheadfind",
@@ -397,17 +393,17 @@
         this._entireWord = prefsvc.getBoolPref("findbar.entireword");
         this._highlightAll = prefsvc.getBoolPref("findbar.highlightAll");
 
-        // Convenience
+        // Convenience.
         this.nsITypeAheadFind = Components.interfaces.nsITypeAheadFind;
-        this.nsISelectionController = Components.interfaces.nsISelectionController;
-        this._findSelection = this.nsISelectionController.SELECTION_FIND;
 
         this._findResetTimeout = -1;
 
         // Make sure the FAYT keypress listener is attached by initializing the
-        // browser property
+        // browser property.
         if (this.getAttribute("browserid"))
-          setTimeout(function(aSelf) { aSelf.browser = aSelf.browser; }, 0, this);
+          setTimeout(() => this.browser = this.browser, 0);
+
+        this._enableFindButtons(false);
       ]]></constructor>
 
       <destructor><![CDATA[
@@ -1016,7 +1012,6 @@
               this._startFindDeferred = null;
             }
 
-            this._enableFindButtons(val);
             this._updateCaseSensitivity(val);
             this._setEntireWord();
 
@@ -1122,7 +1117,6 @@
           return this.dispatchEvent(event);
         ]]></body>
       </method>
-
 
       <!--
         - Opens the findbar, focuses the findfield and selects its contents.
@@ -1289,7 +1283,7 @@
             this._findFailedString = null;
           }
 
-          this._updateStatusUI(aData.result, aData.findBackwards);
+          this.updateControlState(aData.result, aData.findBackwards);
           this._updateStatusUIBar(aData.linkURL);
 
           if (this._findMode != this.FIND_NORMAL)
@@ -1309,9 +1303,9 @@
           if (aResult.total !== 0) {
             if (aResult.total == -1) {
               this._foundMatches.value = this.pluralForm.get(
-                this._matchesCountLimit,
+                aResult.limit,
                 this.strBundle.GetStringFromName("FoundMatchesCountLimit")
-              ).replace("#1", this._matchesCountLimit);
+              ).replace("#1", aResult.limit);
             } else {
               this._foundMatches.value = this.pluralForm.get(
                 aResult.total,
@@ -1353,7 +1347,6 @@
             this._findField.value = aSelectionString;
 
           if (aIsInitialSelection) {
-            this._enableFindButtons(!!this._findField.value);
             this._findField.select();
             this._findField.focus();
 

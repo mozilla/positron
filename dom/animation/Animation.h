@@ -9,6 +9,7 @@
 
 #include "nsWrapperCache.h"
 #include "nsCycleCollectionParticipant.h"
+#include "mozilla/AnimationPerformanceWarning.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/EffectCompositor.h" // For EffectCompositor::CascadeLevel
@@ -35,7 +36,7 @@
 struct JSContext;
 class nsCSSPropertyIDSet;
 class nsIDocument;
-class nsPresContext;
+class nsIFrame;
 
 namespace mozilla {
 
@@ -62,6 +63,7 @@ public:
     , mFinishedAtLastComposeStyle(false)
     , mIsRelevant(false)
     , mFinishedIsResolved(false)
+    , mSyncWithGeometricAnimations(false)
   {
   }
 
@@ -240,6 +242,13 @@ public:
   Nullable<TimeDuration> GetCurrentOrPendingStartTime() const;
 
   /**
+   * Calculates the corresponding start time to use for an animation that is
+   * currently pending with current time |mHoldTime| but should behave
+   * as if it began or resumed playback at timeline time |aReadyTime|.
+   */
+  TimeDuration StartTimeFromReadyTime(const TimeDuration& aReadyTime) const;
+
+  /**
    * Converts a time in the timescale of this Animation's currentTime, to a
    * TimeStamp. Returns a null TimeStamp if the conversion cannot be performed
    * because of the current state of this Animation (e.g. it has no timeline, a
@@ -248,16 +257,16 @@ public:
    */
   TimeStamp AnimationTimeToTimeStamp(const StickyTimeDuration& aTime) const;
 
+  // Converts an AnimationEvent's elapsedTime value to an equivalent TimeStamp
+  // that can be used to sort events by when they occurred.
+  TimeStamp ElapsedTimeToTimeStamp(const StickyTimeDuration& aElapsedTime) const;
+
   bool IsPausedOrPausing() const
   {
     return PlayState() == AnimationPlayState::Paused ||
            mPendingState == PendingState::PausePending;
   }
 
-  bool HasInPlayEffect() const
-  {
-    return GetEffect() && GetEffect()->IsInPlay();
-  }
   bool HasCurrentEffect() const
   {
     return GetEffect() && GetEffect()->IsCurrent();
@@ -267,23 +276,18 @@ public:
     return GetEffect() && GetEffect()->IsInEffect();
   }
 
-  /**
-   * "Playing" is different to "running". An animation in its delay phase is
-   * still running but we only consider it playing when it is in its active
-   * interval. This definition is used for fetching the animations that are
-   * candidates for running on the compositor (since we don't ship animations
-   * to the compositor when they are in their delay phase or paused including
-   * being effectively paused due to having a zero playback rate).
-   */
   bool IsPlaying() const
   {
-    // We need to have an effect in its active interval, and
-    // be either running or waiting to run with a non-zero playback rate.
-    return HasInPlayEffect() &&
-           mPlaybackRate != 0.0 &&
+    return mPlaybackRate != 0.0 &&
            (PlayState() == AnimationPlayState::Running ||
             mPendingState == PendingState::PlayPending);
   }
+
+  bool ShouldBeSynchronizedWithMainThread(
+    nsCSSPropertyID aProperty,
+    const nsIFrame* aFrame,
+    AnimationPerformanceWarning::Type& aPerformanceWarning) const;
+
   bool IsRelevant() const { return mIsRelevant; }
   void UpdateRelevance();
 
@@ -310,13 +314,24 @@ public:
   /**
    * Updates |aStyleRule| with the animation values of this animation's effect,
    * if any.
-   * Any properties already contained in |aSetProperties| are not changed. Any
-   * properties that are changed are added to |aSetProperties|.
+   * Any properties contained in |aPropertiesToSkip| will not be added or
+   * updated in |aStyleRule|.
    */
   void ComposeStyle(RefPtr<AnimValuesStyleRule>& aStyleRule,
-                    nsCSSPropertyIDSet& aSetProperties);
+                    const nsCSSPropertyIDSet& aPropertiesToSkip);
 
   void NotifyEffectTimingUpdated();
+  void NotifyGeometricAnimationsStartingThisFrame();
+
+  /**
+   * Used by subclasses to synchronously queue a cancel event in situations
+   * where the Animation may have been cancelled.
+   *
+   * We need to do this synchronously because after a CSS animation/transition
+   * is canceled, it will be released by its owning element and may not still
+   * exist when we would normally go to queue events on the next tick.
+   */
+  virtual void MaybeQueueCancelEvent(StickyTimeDuration aActiveTime) {};
 
 protected:
   void SilentlySetCurrentTime(const TimeDuration& aNewCurrentTime);
@@ -377,6 +392,18 @@ protected:
    */
   void ResetPendingTasks();
 
+  /**
+   * Returns true if this animation is not only play-pending, but has
+   * yet to be given a pending ready time. This roughly corresponds to
+   * animations that are waiting to be painted (since we set the pending
+   * ready time at the end of painting). Identifying such animations is
+   * useful because in some cases animations that are painted together
+   * may need to be synchronized.
+   */
+  bool IsNewlyStarted() const {
+    return mPendingState == PendingState::PlayPending &&
+           mPendingReadyTime.IsNull();
+  }
   bool IsPossiblyOrphanedPendingAnimation() const;
   StickyTimeDuration EffectEnd() const;
 
@@ -435,6 +462,11 @@ protected:
   // in that case mFinished is immediately reset to represent a new current
   // finished promise.
   bool mFinishedIsResolved;
+
+  // True if this animation was triggered at the same time as one or more
+  // geometric animations and hence we should run any transform animations on
+  // the main thread.
+  bool mSyncWithGeometricAnimations;
 
   nsString mId;
 };

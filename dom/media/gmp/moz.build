@@ -40,6 +40,7 @@ EXPORTS += [
     'GMPChild.h',
     'GMPContentChild.h',
     'GMPContentParent.h',
+    'GMPCrashHelper.h',
     'GMPCrashHelperHolder.h',
     'GMPDecryptorChild.h',
     'GMPDecryptorParent.h',
@@ -73,9 +74,9 @@ EXPORTS += [
     'GMPVideoPlaneImpl.h',
 ]
 
-# We link GMPLoader into xul on B2G/Fennec as its code does not need to be
-# covered by a DRM vendor's voucher.
-if CONFIG['OS_TARGET'] == 'Android':
+# We link GMPLoader into xul on Android and Linux as its code does not
+# need to be covered by a DRM vendor's voucher.
+if CONFIG['OS_ARCH'] == 'Linux':
     SOURCES += [
       'GMPLoader.cpp',
     ]
@@ -92,6 +93,7 @@ UNIFIED_SOURCES += [
     'GMPChild.cpp',
     'GMPContentChild.cpp',
     'GMPContentParent.cpp',
+    'GMPCrashHelper.cpp',
     'GMPDecryptorChild.cpp',
     'GMPDecryptorParent.cpp',
     'GMPDiskStorage.cpp',

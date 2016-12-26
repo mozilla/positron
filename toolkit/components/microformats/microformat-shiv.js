@@ -9,7 +9,7 @@
 
 var Microformats; // jshint ignore:line
 
-(function (root, factory) {
+(function(root, factory) {
     if (typeof define === 'function' && define.amd) {
         define([], factory);
     } else if (typeof exports === 'object') {
@@ -17,7 +17,7 @@ var Microformats; // jshint ignore:line
     } else {
         root.Microformats = factory();
   }
-}(this, function () {
+}(this, function() {
 
     var modules = {};
 
@@ -29,7 +29,7 @@ var Microformats; // jshint ignore:line
      * constructor
      *
      */
-    modules.Parser = function () {
+    modules.Parser = function() {
         this.rootPrefix = 'h-';
         this.propertyPrefixes = ['p-', 'dt-', 'u-', 'e-'];
         this.excludeTags = ['br', 'hr'];
@@ -37,8 +37,8 @@ var Microformats; // jshint ignore:line
 
 
     // create objects incase the v1 map modules don't load
-    modules.maps = (modules.maps)? modules.maps : {};
-    modules.rels = (modules.rels)? modules.rels : {};
+    modules.maps = (modules.maps) ? modules.maps : {};
+    modules.rels = (modules.rels) ? modules.rels : {};
 
 
     modules.Parser.prototype = {
@@ -73,7 +73,7 @@ var Microformats; // jshint ignore:line
                 rels;
 
             this.init();
-            options = (options)? options : {};
+            options = (options) ? options : {};
             this.mergeOptions(options);
             this.getDOMContext( options );
 
@@ -128,7 +128,7 @@ var Microformats; // jshint ignore:line
          */
         getParent: function(node, options) {
             this.init();
-            options = (options)? options : {};
+            options = (options) ? options : {};
 
             if (node) {
                 return this.getParentTreeWalk(node, options);
@@ -152,7 +152,7 @@ var Microformats; // jshint ignore:line
                 i;
 
             this.init();
-            options = (options)? options : {};
+            options = (options) ? options : {};
             this.getDOMContext( options );
 
             // if we do not have any context create error
@@ -275,8 +275,8 @@ var Microformats; // jshint ignore:line
          * @param  {Int} recursive
          * @return {Object}
          */
-        getParentTreeWalk: function (node, options, recursive) {
-            options = (options)? options : {};
+        getParentTreeWalk: function(node, options, recursive) {
+            options = (options) ? options : {};
 
             // recursive calls
             if (recursive === undefined) {
@@ -1207,7 +1207,7 @@ var Microformats; // jshint ignore:line
                                                         }
                                                         y++;
                                                     }
-                                                    //only add property once
+                                                    // only add property once
                                                     if (out.properties.indexOf(propName) === -1) {
                                                         out.properties.push([propName, 'v1']);
                                                     }
@@ -1242,11 +1242,11 @@ var Microformats; // jshint ignore:line
             }
 
 
-            //if(out.root.length === 1 && out.properties.length === 1) {
+            // if(out.root.length === 1 && out.properties.length === 1) {
             //  if(out.root[0].replace('h-','') === this.removePropPrefix(out.properties[0][0])) {
             //      out.typeVersion = 'v2';
             //  }
-            //}
+            // }
 
             return out;
         },
@@ -1386,7 +1386,7 @@ var Microformats; // jshint ignore:line
                     // the url parser can blow up if the format is not right
                     attr = modules.domUtils.getAttribute(nodes[i], attrName);
                     if (attr && attr !== '' && baseUrl !== '' && attr.indexOf('://') === -1) {
-                        //attr = urlParser.resolve(baseUrl, attr);
+                        // attr = urlParser.resolve(baseUrl, attr);
                         attr = modules.url.resolve(attr, baseUrl);
                         modules.domUtils.setAttribute(nodes[i], attrName, attr);
                     }
@@ -1462,7 +1462,7 @@ var Microformats; // jshint ignore:line
          * @return {Object}
          */
          modules.Parser.prototype.impliedRules = function(node, uf, parentClasses) {
-            var typeVersion = (uf.typeVersion)? uf.typeVersion: 'v2';
+            var typeVersion = (uf.typeVersion) ? uf.typeVersion : 'v2';
 
             // TEMP: override to allow v1 implied properties while spec changes
             if (this.options.impliedPropertiesByVersion === false) {
@@ -1806,8 +1806,8 @@ var Microformats; // jshint ignore:line
                 // has no latitude or longitude property
                 if (uf.properties.latitude === undefined || uf.properties.longitude === undefined ) {
 
-                    geoPair = (uf.properties.name)? uf.properties.name[0] : null;
-                    geoPair = (!geoPair && uf.properties.value)? uf.properties.value : geoPair;
+                    geoPair = (uf.properties.name) ? uf.properties.name[0] : null;
+                    geoPair = (!geoPair && uf.properties.value) ? uf.properties.value : geoPair;
 
                     if (geoPair) {
                         // allow for the use of a ';' as in microformats and also ',' as in Geo URL
@@ -2087,7 +2087,7 @@ var Microformats; // jshint ignore:line
                     // add to rel-urls
                     var relUrl = this.getRelProperties(arr[x]);
                     relUrl.rels = items;
-                    // // do not add duplicate rel-urls - based on resolved URLs
+                    // do not add duplicate rel-urls - based on resolved URLs
                     if (url && out['rel-urls'][url] === undefined) {
                         out['rel-urls'][url] = relUrl;
                     }
@@ -2262,7 +2262,7 @@ var Microformats; // jshint ignore:line
          */
         trim: function( text ) {
             if (text && this.isString(text)) {
-                return (text.trim())? text.trim() : text.replace(/^\s+|\s+$/g, '');
+                return (text.trim()) ? text.trim() : text.replace(/^\s+|\s+$/g, '');
             }
             return '';
         },
@@ -2278,7 +2278,7 @@ var Microformats; // jshint ignore:line
          */
         replaceCharAt: function( text, index, character ) {
             if (text && text.length > index) {
-               return text.substr(0, index) + character + text.substr(index+character.length);
+               return text.substr(0, index) + character + text.substr(index + character.length);
             }
             return text;
         },
@@ -2367,7 +2367,7 @@ var Microformats; // jshint ignore:line
          */
         sortObjects: function(property, reverse) {
             reverse = (reverse) ? -1 : 1;
-            return function (a, b) {
+            return function(a, b) {
                 a = a[property];
                 b = b[property];
                 if (a < b) {
@@ -2395,7 +2395,7 @@ var Microformats; // jshint ignore:line
          *
          * @return {Object || undefined}
          */
-        getDOMParser: function () {
+        getDOMParser: function() {
             if (typeof DOMParser === "undefined") {
                 try {
                     return Components.classes["@mozilla.org/xmlextras/domparser;1"]
@@ -2425,7 +2425,7 @@ var Microformats; // jshint ignore:line
 
             // if a html string is passed
             if (options.html) {
-                //var domParser = new DOMParser();
+                // var domParser = new DOMParser();
                 var domParser = this.getDOMParser();
                 this.rootNode = domParser.parseFromString( options.html, 'text/html' );
             }
@@ -2466,10 +2466,10 @@ var Microformats; // jshint ignore:line
         * @return {DOM Node} node
         */
         getTopMostNode: function( node ) {
-            //var doc = this.ownerDocument(node);
-            //if(doc && doc.nodeType && doc.nodeType === 9 && doc.documentElement){
+            // var doc = this.ownerDocument(node);
+            // if(doc && doc.nodeType && doc.nodeType === 9 && doc.documentElement){
             //  return doc.documentElement;
-            //}
+            // }
             return node;
         },
 
@@ -2737,9 +2737,9 @@ var Microformats; // jshint ignore:line
                 }
             }
             if (onlyOfType === true) {
-                return (countOfType === 1)? out : null;
+                return (countOfType === 1) ? out : null;
             }
-            return (countAll === 1)? out : null;
+            return (countAll === 1) ? out : null;
         },
 
 
@@ -2842,7 +2842,7 @@ var Microformats; // jshint ignore:line
          * @return {String}
          */
         decodeEntities: function( doc, text ) {
-            //return text;
+            // return text;
             return doc.createTextNode( text ).nodeValue;
         },
 
@@ -2862,7 +2862,7 @@ var Microformats; // jshint ignore:line
                 newNode = newDocument.importNode( document.documentElement, true );
                 newDocument.replaceChild(newNode, newDocument.querySelector('html'));
             }
-            return (newNode && newNode.nodeType && newNode.nodeType === 1)? newDocument : document;
+            return (newNode && newNode.nodeType && newNode.nodeType === 1) ? newDocument : document;
         },
 
 
@@ -2883,7 +2883,7 @@ var Microformats; // jshint ignore:line
          *   @param  {DOM Node} node
          *   @return {Int}
          */
-        getChildIndex: function (node) {
+        getChildIndex: function(node) {
             var parent = node.parentNode,
                 i = -1,
                 child;
@@ -2902,7 +2902,7 @@ var Microformats; // jshint ignore:line
          *   @param  {DOM Node} node
          *   @return {Array}
          */
-        getNodePath: function  (node) {
+        getNodePath: function(node) {
             var parent = node.parentNode,
                 path = [],
                 index = this.getChildIndex(node);
@@ -2923,7 +2923,7 @@ var Microformats; // jshint ignore:line
          *   @param  {Array} path
          *   @return {DOM Node}
          */
-        getNodeByPath: function (document, path) {
+        getNodeByPath: function(document, path) {
             var node = document.documentElement,
                 i = 0,
                 index;
@@ -2981,7 +2981,7 @@ var Microformats; // jshint ignore:line
          * creates DOM objects needed to resolve URLs
          */
         init: function() {
-            //this._domParser = new DOMParser();
+            // this._domParser = new DOMParser();
             this._domParser = modules.domUtils.getDOMParser();
             // do not use a head tag it does not work with IE9
             this._html = '<base id="base" href=""></base><a id="link" href=""></a>';
@@ -3042,10 +3042,10 @@ var Microformats; // jshint ignore:line
      * @param  {String} format
      * @return {String}
      */
-    modules.ISODate = function ( dateString, format ) {
+    modules.ISODate = function( dateString, format ) {
         this.clear();
 
-        this.format = (format)? format : 'auto'; // auto or W3C or RFC3339 or HTML5
+        this.format = (format) ? format : 'auto'; // auto or W3C or RFC3339 or HTML5
         this.setFormatSep();
 
         // optional should be full iso date/time string
@@ -3304,7 +3304,7 @@ var Microformats; // jshint ignore:line
             if (timeString.toLowerCase() === 'z') {
                 this.z = true;
                 // set case for z
-                this.autoProfile.tzZulu = (timeString === 'z')? 'z' : 'Z';
+                this.autoProfile.tzZulu = (timeString === 'z') ? 'z' : 'Z';
             } else {
 
                 // discover timezone separtor for auto profile // default is ':'
@@ -3598,7 +3598,7 @@ var Microformats; // jshint ignore:line
 
             // if the string has a text : or am or pm
             if (modules.utils.isString(out)) {
-                //text = text.toLowerCase();
+                // text = text.toLowerCase();
                 text = text.replace(/[ ]+/g, '');
 
                 if (text.match(':') || this.hasAM(text) || this.hasPM(text)) {
@@ -3670,7 +3670,7 @@ var Microformats; // jshint ignore:line
          * @param  {String} format ( Modules.ISODate profile format )
          * @return {Object} Modules.ISODate
          */
-        concatFragments: function (arr, format) {
+        concatFragments: function(arr, format) {
             var out = new modules.ISODate(),
                 i = 0,
                 value = '';
@@ -3721,7 +3721,7 @@ var Microformats; // jshint ignore:line
          * @param  {String} text
          * @return {Array} Modules.ISODate
          */
-        splitTimeAndZone: function ( text ) {
+        splitTimeAndZone: function( text ) {
            var out = [text],
                chars = ['-', '+', 'z', 'Z'],
                i = chars.length;
@@ -3764,7 +3764,7 @@ var Microformats; // jshint ignore:line
          */
         parse: function(doc, node, textFormat) {
             var out;
-            this.textFormat = (textFormat)? textFormat : this.textFormat;
+            this.textFormat = (textFormat) ? textFormat : this.textFormat;
             if (this.textFormat === 'normalised') {
                 out = this.walkTreeForText( node );
                 if (out !== undefined) {
@@ -3798,7 +3798,7 @@ var Microformats; // jshint ignore:line
          * @return {String}
          */
         formatText: function( doc, text, textFormat ) {
-           this.textFormat = (textFormat)? textFormat : this.textFormat;
+           this.textFormat = (textFormat) ? textFormat : this.textFormat;
            if (text) {
               var out = '',
                   regex = /(<([^>]+)>)/ig;
@@ -3808,7 +3808,7 @@ var Microformats; // jshint ignore:line
                  out = modules.utils.trimWhitespace( out );
               }
 
-              //return entities.decode( out, 2 );
+              // return entities.decode( out, 2 );
               return modules.domUtils.decodeEntities( doc, out );
            }
            return '';
@@ -3864,7 +3864,7 @@ var Microformats; // jshint ignore:line
                 out += ' ';
             }
 
-            return (out === '')? undefined : out ;
+            return (out === '') ? undefined : out ;
         }
 
     };
@@ -3952,7 +3952,7 @@ var Microformats; // jshint ignore:line
                 }
             }
 
-            return (out === '')? undefined : out;
+            return (out === '') ? undefined : out;
         }
 
 

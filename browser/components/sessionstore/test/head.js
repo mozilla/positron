@@ -273,16 +273,18 @@ var promiseForEachSessionRestoreFile = Task.async(function*(cb) {
     let data = "";
     try {
       data = yield OS.File.read(SessionFile.Paths[key], { encoding: "utf-8" });
-    } catch (ex if ex instanceof OS.File.Error
-	     && ex.becauseNoSuchFile) {
+    } catch (ex) {
       // Ignore missing files
+      if (!(ex instanceof OS.File.Error && ex.becauseNoSuchFile)) {
+        throw ex;
+      }
     }
     cb(data, key);
   }
 });
 
-function promiseBrowserLoaded(aBrowser, ignoreSubFrames = true) {
-  return BrowserTestUtils.browserLoaded(aBrowser, !ignoreSubFrames);
+function promiseBrowserLoaded(aBrowser, ignoreSubFrames = true, wantLoad = null) {
+  return BrowserTestUtils.browserLoaded(aBrowser, !ignoreSubFrames, wantLoad);
 }
 
 function whenWindowLoaded(aWindow, aCallback = next) {
@@ -302,7 +304,7 @@ function r() {
   return Date.now() + "-" + (++gUniqueCounter);
 }
 
-function BrowserWindowIterator() {
+function* BrowserWindowIterator() {
   let windowsEnum = Services.wm.getEnumerator("navigator:browser");
   while (windowsEnum.hasMoreElements()) {
     let currentWindow = windowsEnum.getNext();
@@ -372,7 +374,7 @@ var gProgressListener = {
   _countTabs: function () {
     let needsRestore = 0, isRestoring = 0, wasRestored = 0;
 
-    for (let win in BrowserWindowIterator()) {
+    for (let win of BrowserWindowIterator()) {
       for (let i = 0; i < win.gBrowser.tabs.length; i++) {
         let browser = win.gBrowser.tabs[i].linkedBrowser;
         if (!browser.__SS_restoreState)
@@ -394,7 +396,7 @@ registerCleanupFunction(function () {
 // Close all but our primary window.
 function promiseAllButPrimaryWindowClosed() {
   let windows = [];
-  for (let win in BrowserWindowIterator()) {
+  for (let win of BrowserWindowIterator()) {
     if (win != window) {
       windows.push(win);
     }
@@ -542,15 +544,11 @@ function modifySessionStorage(browser, data, options = {}) {
 }
 
 function pushPrefs(...aPrefs) {
-  return new Promise(resolve => {
-    SpecialPowers.pushPrefEnv({"set": aPrefs}, resolve);
-  });
+  return SpecialPowers.pushPrefEnv({"set": aPrefs});
 }
 
 function popPrefs() {
-  return new Promise(resolve => {
-    SpecialPowers.popPrefEnv(resolve);
-  });
+  return SpecialPowers.popPrefEnv();
 }
 
 function* checkScroll(tab, expected, msg) {

@@ -10,6 +10,8 @@ import tempfile
 import unittest
 import urllib2
 
+import mozunit
+
 from manifestparser import ManifestParser
 import mozfile
 import mozhttpd
@@ -258,10 +260,10 @@ class TestAddonsManager(unittest.TestCase):
         # Generate installer stubs for all possible types of addons
         addons = []
         addons.append(generate_addon('test-addon-invalid-no-manifest@mozilla.org',
-                      path=self.tmpdir,
-                      xpi=False))
+                                     path=self.tmpdir,
+                                     xpi=False))
         addons.append(generate_addon('test-addon-invalid-no-id@mozilla.org',
-                      path=self.tmpdir))
+                                     path=self.tmpdir))
 
         self.am.install_from_path(self.tmpdir)
 
@@ -412,4 +414,4 @@ class TestAddonsManager(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    mozunit.main()

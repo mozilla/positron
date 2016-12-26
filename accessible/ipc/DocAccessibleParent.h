@@ -47,48 +47,43 @@ public:
    * Called when a message from a document in a child process notifies the main
    * process it is firing an event.
    */
-  virtual bool RecvEvent(const uint64_t& aID, const uint32_t& aType)
+  virtual mozilla::ipc::IPCResult RecvEvent(const uint64_t& aID, const uint32_t& aType)
     override;
 
-#if defined(XP_WIN)
-  virtual bool RecvShowEventInfo(const ShowEventData& aData,
-                                 nsTArray<MsaaMapping>* aNewMsaaIds) override;
-#else
-  virtual bool RecvShowEvent(const ShowEventData& aData, const bool& aFromUser)
+  virtual mozilla::ipc::IPCResult RecvShowEvent(const ShowEventData& aData, const bool& aFromUser)
     override;
-#endif // defined(XP_WIN)
-  virtual bool RecvHideEvent(const uint64_t& aRootID, const bool& aFromUser)
+  virtual mozilla::ipc::IPCResult RecvHideEvent(const uint64_t& aRootID, const bool& aFromUser)
     override;
-  virtual bool RecvStateChangeEvent(const uint64_t& aID,
-                                    const uint64_t& aState,
-                                    const bool& aEnabled) override final;
+  virtual mozilla::ipc::IPCResult RecvStateChangeEvent(const uint64_t& aID,
+                                                       const uint64_t& aState,
+                                                       const bool& aEnabled) override final;
 
-  virtual bool RecvCaretMoveEvent(const uint64_t& aID, const int32_t& aOffset)
+  virtual mozilla::ipc::IPCResult RecvCaretMoveEvent(const uint64_t& aID, const int32_t& aOffset)
     override final;
 
-  virtual bool RecvTextChangeEvent(const uint64_t& aID, const nsString& aStr,
-                                   const int32_t& aStart, const uint32_t& aLen,
-                                   const bool& aIsInsert,
-                                   const bool& aFromUser) override;
+  virtual mozilla::ipc::IPCResult RecvTextChangeEvent(const uint64_t& aID, const nsString& aStr,
+                                                      const int32_t& aStart, const uint32_t& aLen,
+                                                      const bool& aIsInsert,
+                                                      const bool& aFromUser) override;
 
-  virtual bool RecvSelectionEvent(const uint64_t& aID,
-                                  const uint64_t& aWidgetID,
-                                  const uint32_t& aType) override;
+  virtual mozilla::ipc::IPCResult RecvSelectionEvent(const uint64_t& aID,
+                                                     const uint64_t& aWidgetID,
+                                                     const uint32_t& aType) override;
 
-  virtual bool RecvRoleChangedEvent(const uint32_t& aRole) override final;
+  virtual mozilla::ipc::IPCResult RecvRoleChangedEvent(const uint32_t& aRole) override final;
 
-  virtual bool RecvBindChildDoc(PDocAccessibleParent* aChildDoc, const uint64_t& aID) override;
+  virtual mozilla::ipc::IPCResult RecvBindChildDoc(PDocAccessibleParent* aChildDoc, const uint64_t& aID) override;
+
   void Unbind()
   {
-    mParent = nullptr;
     if (DocAccessibleParent* parent = ParentDoc()) {
-      parent->mChildDocs.RemoveElement(this);
+      parent->RemoveChildDoc(this);
     }
 
-    mParentDoc = nullptr;
+    mParent = nullptr;
   }
 
-  virtual bool RecvShutdown() override;
+  virtual mozilla::ipc::IPCResult RecvShutdown() override;
   void Destroy();
   virtual void ActorDestroy(ActorDestroyReason aWhy) override
   {
@@ -116,7 +111,7 @@ public:
    */
   void RemoveChildDoc(DocAccessibleParent* aChildDoc)
   {
-    aChildDoc->Parent()->SetChildDoc(nullptr);
+    aChildDoc->Parent()->ClearChildDoc(aChildDoc);
     mChildDocs.RemoveElement(aChildDoc);
     aChildDoc->mParentDoc = nullptr;
     MOZ_ASSERT(aChildDoc->mChildDocs.Length() == 0);
@@ -148,9 +143,10 @@ public:
     { return mChildDocs[aIdx]; }
 
 #if defined(XP_WIN)
-  virtual bool RecvCOMProxy(const IAccessibleHolder& aCOMProxy,
-                            IAccessibleHolder* aParentCOMProxy,
-                            uint32_t* aMsaaID) override;
+  void SetCOMProxy(const RefPtr<IAccessible>& aCOMProxy);
+
+  virtual mozilla::ipc::IPCResult RecvGetWindowedPluginIAccessible(
+      const WindowsHandle& aHwnd, IAccessibleHolder* aPluginCOMProxy) override;
 #endif
 
 private:
@@ -180,11 +176,7 @@ private:
 
   uint32_t AddSubtree(ProxyAccessible* aParent,
                       const nsTArray<AccessibleData>& aNewTree, uint32_t aIdx,
-                      uint32_t aIdxInParent
-#if defined(XP_WIN)
-                      , nsTArray<MsaaMapping>* aNewMsaaIds
-#endif // defined(XP_WIN)
-                      );
+                      uint32_t aIdxInParent);
   MOZ_MUST_USE bool CheckDocTree() const;
   xpcAccessibleGeneric* GetXPCAccessible(ProxyAccessible* aProxy);
 

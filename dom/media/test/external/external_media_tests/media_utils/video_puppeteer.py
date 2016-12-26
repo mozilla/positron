@@ -1,11 +1,12 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
 from collections import namedtuple
 from time import clock, sleep
 
-from marionette import Marionette
 from marionette_driver import By, expected, Wait
+from marionette_harness import Marionette
 
 from external_media_tests.utils import verbose_until
 
@@ -405,9 +406,11 @@ class VideoPuppeteer(object):
         messages += ['\ttimeout: {}'.format(self.timeout)]
         # Print each field on its own line
         for field in self._last_seen_video_state._fields:
-            messages += [('\t{}: {}'
-                          .format(field, getattr(self._last_seen_video_state,
-                                                 field)))]
+            # For compatibility with different test environments we force ascii
+            field_ascii = (
+                unicode(getattr(self._last_seen_video_state, field))
+                .encode('ascii','replace'))
+            messages += [('\t{}: {}'.format(field, field_ascii))]
         messages += '}'
         return '\n'.join(messages)
 

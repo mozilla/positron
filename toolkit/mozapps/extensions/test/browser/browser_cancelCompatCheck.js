@@ -66,36 +66,35 @@ function promise_observer(aTopic) {
 // @param aUpdateURL The real update URL to use after the add-ons are installed
 function promise_install_test_addons(aAddonList, aUpdateURL) {
   info("Starting add-on installs");
-  var installs = [];
   let deferred = Promise.defer();
 
   // Use a blank update URL
   Services.prefs.setCharPref(PREF_UPDATEURL, TESTROOT + "missing.rdf");
 
-  for (let addon of aAddonList) {
-    AddonManager.getInstallForURL(TESTROOT + "addons/" + addon.file + ".xpi", function(aInstall) {
-      installs.push(aInstall);
-    }, "application/x-xpinstall");
-  }
+  let installPromises = Promise.all(
+    aAddonList.map(addon => AddonManager.getInstallForURL(`${TESTROOT}addons/${addon.file}.xpi`,
+                                                          null, "application/x-xpinstall")));
 
-  var listener = {
-    installCount: 0,
+  installPromises.then(installs => {
+    var listener = {
+      installCount: 0,
 
-    onInstallEnded: function() {
-      this.installCount++;
-      if (this.installCount == installs.length) {
-        info("Done add-on installs");
-        // Switch to the test update URL
-        Services.prefs.setCharPref(PREF_UPDATEURL, aUpdateURL);
-        deferred.resolve();
+      onInstallEnded: function() {
+        this.installCount++;
+        if (this.installCount == installs.length) {
+          info("Done add-on installs");
+          // Switch to the test update URL
+          Services.prefs.setCharPref(PREF_UPDATEURL, aUpdateURL);
+          deferred.resolve();
+        }
       }
-    }
-  };
+    };
 
-  for (let install of installs) {
-    install.addListener(listener);
-    install.install();
-  }
+    for (let install of installs) {
+      install.addListener(listener);
+      install.install();
+    }
+  });
 
   return deferred.promise;
 }
@@ -201,14 +200,6 @@ function promise_page(aWindow, aPageId) {
   return deferred.promise;
 }
 
-function get_list_names(aList) {
-  var items = [];
-  for (let listItem of aList.childNodes)
-    items.push(listItem.label);
-  items.sort();
-  return items;
-}
-
 // These add-ons became inactive during the upgrade
 var inactiveAddonIds = [
   ao5.id,
@@ -278,7 +269,7 @@ add_task(function* cancel_during_repopulate() {
   let getInstalls = Promise.defer();
   AddonManager.getAllInstalls(getInstalls.resolve);
   let installs = yield getInstalls.promise;
-  is (installs.length, 0, "There should be no active installs after background installs are done");
+  is(installs.length, 0, "There should be no active installs after background installs are done");
 
   // addon8 should have updated in the background,
   // addon9 was listed as previously disabled so it should not have updated
@@ -347,7 +338,7 @@ add_task(function* cancel_during_findUpdates() {
   let getInstalls = Promise.defer();
   AddonManager.getAllInstalls(getInstalls.resolve);
   let installs = yield getInstalls.promise;
-  is (installs.length, 0, "There should be no active installs after the dialog is cancelled 2");
+  is(installs.length, 0, "There should be no active installs after the dialog is cancelled 2");
 
   info("findUpdates done");
   yield promise_uninstall_test_addons();

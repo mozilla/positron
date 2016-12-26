@@ -21,6 +21,7 @@
 #include "nsIWeakReference.h"             // base class
 #include "nsNodeUtils.h"                  // class member nsNodeUtils::CloneNodeImpl
 #include "nsIHTMLCollection.h"
+#include "nsDataHashtable.h"
 
 class ContentUnbinder;
 class nsContentList;
@@ -33,7 +34,9 @@ class nsDOMStringMap;
 class nsIURI;
 
 namespace mozilla {
+class DeclarationBlock;
 namespace dom {
+class DOMIntersectionObserver;
 class Element;
 } // namespace dom
 } // namespace mozilla
@@ -101,7 +104,6 @@ namespace mozilla {
 namespace dom {
 
 class ShadowRoot;
-class UndoManager;
 
 class FragmentOrElement : public nsIContent
 {
@@ -273,12 +275,6 @@ public:
     nsDOMStringMap* mDataset; // [Weak]
 
     /**
-     * The .undoManager property.
-     * @see nsGenericHTMLElement::GetUndoManager
-     */
-    RefPtr<UndoManager> mUndoManager;
-
-    /**
      * SMIL Overridde style rules (for SMIL animation of CSS properties)
      * @see nsIContent::GetSMILOverrideStyle
      */
@@ -287,7 +283,7 @@ public:
     /**
      * Holds any SMIL override style declaration for this element.
      */
-    RefPtr<mozilla::css::Declaration> mSMILOverrideStyleDeclaration;
+    RefPtr<mozilla::DeclarationBlock> mSMILOverrideStyleDeclaration;
 
     /**
      * An object implementing nsIDOMMozNamedAttrMap for this content (attributes)
@@ -348,6 +344,11 @@ public:
      * Web components custom element data.
      */
     RefPtr<CustomElementData> mCustomElementData;
+
+    /**
+     * Registered Intersection Observers on the element.
+     */
+    nsDataHashtable<nsPtrHashKey<DOMIntersectionObserver>, int32_t> mRegisteredIntersectionObservers;
   };
 
 protected:

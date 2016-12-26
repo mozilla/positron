@@ -123,6 +123,7 @@ nsCSPTokenizer::tokenizeCSPPolicy(const nsAString &aPolicyString,
 
 /* ===== nsCSPParser ==================== */
 bool nsCSPParser::sCSPExperimentalEnabled = false;
+bool nsCSPParser::sStrictDynamicEnabled = false;
 
 nsCSPParser::nsCSPParser(cspTokens& aTokens,
                          nsIURI* aSelfURI,
@@ -131,6 +132,7 @@ nsCSPParser::nsCSPParser(cspTokens& aTokens,
  : mCurChar(nullptr)
  , mEndChar(nullptr)
  , mHasHashOrNonce(false)
+ , mStrictDynamic(false)
  , mUnsafeInlineKeywordSrc(nullptr)
  , mChildSrc(nullptr)
  , mFrameSrc(nullptr)
@@ -144,6 +146,7 @@ nsCSPParser::nsCSPParser(cspTokens& aTokens,
   if (!initialized) {
     initialized = true;
     Preferences::AddBoolVarCache(&sCSPExperimentalEnabled, "security.csp.experimentalEnabled");
+    Preferences::AddBoolVarCache(&sStrictDynamicEnabled, "security.csp.enableStrictDynamic");
   }
   CSPPARSERLOG(("nsCSPParser::nsCSPParser"));
 }
@@ -172,6 +175,32 @@ isValidHexDig(char16_t aHexDig)
   return (isNumberToken(aHexDig) ||
           (aHexDig >= 'A' && aHexDig <= 'F') ||
           (aHexDig >= 'a' && aHexDig <= 'f'));
+}
+
+static bool
+isValidBase64Value(const char16_t* cur, const char16_t* end)
+{
+  // Using grammar at https://w3c.github.io/webappsec-csp/#grammardef-nonce-source
+
+  // May end with one or two =
+  if (end > cur && *(end-1) == EQUALS) end--;
+  if (end > cur && *(end-1) == EQUALS) end--;
+
+  // Must have at least one character aside from any =
+  if (end == cur) {
+    return false;
+  }
+
+  // Rest must all be A-Za-z0-9+/-_
+  for (; cur < end; ++cur) {
+    if (!(isCharacterToken(*cur) || isNumberToken(*cur) ||
+          *cur == PLUS || *cur == SLASH ||
+          *cur == DASH || *cur == UNDERLINE)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 void
@@ -531,6 +560,22 @@ nsCSPParser::keywordSource()
     return CSP_CreateHostSrcFromURI(mSelfURI);
   }
 
+  if (CSP_IsKeyword(mCurToken, CSP_STRICT_DYNAMIC)) {
+    // make sure strict dynamic is enabled
+    if (!sStrictDynamicEnabled) {
+      return nullptr;
+    }
+    if (!CSP_IsDirective(mCurDir[0], nsIContentSecurityPolicy::SCRIPT_SRC_DIRECTIVE)) {
+      // Todo: Enforce 'strict-dynamic' within default-src; see Bug 1313937
+      const char16_t* params[] = { u"strict-dynamic" };
+      logWarningErrorToConsole(nsIScriptError::warningFlag, "ignoringStrictDynamic",
+                               params, ArrayLength(params));
+      return nullptr;
+    }
+    mStrictDynamic = true;
+    return new nsCSPKeywordSrc(CSP_KeywordToEnum(mCurToken));
+  }
+
   if (CSP_IsKeyword(mCurToken, CSP_UNSAFE_INLINE)) {
       nsWeakPtr ctx = mCSPContext->GetLoadingContext();
       nsCOMPtr<nsIDocument> doc = do_QueryReferent(ctx);
@@ -661,6 +706,10 @@ nsCSPParser::nonceSource()
   if (dashIndex < 0) {
     return nullptr;
   }
+  if (!isValidBase64Value(expr.BeginReading() + dashIndex + 1, expr.EndReading())) {
+    return nullptr;
+  }
+
   // cache if encountering hash or nonce to invalidate unsafe-inline
   mHasHashOrNonce = true;
   return new nsCSPNonceSrc(Substring(expr,
@@ -687,6 +736,10 @@ nsCSPParser::hashSource()
 
   int32_t dashIndex = expr.FindChar(DASH);
   if (dashIndex < 0) {
+    return nullptr;
+  }
+
+  if (!isValidBase64Value(expr.BeginReading() + dashIndex + 1, expr.EndReading())) {
     return nullptr;
   }
 
@@ -864,6 +917,11 @@ nsCSPParser::referrerDirectiveValue(nsCSPDirective* aDir)
     delete aDir;
     return;
   }
+
+  //referrer-directive deprecation warning
+  const char16_t* params[] = { mCurDir[1].get() };
+  logWarningErrorToConsole(nsIScriptError::warningFlag, "deprecatedReferrerDirective",
+                             params, ArrayLength(params));
 
   // the referrer policy is valid, so go ahead and use it.
   mPolicy->setReferrerPolicy(&mCurDir[1]);
@@ -1182,6 +1240,7 @@ nsCSPParser::directive()
   // make sure to reset cache variables when trying to invalidate unsafe-inline;
   // unsafe-inline might not only appear in script-src, but also in default-src
   mHasHashOrNonce = false;
+  mStrictDynamic = false;
   mUnsafeInlineKeywordSrc = nullptr;
 
   // Try to parse all the srcs by handing the array off to directiveValue
@@ -1195,12 +1254,44 @@ nsCSPParser::directive()
     srcs.AppendElement(keyword);
   }
 
-  // Ignore unsafe-inline within script-src or style-src if nonce
-  // or hash is specified, see:
-  // http://www.w3.org/TR/CSP2/#directive-script-src
-  if ((cspDir->equals(nsIContentSecurityPolicy::SCRIPT_SRC_DIRECTIVE) ||
-       cspDir->equals(nsIContentSecurityPolicy::STYLE_SRC_DIRECTIVE)) &&
-      mHasHashOrNonce && mUnsafeInlineKeywordSrc) {
+  // If policy contains 'strict-dynamic' invalidate all srcs within script-src.
+  if (mStrictDynamic) {
+    MOZ_ASSERT(cspDir->equals(nsIContentSecurityPolicy::SCRIPT_SRC_DIRECTIVE),
+               "strict-dynamic only allowed within script-src");
+    for (uint32_t i = 0; i < srcs.Length(); i++) {
+      // Please note that nsCSPNonceSrc as well as nsCSPHashSrc overwrite invalidate(),
+      // so it's fine to just call invalidate() on all srcs. Please also note that
+      // nsCSPKeywordSrc() can not be invalidated and always returns false unless the
+      // keyword is 'strict-dynamic' in which case we allow the load if the script is
+      // not parser created!
+      srcs[i]->invalidate();
+      // Log a message to the console that src will be ignored.
+      nsAutoString srcStr;
+      srcs[i]->toString(srcStr);
+      // Even though we invalidate all of the srcs internally, we don't want to log
+      // messages for the srcs: (1) strict-dynamic, (2) unsafe-inline,
+      // (3) nonces, and (4) hashes
+      if (!srcStr.EqualsASCII(CSP_EnumToKeyword(CSP_STRICT_DYNAMIC)) &&
+          !srcStr.EqualsASCII(CSP_EnumToKeyword(CSP_UNSAFE_EVAL)) &&
+          !StringBeginsWith(NS_ConvertUTF16toUTF8(srcStr), NS_LITERAL_CSTRING("'nonce-")) &&
+          !StringBeginsWith(NS_ConvertUTF16toUTF8(srcStr), NS_LITERAL_CSTRING("'sha")))
+      {
+        const char16_t* params[] = { srcStr.get() };
+        logWarningErrorToConsole(nsIScriptError::warningFlag, "ignoringSrcForStrictDynamic",
+                                 params, ArrayLength(params));
+      }
+    }
+    // Log a warning that all scripts might be blocked because the policy contains
+    // 'strict-dynamic' but no valid nonce or hash.
+    if (!mHasHashOrNonce) {
+      const char16_t* params[] = { mCurDir[0].get() };
+      logWarningErrorToConsole(nsIScriptError::warningFlag, "strictDynamicButNoHashOrNonce",
+                               params, ArrayLength(params));
+    }
+  }
+  else if (mHasHashOrNonce && mUnsafeInlineKeywordSrc &&
+           (cspDir->equals(nsIContentSecurityPolicy::SCRIPT_SRC_DIRECTIVE) ||
+            cspDir->equals(nsIContentSecurityPolicy::STYLE_SRC_DIRECTIVE))) {
     mUnsafeInlineKeywordSrc->invalidate();
     // log to the console that unsafe-inline will be ignored
     const char16_t* params[] = { u"'unsafe-inline'" };

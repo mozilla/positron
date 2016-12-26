@@ -346,15 +346,15 @@ BasicLayerManager::SetDefaultTargetConfiguration(BufferMode aDoubleBuffering, Sc
   mDoubleBuffering = aDoubleBuffering;
 }
 
-void
+bool
 BasicLayerManager::BeginTransaction()
 {
   mInTransaction = true;
   mUsingDefaultTarget = true;
-  BeginTransactionWithTarget(mDefaultTarget);
+  return BeginTransactionWithTarget(mDefaultTarget);
 }
 
-void
+bool
 BasicLayerManager::BeginTransactionWithTarget(gfxContext* aTarget)
 {
   mInTransaction = true;
@@ -367,6 +367,7 @@ BasicLayerManager::BeginTransactionWithTarget(gfxContext* aTarget)
   NS_ASSERTION(!InTransaction(), "Nested transactions not allowed");
   mPhase = PHASE_CONSTRUCTION;
   mTarget = aTarget;
+  return true;
 }
 
 static void
@@ -719,10 +720,12 @@ BasicLayerManager::PaintSelfOrChildren(PaintLayerContext& aPaintContext,
   } else {
     ContainerLayer* container =
         static_cast<ContainerLayer*>(aPaintContext.mLayer);
-    AutoTArray<Layer*, 12> children;
-    container->SortChildrenBy3DZOrder(children);
+
+    nsTArray<LayerPolygon> children =
+      container->SortChildrenBy3DZOrder(ContainerLayer::SortMode::WITHOUT_GEOMETRY);
+
     for (uint32_t i = 0; i < children.Length(); i++) {
-      Layer* layer = children.ElementAt(i);
+      Layer* layer = children.ElementAt(i).layer;
       if (layer->IsBackfaceHidden()) {
         continue;
       }

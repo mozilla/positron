@@ -180,6 +180,24 @@ AudioBuffer::~AudioBuffer()
   mozilla::DropJSObjects(this);
 }
 
+/* static */ already_AddRefed<AudioBuffer>
+AudioBuffer::Constructor(const GlobalObject& aGlobal,
+                         AudioContext& aAudioContext,
+                         const AudioBufferOptions& aOptions,
+                         ErrorResult& aRv)
+{
+  if (!aOptions.mNumberOfChannels) {
+    aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return nullptr;
+  }
+
+  float sampleRate = aOptions.mSampleRate.WasPassed()
+                       ? aOptions.mSampleRate.Value()
+                       : aAudioContext.SampleRate();
+  return Create(&aAudioContext, aOptions.mNumberOfChannels, aOptions.mLength,
+                sampleRate, aRv);
+}
+
 void
 AudioBuffer::ClearJSChannels()
 {
@@ -344,9 +362,6 @@ AudioBuffer::GetChannelData(JSContext* aJSContext, uint32_t aChannel,
     return;
   }
 
-  if (mJSChannels[aChannel]) {
-    JS::ExposeObjectToActiveJS(mJSChannels[aChannel]);
-  }
   aRetval.set(mJSChannels[aChannel]);
 }
 
@@ -371,18 +386,12 @@ AudioBuffer::StealJSArrayDataIntoSharedChannels(JSContext* aJSContext)
   RefPtr<ThreadSharedFloatArrayBufferList> result =
     new ThreadSharedFloatArrayBufferList(mJSChannels.Length());
   for (uint32_t i = 0; i < mJSChannels.Length(); ++i) {
-    if (mJSChannels[i]) {
-      JS::ExposeObjectToActiveJS(mJSChannels[i]);
-    }
     JS::Rooted<JSObject*> arrayBufferView(aJSContext, mJSChannels[i]);
     bool isSharedMemory;
     JS::Rooted<JSObject*> arrayBuffer(aJSContext,
                                       JS_GetArrayBufferViewBuffer(aJSContext,
                                                                   arrayBufferView,
                                                                   &isSharedMemory));
-    if (arrayBuffer) {
-      JS::ExposeObjectToActiveJS(arrayBuffer);
-    }
     // The channel data arrays should all have originated in
     // RestoreJSChannelData, where they are created unshared.
     MOZ_ASSERT(!isSharedMemory);

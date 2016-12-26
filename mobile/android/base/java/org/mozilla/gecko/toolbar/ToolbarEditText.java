@@ -20,6 +20,7 @@ import org.mozilla.gecko.util.StringUtils;
 import android.content.Context;
 import android.graphics.Rect;
 import android.text.Editable;
+import android.text.InputType;
 import android.text.NoCopySpan;
 import android.text.Selection;
 import android.text.Spanned;
@@ -417,12 +418,18 @@ public class ToolbarEditText extends CustomEditText
      * If there is no autocomplete text, both removeAutocomplete() and commitAutocomplete()
      * are no-ops and return false. Therefore we can use them here without checking explicitly
      * if we have autocomplete text or not.
+     *
+     * Also turns off text prediction for private mode tabs.
      */
     @Override
     public InputConnection onCreateInputConnection(final EditorInfo outAttrs) {
         final InputConnection ic = super.onCreateInputConnection(outAttrs);
         if (ic == null) {
             return null;
+        }
+
+        if (isPrivateMode()) {
+            outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
         }
 
         return new InputConnectionWrapper(ic, false) {
@@ -618,8 +625,7 @@ public class ToolbarEditText extends CustomEditText
             }
 
             if ((keyCode == KeyEvent.KEYCODE_DEL ||
-                (Versions.feature11Plus &&
-                 keyCode == KeyEvent.KEYCODE_FORWARD_DEL)) &&
+                (keyCode == KeyEvent.KEYCODE_FORWARD_DEL)) &&
                 removeAutocomplete(getText())) {
                 // Delete autocomplete text when backspacing or forward deleting.
                 return true;

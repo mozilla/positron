@@ -25,7 +25,7 @@ add_task(function* () {
     let contract = "@mozilla.org/network/protocol/about;1?what=" + aboutType;
     try {
       let am = Cc[contract].getService(Ci.nsIAboutModule);
-      let uri = ios.newURI("about:"+aboutType, null, null);
+      let uri = ios.newURI("about:" + aboutType, null, null);
       let flags = am.getURIFlags(uri);
       if (!(flags & Ci.nsIAboutModule.HIDE_FROM_ABOUTABOUT) &&
           networkURLs.indexOf(aboutType) == -1) {
@@ -38,10 +38,11 @@ add_task(function* () {
   }
 
   for (let url of aboutURLs) {
-    let tab = gBrowser.addTab("about:"+url, {userContextId: 1});
+    info("Loading about:" + url);
+    let tab = gBrowser.addTab("about:" + url, {userContextId: 1});
     yield BrowserTestUtils.browserLoaded(tab.linkedBrowser);
 
-    ok(true);
+    ok(true, "Done loading about:" + url);
 
     yield BrowserTestUtils.removeTab(tab);
   }

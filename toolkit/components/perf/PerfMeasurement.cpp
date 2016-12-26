@@ -10,6 +10,7 @@
 #include "mozilla/Preferences.h"
 #include "mozJSComponentLoader.h"
 #include "nsZipArchive.h"
+#include "xpc_make_class.h"
 
 #define JSPERF_CONTRACTID \
   "@mozilla.org/jsperf;1"
@@ -25,13 +26,9 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(Module)
 
 NS_IMPL_ISUPPORTS(Module, nsIXPCScriptable)
 
-Module::Module()
-{
-}
+Module::Module() = default;
 
-Module::~Module()
-{
-}
+Module::~Module() = default;
 
 #define XPC_MAP_CLASSNAME Module
 #define XPC_MAP_QUOTED_CLASSNAME "Module"

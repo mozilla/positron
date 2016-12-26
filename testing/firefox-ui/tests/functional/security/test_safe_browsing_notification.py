@@ -4,15 +4,15 @@
 
 import time
 
+from firefox_puppeteer import PuppeteerMixin
 from marionette_driver import By, expected, Wait
+from marionette_harness import MarionetteTestCase
 
-from firefox_ui_harness.testcases import FirefoxTestCase
 
-
-class TestSafeBrowsingNotificationBar(FirefoxTestCase):
+class TestSafeBrowsingNotificationBar(PuppeteerMixin, MarionetteTestCase):
 
     def setUp(self):
-        FirefoxTestCase.setUp(self)
+        super(TestSafeBrowsingNotificationBar, self).setUp()
 
         self.test_data = [
             # Unwanted software URL
@@ -26,19 +26,19 @@ class TestSafeBrowsingNotificationBar(FirefoxTestCase):
             # Phishing URL info
             {
                 'button_property': 'safebrowsing.notADeceptiveSiteButton.label',
-                'report_page': 'www.google.com/safebrowsing/report_error',
+                'report_page': 'google.com/safebrowsing/report_error',
                 'unsafe_page': 'https://www.itisatrap.org/firefox/its-a-trap.html'
             },
             # Malware URL object
             {
                 'button_property': 'safebrowsing.notAnAttackButton.label',
-                'report_page': 'www.stopbadware.org',
+                'report_page': 'stopbadware.org',
                 'unsafe_page': 'https://www.itisatrap.org/firefox/its-an-attack.html'
             }
         ]
 
-        self.prefs.set_pref('browser.safebrowsing.phishing.enabled', True)
-        self.prefs.set_pref('browser.safebrowsing.malware.enabled', True)
+        self.marionette.set_pref('browser.safebrowsing.phishing.enabled', True)
+        self.marionette.set_pref('browser.safebrowsing.malware.enabled', True)
 
         # Give the browser a little time, because SafeBrowsing.jsm takes a while
         # between start up and adding the example urls to the db.
@@ -51,10 +51,12 @@ class TestSafeBrowsingNotificationBar(FirefoxTestCase):
 
     def tearDown(self):
         try:
-            self.utils.permissions.remove('https://www.itisatrap.org', 'safe-browsing')
+            self.puppeteer.utils.permissions.remove('https://www.itisatrap.org', 'safe-browsing')
             self.browser.tabbar.close_all_tabs([self.browser.tabbar.tabs[0]])
+            self.marionette.clear_pref('browser.safebrowsing.phishing.enabled')
+            self.marionette.clear_pref('browser.safebrowsing.malware.enabled')
         finally:
-            FirefoxTestCase.tearDown(self)
+            super(TestSafeBrowsingNotificationBar, self).tearDown()
 
     def test_notification_bar(self):
         with self.marionette.using_context('content'):
@@ -92,38 +94,45 @@ class TestSafeBrowsingNotificationBar(FirefoxTestCase):
         button = self.marionette.find_element(By.ID, 'ignoreWarningButton')
         button.click()
 
-        Wait(self.marionette, timeout=self.browser.timeout_page_load).until(
-            expected.element_present(By.ID, 'main-feature'))
+        Wait(self.marionette, timeout=self.marionette.timeout.page_load).until(
+            expected.element_present(By.ID, 'main-feature'),
+            message='Expected target element "#main-feature" has not been found',
+        )
         self.assertEquals(self.marionette.get_url(), self.browser.get_final_url(unsafe_page))
 
         # Clean up here since the permission gets set in this function
-        self.utils.permissions.remove('https://www.itisatrap.org', 'safe-browsing')
+        self.puppeteer.utils.permissions.remove('https://www.itisatrap.org', 'safe-browsing')
 
     # Check the not a forgery or attack button in the notification bar
     def check_not_badware_button(self, button_property, report_page):
         with self.marionette.using_context('chrome'):
             # TODO: update to use safe browsing notification bar class when bug 1139544 lands
-            label = self.browser.get_property(button_property)
+            label = self.browser.localize_property(button_property)
             button = (self.marionette.find_element(By.ID, 'content')
                       .find_element('anon attribute', {'label': label}))
 
             self.browser.tabbar.open_tab(lambda _: button.click())
 
-        Wait(self.marionette, timeout=self.browser.timeout_page_load).until(
-            lambda mn: report_page in mn.get_url())
+        Wait(self.marionette, timeout=self.marionette.timeout.page_load).until(
+            lambda mn: report_page in mn.get_url(),
+            message='The expected safe-browsing report page has not been opened',
+        )
+
         with self.marionette.using_context('chrome'):
             self.browser.tabbar.close_tab()
 
     def check_get_me_out_of_here_button(self):
         with self.marionette.using_context('chrome'):
             # TODO: update to use safe browsing notification bar class when bug 1139544 lands
-            label = self.browser.get_property('safebrowsing.getMeOutOfHereButton.label')
+            label = self.browser.localize_property('safebrowsing.getMeOutOfHereButton.label')
             button = (self.marionette.find_element(By.ID, 'content')
                       .find_element('anon attribute', {'label': label}))
             button.click()
 
-        Wait(self.marionette, timeout=self.browser.timeout_page_load).until(
-            lambda mn: self.browser.default_homepage in mn.get_url())
+        Wait(self.marionette, timeout=self.marionette.timeout.page_load).until(
+            lambda mn: self.browser.default_homepage in mn.get_url(),
+            message='The default home page has not been loaded',
+        )
 
     def check_x_button(self):
         with self.marionette.using_context('chrome'):
@@ -134,5 +143,7 @@ class TestSafeBrowsingNotificationBar(FirefoxTestCase):
                                     {'class': 'messageCloseButton close-icon tabbable'}))
             button.click()
 
-            Wait(self.marionette, timeout=self.browser.timeout_page_load).until(
-                expected.element_stale(button))
+            Wait(self.marionette, timeout=self.marionette.timeout.page_load).until(
+                expected.element_stale(button),
+                message='The notification bar has not been closed',
+            )

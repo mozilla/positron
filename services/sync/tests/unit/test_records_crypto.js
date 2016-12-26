@@ -27,13 +27,10 @@ function prepareCryptoWrap(collection, id) {
   return w;
 }
 
-function run_test() {
+add_task(async function test_records_crypto() {
   let server;
-  do_test_pending();
 
-  ensureLegacyIdentityManager();
-  Service.identity.username = "john@example.com";
-  Service.identity.syncKey = "a-abcde-abcde-abcde-abcde-abcde";
+  await configureIdentity({ username: "john@example.com" });
   let keyBundle = Service.identity.syncKeyBundle;
 
   try {
@@ -148,9 +145,35 @@ function run_test() {
     do_check_eq(bookmarkItem.decrypt(Service.collectionKeys.keyForCollection("bookmarks")).stuff,
         "my payload here");
 
+    do_check_true(Service.collectionKeys.hasKeysFor(["bookmarks"]));
+
+    // Add a key for some new collection and verify that it isn't the
+    // default key.
+    do_check_false(Service.collectionKeys.hasKeysFor(["forms"]));
+    do_check_false(Service.collectionKeys.hasKeysFor(["bookmarks", "forms"]));
+    let oldFormsKey = Service.collectionKeys.keyForCollection("forms");
+    do_check_eq(oldFormsKey, Service.collectionKeys._default);
+    let newKeys = Service.collectionKeys.ensureKeysFor(["forms"]);
+    do_check_true(newKeys.hasKeysFor(["forms"]));
+    do_check_true(newKeys.hasKeysFor(["bookmarks", "forms"]));
+    let newFormsKey = newKeys.keyForCollection("forms");
+    do_check_neq(newFormsKey, oldFormsKey);
+
+    // Verify that this doesn't overwrite keys
+    let regetKeys = newKeys.ensureKeysFor(["forms"]);
+    do_check_eq(regetKeys.keyForCollection("forms"), newFormsKey);
+
+    const emptyKeys = new CollectionKeyManager();
+    payload = {
+      default: Service.collectionKeys._default.keyPairB64,
+      collections: {}
+    };
+    // Verify that not passing `modified` doesn't throw
+    emptyKeys.setContents(payload, null);
+
     log.info("Done!");
   }
   finally {
-    server.stop(do_test_finished);
+    await promiseStopServer(server);
   }
-}
+});

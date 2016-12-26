@@ -9,13 +9,11 @@ Cu.import("resource://testing-common/AddonManagerTesting.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Experiments",
   "resource:///modules/experiments/Experiments.jsm");
 
-const FILE_MANIFEST            = "experiments.manifest";
 const MANIFEST_HANDLER         = "manifests/handler";
 
 const SEC_IN_ONE_DAY  = 24 * 60 * 60;
 const MS_IN_ONE_DAY   = SEC_IN_ONE_DAY * 1000;
 
-var gProfileDir          = null;
 var gHttpServer          = null;
 var gHttpRoot            = null;
 var gDataRoot            = null;
@@ -47,7 +45,6 @@ function run_test() {
 
 add_task(function* test_setup() {
   loadAddonManager();
-  gProfileDir = do_get_profile();
 
   gHttpServer = new HttpServer();
   gHttpServer.start(-1);
@@ -162,7 +159,7 @@ add_task(function* test_getExperiments() {
   Assert.equal(addons.length, 0, "Precondition: No experiment add-ons are installed.");
 
   try {
-    let b = yield experiments.getExperimentBranch();
+    yield experiments.getExperimentBranch();
     Assert.ok(false, "getExperimentBranch should fail with no experiment");
   }
   catch (e) {
@@ -259,7 +256,7 @@ add_task(function* test_getExperiments() {
 
   experimentListData[0].active = true;
   experimentListData[0].endDate = now.getTime() + 10 * MS_IN_ONE_DAY;
-  for (let i=0; i<experimentListData.length; ++i) {
+  for (let i = 0; i < experimentListData.length; ++i) {
     let entry = experimentListData[i];
     for (let k of Object.keys(entry)) {
       Assert.equal(entry[k], list[i][k],
@@ -289,7 +286,7 @@ add_task(function* test_getExperiments() {
 
   experimentListData[0].active = false;
   experimentListData[0].endDate = now.getTime();
-  for (let i=0; i<experimentListData.length; ++i) {
+  for (let i = 0; i < experimentListData.length; ++i) {
     let entry = experimentListData[i];
     for (let k of Object.keys(entry)) {
       Assert.equal(entry[k], list[i][k],
@@ -746,7 +743,7 @@ add_task(function* test_installFailure() {
   list = yield experiments.getExperiments();
   Assert.equal(list.length, 2, "Experiment list should have 2 entries now.");
 
-  for (let i=0; i<experimentListData.length; ++i) {
+  for (let i = 0; i < experimentListData.length; ++i) {
     let entry = experimentListData[i];
     for (let k of Object.keys(entry)) {
       Assert.equal(entry[k], list[i][k],

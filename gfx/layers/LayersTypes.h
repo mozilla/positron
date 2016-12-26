@@ -8,11 +8,6 @@
 
 #include <stdint.h>                     // for uint32_t
 
-#ifdef MOZ_WIDGET_GONK
-#include <utils/RefBase.h>
-#include "mozilla/layers/GonkNativeHandle.h"
-#endif
-
 #include "Units.h"
 #include "mozilla/gfx/Point.h"          // for IntPoint
 #include "mozilla/TypedEnumBits.h"
@@ -30,6 +25,10 @@
   do { if (layer->AsShadowableLayer()) { MOZ_LOG(LayerManager::GetLog(), LogLevel::Debug, _args); } } while (0)
 
 #define INVALID_OVERLAY -1
+
+namespace IPC {
+template <typename T> struct ParamTraits;
+} // namespace IPC
 
 namespace android {
 class MOZ_EXPORT GraphicBuffer;
@@ -71,8 +70,6 @@ enum class SurfaceMode : int8_t {
 };
 
 // LayerRenderState for Composer2D
-// We currently only support Composer2D using gralloc. If we want to be backed
-// by other surfaces we will need a more generic LayerRenderState.
 enum class LayerRenderStateFlags : int8_t {
   LAYER_RENDER_STATE_DEFAULT = 0,
   ORIGIN_BOTTOM_LEFT = 1 << 0,
@@ -86,8 +83,6 @@ enum class LayerRenderStateFlags : int8_t {
 };
 MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(LayerRenderStateFlags)
 
-// The 'ifdef MOZ_WIDGET_GONK' sadness here is because we don't want to include
-// android::sp unless we have to.
 struct LayerRenderState {
   // Constructors and destructor are defined in LayersTypes.cpp so we don't
   // have to pull in a definition for GraphicBuffer.h here. In KK at least,
@@ -96,36 +91,6 @@ struct LayerRenderState {
   LayerRenderState();
   LayerRenderState(const LayerRenderState& aOther);
   ~LayerRenderState();
-
-#ifdef MOZ_WIDGET_GONK
-  LayerRenderState(android::GraphicBuffer* aSurface,
-                   const gfx::IntSize& aSize,
-                   LayerRenderStateFlags aFlags,
-                   TextureHost* aTexture);
-
-  bool OriginBottomLeft() const
-  { return bool(mFlags & LayerRenderStateFlags::ORIGIN_BOTTOM_LEFT); }
-
-  bool BufferRotated() const
-  { return bool(mFlags & LayerRenderStateFlags::BUFFER_ROTATION); }
-
-  bool FormatRBSwapped() const
-  { return bool(mFlags & LayerRenderStateFlags::FORMAT_RB_SWAP); }
-
-  void SetOverlayId(const int32_t& aId)
-  { mOverlayId = aId; }
-
-  void SetSidebandStream(const GonkNativeHandle& aStream)
-  {
-    mSidebandStream = aStream;
-  }
-
-  android::GraphicBuffer* GetGrallocBuffer() const
-  { return mSurface.get(); }
-
-  const GonkNativeHandle& GetSidebandStream()
-  { return mSidebandStream; }
-#endif
 
   void SetOffset(const nsIntPoint& aOffset)
   {
@@ -139,17 +104,6 @@ struct LayerRenderState {
   bool mHasOwnOffset;
   // the location of the layer's origin on mSurface
   nsIntPoint mOffset;
-  // The 'ifdef MOZ_WIDGET_GONK' sadness here is because we don't want to include
-  // android::sp unless we have to.
-#ifdef MOZ_WIDGET_GONK
-  // surface to render
-  android::sp<android::GraphicBuffer> mSurface;
-  int32_t mOverlayId;
-  // size of mSurface
-  gfx::IntSize mSize;
-  TextureHost* mTexture;
-  GonkNativeHandle mSidebandStream;
-#endif
 };
 
 enum class ScaleMode : int8_t {
@@ -291,6 +245,39 @@ typedef gfx::Matrix4x4Typed<LayerPixel, CSSTransformedLayerPixel> CSSTransformMa
 // PixelCastJustification is provided for this purpose.
 typedef gfx::Matrix4x4Typed<ParentLayerPixel, ParentLayerPixel> AsyncTransformComponentMatrix;
 typedef gfx::Matrix4x4Typed<CSSTransformedLayerPixel, ParentLayerPixel> AsyncTransformMatrix;
+
+typedef Array<gfx::Color, 4> BorderColors;
+typedef Array<LayerSize, 4> BorderCorners;
+typedef Array<LayerCoord, 4> BorderWidths;
+
+// This is used to communicate Layers across IPC channels. The Handle is valid
+// for layers in the same PLayerTransaction. Handles are created by ClientLayerManager,
+// and are cached in LayerTransactionParent on first use.
+class LayerHandle
+{
+  friend struct IPC::ParamTraits<mozilla::layers::LayerHandle>;
+public:
+  LayerHandle() : mHandle(0)
+  {}
+  LayerHandle(const LayerHandle& aOther) : mHandle(aOther.mHandle)
+  {}
+  explicit LayerHandle(uint64_t aHandle) : mHandle(aHandle)
+  {}
+  bool IsValid() const {
+    return mHandle != 0;
+  }
+  explicit operator bool() const {
+    return IsValid();
+  }
+  bool operator ==(const LayerHandle& aOther) const {
+    return mHandle == aOther.mHandle;
+  }
+  uint64_t Value() const {
+    return mHandle;
+  }
+private:
+  uint64_t mHandle;
+};
 
 } // namespace layers
 } // namespace mozilla

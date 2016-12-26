@@ -5,7 +5,7 @@
 "use strict";
 
 // These are injected from XPIProvider.jsm
-/*globals ADDON_SIGNING, SIGNED_TYPES, BOOTSTRAP_REASONS, DB_SCHEMA,
+/* globals ADDON_SIGNING, SIGNED_TYPES, BOOTSTRAP_REASONS, DB_SCHEMA,
           AddonInternal, XPIProvider, XPIStates, syncLoadManifestFromFile,
           isUsableAddon, recordAddonTelemetry, applyBlocklistChanges,
           flushChromeCaches, canRunInSafeMode*/
@@ -18,7 +18,7 @@ var Cu = Components.utils;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/AddonManager.jsm");
-/*globals AddonManagerPrivate*/
+/* globals AddonManagerPrivate*/
 Cu.import("resource://gre/modules/Preferences.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "AddonRepository",
@@ -37,6 +37,8 @@ XPCOMUtils.defineLazyServiceGetter(this, "Blocklist",
 
 Cu.import("resource://gre/modules/Log.jsm");
 const LOGGER_ID = "addons.xpi-utils";
+
+const nsIFile = Components.Constructor("@mozilla.org/file/local;1", "nsIFile");
 
 // Create a new logger for use by the Addons XPI Provider Utils
 // (Requires AddonManager.jsm)
@@ -87,12 +89,12 @@ const PROP_JSON_FIELDS = ["id", "syncGUID", "location", "version", "type",
                           "softDisabled", "foreignInstall", "hasBinaryComponents",
                           "strictCompatibility", "locales", "targetApplications",
                           "targetPlatforms", "multiprocessCompatible", "signedState",
-                          "seen", "dependencies", "hasEmbeddedWebExtension"];
+                          "seen", "dependencies", "hasEmbeddedWebExtension", "mpcOptedOut"];
 
 // Properties that should be migrated where possible from an old database. These
 // shouldn't include properties that can be read directly from install.rdf files
 // or calculated
-const DB_MIGRATE_METADATA= ["installDate", "userDisabled", "softDisabled",
+const DB_MIGRATE_METADATA = ["installDate", "userDisabled", "softDisabled",
                             "sourceURI", "applyBackgroundUpdates",
                             "releaseNotesURI", "foreignInstall", "syncGUID"];
 
@@ -247,16 +249,6 @@ function logSQLError(aError, aErrorString) {
 }
 
 /**
- * A helper function to log any errors that occur during async statements.
- *
- * @param  aError
- *         A mozIStorageError to log
- */
-function asyncErrorLogger(aError) {
-  logSQLError(aError.result, aError.message);
-}
-
-/**
  * A helper function to step a statement synchronously and log any error that
  * occurs.
  *
@@ -292,27 +284,6 @@ function copyProperties(aObject, aProperties, aTarget) {
   aProperties.forEach(function(aProp) {
     if (aProp in aObject)
       aTarget[aProp] = aObject[aProp];
-  });
-  return aTarget;
-}
-
-/**
- * Copies properties from a mozIStorageRow to an object. If no target object is
- * passed a new object will be created and returned.
- *
- * @param  aRow
- *         A mozIStorageRow to copy from
- * @param  aProperties
- *         An array of properties to be copied
- * @param  aTarget
- *         An optional target object to copy the properties to
- * @return the object that the properties were copied onto
- */
-function copyRowProperties(aRow, aProperties, aTarget) {
-  if (!aTarget)
-    aTarget = {};
-  aProperties.forEach(function(aProp) {
-    aTarget[aProp] = aRow.getResultByName(aProp);
   });
   return aTarget;
 }
@@ -619,14 +590,11 @@ this.XPIDatabase = {
       if (fstream)
         fstream.close();
     }
-    // If an async load was also in progress, resolve that promise with our DB;
-    // otherwise create a resolved promise
+    // If an async load was also in progress, record in telemetry.
     if (this._dbPromise) {
       AddonManagerPrivate.recordSimpleMeasure("XPIDB_overlapped_load", 1);
-      this._dbPromise.resolve(this.addonDB);
     }
-    else
-      this._dbPromise = Promise.resolve(this.addonDB);
+    this._dbPromise = Promise.resolve(this.addonDB);
   },
 
   /**
@@ -770,7 +738,8 @@ this.XPIDatabase = {
         logger.debug("Async JSON file read took " + readOptions.outExecutionDuration + " MS");
         AddonManagerPrivate.recordSimpleMeasure("XPIDB_asyncRead_MS",
           readOptions.outExecutionDuration);
-        if (this._addonDB) {
+
+        if (this.addonDB) {
           logger.debug("Synchronous load completed while waiting for async load");
           return this.addonDB;
         }
@@ -782,9 +751,9 @@ this.XPIDatabase = {
         this.parseDB(data, true);
         return this.addonDB;
       })
-    .then(null,
+    .catch(
       error => {
-        if (this._addonDB) {
+        if (this.addonDB) {
           logger.debug("Synchronous load completed while waiting for async load");
           return this.addonDB;
         }
@@ -1587,7 +1556,7 @@ this.XPIDatabaseReconcile = {
   getVisibleAddons(addonMap) {
     let map = new Map();
 
-    for (let [location, addons] of addonMap) {
+    for (let addons of addonMap.values()) {
       for (let [id, addon] of addons) {
         if (!addon.visible)
           continue;
@@ -1853,10 +1822,13 @@ this.XPIDatabaseReconcile = {
    * @param  aOldPlatformVersion
    *         The version of the platform last run with this profile or null
    *         if it is a new profile or the version is unknown
-   * @return a boolean indicating if flushing caches is required to complete
-   *         changing this add-on
+   * @param  aReloadMetadata
+   *         A boolean which indicates whether metadata should be reloaded from
+   *         the addon manifests. Default to false.
+   * @return the new addon.
    */
-  updateCompatibility(aInstallLocation, aOldAddon, aAddonState, aOldAppVersion, aOldPlatformVersion) {
+  updateCompatibility(aInstallLocation, aOldAddon, aAddonState, aOldAppVersion,
+                      aOldPlatformVersion, aReloadMetadata) {
     logger.debug("Updating compatibility for add-on " + aOldAddon.id + " in " + aInstallLocation.name);
 
     // If updating from a version of the app that didn't support signedState
@@ -1868,6 +1840,25 @@ this.XPIDatabaseReconcile = {
       let manifest = syncLoadManifestFromFile(file, aInstallLocation);
       aOldAddon.signedState = manifest.signedState;
     }
+
+    // May be updating from a version of the app that didn't support all the
+    // properties of the currently-installed add-ons.
+    if (aReloadMetadata) {
+      let file = new nsIFile()
+      file.persistentDescriptor = aAddonState.descriptor;
+      let manifest = syncLoadManifestFromFile(file, aInstallLocation);
+
+      // Avoid re-reading these properties from manifest,
+      // use existing addon instead.
+      // TODO - consider re-scanning for targetApplications.
+      let remove = ["syncGUID", "foreignInstall", "visible", "active",
+                    "userDisabled", "applyBackgroundUpdates", "sourceURI",
+                    "releaseNotesURI", "targetApplications"];
+
+      let props = PROP_JSON_FIELDS.filter(a => !remove.includes(a));
+      copyProperties(manifest, props, aOldAddon);
+    }
+
     // This updates the addon's JSON cached data in place
     applyBlocklistChanges(aOldAddon, aOldAddon, aOldAppVersion,
                           aOldPlatformVersion);
@@ -1895,10 +1886,13 @@ this.XPIDatabaseReconcile = {
    * @param  aOldPlatformVersion
    *         The version of the platform last run with this profile or null
    *         if it is a new profile or the version is unknown
+   * @param  aSchemaChange
+   *         The schema has changed and all add-on manifests should be re-read.
    * @return a boolean indicating if a change requiring flushing the caches was
    *         detected
    */
-  processFileChanges(aManifests, aUpdateCompatibility, aOldAppVersion, aOldPlatformVersion) {
+  processFileChanges(aManifests, aUpdateCompatibility, aOldAppVersion, aOldPlatformVersion,
+                     aSchemaChange) {
     let loadedManifest = (aInstallLocation, aId) => {
       if (!(aInstallLocation.name in aManifests))
         return null;
@@ -1969,10 +1963,12 @@ this.XPIDatabaseReconcile = {
               }
             }
 
-            // The add-on has changed if the modification time has changed, or
-            // we have an updated manifest for it. Also reload the metadata for
-            // add-ons in the application directory when the application version
-            // has changed
+            // The add-on has changed if the modification time has changed, if
+            // we have an updated manifest for it, or if the schema version has
+            // changed.
+            //
+            // Also reload the metadata for add-ons in the application directory
+            // when the application version has changed.
             let newAddon = loadedManifest(installLocation, id);
             if (newAddon || oldAddon.updateDate != xpiState.mtime ||
                 (aUpdateCompatibility && (installLocation.name == KEY_APP_GLOBAL ||
@@ -1982,9 +1978,13 @@ this.XPIDatabaseReconcile = {
             else if (oldAddon.descriptor != xpiState.descriptor) {
               newAddon = this.updateDescriptor(installLocation, oldAddon, xpiState);
             }
-            else if (aUpdateCompatibility) {
+            // Check compatility when the application version and/or schema
+            // version has changed. A schema change also reloads metadata from
+            // the manifests.
+            else if (aUpdateCompatibility || aSchemaChange) {
               newAddon = this.updateCompatibility(installLocation, oldAddon, xpiState,
-                                                  aOldAppVersion, aOldPlatformVersion);
+                                                  aOldAppVersion, aOldPlatformVersion,
+                                                  aSchemaChange);
             }
             else {
               // No change
@@ -2028,7 +2028,7 @@ this.XPIDatabaseReconcile = {
     // for those add-ons must be removed from the database.
     for (let [locationName, addons] of previousAddons) {
       if (!currentAddons.has(locationName)) {
-        for (let [id, oldAddon] of addons)
+        for (let oldAddon of addons.values())
           this.removeMetadata(oldAddon);
       }
     }
@@ -2092,6 +2092,7 @@ this.XPIDatabaseReconcile = {
             AddonManagerPrivate.addStartupChange(AddonManager.STARTUP_CHANGE_INSTALLED, id);
 
           if (currentAddon.bootstrap) {
+            AddonManagerPrivate.addStartupChange(AddonManager.STARTUP_CHANGE_INSTALLED, id);
             // Visible bootstrapped add-ons need to have their install method called
             XPIProvider.callBootstrapMethod(currentAddon, currentAddon._sourceBundle,
                                             "install", BOOTSTRAP_REASONS.ADDON_INSTALL);

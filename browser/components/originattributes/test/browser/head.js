@@ -213,6 +213,8 @@ this.IsolationTestTools = {
       // Make sure preferences are set properly.
       yield SpecialPowers.pushPrefEnv({"set": aPref});
 
+      yield SpecialPowers.pushPrefEnv({"set": [["dom.ipc.processCount", 1]]});
+
       yield aTask(aMode);
     });
   },
@@ -273,11 +275,19 @@ this.IsolationTestTools = {
    * @param aBeforeFunc
    *    An optional function which is called before any tabs are created so
    *    that the test case can set up/reset local state.
+   * @param aGetResultImmediately
+   *    An optional boolean to ensure we get results before the next tab is opened.
    */
-  runTests(aURL, aGetResultFuncs, aCompareResultFunc, aBeforeFunc) {
+  runTests(aURL, aGetResultFuncs, aCompareResultFunc, aBeforeFunc,
+           aGetResultImmediately, aUseHttps) {
     let pageURL;
     let firstFrameSetting;
     let secondFrameSetting;
+
+    // Request a longer timeout since the test will run a test for three times
+    // with different settings. Thus, one test here represents three tests.
+    // For this reason, we triple the timeout.
+    requestLongerTimeout(3);
 
     if (typeof aURL === "string") {
       pageURL = aURL;
@@ -291,7 +301,10 @@ this.IsolationTestTools = {
       aGetResultFuncs = [aGetResultFuncs];
     }
 
-    let tabSettings = [
+    let tabSettings = aUseHttps ? [
+                        { firstPartyDomain: "https://example.com", userContextId: 1},
+                        { firstPartyDomain: "https://example.org", userContextId: 2}
+                      ] : [
                         { firstPartyDomain: "http://example.com", userContextId: 1},
                         { firstPartyDomain: "http://example.org", userContextId: 2}
                       ];
@@ -302,7 +315,7 @@ this.IsolationTestTools = {
       for (let tabSettingB of [0, 1]) {
         // Give the test a chance to set up before each case is run.
         if (aBeforeFunc) {
-          yield aBeforeFunc();
+          yield aBeforeFunc(aMode);
         }
 
         // Create Tabs.
@@ -310,14 +323,21 @@ this.IsolationTestTools = {
                                                         pageURL,
                                                         tabSettings[tabSettingA],
                                                         firstFrameSetting);
+        let resultsA = [];
+        if (aGetResultImmediately) {
+          for (let getResultFunc of aGetResultFuncs) {
+            resultsA.push(yield getResultFunc(tabInfoA.browser));
+          }
+        }
         let tabInfoB = yield IsolationTestTools._addTab(aMode,
                                                         pageURL,
                                                         tabSettings[tabSettingB],
                                                         secondFrameSetting);
-
+        let i = 0;
         for (let getResultFunc of aGetResultFuncs) {
           // Fetch results from tabs.
-          let resultA = yield getResultFunc(tabInfoA.browser);
+          let resultA = aGetResultImmediately ? resultsA[i++] :
+                        yield getResultFunc(tabInfoA.browser);
           let resultB = yield getResultFunc(tabInfoB.browser);
 
           // Compare results.

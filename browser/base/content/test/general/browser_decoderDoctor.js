@@ -5,10 +5,10 @@ function* test_decoder_doctor_notification(type, notificationMessage, options) {
     let awaitNotificationBar =
       BrowserTestUtils.waitForNotificationBar(gBrowser, browser, "decoder-doctor-notification");
 
-    yield ContentTask.spawn(browser, type, function*(type) {
+    yield ContentTask.spawn(browser, type, function*(aType) {
       Services.obs.notifyObservers(content.window,
                                    "decoder-doctor-notification",
-                                   JSON.stringify({type: type,
+                                   JSON.stringify({type: aType,
                                                    isSolved: false,
                                                    decoderDoctorReportId: "test",
                                                    formats: "test"}));
@@ -107,4 +107,16 @@ add_task(function* test_cannot_initialize_pulseaudio() {
   yield test_decoder_doctor_notification("cannot-initialize-pulseaudio",
                                          message,
                                          {sumo: "fix-common-audio-and-video-issues"});
+});
+
+add_task(function* test_unsupported_libavcodec() {
+  // This is only sent on Linux.
+  if (AppConstants.platform != "linux") {
+    return;
+  }
+
+  let message = gNavigatorBundle.getString("decoder.unsupportedLibavcodec.message");
+  yield test_decoder_doctor_notification("unsupported-libavcodec",
+                                         message,
+                                         {noLearnMoreButton: true});
 });

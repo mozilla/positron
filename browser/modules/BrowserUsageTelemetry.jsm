@@ -5,7 +5,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["BrowserUsageTelemetry"];
+this.EXPORTED_SYMBOLS = ["BrowserUsageTelemetry", "URLBAR_SELECTED_RESULT_TYPES"];
 
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
@@ -23,6 +23,7 @@ const WINDOWS_RESTORED_TOPIC = "sessionstore-windows-restored";
 const TAB_RESTORING_TOPIC = "SSTabRestoring";
 const TELEMETRY_SUBSESSIONSPLIT_TOPIC = "internal-telemetry-after-subsession-split";
 const DOMWINDOW_OPENED_TOPIC = "domwindowopened";
+const AUTOCOMPLETE_ENTER_TEXT_TOPIC = "autocomplete-did-enter-text";
 
 // Probe names.
 const MAX_TAB_COUNT_SCALAR_NAME = "browser.engagement.max_concurrent_tab_count";
@@ -31,6 +32,40 @@ const TAB_OPEN_EVENT_COUNT_SCALAR_NAME = "browser.engagement.tab_open_event_coun
 const WINDOW_OPEN_EVENT_COUNT_SCALAR_NAME = "browser.engagement.window_open_event_count";
 const UNIQUE_DOMAINS_COUNT_SCALAR_NAME = "browser.engagement.unique_domains_count";
 const TOTAL_URI_COUNT_SCALAR_NAME = "browser.engagement.total_uri_count";
+const UNFILTERED_URI_COUNT_SCALAR_NAME = "browser.engagement.unfiltered_uri_count";
+
+// A list of known search origins.
+const KNOWN_SEARCH_SOURCES = [
+  "abouthome",
+  "contextmenu",
+  "newtab",
+  "searchbar",
+  "urlbar",
+];
+
+const KNOWN_ONEOFF_SOURCES = [
+  "oneoff-urlbar",
+  "oneoff-searchbar",
+  "unknown", // Edge case: this is the searchbar (see bug 1195733 comment 7).
+];
+
+/**
+ * The buckets used for logging telemetry to the FX_URLBAR_SELECTED_RESULT_TYPE
+ * histogram.
+ */
+const URLBAR_SELECTED_RESULT_TYPES = {
+  autofill: 0,
+  bookmark: 1,
+  history: 2,
+  keyword: 3,
+  searchengine: 4,
+  searchsuggestion: 5,
+  switchtab: 6,
+  tag: 7,
+  visiturl: 8,
+  remotetab: 9,
+  extension: 10,
+};
 
 function getOpenTabsAndWinsCounts() {
   let tabCount = 0;
@@ -46,19 +81,36 @@ function getOpenTabsAndWinsCounts() {
   return { tabCount, winCount };
 }
 
+function getSearchEngineId(engine) {
+  if (engine) {
+    if (engine.identifier) {
+      return engine.identifier;
+    }
+    // Due to bug 1222070, we can't directly check Services.telemetry.canRecordExtended
+    // here.
+    const extendedTelemetry = Services.prefs.getBoolPref("toolkit.telemetry.enabled");
+    if (engine.name && extendedTelemetry) {
+      // If it's a custom search engine only report the engine name
+      // if extended Telemetry is enabled.
+      return "other-" + engine.name;
+    }
+  }
+  return "other";
+}
+
 let URICountListener = {
   // A set containing the visited domains, see bug 1271310.
   _domainSet: new Set(),
   // A map to keep track of the URIs loaded from the restored tabs.
   _restoredURIsMap: new WeakMap(),
 
-  isValidURI(uri) {
+  isHttpURI(uri) {
     // Only consider http(s) schemas.
     return uri.schemeIs("http") || uri.schemeIs("https");
   },
 
   addRestoredURI(browser, uri) {
-    if (!this.isValidURI(uri)) {
+    if (!this.isHttpURI(uri)) {
       return;
     }
 
@@ -76,10 +128,6 @@ let URICountListener = {
       return;
     }
 
-    if (!this.isValidURI(uri)) {
-      return;
-    }
-
     // The SessionStore sets the URI of a tab first, firing onLocationChange the
     // first time, then manages content loading using its scheduler. Once content
     // loads, we will hit onLocationChange again.
@@ -90,11 +138,38 @@ let URICountListener = {
       return;
     }
 
+    // Track URI loads, even if they're not http(s).
+    let uriSpec = null;
+    try {
+      uriSpec = uri.spec;
+    } catch (e) {
+      // If we have troubles parsing the spec, still count this as
+      // an unfiltered URI.
+      Services.telemetry.scalarAdd(UNFILTERED_URI_COUNT_SCALAR_NAME, 1);
+      return;
+    }
+
+
+    // Don't count about:blank and similar pages, as they would artificially
+    // inflate the counts.
+    if (browser.ownerDocument.defaultView.gInitialPages.includes(uriSpec)) {
+      return;
+    }
+
     // If the URI we're loading is in the _restoredURIsMap, then it comes from a
     // restored tab. If so, let's skip it and remove it from the map as we want to
     // count page refreshes.
-    if (this._restoredURIsMap.get(browser) === uri.spec) {
+    if (this._restoredURIsMap.get(browser) === uriSpec) {
       this._restoredURIsMap.delete(browser);
+      return;
+    }
+
+    // The URI wasn't from a restored tab. Count it among the unfiltered URIs.
+    // If this is an http(s) URI, this also gets counted by the "total_uri_count"
+    // probe.
+    Services.telemetry.scalarAdd(UNFILTERED_URI_COUNT_SCALAR_NAME, 1);
+
+    if (!this.isHttpURI(uri)) {
       return;
     }
 
@@ -131,9 +206,82 @@ let URICountListener = {
                                          Ci.nsISupportsWeakReference]),
 };
 
+let urlbarListener = {
+  init() {
+    Services.obs.addObserver(this, AUTOCOMPLETE_ENTER_TEXT_TOPIC, true);
+  },
+
+  uninit() {
+    Services.obs.removeObserver(this, AUTOCOMPLETE_ENTER_TEXT_TOPIC, true);
+  },
+
+  observe(subject, topic, data) {
+    switch (topic) {
+      case AUTOCOMPLETE_ENTER_TEXT_TOPIC:
+        this._handleURLBarTelemetry(subject.QueryInterface(Ci.nsIAutoCompleteInput));
+        break;
+    }
+  },
+
+  /**
+   * Used to log telemetry when the user enters text in the urlbar.
+   *
+   * @param {nsIAutoCompleteInput} input  The autocomplete element where the
+   *                                      text was entered.
+   */
+  _handleURLBarTelemetry(input) {
+    if (!input ||
+        input.id != "urlbar" ||
+        input.inPrivateContext ||
+        input.popup.selectedIndex < 0) {
+      return;
+    }
+    let controller =
+      input.popup.view.QueryInterface(Ci.nsIAutoCompleteController);
+    let idx = input.popup.selectedIndex;
+    let value = controller.getValueAt(idx);
+    let action = input._parseActionUrl(value);
+    let actionType;
+    if (action) {
+      actionType =
+        action.type == "searchengine" && action.params.searchSuggestion ?
+          "searchsuggestion" :
+        action.type;
+    }
+    if (!actionType) {
+      let styles = new Set(controller.getStyleAt(idx).split(/\s+/));
+      let style = ["autofill", "tag", "bookmark"].find(s => styles.has(s));
+      actionType = style || "history";
+    }
+
+    Services.telemetry
+            .getHistogramById("FX_URLBAR_SELECTED_RESULT_INDEX")
+            .add(idx);
+
+    // Ideally this would be a keyed histogram and we'd just add(actionType),
+    // but keyed histograms aren't currently shown on the telemetry dashboard
+    // (bug 1151756).
+    //
+    // You can add values but don't change any of the existing values.
+    // Otherwise you'll break our data.
+    if (actionType in URLBAR_SELECTED_RESULT_TYPES) {
+      Services.telemetry
+              .getHistogramById("FX_URLBAR_SELECTED_RESULT_TYPE")
+              .add(URLBAR_SELECTED_RESULT_TYPES[actionType]);
+    } else {
+      Cu.reportError("Unknown FX_URLBAR_SELECTED_RESULT_TYPE type: " +
+                     actionType);
+    }
+  },
+
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
+                                         Ci.nsISupportsWeakReference]),
+};
+
 let BrowserUsageTelemetry = {
   init() {
     Services.obs.addObserver(this, WINDOWS_RESTORED_TOPIC, false);
+    urlbarListener.init();
   },
 
   /**
@@ -155,6 +303,7 @@ let BrowserUsageTelemetry = {
     Services.obs.removeObserver(this, DOMWINDOW_OPENED_TOPIC, false);
     Services.obs.removeObserver(this, TELEMETRY_SUBSESSIONSPLIT_TOPIC, false);
     Services.obs.removeObserver(this, WINDOWS_RESTORED_TOPIC, false);
+    urlbarListener.uninit();
   },
 
   observe(subject, topic, data) {
@@ -187,6 +336,131 @@ let BrowserUsageTelemetry = {
         URICountListener.addRestoredURI(browser, browser.currentURI);
         break;
     }
+  },
+
+  /**
+   * The main entry point for recording search related Telemetry. This includes
+   * search counts and engagement measurements.
+   *
+   * Telemetry records only search counts per engine and action origin, but
+   * nothing pertaining to the search contents themselves.
+   *
+   * @param {nsISearchEngine} engine
+   *        The engine handling the search.
+   * @param {String} source
+   *        Where the search originated from. See KNOWN_SEARCH_SOURCES for allowed
+   *        values.
+   * @param {Object} [details] Options object.
+   * @param {Boolean} [details.isOneOff=false]
+   *        true if this event was generated by a one-off search.
+   * @param {Boolean} [details.isSuggestion=false]
+   *        true if this event was generated by a suggested search.
+   * @param {Boolean} [details.isAlias=false]
+   *        true if this event was generated by a search using an alias.
+   * @param {Object} [details.type=null]
+   *        The object describing the event that triggered the search.
+   * @throws if source is not in the known sources list.
+   */
+  recordSearch(engine, source, details = {}) {
+    const isOneOff = !!details.isOneOff;
+    const countId = getSearchEngineId(engine) + "." + source;
+
+    if (isOneOff) {
+      if (!KNOWN_ONEOFF_SOURCES.includes(source)) {
+        // Silently drop the error if this bogus call
+        // came from 'urlbar' or 'searchbar'. They're
+        // calling |recordSearch| twice from two different
+        // code paths because they want to record the search
+        // in SEARCH_COUNTS.
+        if (['urlbar', 'searchbar'].includes(source)) {
+          Services.telemetry.getKeyedHistogramById("SEARCH_COUNTS").add(countId);
+          return;
+        }
+        throw new Error("Unknown source for one-off search: " + source);
+      }
+    } else {
+      if (!KNOWN_SEARCH_SOURCES.includes(source)) {
+        throw new Error("Unknown source for search: " + source);
+      }
+      Services.telemetry.getKeyedHistogramById("SEARCH_COUNTS").add(countId);
+    }
+
+    // Dispatch the search signal to other handlers.
+    this._handleSearchAction(engine, source, details);
+  },
+
+  _recordSearch(engine, source, action = null) {
+    let scalarKey = action ? "search_" + action : "search";
+    Services.telemetry.keyedScalarAdd("browser.engagement.navigation." + source,
+                                      scalarKey, 1);
+    Services.telemetry.recordEvent("navigation", "search", source, action,
+                                   { engine: getSearchEngineId(engine) });
+  },
+
+  _handleSearchAction(engine, source, details) {
+    switch (source) {
+      case "urlbar":
+      case "oneoff-urlbar":
+      case "searchbar":
+      case "oneoff-searchbar":
+      case "unknown": // Edge case: this is the searchbar (see bug 1195733 comment 7).
+        this._handleSearchAndUrlbar(engine, source, details);
+        break;
+      case "abouthome":
+        this._recordSearch(engine, "about_home", "enter");
+        break;
+      case "newtab":
+        this._recordSearch(engine, "about_newtab", "enter");
+        break;
+      case "contextmenu":
+        this._recordSearch(engine, "contextmenu");
+        break;
+    }
+  },
+
+  /**
+   * This function handles the "urlbar", "urlbar-oneoff", "searchbar" and
+   * "searchbar-oneoff" sources.
+   */
+  _handleSearchAndUrlbar(engine, source, details) {
+    // We want "urlbar" and "urlbar-oneoff" (and similar cases) to go in the same
+    // scalar, but in a different key.
+
+    // When using one-offs in the searchbar we get an "unknown" source. See bug
+    // 1195733 comment 7 for the context. Fix-up the label here.
+    const sourceName =
+      (source === "unknown") ? "searchbar" : source.replace("oneoff-", "");
+
+    const isOneOff = !!details.isOneOff;
+    if (isOneOff) {
+      // We will receive a signal from the "urlbar"/"searchbar" even when the
+      // search came from "oneoff-urlbar". That's because both signals
+      // are propagated from search.xml. Skip it if that's the case.
+      // Moreover, we skip the "unknown" source that comes from the searchbar
+      // when performing searches from the default search engine. See bug 1195733
+      // comment 7 for context.
+      if (["urlbar", "searchbar", "unknown"].includes(source)) {
+        return;
+      }
+
+      // If that's a legit one-off search signal, record it using the relative key.
+      this._recordSearch(engine, sourceName, "oneoff");
+      return;
+    }
+
+    // The search was not a one-off. It was a search with the default search engine.
+    if (details.isSuggestion) {
+      // It came from a suggested search, so count it as such.
+      this._recordSearch(engine, sourceName, "suggestion");
+      return;
+    } else if (details.isAlias) {
+      // This one came from a search that used an alias.
+      this._recordSearch(engine, sourceName, "alias");
+      return;
+    }
+
+    // The search signal was generated by typing something and pressing enter.
+    this._recordSearch(engine, sourceName, "enter");
   },
 
   /**

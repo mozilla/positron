@@ -6,12 +6,12 @@
 
 #include "TransportSecurityInfo.h"
 
+#include "DateTimeFormat.h"
 #include "PSMRunnable.h"
 #include "mozilla/Casting.h"
 #include "nsComponentManagerUtils.h"
 #include "nsIArray.h"
 #include "nsICertOverrideService.h"
-#include "nsIDateTimeFormat.h"
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
 #include "nsIWebProgressListener.h"
@@ -95,6 +95,14 @@ nsresult
 TransportSecurityInfo::GetPort(int32_t *aPort)
 {
   *aPort = mPort;
+  return NS_OK;
+}
+
+nsresult
+TransportSecurityInfo::SetOriginAttributes(
+  const NeckoOriginAttributes& aOriginAttributes)
+{
+  mOriginAttributes = aOriginAttributes;
   return NS_OK;
 }
 
@@ -790,14 +798,9 @@ GetDateBoundary(nsIX509Cert* ix509,
     trueExpired_falseNotYetValid = false;
   }
 
-  nsCOMPtr<nsIDateTimeFormat> dateTimeFormat = nsIDateTimeFormat::Create();
-  if (!dateTimeFormat) {
-    return;
-  }
-
-  dateTimeFormat->FormatPRTime(nullptr, kDateFormatLong, kTimeFormatNoSeconds,
+  DateTimeFormat::FormatPRTime(kDateFormatLong, kTimeFormatNoSeconds,
                                timeToUse, formattedDate);
-  dateTimeFormat->FormatPRTime(nullptr, kDateFormatLong, kTimeFormatNoSeconds,
+  DateTimeFormat::FormatPRTime(kDateFormatLong, kTimeFormatNoSeconds,
                                now, nowDate);
 }
 
@@ -1049,7 +1052,7 @@ TransportSecurityInfo::SetStatusErrorBits(nsNSSCertificate* cert,
     mSSLStatus = new nsSSLStatus();
   }
 
-  mSSLStatus->SetServerCert(cert, nsNSSCertificate::ev_status_invalid);
+  mSSLStatus->SetServerCert(cert, EVStatus::NotEV);
 
   mSSLStatus->mHaveCertErrorBits = true;
   mSSLStatus->mIsDomainMismatch = 

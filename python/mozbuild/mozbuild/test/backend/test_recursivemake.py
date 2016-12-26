@@ -4,6 +4,7 @@
 
 from __future__ import unicode_literals
 
+import cPickle as pickle
 import json
 import os
 import unittest
@@ -524,11 +525,11 @@ class TestRecursiveMakeBackend(BackendTester):
             '[include:xpcshell.ini]',
         ])
 
-        all_tests_path = mozpath.join(env.topobjdir, 'all-tests.json')
+        all_tests_path = mozpath.join(env.topobjdir, 'all-tests.pkl')
         self.assertTrue(os.path.exists(all_tests_path))
 
-        with open(all_tests_path, 'rt') as fh:
-            o, _ = json.load(fh)
+        with open(all_tests_path, 'rb') as fh:
+            o = pickle.load(fh)
 
             self.assertIn('xpcshell.js', o)
             self.assertIn('dir1/test_bar.js', o)
@@ -550,12 +551,12 @@ class TestRecursiveMakeBackend(BackendTester):
     def test_test_manifest_deffered_installs_written(self):
         """Shared support files are written to their own data file by the backend."""
         env = self._consume('test-manifest-shared-support', RecursiveMakeBackend)
-        all_tests_path = mozpath.join(env.topobjdir, 'all-tests.json')
+        all_tests_path = mozpath.join(env.topobjdir, 'all-tests.pkl')
         self.assertTrue(os.path.exists(all_tests_path))
-        test_installs_path = mozpath.join(env.topobjdir, 'test-installs.json')
+        test_installs_path = mozpath.join(env.topobjdir, 'test-installs.pkl')
 
         with open(test_installs_path, 'r') as fh:
-            test_installs = json.load(fh)
+            test_installs = pickle.load(fh)
 
         self.assertEqual(set(test_installs.keys()),
                          set(['child/test_sub.js',
@@ -572,7 +573,7 @@ class TestRecursiveMakeBackend(BackendTester):
         # First, read the generated for ini manifest contents.
         m = InstallManifest(path=test_files_manifest)
 
-        # Then, synthesize one from the test-installs.json file. This should
+        # Then, synthesize one from the test-installs.pkl file. This should
         # allow us to re-create a subset of the above.
         synthesized_manifest = InstallManifest()
         for item, installs in test_installs.items():
@@ -734,6 +735,52 @@ class TestRecursiveMakeBackend(BackendTester):
         found = [str for str in lines if str.startswith('LOCAL_INCLUDES')]
         self.assertEqual(found, expected)
 
+    def test_rust_library(self):
+        """Test that a Rust library is written to backend.mk correctly."""
+        env = self._consume('rust-library', RecursiveMakeBackend)
+
+        backend_path = mozpath.join(env.topobjdir, 'backend.mk')
+        lines = [l.strip() for l in open(backend_path, 'rt').readlines()[2:]]
+
+        expected = [
+            'RUST_LIBRARY_FILE := x86_64-unknown-linux-gnu/release/libgkrust.a',
+            'CARGO_FILE := $(srcdir)/Cargo.toml',
+        ]
+
+        self.assertEqual(lines, expected)
+
+    def test_rust_library_with_features(self):
+        """Test that a Rust library with features is written to backend.mk correctly."""
+        env = self._consume('rust-library-features', RecursiveMakeBackend)
+
+        backend_path = mozpath.join(env.topobjdir, 'backend.mk')
+        lines = [l.strip() for l in open(backend_path, 'rt').readlines()[2:]]
+
+        expected = [
+            'RUST_LIBRARY_FILE := x86_64-unknown-linux-gnu/release/libgkrust.a',
+            'CARGO_FILE := $(srcdir)/Cargo.toml',
+            'RUST_LIBRARY_FEATURES := musthave cantlivewithout',
+        ]
+
+        self.assertEqual(lines, expected)
+
+    def test_rust_programs(self):
+        """Test that {HOST_,}RUST_PROGRAMS are written to backend.mk correctly."""
+        env = self._consume('rust-programs', RecursiveMakeBackend)
+
+        backend_path = mozpath.join(env.topobjdir, 'backend.mk')
+        lines = [l.strip() for l in open(backend_path, 'rt').readlines()[2:]]
+
+        expected = [
+            'CARGO_FILE := %s/Cargo.toml' % env.topsrcdir,
+            'RUST_PROGRAMS += i686-pc-windows-msvc/release/target.exe',
+            'RUST_CARGO_PROGRAMS += target',
+            'HOST_RUST_PROGRAMS += i686-pc-windows-msvc/release/host.exe',
+            'HOST_RUST_CARGO_PROGRAMS += host',
+        ]
+
+        self.assertEqual(lines, expected)
+
     def test_final_target(self):
         """Test that FINAL_TARGET is written to backend.mk correctly."""
         env = self._consume('final_target', RecursiveMakeBackend)
@@ -850,12 +897,11 @@ class TestRecursiveMakeBackend(BackendTester):
         """Ensure test suites honor package_tests=False."""
         env = self._consume('test-manifests-package-tests', RecursiveMakeBackend)
 
-        all_tests_path = mozpath.join(env.topobjdir, 'all-tests.json')
+        all_tests_path = mozpath.join(env.topobjdir, 'all-tests.pkl')
         self.assertTrue(os.path.exists(all_tests_path))
 
-        with open(all_tests_path, 'rt') as fh:
-            o, _ = json.load(fh)
-
+        with open(all_tests_path, 'rb') as fh:
+            o = pickle.load(fh)
             self.assertIn('mochitest.js', o)
             self.assertIn('not_packaged.java', o)
 

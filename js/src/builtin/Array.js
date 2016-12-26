@@ -203,6 +203,9 @@ function ArraySort(comparefn) {
     /* Step 2. */
     var len = ToLength(O.length);
 
+    if (len <= 1)
+      return this;
+
     /* 22.1.3.25.1 Runtime Semantics: SortCompare( x, y ) */
     var wrappedCompareFn = comparefn;
     comparefn = function(x, y) {
@@ -781,7 +784,7 @@ function ArrayKeys() {
     return CreateArrayIterator(this, ITEM_KIND_KEY);
 }
 
-// ES6 draft rev31 (2015/01/15) 22.1.2.1 Array.from(source[, mapfn[, thisArg]]).
+// ES 2017 draft 0f10dba4ad18de92d47d421f378233a2eae8f077 22.1.2.1
 function ArrayFrom(items, mapfn=undefined, thisArg=undefined) {
     // Step 1.
     var C = this;
@@ -792,43 +795,61 @@ function ArrayFrom(items, mapfn=undefined, thisArg=undefined) {
         ThrowTypeError(JSMSG_NOT_FUNCTION, DecompileArg(1, mapfn));
     var T = thisArg;
 
-    // Steps 4-5.
+    // Step 4.
     var usingIterator = GetMethod(items, std_iterator);
 
-    // Step 6.
+    // Step 5.
     if (usingIterator !== undefined) {
-        // Steps 6.a-c.
+        // Steps 5.a-c.
         var A = IsConstructor(C) ? new C() : [];
 
-        // Steps 6.d-e.
+        // Step 5.c.
         var iterator = GetIterator(items, usingIterator);
 
-        // Step 6.f.
+        // Step 5.d.
         var k = 0;
 
-        // Step 6.g.
+        // Step 5.e.
         // These steps cannot be implemented using a for-of loop.
         // See <https://bugs.ecmascript.org/show_bug.cgi?id=2883>.
         while (true) {
-            // Steps 6.g.i-iii.
+            // Step 5.e.i.
+            // Disabled for performance reason.  We won't hit this case on
+            // normal array, since _DefineDataProperty will throw before it.
+            // We could hit this when |A| is a proxy and it ignores
+            // |_DefineDataProperty|, but it happens only after too long loop.
+            /*
+            if (k >= 0x1fffffffffffff) {
+                IteratorCloseThrow(iterator);
+                ThrowTypeError(JSMSG_TOO_LONG_ARRAY);
+            }
+            */
+
+            // Step 5.e.iii.
             var next = callContentFunction(iterator.next, iterator);
             if (!IsObject(next))
                 ThrowTypeError(JSMSG_NEXT_RETURNED_PRIMITIVE);
 
-            // Step 6.g.iv.
+            // Step 5.e.iv.
             if (next.done) {
                 A.length = k;
                 return A;
             }
 
-            // Steps 6.g.v-vi.
+            // Steps 5.e.v.
             var nextValue = next.value;
 
-            // Steps 6.g.vii-viii.
-            var mappedValue = mapping ? callContentFunction(mapfn, thisArg, nextValue, k) : nextValue;
+            // Steps 5.e.vi-vii.
+            try {
+                var mappedValue = mapping ? callContentFunction(mapfn, thisArg, nextValue, k) : nextValue;
 
-            // Steps 6.g.ix-xi.
-            _DefineDataProperty(A, k++, mappedValue);
+                // Steps 5.e.ii (reordered), 5.e.viii.
+                _DefineDataProperty(A, k++, mappedValue);
+            } catch (e) {
+                // Steps 5.e.vi.2, 5.e.ix.
+                IteratorCloseThrow(iterator);
+                throw e;
+            }
         }
     }
 
@@ -877,11 +898,67 @@ function ArrayToString() {
     return callContentFunction(func, array);
 }
 
+// ES2017 draft rev f8a9be8ea4bd97237d176907a1e3080dce20c68f
+// 22.1.3.27 Array.prototype.toLocaleString ([ reserved1 [ , reserved2 ] ])
+// ES2017 Intl draft rev 78bbe7d1095f5ff3760ac4017ed366026e4cb276
+// 13.4.1 Array.prototype.toLocaleString ([ locales [ , options ]])
+function ArrayToLocaleString(locales, options) {
+    // Step 1 (ToObject already performed in native code).
+    assert(IsObject(this), "|this| should be an object");
+    var array = this;
+
+    // Step 2.
+    var len = ToLength(array.length);
+
+    // Step 4.
+    if (len === 0)
+        return "";
+
+    // Step 5.
+    var firstElement = array[0];
+
+    // Steps 6-7.
+    var R;
+    if (firstElement === undefined || firstElement === null) {
+        R = "";
+    } else {
+#if EXPOSE_INTL_API
+        R = ToString(callContentFunction(firstElement.toLocaleString, firstElement, locales, options));
+#else
+        R = ToString(callContentFunction(firstElement.toLocaleString, firstElement));
+#endif
+    }
+
+    // Step 3 (reordered).
+    // We don't (yet?) implement locale-dependent separators.
+    var separator = ",";
+
+    // Steps 8-9.
+    for (var k = 1; k < len; k++) {
+        // Step 9.b.
+        var nextElement = array[k];
+
+        // Steps 9.a, 9.c-e.
+        R += separator;
+        if (!(nextElement === undefined || nextElement === null)) {
+#if EXPOSE_INTL_API
+            R += ToString(callContentFunction(nextElement.toLocaleString, nextElement, locales, options));
+#else
+            R += ToString(callContentFunction(nextElement.toLocaleString, nextElement));
+#endif
+        }
+    }
+
+    // Step 10.
+    return R;
+}
+
 // ES 2016 draft Mar 25, 2016 22.1.2.5.
 function ArraySpecies() {
     // Step 1.
     return this;
 }
+_SetCanonicalName(ArraySpecies, "get [Symbol.species]");
 
 // ES 2016 draft Mar 25, 2016 9.4.2.3.
 function ArraySpeciesCreate(originalArray, length) {

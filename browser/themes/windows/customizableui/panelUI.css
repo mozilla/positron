@@ -31,6 +31,7 @@
   /* emulating chrome://browser/content/places/menu.xml#places-popup-arrow but without the arrow */
   box-shadow: 0 0 4px rgba(0,0,0,0.2);
   background: var(--arrowpanel-background);
+  color: var(--arrowpanel-color);
   border: 1px solid var(--arrowpanel-border-color);
   border-radius: 3.5px;
   margin-top: -4px;
@@ -119,7 +120,7 @@ menu[disabled="true"].subviewbutton > .menu-right {
   list-style-image: url(chrome://browser/skin/customizableui/menu-arrow.svg#arrow-disabled);
 }
 
-@media not all and (-moz-windows-default-theme) {
+@media (-moz-windows-default-theme: 0) {
   menu[_moz-menuactive].subviewbutton > .menu-right {
     list-style-image: url(chrome://browser/skin/customizableui/menu-arrow.svg#arrow-hover);
   }

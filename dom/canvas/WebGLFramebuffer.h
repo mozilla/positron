@@ -132,7 +132,6 @@ class WebGLFramebuffer final
     : public nsWrapperCache
     , public WebGLRefCountedObject<WebGLFramebuffer>
     , public LinkedListElement<WebGLFramebuffer>
-    , public WebGLContextBoundObject
     , public SupportsWeakPtr<WebGLFramebuffer>
 {
     friend class WebGLContext;
@@ -174,6 +173,7 @@ protected:
     struct ResolvedData {
         // BlitFramebuffer
         bool hasSampleBuffers;
+        std::vector<const WebGLFBAttachPoint*> colorDrawBuffers;
         const WebGLFBAttachPoint* depthBuffer;
         const WebGLFBAttachPoint* stencilBuffer;
 

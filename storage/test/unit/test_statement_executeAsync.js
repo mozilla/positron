@@ -61,7 +61,7 @@ function execAsync(aStmt, aOptions, aResults)
   }
   else { // array
     resultsExpected = aResults.length;
-    resultsChecker = function (aResultNum, aTup, aCaller) {
+    resultsChecker = function(aResultNum, aTup, aCaller) {
       aResults[aResultNum](aTup, aCaller);
     };
   }
@@ -226,7 +226,7 @@ function test_get_data()
   );
   stmt.bindByIndex(0, INTEGER);
   execAsync(stmt, {}, [
-    function (tuple) {
+    function(tuple) {
       do_check_neq(null, tuple);
 
       // Check that it's what we expect
@@ -282,7 +282,7 @@ function test_tuple_out_of_bounds()
     "SELECT string FROM test"
   );
   execAsync(stmt, {}, [
-    function (tuple) {
+    function(tuple) {
       do_check_neq(null, tuple);
 
       // Check all out of bounds - should throw
@@ -828,7 +828,7 @@ function test_not_right_owning_statement()
   );
 
   let array1 = stmt1.newBindingParamsArray();
-  let array2 = stmt2.newBindingParamsArray();
+  stmt2.newBindingParamsArray();
   let bp = array1.newBindingParams();
   bp.bindByName("int", INTEGER);
   array1.addParams(bp);
@@ -874,9 +874,7 @@ function test_multiple_results()
   run_next_test();
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//// Test Runner
-
+// Test Runner
 
 const TEST_PASS_SYNC = 0;
 const TEST_PASS_ASYNC = 1;

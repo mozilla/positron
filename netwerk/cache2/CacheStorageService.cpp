@@ -2010,6 +2010,14 @@ CacheStorageService::GetCacheEntryInfo(CacheEntry* aEntry,
                          aEntry->IsPinned());
 }
 
+// static
+uint32_t CacheStorageService::CacheQueueSize(bool highPriority)
+{
+  RefPtr<CacheIOThread> thread = CacheFileIOManager::IOThread();
+  MOZ_ASSERT(thread);
+  return thread->QueueSize(highPriority);
+}
+
 // Telementry collection
 
 namespace {
@@ -2275,7 +2283,7 @@ CacheStorageService::Flush(nsIObserver* aObserver)
   RefPtr<CacheStorageService::PurgeFromMemoryRunnable> r =
     new CacheStorageService::PurgeFromMemoryRunnable(this, CacheEntry::PURGE_WHOLE);
 
-  return thread->Dispatch(r, CacheIOThread::CLOSE);
+  return thread->Dispatch(r, CacheIOThread::WRITE);
 }
 
 } // namespace net

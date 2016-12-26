@@ -62,11 +62,6 @@
  * XPConnect. These can have pointers from XPCWrappedNativeProto and
  * XPCWrappedNative (since C++ objects can have scriptable info without having
  * class info).
- *
- * Most data in an XPCNativeScriptableInfo is shared between instances. The
- * shared data is stored in an XPCNativeScriptableShared object. This type is
- * important because it holds the JSClass of the flattened JS objects with the
- * given scriptable info.
  */
 
 /* All the XPConnect private declarations - only include locally. */
@@ -180,7 +175,6 @@
 #define XPC_DYING_NATIVE_PROTO_MAP_LENGTH        8
 #define XPC_NATIVE_INTERFACE_MAP_LENGTH         32
 #define XPC_NATIVE_SET_MAP_LENGTH               32
-#define XPC_NATIVE_JSCLASS_MAP_LENGTH           16
 #define XPC_THIS_TRANSLATOR_MAP_LENGTH           4
 #define XPC_WRAPPER_MAP_LENGTH                   8
 
@@ -206,9 +200,6 @@ extern const char XPC_XPCONNECT_CONTRACTID[];
         result = nullptr;                                                      \
     *dest = result;                                                           \
     return (result || !src) ? NS_OK : NS_ERROR_OUT_OF_MEMORY
-
-
-#define WRAPPER_FLAGS (JSCLASS_HAS_PRIVATE | JSCLASS_FOREGROUND_FINALIZE)
 
 // If IS_WN_CLASS for the JSClass of an object is true, the object is a
 // wrappednative wrapper, holding the XPCWrappedNative in its private slot.
@@ -448,9 +439,6 @@ public:
     IID2ThisTranslatorMap* GetThisTranslatorMap() const
         {return mThisTranslatorMap;}
 
-    XPCNativeScriptableSharedMap* GetNativeScriptableSharedMap() const
-        {return mNativeScriptableSharedMap;}
-
     XPCWrappedNativeProtoMap* GetDyingWrappedNativeProtoMap() const
         {return mDyingWrappedNativeProtoMap;}
 
@@ -612,7 +600,6 @@ private:
     ClassInfo2NativeSetMap*  mClassInfo2NativeSetMap;
     NativeSetMap*            mNativeSetMap;
     IID2ThisTranslatorMap*   mThisTranslatorMap;
-    XPCNativeScriptableSharedMap* mNativeScriptableSharedMap;
     XPCWrappedNativeProtoMap* mDyingWrappedNativeProtoMap;
     bool mGCIsRunning;
     nsTArray<nsISupports*> mNativesToReleaseArray;
@@ -738,7 +725,7 @@ public:
     inline XPCWrappedNative* GetResolvingWrapper() const;
     inline XPCWrappedNative* SetResolvingWrapper(XPCWrappedNative* w);
 
-    inline void SetRetVal(JS::Value val);
+    inline void SetRetVal(const JS::Value& val);
 
     void SetName(jsid name);
     void SetArgsAndResultPtr(unsigned argc, JS::Value* argv, JS::Value* rval);
@@ -887,12 +874,11 @@ public:
 
     JSObject*
     GetGlobalJSObject() const {
-        JS::ExposeObjectToActiveJS(mGlobalJSObject);
         return mGlobalJSObject;
     }
 
     JSObject*
-    GetGlobalJSObjectPreserveColor() const {return mGlobalJSObject;}
+    GetGlobalJSObjectPreserveColor() const {return mGlobalJSObject.unbarrieredGet();}
 
     nsIPrincipal*
     GetPrincipal() const {
@@ -1429,7 +1415,6 @@ public:
 #define GET_IT(f_) const { return 0 != (mFlags & nsIXPCScriptable:: f_ ); }
 
     bool WantPreCreate()                GET_IT(WANT_PRECREATE)
-    bool WantAddProperty()              GET_IT(WANT_ADDPROPERTY)
     bool WantGetProperty()              GET_IT(WANT_GETPROPERTY)
     bool WantSetProperty()              GET_IT(WANT_SETPROPERTY)
     bool WantEnumerate()                GET_IT(WANT_ENUMERATE)
@@ -1457,46 +1442,8 @@ private:
 };
 
 /***************************************************************************/
-
-// XPCNativeScriptableShared is used to hold the JSClass and the
-// associated scriptable flags for XPCWrappedNatives. These are shared across
-// the context and are garbage collected by xpconnect. We *used* to just store
-// this inside the XPCNativeScriptableInfo (usually owned by instances of
-// XPCWrappedNativeProto. This had two problems... It was wasteful, and it
-// was a big problem when wrappers are reparented to different scopes (and
-// thus different protos (the DOM does this).
-
-class XPCNativeScriptableShared final
-{
-public:
-    NS_INLINE_DECL_REFCOUNTING(XPCNativeScriptableShared)
-
-    const XPCNativeScriptableFlags& GetFlags() const { return mFlags; }
-
-    const JSClass* GetJSClass() { return Jsvalify(&mJSClass); }
-
-    XPCNativeScriptableShared(uint32_t aFlags, char* aName, bool aPopulate);
-
-    char* TransferNameOwnership() {
-        char* name = (char*)mJSClass.name;
-        mJSClass.name = nullptr;
-        return name;
-    }
-
-private:
-    ~XPCNativeScriptableShared();
-
-    XPCNativeScriptableFlags mFlags;
-
-    // This is an unusual js::Class instance: its name and cOps members are
-    // heap-allocated, unlike all other instances for which they are statically
-    // allocated. So we must free them in the destructor.
-    js::Class mJSClass;
-};
-
-/***************************************************************************/
-// XPCNativeScriptableInfo is used to hold the nsIXPCScriptable state for a
-// given class or instance.
+// XPCNativeScriptableInfo is a trivial wrapper for nsIXPCScriptable which
+// should be removed eventually.
 
 class XPCNativeScriptableInfo final
 {
@@ -1507,18 +1454,15 @@ public:
     nsIXPCScriptable*
     GetCallback() const { return mCallback; }
 
-    const XPCNativeScriptableFlags&
-    GetFlags() const { return mShared->GetFlags(); }
+    XPCNativeScriptableFlags
+    GetFlags() const { return XPCNativeScriptableFlags(mCallback->GetScriptableFlags()); }
 
     const JSClass*
-    GetJSClass() { return mShared->GetJSClass(); }
-
-    void
-    SetScriptableShared(already_AddRefed<XPCNativeScriptableShared>&& shared) { mShared = shared; }
+    GetJSClass() { return Jsvalify(mCallback->GetClass()); }
 
 protected:
-    explicit XPCNativeScriptableInfo(nsIXPCScriptable* scriptable)
-        : mCallback(scriptable)
+    explicit XPCNativeScriptableInfo(nsIXPCScriptable* aCallback)
+        : mCallback(aCallback)
     {
         MOZ_COUNT_CTOR(XPCNativeScriptableInfo);
     }
@@ -1535,7 +1479,6 @@ private:
 
 private:
     nsCOMPtr<nsIXPCScriptable> mCallback;
-    RefPtr<XPCNativeScriptableShared> mShared;
 };
 
 /***************************************************************************/
@@ -1572,6 +1515,8 @@ public:
     SetFlags(const XPCNativeScriptableFlags& flags)  {mFlags = flags;}
 
 private:
+    // XXX: the flags are the same as the ones gettable from the callback. This
+    // redundancy should be removed eventually.
     nsCOMPtr<nsIXPCScriptable>  mCallback;
     XPCNativeScriptableFlags    mFlags;
 };
@@ -1596,10 +1541,7 @@ public:
     GetContext() const {return mScope->GetContext();}
 
     JSObject*
-    GetJSProtoObject() const {
-        JS::ExposeObjectToActiveJS(mJSProtoObject);
-        return mJSProtoObject;
-    }
+    GetJSProtoObject() const { return mJSProtoObject; }
 
     nsIClassInfo*
     GetClassInfo()     const {return mClassInfo;}
@@ -1796,12 +1738,7 @@ public:
      * This getter clears the gray bit before handing out the JSObject which
      * means that the object is guaranteed to be kept alive past the next CC.
      */
-    JSObject*
-    GetFlatJSObject() const
-    {
-        JS::ExposeObjectToActiveJS(mFlatJSObject);
-        return mFlatJSObject;
-    }
+    JSObject* GetFlatJSObject() const { return mFlatJSObject; }
 
     /**
      * This getter does not change the color of the JSObject meaning that the
@@ -1812,7 +1749,9 @@ public:
      * being rooted (or otherwise signaling the stored value to the CC).
      */
     JSObject*
-    GetFlatJSObjectPreserveColor() const {return mFlatJSObject;}
+    GetFlatJSObjectPreserveColor() const {
+        return mFlatJSObject.unbarrieredGetPtr();
+    }
 
     XPCNativeSet*
     GetSet() const {return mSet;}
@@ -1900,9 +1839,10 @@ public:
             GetProto()->TraceSelf(trc);
         else
             GetScope()->TraceSelf(trc);
-        if (mFlatJSObject && JS_IsGlobalObject(mFlatJSObject))
-        {
-            xpc::TraceXPCGlobal(trc, mFlatJSObject);
+
+        JSObject* obj = mFlatJSObject.unbarrieredGetPtr();
+        if (obj && JS_IsGlobalObject(obj)) {
+            xpc::TraceXPCGlobal(trc, obj);
         }
     }
 
@@ -2159,7 +2099,7 @@ public:
      * be passed into a JS API function and that it won't be stored without
      * being rooted (or otherwise signaling the stored value to the CC).
      */
-    JSObject* GetJSObjectPreserveColor() const {return mJSObj;}
+    JSObject* GetJSObjectPreserveColor() const { return mJSObj.unbarrieredGet(); }
 
     // Returns true if the wrapper chain contains references to multiple
     // compartments. If the wrapper chain contains references to multiple
@@ -2183,8 +2123,8 @@ public:
         return FindInherited(aIID);
     }
 
-    bool IsRootWrapper() const {return mRoot == this;}
-    bool IsValid() const {return mJSObj != nullptr;}
+    bool IsRootWrapper() const { return mRoot == this; }
+    bool IsValid() const { return bool(mJSObj); }
     void SystemIsBeingShutDown();
 
     // These two methods are used by JSObject2WrappedJSMap::FindDyingJSObjects
@@ -2223,6 +2163,10 @@ protected:
     void Unlink();
 
 private:
+    JSCompartment* Compartment() const {
+        return js::GetObjectCompartment(mJSObj.unbarrieredGet());
+    }
+
     JS::Heap<JSObject*> mJSObj;
     RefPtr<nsXPCWrappedJSClass> mClass;
     nsXPCWrappedJS* mRoot;    // If mRoot != this, it is an owning pointer.
@@ -2377,12 +2321,6 @@ public:
                                         const char* ifaceName,
                                         const char* methodName,
                                         nsIException** exception);
-
-    static nsresult JSErrorToXPCException(const char* message,
-                                          const char* ifaceName,
-                                          const char* methodName,
-                                          const JSErrorReport* report,
-                                          nsIException** exception);
 
     static nsresult ConstructException(nsresult rv, const char* message,
                                        const char* ifaceName,
@@ -2873,7 +2811,7 @@ public:
     // if a given nsIVariant is in fact an XPCVariant.
     NS_DECLARE_STATIC_IID_ACCESSOR(XPCVARIANT_IID)
 
-    static already_AddRefed<XPCVariant> newVariant(JSContext* cx, JS::Value aJSVal);
+    static already_AddRefed<XPCVariant> newVariant(JSContext* cx, const JS::Value& aJSVal);
 
     /**
      * This getter clears the gray bit before handing out the Value if the Value
@@ -2881,8 +2819,6 @@ public:
      * kept alive past the next CC.
      */
     JS::Value GetJSVal() const {
-        if (!mJSVal.isPrimitive())
-            JS::ExposeObjectToActiveJS(&mJSVal.toObject());
         return mJSVal;
     }
 
@@ -2895,9 +2831,9 @@ public:
      * be passed into a JS API function and that it won't be stored without
      * being rooted (or otherwise signaling the stored value to the CC).
      */
-    JS::Value GetJSValPreserveColor() const {return mJSVal;}
+    JS::Value GetJSValPreserveColor() const { return mJSVal.unbarrieredGet(); }
 
-    XPCVariant(JSContext* cx, JS::Value aJSVal);
+    XPCVariant(JSContext* cx, const JS::Value& aJSVal);
 
     /**
      * Convert a variant into a JS::Value.
@@ -2945,7 +2881,7 @@ class XPCTraceableVariant: public XPCVariant,
                            public XPCRootSetElem
 {
 public:
-    XPCTraceableVariant(JSContext* cx, JS::Value aJSVal)
+    XPCTraceableVariant(JSContext* cx, const JS::Value& aJSVal)
         : XPCVariant(cx, aJSVal)
     {
          nsXPConnect::GetContextInstance()->AddVariantRoot(this);

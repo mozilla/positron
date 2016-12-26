@@ -31,11 +31,13 @@
 
 #ifdef JS_SIMULATOR_ARM
 
+#include "mozilla/Atomics.h"
+
 #include "jit/arm/Architecture-arm.h"
 #include "jit/arm/disasm/Disasm-arm.h"
 #include "jit/IonTypes.h"
-#include "threading/Mutex.h"
 #include "threading/Thread.h"
+#include "vm/MutexIDs.h"
 
 namespace js {
 namespace jit {
@@ -115,6 +117,29 @@ class Simulator
     static inline uintptr_t StackLimit() {
         return Simulator::Current()->stackLimit();
     }
+
+    // Disassemble some instructions starting at instr and print them
+    // on stdout.  Useful for working within GDB after a MOZ_CRASH(),
+    // among other things.
+    //
+    // Typical use within a crashed instruction decoding method is simply:
+    //
+    //   call Simulator::disassemble(instr, 1)
+    //
+    // or use one of the more convenient inline methods below.
+    static void disassemble(SimInstruction* instr, size_t n);
+
+    // Disassemble one instruction.
+    // "call disasm(instr)"
+    void disasm(SimInstruction* instr);
+
+    // Disassemble n instructions starting at instr.
+    // "call disasm(instr, 3)"
+    void disasm(SimInstruction* instr, size_t n);
+
+    // Skip backwards m instructions before starting, then disassemble n instructions.
+    // "call disasm(instr, 3, 7)"
+    void disasm(SimInstruction* instr, size_t m, size_t n);
 
     uintptr_t* addressOfStackLimit();
 
@@ -283,6 +308,9 @@ class Simulator
     inline int readW(int32_t addr, SimInstruction* instr, UnalignedPolicy f = ForbidUnaligned);
     inline void writeW(int32_t addr, int value, SimInstruction* instr, UnalignedPolicy f = ForbidUnaligned);
 
+    inline uint64_t readQ(int32_t addr, SimInstruction* instr, UnalignedPolicy f = ForbidUnaligned);
+    inline void writeQ(int32_t addr, uint64_t value, SimInstruction* instr, UnalignedPolicy f = ForbidUnaligned);
+
     inline int readExW(int32_t addr, SimInstruction* instr);
     inline int writeExW(int32_t addr, int value, SimInstruction* instr);
 
@@ -319,9 +347,29 @@ class Simulator
     // Executes one instruction.
     void instructionDecode(SimInstruction* instr);
 
+  private:
+    // ICache checking.
+    struct ICacheHasher {
+        typedef void* Key;
+        typedef void* Lookup;
+        static HashNumber hash(const Lookup& l);
+        static bool match(const Key& k, const Lookup& l);
+    };
+
+  public:
+    typedef HashMap<void*, CachePage*, ICacheHasher, SystemAllocPolicy> ICacheMap;
+
   public:
     static bool ICacheCheckingEnabled;
     static void FlushICache(void* start, size_t size);
+
+    // Jitcode may be rewritten from a signal handler, but is prevented from
+    // calling FlushICache() because the signal may arrive within the critical
+    // area of an AutoLockSimulatorCache. This flag instructs the Simulator
+    // to remove all cache entries the next time it checks, avoiding false negatives.
+    mozilla::Atomic<bool, mozilla::ReleaseAcquire> cacheInvalidatedBySignalHandler_;
+
+    void checkICacheLocked(ICacheMap& i_cache, SimInstruction* instr);
 
     static int64_t StopSimAt;
 
@@ -423,18 +471,6 @@ class Simulator
     int64_t icount() {
         return icount_;
     }
-
-  private:
-    // ICache checking.
-    struct ICacheHasher {
-        typedef void* Key;
-        typedef void* Lookup;
-        static HashNumber hash(const Lookup& l);
-        static bool match(const Key& k, const Lookup& l);
-    };
-
-  public:
-    typedef HashMap<void*, CachePage*, ICacheHasher, SystemAllocPolicy> ICacheMap;
 
   private:
     // This lock creates a critical section around 'redirection_' and

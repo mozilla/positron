@@ -24,12 +24,6 @@
 #include "mozilla/gfx/gfxVars.h"
 #include "nsISupportsUtils.h"           // for NS_IF_ADDREF
 #include "YCbCrUtils.h"                 // for YCbCr conversions
-#ifdef MOZ_WIDGET_GONK
-#include "GrallocImages.h"
-#endif
-#if defined(MOZ_WIDGET_GONK) && defined(MOZ_B2G_CAMERA) && defined(MOZ_WEBRTC)
-#include "GonkCameraImage.h"
-#endif
 #include "gfx2DGlue.h"
 #include "mozilla/gfx/2D.h"
 
@@ -104,6 +98,25 @@ BufferRecycleBin::ClearRecycledBuffers()
   mRecycledBufferSize = 0;
 }
 
+void
+ImageContainer::EnsureImageClient(bool aCreate)
+{
+  // If we're not forcing a new ImageClient, then we can skip this if we don't have an existing
+  // ImageClient, or if the existing one belongs to an IPC actor that is still open.
+  if (!aCreate && (!mImageClient || mImageClient->GetForwarder()->GetLayersIPCActor()->IPCOpen())) {
+    return;
+  }
+
+  RefPtr<ImageBridgeChild> imageBridge = ImageBridgeChild::GetSingleton();
+  if (imageBridge) {
+    mIPDLChild = new ImageContainerChild(this);
+    mImageClient = imageBridge->CreateImageClient(CompositableType::IMAGE, this, mIPDLChild);
+    if (mImageClient) {
+      mAsyncContainerID = mImageClient->GetAsyncID();
+    }
+  }
+}
+
 ImageContainer::ImageContainer(Mode flag)
 : mReentrantMonitor("ImageContainer.mReentrantMonitor"),
   mGenerationCounter(++sGenerationCounter),
@@ -113,25 +126,11 @@ ImageContainer::ImageContainer(Mode flag)
   mRecycleBin(new BufferRecycleBin()),
   mCurrentProducerID(-1)
 {
-  RefPtr<ImageBridgeChild> imageBridge = ImageBridgeChild::GetSingleton();
-  if (imageBridge) {
-    // the refcount of this ImageClient is 1. we don't use a RefPtr here because the refcount
-    // of this class must be done on the ImageBridge thread.
-    switch (flag) {
-      case SYNCHRONOUS:
-        break;
-      case ASYNCHRONOUS:
-        mIPDLChild = new ImageContainerChild(this);
-        mImageClient = imageBridge->CreateImageClient(CompositableType::IMAGE, this, mIPDLChild);
-        MOZ_ASSERT(mImageClient);
-        break;
-      default:
-        MOZ_ASSERT(false, "This flag is invalid.");
-        break;
-    }
+  if (flag == ASYNCHRONOUS) {
+    EnsureImageClient(true);
+  } else {
+    mAsyncContainerID = sInvalidAsyncContainerId;
   }
-  mAsyncContainerID = mImageClient ? mImageClient->GetAsyncID()
-                                   : sInvalidAsyncContainerId;
 }
 
 ImageContainer::ImageContainer(uint64_t aAsyncContainerID)
@@ -161,6 +160,7 @@ RefPtr<PlanarYCbCrImage>
 ImageContainer::CreatePlanarYCbCrImage()
 {
   ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+  EnsureImageClient(false);
   if (mImageClient && mImageClient->AsImageClientSingle()) {
     return new SharedPlanarYCbCrImage(mImageClient);
   }
@@ -171,23 +171,12 @@ RefPtr<SharedRGBImage>
 ImageContainer::CreateSharedRGBImage()
 {
   ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+  EnsureImageClient(false);
   if (!mImageClient || !mImageClient->AsImageClientSingle()) {
     return nullptr;
   }
   return new SharedRGBImage(mImageClient);
 }
-
-#ifdef MOZ_WIDGET_GONK
-RefPtr<OverlayImage>
-ImageContainer::CreateOverlayImage()
-{
-  ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-  if (!mImageClient || !mImageClient->AsImageClientSingle()) {
-    return nullptr;
-  }
-  return new OverlayImage();
-}
-#endif
 
 void
 ImageContainer::SetCurrentImageInternal(const nsTArray<NonOwningImage>& aImages)
@@ -331,9 +320,10 @@ bool ImageContainer::IsAsync() const
   return mAsyncContainerID != sInvalidAsyncContainerId;
 }
 
-uint64_t ImageContainer::GetAsyncContainerID() const
+uint64_t ImageContainer::GetAsyncContainerID()
 {
   NS_ASSERTION(IsAsync(),"Shared image ID is only relevant to async ImageContainers");
+  EnsureImageClient(false);
   return mAsyncContainerID;
 }
 
@@ -569,9 +559,7 @@ NVImage::NVImage()
 {
 }
 
-NVImage::~NVImage()
-{
-}
+NVImage::~NVImage() = default;
 
 IntSize
 NVImage::GetSize()
@@ -597,7 +585,7 @@ NVImage::GetAsSourceSurface()
   // logics in PlanarYCbCrImage::GetAsSourceSurface().
   const int bufferLength = mData.mYSize.height * mData.mYStride +
                            mData.mCbCrSize.height * mData.mCbCrSize.width * 2;
-  uint8_t* buffer = new uint8_t[bufferLength];
+  auto *buffer = new uint8_t[bufferLength];
 
   Data aData = mData;
   aData.mCbCrStride = aData.mCbCrSize.width;
@@ -734,9 +722,7 @@ SourceSurfaceImage::SourceSurfaceImage(gfx::SourceSurface* aSourceSurface)
     mTextureFlags(TextureFlags::DEFAULT)
 {}
 
-SourceSurfaceImage::~SourceSurfaceImage()
-{
-}
+SourceSurfaceImage::~SourceSurfaceImage() = default;
 
 TextureClient*
 SourceSurfaceImage::GetTextureClient(KnowsCompositor* aForwarder)

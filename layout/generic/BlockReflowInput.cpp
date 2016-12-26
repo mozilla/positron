@@ -140,7 +140,7 @@ BlockReflowInput::BlockReflowInput(const ReflowInput& aReflowInput,
   mBCoord = mContentArea.BStart(wm) = mBorderPadding.BStart(wm);
 
   mPrevChild = nullptr;
-  mCurrentLine = aFrame->end_lines();
+  mCurrentLine = aFrame->LinesEnd();
 
   mMinLineHeight = aReflowInput.CalcLineHeight();
 }
@@ -329,8 +329,8 @@ BlockReflowInput::ReplacedBlockFitsInAvailSpace(nsIFrame* aReplacedBlock,
 
 nsFlowAreaRect
 BlockReflowInput::GetFloatAvailableSpaceWithState(
-                      nscoord aBCoord,
-                      nsFloatManager::SavedState *aState) const
+                    nscoord aBCoord, ShapeType aShapeType,
+                    nsFloatManager::SavedState* aState) const
 {
   WritingMode wm = mReflowInput.GetWritingMode();
 #ifdef DEBUG
@@ -345,9 +345,9 @@ BlockReflowInput::GetFloatAvailableSpaceWithState(
   nscoord blockSize = (mContentArea.BSize(wm) == nscoord_MAX)
     ? nscoord_MAX : std::max(mContentArea.BEnd(wm) - aBCoord, 0);
   nsFlowAreaRect result =
-    mFloatManager->GetFlowArea(wm, aBCoord, nsFloatManager::BAND_FROM_POINT,
-                               blockSize, mContentArea, aState,
-                               ContainerSize());
+    mFloatManager->GetFlowArea(wm, aBCoord, blockSize,
+                               BandInfoType::BandFromPoint, aShapeType,
+                               mContentArea, aState, ContainerSize());
   // Keep the inline size >= 0 for compatibility with nsSpaceManager.
   if (result.mRect.ISize(wm) < 0) {
     result.mRect.ISize(wm) = 0;
@@ -356,7 +356,7 @@ BlockReflowInput::GetFloatAvailableSpaceWithState(
 #ifdef DEBUG
   if (nsBlockFrame::gNoisyReflow) {
     nsFrame::IndentBy(stdout, nsBlockFrame::gNoiseIndent);
-    printf("GetAvailableSpace: band=%d,%d,%d,%d hasfloats=%d\n",
+    printf("%s: band=%d,%d,%d,%d hasfloats=%d\n", __func__,
            result.mRect.IStart(wm), result.mRect.BStart(wm),
            result.mRect.ISize(wm), result.mRect.BSize(wm), result.mHasFloats);
   }
@@ -379,8 +379,10 @@ BlockReflowInput::GetFloatAvailableSpaceForBSize(
                "bad coord system");
 #endif
   nsFlowAreaRect result =
-    mFloatManager->GetFlowArea(wm, aBCoord, nsFloatManager::WIDTH_WITHIN_HEIGHT,
-                               aBSize, mContentArea, aState, ContainerSize());
+    mFloatManager->GetFlowArea(wm, aBCoord, aBSize,
+                               BandInfoType::WidthWithinHeight,
+                               ShapeType::ShapeOutside,
+                               mContentArea, aState, ContainerSize());
   // Keep the width >= 0 for compatibility with nsSpaceManager.
   if (result.mRect.ISize(wm) < 0) {
     result.mRect.ISize(wm) = 0;
@@ -389,7 +391,7 @@ BlockReflowInput::GetFloatAvailableSpaceForBSize(
 #ifdef DEBUG
   if (nsBlockFrame::gNoisyReflow) {
     nsFrame::IndentBy(stdout, nsBlockFrame::gNoiseIndent);
-    printf("GetAvailableSpaceForHeight: space=%d,%d,%d,%d hasfloats=%d\n",
+    printf("%s: space=%d,%d,%d,%d hasfloats=%d\n", __func__,
            result.mRect.IStart(wm), result.mRect.BStart(wm),
            result.mRect.ISize(wm), result.mRect.BSize(wm), result.mHasFloats);
   }
@@ -416,7 +418,7 @@ BlockReflowInput::ReconstructMarginBefore(nsLineList::iterator aLine)
   mPrevBEndMargin.Zero();
   nsBlockFrame *block = mBlock;
 
-  nsLineList::iterator firstLine = block->begin_lines();
+  nsLineList::iterator firstLine = block->LinesBegin();
   for (;;) {
     --aLine;
     if (aLine->IsBlock()) {
@@ -569,7 +571,7 @@ BlockReflowInput::AddFloat(nsLineLayout*       aLineLayout,
                              nscoord             aAvailableISize)
 {
   NS_PRECONDITION(aLineLayout, "must have line layout");
-  NS_PRECONDITION(mBlock->end_lines() != mCurrentLine, "null ptr");
+  NS_PRECONDITION(mBlock->LinesEnd() != mCurrentLine, "null ptr");
   NS_PRECONDITION(aFloat->GetStateBits() & NS_FRAME_OUT_OF_FLOW,
                   "aFloat must be an out-of-flow frame");
 
@@ -614,11 +616,12 @@ BlockReflowInput::AddFloat(nsLineLayout*       aLineLayout,
   bool placed;
 
   // Now place the float immediately if possible. Otherwise stash it
-  // away in mPendingFloats and place it later.
+  // away in mBelowCurrentLineFloats and place it later.
   // If one or more floats has already been pushed to the next line,
   // don't let this one go on the current line, since that would violate
   // float ordering.
-  LogicalRect floatAvailableSpace = GetFloatAvailableSpace().mRect;
+  LogicalRect floatAvailableSpace =
+    GetFloatAvailableSpaceForPlacingFloat(mBCoord).mRect;
   if (mBelowCurrentLineFloats.IsEmpty() &&
       (aLineLayout->LineIsEmpty() ||
        mBlock->ComputeFloatISize(*this, floatAvailableSpace, aFloat)
@@ -628,7 +631,13 @@ BlockReflowInput::AddFloat(nsLineLayout*       aLineLayout,
     if (placed) {
       // Pass on updated available space to the current inline reflow engine
       WritingMode wm = mReflowInput.GetWritingMode();
-      nsFlowAreaRect floatAvailSpace = GetFloatAvailableSpace(mBCoord);
+      // If we have mLineBSize, we are reflowing the line again due to
+      // LineReflowStatus::RedoMoreFloats. We should use mLineBSize to query the
+      // correct available space.
+      nsFlowAreaRect floatAvailSpace =
+        mLineBSize.isNothing()
+        ? GetFloatAvailableSpace(mBCoord)
+        : GetFloatAvailableSpaceForBSize(mBCoord, mLineBSize.value(), nullptr);
       LogicalRect availSpace(wm, floatAvailSpace.mRect.IStart(wm), mBCoord,
                              floatAvailSpace.mRect.ISize(wm),
                              floatAvailSpace.mRect.BSize(wm));
@@ -736,8 +745,9 @@ BlockReflowInput::FlowAndPlaceFloat(nsIFrame* aFloat)
     // XXXldb Does this handle vertical margins correctly?
     mBCoord = ClearFloats(mBCoord, floatDisplay->PhysicalBreakType(wm));
   }
-    // Get the band of available space
-  nsFlowAreaRect floatAvailableSpace = GetFloatAvailableSpace(mBCoord);
+  // Get the band of available space with respect to margin box.
+  nsFlowAreaRect floatAvailableSpace =
+    GetFloatAvailableSpaceForPlacingFloat(mBCoord);
   LogicalRect adjustedAvailableSpace =
     mBlock->AdjustFloatAvailableSpace(*this, floatAvailableSpace.mRect, aFloat);
 
@@ -812,7 +822,7 @@ BlockReflowInput::FlowAndPlaceFloat(nsIFrame* aFloat)
       if (adjustedAvailableSpace.BSize(wm) != NS_UNCONSTRAINEDSIZE) {
         adjustedAvailableSpace.BSize(wm) -= floatAvailableSpace.mRect.BSize(wm);
       }
-      floatAvailableSpace = GetFloatAvailableSpace(mBCoord);
+      floatAvailableSpace = GetFloatAvailableSpaceForPlacingFloat(mBCoord);
     } else {
       // This quirk matches the one in nsBlockFrame::AdjustFloatAvailableSpace
       // IE handles float tables in a very special way
@@ -853,7 +863,7 @@ BlockReflowInput::FlowAndPlaceFloat(nsIFrame* aFloat)
       mBCoord += floatAvailableSpace.mRect.BSize(wm);
       // To match nsBlockFrame::AdjustFloatAvailableSpace, we have to
       // get a new width for the new band.
-      floatAvailableSpace = GetFloatAvailableSpace(mBCoord);
+      floatAvailableSpace = GetFloatAvailableSpaceForPlacingFloat(mBCoord);
       adjustedAvailableSpace = mBlock->AdjustFloatAvailableSpace(*this,
                                  floatAvailableSpace.mRect, aFloat);
       floatMarginISize = FloatMarginISize(mReflowInput,

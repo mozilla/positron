@@ -4,7 +4,11 @@
 import mozdevice
 import logging
 import unittest
+
+import mozunit
+
 from sut import MockAgent
+
 
 class MkDirsTest(unittest.TestCase):
 
@@ -26,9 +30,10 @@ class MkDirsTest(unittest.TestCase):
                               ('isdir /mnt/sdcard', 'TRUE'),
                               ('isdir /mnt/sdcard/baz', 'FALSE'),
                               ('mkdr /mnt/sdcard/baz',
-                               '##AGENT-WARNING## Could not create the directory /mnt/sdcard/baz')],
+                               "##AGENT-WARNING## "
+                               "Could not create the directory /mnt/sdcard/baz")],
                      'expectException': True},
-                     ]
+                    ]
         for subTest in subTests:
             a = MockAgent(self, commands=subTest['cmds'])
 
@@ -73,4 +78,4 @@ class MkDirsTest(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    mozunit.main()

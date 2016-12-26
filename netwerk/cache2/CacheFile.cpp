@@ -39,7 +39,6 @@ public:
   {
     LOG(("NotifyCacheFileListenerEvent::NotifyCacheFileListenerEvent() "
          "[this=%p]", this));
-    MOZ_COUNT_CTOR(NotifyCacheFileListenerEvent);
   }
 
 protected:
@@ -47,7 +46,6 @@ protected:
   {
     LOG(("NotifyCacheFileListenerEvent::~NotifyCacheFileListenerEvent() "
          "[this=%p]", this));
-    MOZ_COUNT_DTOR(NotifyCacheFileListenerEvent);
   }
 
 public:
@@ -78,7 +76,6 @@ public:
   {
     LOG(("NotifyChunkListenerEvent::NotifyChunkListenerEvent() [this=%p]",
          this));
-    MOZ_COUNT_CTOR(NotifyChunkListenerEvent);
   }
 
 protected:
@@ -86,7 +83,6 @@ protected:
   {
     LOG(("NotifyChunkListenerEvent::~NotifyChunkListenerEvent() [this=%p]",
          this));
-    MOZ_COUNT_DTOR(NotifyChunkListenerEvent);
   }
 
 public:
@@ -114,7 +110,6 @@ public:
   explicit DoomFileHelper(CacheFileListener *aListener)
     : mListener(aListener)
   {
-    MOZ_COUNT_CTOR(DoomFileHelper);
   }
 
 
@@ -159,7 +154,6 @@ public:
 private:
   virtual ~DoomFileHelper()
   {
-    MOZ_COUNT_DTOR(DoomFileHelper);
   }
 
   nsCOMPtr<CacheFileListener>  mListener;
@@ -783,7 +777,7 @@ CacheFile::OpenAlternativeInputStream(nsICacheEntry *aEntryHandle,
 
   nsresult rv;
 
-  if (!mReady) {
+  if (NS_WARN_IF(!mReady)) {
     LOG(("CacheFile::OpenAlternativeInputStream() - CacheFile is not ready "
          "[this=%p]", this));
     return NS_ERROR_NOT_AVAILABLE;
@@ -810,7 +804,7 @@ CacheFile::OpenAlternativeInputStream(nsICacheEntry *aEntryHandle,
 
   const char *altData = mMetadata->GetElement(CacheFileUtils::kAltDataKey);
   MOZ_ASSERT(altData, "alt-metadata should exist but was not found!");
-  if (!altData) {
+  if (NS_WARN_IF(!altData)) {
     LOG(("CacheFile::OpenAlternativeInputStream() - alt-metadata not found but "
          "alt-data exists according to mAltDataOffset! [this=%p, ]", this));
     return NS_ERROR_NOT_AVAILABLE;
@@ -820,7 +814,7 @@ CacheFile::OpenAlternativeInputStream(nsICacheEntry *aEntryHandle,
   nsCString availableAltData;
   rv = CacheFileUtils::ParseAlternativeDataInfo(altData, &offset,
                                                 &availableAltData);
-  if (NS_FAILED(rv)) {
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     MOZ_ASSERT(false, "alt-metadata unexpectedly failed to parse");
     LOG(("CacheFile::OpenAlternativeInputStream() - Cannot parse alternative "
          "metadata! [this=%p]", this));
@@ -1228,6 +1222,17 @@ CacheFile::GetFetchCount(uint32_t *_retval)
   NS_ENSURE_TRUE(mMetadata, NS_ERROR_UNEXPECTED);
 
   return mMetadata->GetFetchCount(_retval);
+}
+
+nsresult
+CacheFile::GetDiskStorageSizeInKB(uint32_t *aDiskStorageSize)
+{
+  if (!mHandle) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  *aDiskStorageSize = mHandle->FileSizeInK();
+  return NS_OK;
 }
 
 nsresult
@@ -2300,12 +2305,9 @@ CacheFile::InitIndexEntry()
 
   nsresult rv;
 
-  // Bug 1201042 - will pass OriginAttributes directly.
-  rv = CacheFileIOManager::InitIndexEntry(mHandle,
-                                          mMetadata->OriginAttributes().mAppId,
-                                          mMetadata->IsAnonymous(),
-                                          mMetadata->OriginAttributes().mInIsolatedMozBrowser,
-                                          mPinned);
+  rv = CacheFileIOManager::InitIndexEntry(
+         mHandle, GetOriginAttrsHash(mMetadata->OriginAttributes()),
+         mMetadata->IsAnonymous(), mPinned);
   NS_ENSURE_SUCCESS(rv, rv);
 
   uint32_t expTime;

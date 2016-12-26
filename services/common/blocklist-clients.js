@@ -8,6 +8,7 @@ this.EXPORTED_SYMBOLS = ["AddonBlocklistClient",
                          "GfxBlocklistClient",
                          "OneCRLBlocklistClient",
                          "PluginBlocklistClient",
+                         "PinningBlocklistClient",
                          "FILENAME_ADDONS_JSON",
                          "FILENAME_GFX_JSON",
                          "FILENAME_PLUGINS_JSON"];
@@ -19,8 +20,9 @@ const { Task } = Cu.import("resource://gre/modules/Task.jsm");
 const { OS } = Cu.import("resource://gre/modules/osfile.jsm");
 Cu.importGlobalProperties(["fetch"]);
 
-const { loadKinto } = Cu.import("resource://services-common/kinto-offline-client.js");
+const { Kinto } = Cu.import("resource://services-common/kinto-offline-client.js");
 const { KintoHttpClient } = Cu.import("resource://services-common/kinto-http-client.js");
+const { FirefoxAdapter } = Cu.import("resource://services-common/kinto-storage-adapter.js");
 const { CanonicalJSON } = Components.utils.import("resource://gre/modules/CanonicalJSON.jsm");
 
 const PREF_SETTINGS_SERVER                   = "services.settings.server";
@@ -31,31 +33,29 @@ const PREF_BLOCKLIST_ADDONS_COLLECTION       = "services.blocklist.addons.collec
 const PREF_BLOCKLIST_ADDONS_CHECKED_SECONDS  = "services.blocklist.addons.checked";
 const PREF_BLOCKLIST_PLUGINS_COLLECTION      = "services.blocklist.plugins.collection";
 const PREF_BLOCKLIST_PLUGINS_CHECKED_SECONDS = "services.blocklist.plugins.checked";
+const PREF_BLOCKLIST_PINNING_ENABLED         = "services.blocklist.pinning.enabled";
+const PREF_BLOCKLIST_PINNING_BUCKET          = "services.blocklist.pinning.bucket";
+const PREF_BLOCKLIST_PINNING_COLLECTION      = "services.blocklist.pinning.collection";
+const PREF_BLOCKLIST_PINNING_CHECKED_SECONDS = "services.blocklist.pinning.checked";
 const PREF_BLOCKLIST_GFX_COLLECTION          = "services.blocklist.gfx.collection";
 const PREF_BLOCKLIST_GFX_CHECKED_SECONDS     = "services.blocklist.gfx.checked";
 const PREF_BLOCKLIST_ENFORCE_SIGNING         = "services.blocklist.signing.enforced";
 
 const INVALID_SIGNATURE = "Invalid content/signature";
 
+// FIXME: this was the default path in earlier versions of
+// FirefoxAdapter, so for backwards compatibility we maintain this
+// filename, even though it isn't descriptive of who is using it.
+this.KINTO_STORAGE_PATH    = "kinto.sqlite";
+
 this.FILENAME_ADDONS_JSON  = "blocklist-addons.json";
 this.FILENAME_GFX_JSON     = "blocklist-gfx.json";
 this.FILENAME_PLUGINS_JSON = "blocklist-plugins.json";
 
-function mergeChanges(localRecords, changes) {
-  // Kinto.js adds attributes to local records that aren't present on server.
-  // (e.g. _status)
-  const stripPrivateProps = (obj) => {
-    return Object.keys(obj).reduce((current, key) => {
-      if (!key.startsWith("_")) {
-        current[key] = obj[key];
-      }
-      return current;
-    }, {});
-  };
-
+function mergeChanges(collection, localRecords, changes) {
   const records = {};
   // Local records by id.
-  localRecords.forEach((record) => records[record.id] = stripPrivateProps(record));
+  localRecords.forEach((record) => records[record.id] = collection.cleanLocalFields(record));
   // All existing records are replaced by the version from the server.
   changes.forEach((record) => records[record.id] = record);
 
@@ -87,18 +87,14 @@ function fetchRemoteCollection(collection) {
  * URL and bucket name. It uses the `FirefoxAdapter` which relies on SQLite to
  * persist the local DB.
  */
-function kintoClient() {
+function kintoClient(connection, bucket) {
   let base = Services.prefs.getCharPref(PREF_SETTINGS_SERVER);
-  let bucket = Services.prefs.getCharPref(PREF_BLOCKLIST_BUCKET);
-
-  let Kinto = loadKinto();
-
-  let FirefoxAdapter = Kinto.adapters.FirefoxAdapter;
 
   let config = {
     remote: base,
     bucket: bucket,
     adapter: FirefoxAdapter,
+    adapterOptions: {sqliteHandle: connection},
   };
 
   return new Kinto(config);
@@ -107,10 +103,11 @@ function kintoClient() {
 
 class BlocklistClient {
 
-  constructor(collectionName, lastCheckTimePref, processCallback, signerName) {
+  constructor(collectionName, lastCheckTimePref, processCallback, bucketName, signerName) {
     this.collectionName = collectionName;
     this.lastCheckTimePref = lastCheckTimePref;
     this.processCallback = processCallback;
+    this.bucketName = bucketName;
     this.signerName = signerName;
   }
 
@@ -131,7 +128,7 @@ class BlocklistClient {
         };
       } else {
         const localRecords = (yield collection.list()).data;
-        const records = mergeChanges(localRecords, payload.changes);
+        const records = mergeChanges(collection, localRecords, payload.changes);
         toSerialize = {
           last_modified: `${payload.lastModified}`,
           data: records
@@ -159,7 +156,6 @@ class BlocklistClient {
    * @return {Promise}          which rejects on sync or process failure.
    */
   maybeSync(lastModified, serverTime) {
-    let db = kintoClient();
     let opts = {};
     let enforceCollectionSigning =
       Services.prefs.getBoolPref(PREF_BLOCKLIST_ENFORCE_SIGNING);
@@ -172,11 +168,13 @@ class BlocklistClient {
       }
     }
 
-    let collection = db.collection(this.collectionName, opts);
 
     return Task.spawn((function* syncCollection() {
+      let connection;
       try {
-        yield collection.db.open();
+        connection = yield FirefoxAdapter.openConnection({path: KINTO_STORAGE_PATH});
+        let db = kintoClient(connection, this.bucketName);
+        let collection = db.collection(this.collectionName, opts);
 
         let collectionLastModified = yield collection.db.getLastModified();
         // If the data is up to date, there's no need to sync. We still need
@@ -202,7 +200,8 @@ class BlocklistClient {
             // if the signature is good (we haven't thrown), and the remote
             // last_modified is newer than the local last_modified, replace the
             // local data
-            if (payload.last_modified >= collection.lastModified) {
+            const localLastModified = yield collection.db.getLastModified();
+            if (payload.last_modified >= localLastModified) {
               yield collection.clear();
               yield collection.loadDump(payload.data);
             }
@@ -218,7 +217,7 @@ class BlocklistClient {
         // Track last update.
         this.updateLastCheck(serverTime);
       } finally {
-        collection.db.close();
+        yield connection.close();
       }
     }).bind(this));
   }
@@ -253,12 +252,58 @@ function* updateCertBlocklist(records) {
       }
     } catch (e) {
       // prevent errors relating to individual blocklist entries from
-      // causing sync to fail. At some point in the future, we may want to
-      // accumulate telemetry on these failures.
+      // causing sync to fail. We will accumulate telemetry on these failures in
+      // bug 1254099.
       Cu.reportError(e);
     }
   }
   certList.saveEntries();
+}
+
+/**
+ * Modify the appropriate security pins based on records from the remote
+ * collection.
+ *
+ * @param {Object} records   current records in the local db.
+ */
+function* updatePinningList(records) {
+  if (Services.prefs.getBoolPref(PREF_BLOCKLIST_PINNING_ENABLED)) {
+    const appInfo = Cc["@mozilla.org/xre/app-info;1"]
+        .getService(Ci.nsIXULAppInfo);
+
+    const siteSecurityService = Cc["@mozilla.org/ssservice;1"]
+        .getService(Ci.nsISiteSecurityService);
+
+    // clear the current preload list
+    siteSecurityService.clearPreloads();
+
+    // write each KeyPin entry to the preload list
+    for (let item of records) {
+      try {
+        const {pinType, pins=[], versions} = item;
+        if (versions.indexOf(appInfo.version) != -1) {
+          if (pinType == "KeyPin" && pins.length) {
+            siteSecurityService.setKeyPins(item.hostName,
+                item.includeSubdomains,
+                item.expires,
+                pins.length,
+                pins, true);
+          }
+          if (pinType == "STSPin") {
+            siteSecurityService.setHSTSPreload(item.hostName,
+                                               item.includeSubdomains,
+                                               item.expires);
+          }
+        }
+      } catch (e) {
+        // prevent errors relating to individual preload entries from causing
+        // sync to fail. We will accumulate telemetry for such failures in bug
+        // 1254099.
+      }
+    }
+  } else {
+    return;
+  }
 }
 
 /**
@@ -282,28 +327,39 @@ function* updateJSONBlocklist(filename, records) {
   }
 }
 
-
 this.OneCRLBlocklistClient = new BlocklistClient(
   Services.prefs.getCharPref(PREF_BLOCKLIST_ONECRL_COLLECTION),
   PREF_BLOCKLIST_ONECRL_CHECKED_SECONDS,
   updateCertBlocklist,
+  Services.prefs.getCharPref(PREF_BLOCKLIST_BUCKET),
   "onecrl.content-signature.mozilla.org"
 );
 
 this.AddonBlocklistClient = new BlocklistClient(
   Services.prefs.getCharPref(PREF_BLOCKLIST_ADDONS_COLLECTION),
   PREF_BLOCKLIST_ADDONS_CHECKED_SECONDS,
-  updateJSONBlocklist.bind(undefined, FILENAME_ADDONS_JSON)
+  updateJSONBlocklist.bind(undefined, FILENAME_ADDONS_JSON),
+  Services.prefs.getCharPref(PREF_BLOCKLIST_BUCKET)
 );
 
 this.GfxBlocklistClient = new BlocklistClient(
   Services.prefs.getCharPref(PREF_BLOCKLIST_GFX_COLLECTION),
   PREF_BLOCKLIST_GFX_CHECKED_SECONDS,
-  updateJSONBlocklist.bind(undefined, FILENAME_GFX_JSON)
+  updateJSONBlocklist.bind(undefined, FILENAME_GFX_JSON),
+  Services.prefs.getCharPref(PREF_BLOCKLIST_BUCKET)
 );
 
 this.PluginBlocklistClient = new BlocklistClient(
   Services.prefs.getCharPref(PREF_BLOCKLIST_PLUGINS_COLLECTION),
   PREF_BLOCKLIST_PLUGINS_CHECKED_SECONDS,
-  updateJSONBlocklist.bind(undefined, FILENAME_PLUGINS_JSON)
+  updateJSONBlocklist.bind(undefined, FILENAME_PLUGINS_JSON),
+  Services.prefs.getCharPref(PREF_BLOCKLIST_BUCKET)
+);
+
+this.PinningPreloadClient = new BlocklistClient(
+  Services.prefs.getCharPref(PREF_BLOCKLIST_PINNING_COLLECTION),
+  PREF_BLOCKLIST_PINNING_CHECKED_SECONDS,
+  updatePinningList,
+  Services.prefs.getCharPref(PREF_BLOCKLIST_PINNING_BUCKET),
+  "pinning-preload.content-signature.mozilla.org"
 );

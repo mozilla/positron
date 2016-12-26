@@ -17,8 +17,8 @@ const TEST_THRESHOLD = {
 };
 
 const ADDON_ROLLOUT_POLICY = {
-  "beta"    : "50allmpc", // Any WebExtension or addon with mpc = true
-  "release" : "49a", // 10 tested add-ons + any WebExtension
+  "beta"    : "51alladdons", // Any WebExtension or addon except with mpc = false
+  "release" : "50allmpc", // Any WebExtension or addon with mpc = true
 };
 
 const PREF_COHORT_SAMPLE       = "e10s.rollout.cohortSample";
@@ -170,15 +170,5 @@ function optedOut() {
  * string must be returned.
  */
 function getTemporaryDisqualification() {
-  let applicationLanguage =
-    Cc["@mozilla.org/chrome/chrome-registry;1"]
-      .getService(Ci.nsIXULChromeRegistry)
-      .getSelectedLocale("global")
-      .split("-")[0];
-
-  if (applicationLanguage == "ru") {
-    return "ru";
-  }
-
   return "";
 }

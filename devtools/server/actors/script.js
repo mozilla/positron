@@ -33,6 +33,7 @@ loader.lazyGetter(this, "Debugger", () => {
   return Debugger;
 });
 loader.lazyRequireGetter(this, "CssLogic", "devtools/server/css-logic", true);
+loader.lazyRequireGetter(this, "findCssSelector", "devtools/shared/inspector/css-logic", true);
 loader.lazyRequireGetter(this, "events", "sdk/event/core");
 loader.lazyRequireGetter(this, "mapURIToAddonID", "devtools/server/actors/utils/map-uri-to-addon-id");
 
@@ -561,8 +562,8 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     });
   },
 
-  disconnect: function () {
-    dumpn("in ThreadActor.prototype.disconnect");
+  destroy: function () {
+    dumpn("in ThreadActor.prototype.destroy");
     if (this._state == "paused") {
       this.onResume();
     }
@@ -592,10 +593,10 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
   },
 
   /**
-   * Disconnect the debugger and put the actor in the exited state.
+   * destroy the debugger and put the actor in the exited state.
    */
   exit: function () {
-    this.disconnect();
+    this.destroy();
     this._state = "exited";
   },
 
@@ -654,7 +655,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
   },
 
   onDetach: function (aRequest) {
-    this.disconnect();
+    this.destroy();
     this._state = "detached";
     this._debuggerSourcesSeen = null;
 
@@ -1114,7 +1115,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     let els = Cc["@mozilla.org/eventlistenerservice;1"]
                 .getService(Ci.nsIEventListenerService);
 
-    let targets = els.getEventTargetChainFor(eventTarget);
+    let targets = els.getEventTargetChainFor(eventTarget, true);
     let listeners = [];
 
     for (let target of targets) {
@@ -1435,7 +1436,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
         }
 
         // There will be no tagName if the event listener is set on the window.
-        let selector = node.tagName ? CssLogic.findCssSelector(node) : "window";
+        let selector = node.tagName ? findCssSelector(node) : "window";
         let nodeDO = this.globalDebugObject.makeDebuggeeValue(node);
         listenerForm.node = {
           selector: selector,

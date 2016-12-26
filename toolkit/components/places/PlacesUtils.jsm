@@ -256,9 +256,14 @@ const BOOKMARK_VALIDATORS = Object.freeze({
 });
 
 // Sync bookmark records can contain additional properties.
-const SYNC_BOOKMARK_VALIDATORS = Object.freeze(Object.assign({
-  // Sync uses kinds instead of types, which distinguish between livemarks
-  // and smart bookmarks.
+const SYNC_BOOKMARK_VALIDATORS = Object.freeze({
+  // Sync uses Places GUIDs for all records except roots.
+  syncId: simpleValidateFunc(v => typeof v == "string" && (
+                                  (PlacesSyncUtils.bookmarks.ROOTS.includes(v) ||
+                                   PlacesUtils.isValidGuid(v)))),
+  parentSyncId: v => SYNC_BOOKMARK_VALIDATORS.syncId(v),
+  // Sync uses kinds instead of types, which distinguish between livemarks,
+  // queries, and smart bookmarks.
   kind: simpleValidateFunc(v => typeof v == "string" &&
                                 Object.values(PlacesSyncUtils.bookmarks.KINDS).includes(v)),
   query: simpleValidateFunc(v => v === null || (typeof v == "string" && v)),
@@ -282,9 +287,23 @@ const SYNC_BOOKMARK_VALIDATORS = Object.freeze(Object.assign({
   keyword: simpleValidateFunc(v => v === null || typeof v == "string"),
   description: simpleValidateFunc(v => v === null || typeof v == "string"),
   loadInSidebar: simpleValidateFunc(v => v === true || v === false),
-  feed: BOOKMARK_VALIDATORS.url,
+  feed: v => v === null ? v : BOOKMARK_VALIDATORS.url(v),
   site: v => v === null ? v : BOOKMARK_VALIDATORS.url(v),
-}, BOOKMARK_VALIDATORS));
+  title: BOOKMARK_VALIDATORS.title,
+  url: BOOKMARK_VALIDATORS.url,
+});
+
+// Sync change records are passed between `PlacesSyncUtils` and the Sync
+// bookmarks engine, and are used to update an item's sync status and change
+// counter at the end of a sync.
+const SYNC_CHANGE_RECORD_VALIDATORS = Object.freeze({
+  modified: simpleValidateFunc(v => typeof v == "number" && v >= 0),
+  counter: simpleValidateFunc(v => typeof v == "number" && v >= 0),
+  status: simpleValidateFunc(v => typeof v == "number" &&
+                                  Object.values(PlacesUtils.bookmarks.SYNC_STATUS).includes(v)),
+  tombstone: simpleValidateFunc(v => v === true || v === false),
+  synced: simpleValidateFunc(v => v === true || v === false),
+});
 
 this.PlacesUtils = {
   // Place entries that are containers, e.g. bookmark folders or queries.
@@ -308,6 +327,7 @@ this.PlacesUtils = {
   POST_DATA_ANNO: "bookmarkProperties/POSTData",
   READ_ONLY_ANNO: "placesInternal/READ_ONLY",
   CHARSET_ANNO: "URIProperties/characterSet",
+  MOBILE_ROOT_ANNO: "mobile/bookmarksRoot",
 
   TOPIC_SHUTDOWN: "places-shutdown",
   TOPIC_INIT_COMPLETE: "places-init-complete",
@@ -414,6 +434,11 @@ this.PlacesUtils = {
   mozActionURI(type, params) {
     let encodedParams = {};
     for (let key in params) {
+      // Strip null or undefined.
+      // Regardless, don't encode them or they would be converted to a string.
+      if (params[key] === null || params[key] === undefined) {
+        continue;
+      }
       encodedParams[key] = encodeURIComponent(params[key]);
     }
     return "moz-action:" + type + "," + JSON.stringify(encodedParams);
@@ -506,7 +531,7 @@ this.PlacesUtils = {
    * @throws if the object contains invalid data.
    * @note any unknown properties are pass-through.
    */
-  validateItemProperties(validators, props, behavior={}) {
+  validateItemProperties(validators, props, behavior = {}) {
     if (!props)
       throw new Error("Input should be a valid object");
     // Make a shallow copy of `props` to avoid mutating the original object
@@ -552,6 +577,7 @@ this.PlacesUtils = {
 
   BOOKMARK_VALIDATORS,
   SYNC_BOOKMARK_VALIDATORS,
+  SYNC_CHANGE_RECORD_VALIDATORS,
 
   QueryInterface: XPCOMUtils.generateQI([
     Ci.nsIObserver
@@ -568,8 +594,7 @@ this.PlacesUtils = {
     this._shutdownFunctions.push(aFunc);
   },
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// nsIObserver
+  // nsIObserver
   observe: function PU_observe(aSubject, aTopic, aData)
   {
     switch (aTopic) {
@@ -602,8 +627,7 @@ this.PlacesUtils = {
   onPageAnnotationRemoved: function() {},
 
 
-  //////////////////////////////////////////////////////////////////////////////
-  //// nsITransactionListener
+  // nsITransactionListener
 
   didDo: function PU_didDo(aManager, aTransaction, aDoResult)
   {
@@ -912,11 +936,11 @@ this.PlacesUtils = {
         // but drag and drop of files from the shell has parts.length = 1
         if (parts.length != 1 && parts.length % 2)
           break;
-        for (let i = 0; i < parts.length; i=i+2) {
+        for (let i = 0; i < parts.length; i = i + 2) {
           let uriString = parts[i];
           let titleString = "";
-          if (parts.length > i+1)
-            titleString = parts[i+1];
+          if (parts.length > i + 1)
+            titleString = parts[i + 1];
           else {
             // for drag and drop of files, try to use the leafName as title
             try {
@@ -1110,6 +1134,11 @@ this.PlacesUtils = {
     return this.unfiledBookmarksFolderId = this.bookmarks.unfiledBookmarksFolder;
   },
 
+  get mobileFolderId() {
+    delete this.mobileFolderId;
+    return this.mobileFolderId = this.bookmarks.mobileFolder;
+  },
+
   /**
    * Checks if aItemId is a root.
    *
@@ -1122,7 +1151,8 @@ this.PlacesUtils = {
            aItemId == PlacesUtils.toolbarFolderId ||
            aItemId == PlacesUtils.unfiledBookmarksFolderId ||
            aItemId == PlacesUtils.tagsFolderId ||
-           aItemId == PlacesUtils.placesRootId;
+           aItemId == PlacesUtils.placesRootId ||
+           aItemId == PlacesUtils.mobileFolderId;
   },
 
   /**
@@ -1161,7 +1191,7 @@ this.PlacesUtils = {
 
       // Fetch keywords for this href.
       let cache = yield gKeywordsCachePromise;
-      for (let [ keyword, entry ] of cache) {
+      for (let [ , entry ] of cache) {
         // Set the POST data on keywords not having it.
         if (entry.url.href == bm.url.href && !entry.postData) {
           entry.postData = aPostData;
@@ -1612,10 +1642,10 @@ this.PlacesUtils = {
    *           properties: { uri, dataLen, data, mimeType }
    * @rejects JavaScript exception if the given url has no associated favicon.
    */
-  promiseFaviconData: function (aPageUrl) {
+  promiseFaviconData: function(aPageUrl) {
     let deferred = Promise.defer();
     PlacesUtils.favicons.getFaviconDataForPage(NetUtil.newURI(aPageUrl),
-      function (aURI, aDataLen, aData, aMimeType) {
+      function(aURI, aDataLen, aData, aMimeType) {
         if (aURI) {
           deferred.resolve({ uri: aURI,
                              dataLen: aDataLen,
@@ -1635,7 +1665,7 @@ this.PlacesUtils = {
    * @resolves to the nsIURL of the favicon link
    * @rejects if the given url has no associated favicon.
    */
-  promiseFaviconLinkUrl: function (aPageUrl) {
+  promiseFaviconLinkUrl: function(aPageUrl) {
     let deferred = Promise.defer();
     if (!(aPageUrl instanceof Ci.nsIURI))
       aPageUrl = NetUtil.newURI(aPageUrl);
@@ -1815,6 +1845,8 @@ this.PlacesUtils = {
             item.root = "unfiledBookmarksFolder";
           else if (itemId == PlacesUtils.toolbarFolderId)
             item.root = "toolbarFolder";
+          else if (itemId == PlacesUtils.mobileFolderId)
+            item.root = "mobileFolder";
           break;
         case Ci.nsINavBookmarksService.TYPE_SEPARATOR:
           item.type = PlacesUtils.TYPE_X_MOZ_PLACE_SEPARATOR;
@@ -2000,7 +2032,7 @@ XPCOMUtils.defineLazyGetter(PlacesUtils, "transactionManager", function() {
   let tm = Cc["@mozilla.org/transactionmanager;1"].
            createInstance(Ci.nsITransactionManager);
   tm.AddListener(PlacesUtils);
-  this.registerShutdownFunction(function () {
+  this.registerShutdownFunction(function() {
     // Clear all references to local transactions in the transaction manager,
     // this prevents from leaking it.
     this.transactionManager.RemoveListener(this);
@@ -2126,7 +2158,7 @@ var Keywords = {
    * @resolves to an object in the form: { keyword, url, postData },
    *           or null if a keyword entry was not found.
    */
-  fetch(keywordOrEntry, onResult=null) {
+  fetch(keywordOrEntry, onResult = null) {
     if (typeof(keywordOrEntry) == "string")
       keywordOrEntry = { keyword: keywordOrEntry };
 
@@ -2252,6 +2284,9 @@ var Keywords = {
             `, { url: url.href, keyword: keyword, post_data: postData });
         }
 
+        yield PlacesSyncUtils.bookmarks.addSyncChangesForBookmarksWithURL(
+          db, url, PlacesSyncUtils.bookmarks.determineSyncChangeDelta(source));
+
         cache.set(keyword, { keyword, url, postData });
 
         // In any case, notify about the new keyword.
@@ -2288,6 +2323,9 @@ var Keywords = {
 
       yield db.execute(`DELETE FROM moz_keywords WHERE keyword = :keyword`,
                        { keyword });
+
+      yield PlacesSyncUtils.bookmarks.addSyncChangesForBookmarksWithURL(
+        db, url, PlacesSyncUtils.bookmarks.determineSyncChangeDelta(source));
 
       // Notify bookmarks about the removal.
       yield notifyKeywordChange(url.href, "", source);
@@ -2497,7 +2535,7 @@ var GuidHelper = {
     this.idsForGuids.delete(guid);
   },
 
-  ensureObservingRemovedItems: function () {
+  ensureObservingRemovedItems: function() {
     if (!("observer" in this)) {
       /**
        * This observers serves two purposes:
@@ -2535,8 +2573,7 @@ var GuidHelper = {
   }
 };
 
-////////////////////////////////////////////////////////////////////////////////
-//// Transactions handlers.
+// Transactions handlers.
 
 /**
  * Updates commands in the undo group of the active window commands.
@@ -3675,7 +3712,7 @@ PlacesSortFolderByNameTransaction.prototype = {
     let newOrder = [];
     let preSep = []; // temporary array for sorting each group of items
     let sortingMethod =
-      function (a, b) {
+      function(a, b) {
         if (PlacesUtils.nodeIsContainer(a) && !PlacesUtils.nodeIsContainer(b))
           return -1;
         if (!PlacesUtils.nodeIsContainer(a) && PlacesUtils.nodeIsContainer(b))
@@ -3816,7 +3853,7 @@ PlacesUntagURITransaction.prototype = {
     // Filter tags existing on the bookmark, otherwise on undo we may try to
     // set nonexistent tags.
     let tags = PlacesUtils.tagging.getTagsForURI(this.item.uri);
-    this.item.tags = this.item.tags.filter(function (aTag) {
+    this.item.tags = this.item.tags.filter(function(aTag) {
       return tags.includes(aTag);
     });
     PlacesUtils.tagging.untagURI(this.item.uri, this.item.tags);

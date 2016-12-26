@@ -7,21 +7,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "Task",
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
   "resource://gre/modules/PlacesUtils.jsm");
 
-function whenDelayedStartupFinished(aWindow, aCallback) {
-  return new Promise(resolve => {
-    info("Waiting for delayed startup to finish");
-    Services.obs.addObserver(function observer(aSubject, aTopic) {
-      if (aWindow == aSubject) {
-        Services.obs.removeObserver(observer, aTopic);
-        if (aCallback) {
-          executeSoon(aCallback);
-        }
-        resolve();
-      }
-    }, "browser-delayed-startup-finished", false);
-  });
-}
-
 /**
  * Allows waiting for an observer notification once.
  *
@@ -36,13 +21,30 @@ function promiseTopicObserved(topic)
 {
   let deferred = Promise.defer();
   info("Waiting for observer topic " + topic);
-  Services.obs.addObserver(function PTO_observe(subject, topic, data) {
-    Services.obs.removeObserver(PTO_observe, topic);
-    deferred.resolve([subject, data]);
+  Services.obs.addObserver(function PTO_observe(obsSubject, obsTopic, obsData) {
+    Services.obs.removeObserver(PTO_observe, obsTopic);
+    deferred.resolve([obsSubject, obsData]);
   }, topic, false);
   return deferred.promise;
 }
 
+/**
+ * Called after opening a new window or switching windows, this will wait until
+ * we are sure that an attempt to display a notification will not fail.
+ */
+function* waitForWindowReadyForPopupNotifications(win)
+{
+  // These are the same checks that PopupNotifications.jsm makes before it
+  // allows a notification to open.
+  yield BrowserTestUtils.waitForCondition(
+    () => win.gBrowser.selectedBrowser.docShellIsActive,
+    "The browser should be active"
+  );
+  yield BrowserTestUtils.waitForCondition(
+    () => Services.focus.activeWindow == win,
+    "The window should be active"
+  );
+}
 
 /**
  * Waits for a load (or custom) event to finish in a given tab. If provided
@@ -70,10 +72,10 @@ function promiseTabLoadEvent(tab, url)
 const PREF_SECURITY_DELAY_INITIAL = Services.prefs.getIntPref("security.notification_enable_delay");
 
 function setup() {
-  // Disable transitions as they slow the test down and we want to click the
-  // mouse buttons in a predictable location.
-
+  BrowserTestUtils.openNewForegroundTab(gBrowser, "http://example.com/")
+                  .then(goNext);
   registerCleanupFunction(() => {
+    gBrowser.removeTab(gBrowser.selectedTab);
     PopupNotifications.buttonDelay = PREF_SECURITY_DELAY_INITIAL;
   });
 }
@@ -91,16 +93,16 @@ function* runNextTest() {
   let nextTest = tests.shift();
   if (nextTest.onShown) {
     let shownState = false;
-    onPopupEvent("popupshowing", function () {
+    onPopupEvent("popupshowing", function() {
       info("[" + nextTest.id + "] popup showing");
     });
-    onPopupEvent("popupshown", function () {
+    onPopupEvent("popupshown", function() {
       shownState = true;
       info("[" + nextTest.id + "] popup shown");
       Task.spawn(() => nextTest.onShown(this))
           .then(undefined, ex => Assert.ok(false, "onShown failed: " + ex));
     });
-    onPopupEvent("popuphidden", function () {
+    onPopupEvent("popuphidden", function() {
       info("[" + nextTest.id + "] popup hidden");
       nextTest.onHidden(this);
       goNext();
@@ -173,7 +175,8 @@ BasicNotification.prototype.addOptions = function(options) {
     this.options[name] = value;
 };
 
-function ErrorNotification() {
+function ErrorNotification(testId) {
+  BasicNotification.call(this, testId);
   this.mainAction.callback = () => {
     this.mainActionClicked = true;
     throw new Error("Oops!");
@@ -184,8 +187,7 @@ function ErrorNotification() {
   };
 }
 
-ErrorNotification.prototype = new BasicNotification();
-ErrorNotification.prototype.constructor = ErrorNotification;
+ErrorNotification.prototype = BasicNotification.prototype;
 
 function checkPopup(popup, notifyObj) {
   info("Checking notification " + notifyObj.id);
@@ -213,25 +215,24 @@ function checkPopup(popup, notifyObj) {
     is(notification.getAttribute("buttonaccesskey"),
        notifyObj.mainAction.accessKey, "main action accesskey matches");
   }
-  let actualSecondaryActions =
+  if (notifyObj.secondaryActions && notifyObj.secondaryActions.length > 0) {
+    let secondaryAction = notifyObj.secondaryActions[0];
+    is(notification.getAttribute("secondarybuttonlabel"), secondaryAction.label,
+       "secondary action label matches");
+    is(notification.getAttribute("secondarybuttonaccesskey"),
+       secondaryAction.accessKey, "secondary action accesskey matches");
+  }
+  // Additional secondary actions appear as menu items.
+  let actualExtraSecondaryActions =
     Array.filter(notification.childNodes, child => child.nodeName == "menuitem");
-  let secondaryActions = notifyObj.secondaryActions || [];
-  let actualSecondaryActionsCount = actualSecondaryActions.length;
-  if (notifyObj.options.hideNotNow) {
-    is(notification.getAttribute("hidenotnow"), "true", "'Not Now' item hidden");
-    if (secondaryActions.length)
-      is(notification.lastChild.tagName, "menuitem", "no menuseparator");
-  }
-  else if (secondaryActions.length) {
-    is(notification.lastChild.tagName, "menuseparator", "menuseparator exists");
-  }
-  is(actualSecondaryActionsCount, secondaryActions.length,
-    actualSecondaryActions.length + " secondary actions");
-  secondaryActions.forEach(function (a, i) {
-    is(actualSecondaryActions[i].getAttribute("label"), a.label,
-       "label for secondary action " + i + " matches");
-    is(actualSecondaryActions[i].getAttribute("accesskey"), a.accessKey,
-       "accessKey for secondary action " + i + " matches");
+  let extraSecondaryActions = notifyObj.secondaryActions ? notifyObj.secondaryActions.slice(1) : [];
+  is(actualExtraSecondaryActions.length, extraSecondaryActions.length,
+     "number of extra secondary actions matches");
+  extraSecondaryActions.forEach(function(a, i) {
+    is(actualExtraSecondaryActions[i].getAttribute("label"), a.label,
+       "label for extra secondary action " + i + " matches");
+    is(actualExtraSecondaryActions[i].getAttribute("accesskey"), a.accessKey,
+       "accessKey for extra secondary action " + i + " matches");
   });
 }
 
@@ -258,13 +259,20 @@ function onPopupEvent(eventName, callback, condition) {
   PopupNotifications.panel.addEventListener(eventName, listener, false);
 }
 
+function waitForNotificationPanel() {
+  return new Promise(resolve => {
+    onPopupEvent("popupshown", function() {
+      resolve(this);
+    });
+  });
+}
+
 function triggerMainCommand(popup) {
   let notifications = popup.childNodes;
   ok(notifications.length > 0, "at least one notification displayed");
   let notification = notifications[0];
   info("Triggering main command for notification " + notification.id);
-  // 20, 10 so that the inner button is hit
-  EventUtils.synthesizeMouse(notification.button, 20, 10, {});
+  EventUtils.synthesizeMouseAtCenter(notification.button, {});
 }
 
 function triggerSecondaryCommand(popup, index) {
@@ -272,17 +280,21 @@ function triggerSecondaryCommand(popup, index) {
   ok(notifications.length > 0, "at least one notification displayed");
   let notification = notifications[0];
   info("Triggering secondary command for notification " + notification.id);
-  // Cancel the arrow panel slide-in transition (bug 767133) such that
-  // it won't interfere with us interacting with the dropdown.
-  document.getAnonymousNodes(popup)[0].style.transition = "none";
 
-  notification.button.focus();
+  if (index == 0) {
+    EventUtils.synthesizeMouseAtCenter(notification.secondaryButton, {});
+    return;
+  }
+
+  // Extra secondary actions appear in a menu.
+  notification.secondaryButton.nextSibling.nextSibling.focus();
 
   popup.addEventListener("popupshown", function handle() {
     popup.removeEventListener("popupshown", handle, false);
     info("Command popup open for notification " + notification.id);
-    // Press down until the desired command is selected
-    for (let i = 0; i <= index; i++) {
+    // Press down until the desired command is selected. Decrease index by one
+    // since the secondary action was handled above.
+    for (let i = 0; i <= index - 1; i++) {
       EventUtils.synthesizeKey("VK_DOWN", {});
     }
     // Activate

@@ -19,7 +19,7 @@ function run_test() {
     onItemAdded: forceBookmarkCaching,
     onItemChanged: forceBookmarkCaching,
     onItemMoved: forceBookmarkCaching,
-    onItemRemoved: function (id) {
+    onItemRemoved: function(id) {
       try {
         forceBookmarkCaching(id);
         do_throw("trying to fetch a removed bookmark should throw");
@@ -38,11 +38,10 @@ function run_test() {
                            .createFolder(folder1,
                                          "Folder2",
                                          PlacesUtils.bookmarks.DEFAULT_INDEX);
-  let itemId = PlacesUtils.bookmarks
-                           .insertBookmark(folder2,
-                                           NetUtil.newURI("http://mozilla.org/"),
-                                           PlacesUtils.bookmarks.DEFAULT_INDEX,
-                                           "Mozilla");
+  PlacesUtils.bookmarks.insertBookmark(folder2,
+                                       NetUtil.newURI("http://mozilla.org/"),
+                                       PlacesUtils.bookmarks.DEFAULT_INDEX,
+                                       "Mozilla");
 
   PlacesUtils.bookmarks.removeFolderChildren(folder1);
 

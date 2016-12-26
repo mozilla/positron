@@ -29,11 +29,12 @@ import android.annotation.SuppressLint;
 import org.mozilla.gecko.annotation.JNITarget;
 import org.mozilla.gecko.annotation.RobocopTarget;
 import org.mozilla.gecko.annotation.WrapForJNI;
-import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.gfx.LayerView;
 import org.mozilla.gecko.gfx.PanZoomController;
 import org.mozilla.gecko.permissions.Permissions;
+import org.mozilla.gecko.process.GeckoProcessManager;
+import org.mozilla.gecko.process.GeckoServiceChildProcess;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoRequest;
 import org.mozilla.gecko.util.HardwareCodecCapabilityUtils;
@@ -81,9 +82,11 @@ import android.location.LocationManager;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Looper;
+import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
 import android.os.Vibrator;
 import android.provider.Settings;
@@ -319,6 +322,18 @@ public class GeckoAppShell
         CRASH_HANDLER.uncaughtException(null, e);
     }
 
+    @WrapForJNI
+    public static void launchOrBringToFront() {
+        GeckoInterface gi = getGeckoInterface();
+        if (gi == null || !gi.isForegrounded()) {
+            Intent intent = new Intent(Intent.ACTION_MAIN);
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+            intent.setClassName(AppConstants.ANDROID_PACKAGE_NAME, AppConstants.MOZ_ANDROID_BROWSER_INTENT_CLASS);
+
+            getApplicationContext().startActivity(intent);
+        }
+    }
+
     private static float getLocationAccuracy(Location location) {
         float radius = location.getAccuracy();
         return (location.hasAccuracy() && radius > 0) ? radius : 1001;
@@ -459,7 +474,7 @@ public class GeckoAppShell
                                                        float bearing, float speed, long time);
 
     private static class DefaultListeners
-            implements SensorEventListener, LocationListener, NotificationListener {
+            implements SensorEventListener, LocationListener, NotificationListener, ScreenOrientationDelegate {
         @Override
         public void onAccuracyChanged(Sensor sensor, int accuracy) {
         }
@@ -574,7 +589,7 @@ public class GeckoAppShell
         public void showNotification(String name, String cookie, String host,
                                      String title, String text, String imageUrl) {
             // Default is to not show the notification, and immediate send close message.
-            GeckoAppShell.onNotificationClose(name);
+            GeckoAppShell.onNotificationClose(name, cookie);
         }
 
         @Override // NotificationListener
@@ -582,12 +597,18 @@ public class GeckoAppShell
                                                String title, String text, String imageUrl,
                                                String data) {
             // Default is to not show the notification, and immediate send close message.
-            GeckoAppShell.onNotificationClose(name);
+            GeckoAppShell.onNotificationClose(name, cookie);
         }
 
         @Override // NotificationListener
         public void closeNotification(String name) {
             // Do nothing.
+        }
+
+        @Override
+        public boolean setRequestedOrientationForCurrentActivity(int requestedActivityInfoOrientation) {
+            // Do nothing, and report that the orientation was not set.
+            return false;
         }
     }
 
@@ -595,6 +616,11 @@ public class GeckoAppShell
     private static SensorEventListener sSensorListener = DEFAULT_LISTENERS;
     private static LocationListener sLocationListener = DEFAULT_LISTENERS;
     private static NotificationListener sNotificationListener = DEFAULT_LISTENERS;
+
+    /**
+     * A delegate for supporting the Screen Orientation API.
+     */
+    private static ScreenOrientationDelegate sScreenOrientationDelegate = DEFAULT_LISTENERS;
 
     public static SensorEventListener getSensorListener() {
         return sSensorListener;
@@ -618,6 +644,14 @@ public class GeckoAppShell
 
     public static void setNotificationListener(final NotificationListener listener) {
         sNotificationListener = (listener != null) ? listener : DEFAULT_LISTENERS;
+    }
+
+    public static ScreenOrientationDelegate getScreenOrientationDelegate() {
+        return sScreenOrientationDelegate;
+    }
+
+    public static void setScreenOrientationDelegate(ScreenOrientationDelegate screenOrientationDelegate) {
+        sScreenOrientationDelegate = (screenOrientationDelegate != null) ? screenOrientationDelegate : DEFAULT_LISTENERS;
     }
 
     @WrapForJNI(calledFrom = "gecko")
@@ -802,8 +836,7 @@ public class GeckoAppShell
 
     @WrapForJNI(calledFrom = "gecko")
     private static void moveTaskToBack() {
-        if (getGeckoInterface() != null)
-            getGeckoInterface().getActivity().moveTaskToBack(true);
+        // This is a vestige, to be removed as full-screen support for GeckoView is implemented.
     }
 
     @WrapForJNI(calledFrom = "gecko")
@@ -824,21 +857,9 @@ public class GeckoAppShell
 
     @JNITarget
     static public int getPreferredIconSize() {
-        if (Versions.feature11Plus) {
-            ActivityManager am = (ActivityManager)
-                    getApplicationContext().getSystemService(Context.ACTIVITY_SERVICE);
-            return am.getLauncherLargeIconSize();
-        } else {
-            switch (getDpi()) {
-                case DisplayMetrics.DENSITY_MEDIUM:
-                    return 48;
-                case DisplayMetrics.DENSITY_XHIGH:
-                    return 96;
-                case DisplayMetrics.DENSITY_HIGH:
-                default:
-                    return 72;
-            }
-        }
+        ActivityManager am = (ActivityManager)
+            getApplicationContext().getSystemService(Context.ACTIVITY_SERVICE);
+        return am.getLauncherLargeIconSize();
     }
 
     @WrapForJNI(calledFrom = "gecko")
@@ -943,15 +964,15 @@ public class GeckoAppShell
     }
 
     @WrapForJNI(dispatchTo = "gecko")
-    private static native void notifyAlertListener(String name, String topic);
+    private static native void notifyAlertListener(String name, String topic, String cookie);
 
     /**
      * Called by the NotificationListener to notify Gecko that a notification has been
      * shown.
      */
-    public static void onNotificationShow(final String name) {
+    public static void onNotificationShow(final String name, final String cookie) {
         if (GeckoThread.isRunning()) {
-            notifyAlertListener(name, "alertshow");
+            notifyAlertListener(name, "alertshow", cookie);
         }
     }
 
@@ -959,9 +980,9 @@ public class GeckoAppShell
      * Called by the NotificationListener to notify Gecko that a previously shown
      * notification has been closed.
      */
-    public static void onNotificationClose(final String name) {
+    public static void onNotificationClose(final String name, final String cookie) {
         if (GeckoThread.isRunning()) {
-            notifyAlertListener(name, "alertfinished");
+            notifyAlertListener(name, "alertfinished", cookie);
         }
     }
 
@@ -969,9 +990,9 @@ public class GeckoAppShell
      * Called by the NotificationListener to notify Gecko that a previously shown
      * notification has been clicked on.
      */
-    public static void onNotificationClick(final String name) {
+    public static void onNotificationClick(final String name, final String cookie) {
         if (GeckoThread.isRunning()) {
-            notifyAlertListener(name, "alertclickcallback");
+            notifyAlertListener(name, "alertclickcallback", cookie);
         }
     }
 
@@ -1485,7 +1506,7 @@ public class GeckoAppShell
                           (new File("/sys/class/nvidia-gpu")).exists();
         if (isTegra) {
             // disable on KitKat (bug 957694)
-            if (Versions.feature19Plus) {
+            if (Build.VERSION.SDK_INT >= 19) {
                 Log.w(LOGTAG, "Blocking plugins because of Tegra (bug 957694)");
                 return null;
             }
@@ -1724,19 +1745,25 @@ public class GeckoAppShell
         public Activity getActivity();
         public String getDefaultUAString();
         public void doRestart();
+
+        /**
+         * This API doesn't make sense for arbitrary GeckoView consumers. In future, consider an
+         * API like Android WebView's, which provides a View to the consumer to display fullscreen.
+         * See <a href="https://developer.android.com/reference/android/webkit/WebChromeClient.html#onShowCustomView(android.view.View,%20android.webkit.WebChromeClient.CustomViewCallback)">https://developer.android.com/reference/android/webkit/WebChromeClient.html#onShowCustomView(android.view.View,%20android.webkit.WebChromeClient.CustomViewCallback)</a>.
+         */
         public void setFullScreen(boolean fullscreen);
         public void addPluginView(View view);
         public void removePluginView(final View view);
-        public void enableCameraView();
-        public void disableCameraView();
+        public void enableOrientationListener();
+        public void disableOrientationListener();
         public void addAppStateListener(AppStateListener listener);
         public void removeAppStateListener(AppStateListener listener);
-        public View getCameraView();
         public void notifyWakeLockChanged(String topic, String state);
         public boolean areTabsShown();
         public AbsoluteLayout getPluginContainer();
         public void notifyCheckUpdateResult(String result);
         public void invalidateOptionsMenu();
+        public boolean isForegrounded();
 
         /**
          * Create a shortcut -- generally a home-screen icon -- linking the given title to the given URI.
@@ -1797,6 +1824,13 @@ public class GeckoAppShell
          * @return URI or null.
          */
         String getDefaultChromeURI();
+
+        /**
+         * Is this an official Mozilla application, like Firefox or Thunderbird?
+         *
+         * @return true if MOZILLA_OFFICIAL.
+         */
+        boolean isOfficial();
     };
 
     private static GeckoInterface sGeckoInterface;
@@ -1841,7 +1875,7 @@ public class GeckoAppShell
                 public void run() {
                     try {
                         if (getGeckoInterface() != null)
-                            getGeckoInterface().enableCameraView();
+                            getGeckoInterface().enableOrientationListener();
                     } catch (Exception e) { }
                 }
             });
@@ -1891,19 +1925,6 @@ public class GeckoAppShell
                 }
             }
 
-            try {
-                if (getGeckoInterface() != null) {
-                    View cameraView = getGeckoInterface().getCameraView();
-                    if (cameraView instanceof SurfaceView) {
-                        sCamera.setPreviewDisplay(((SurfaceView)cameraView).getHolder());
-                    } else if (cameraView instanceof TextureView) {
-                        sCamera.setPreviewTexture(((TextureView)cameraView).getSurfaceTexture());
-                    }
-                }
-            } catch (IOException | RuntimeException e) {
-                Log.w(LOGTAG, "Error setPreviewXXX:", e);
-            }
-
             sCamera.setParameters(params);
             sCameraBuffer = new byte[(bufferSize * 12) / 8];
             sCamera.addCallbackBuffer(sCameraBuffer);
@@ -1928,7 +1949,7 @@ public class GeckoAppShell
                 public void run() {
                     try {
                         if (getGeckoInterface() != null)
-                            getGeckoInterface().disableCameraView();
+                            getGeckoInterface().disableOrientationListener();
                     } catch (Exception e) { }
                 }
             });
@@ -1950,8 +1971,11 @@ public class GeckoAppShell
 
     @WrapForJNI(calledFrom = "gecko")
     private static void handleGeckoMessage(final NativeJSContainer message) {
-        final boolean success = EventDispatcher.getInstance().dispatchEvent(message) |
-                                getGeckoInterface().getAppEventDispatcher().dispatchEvent(message);
+        boolean success = EventDispatcher.getInstance().dispatchEvent(message);
+        if (getGeckoInterface() != null && getGeckoInterface().getAppEventDispatcher() != null) {
+            success |= getGeckoInterface().getAppEventDispatcher().dispatchEvent(message);
+        }
+
         if (!success) {
             final String type = message.optString("type", null);
             final String guid = message.optString(EventDispatcher.GUID, null);
@@ -2002,87 +2026,6 @@ public class GeckoAppShell
     @WrapForJNI(calledFrom = "gecko")
     private static void hideProgressDialog() {
         // unused stub
-    }
-
-    /*
-     * WebSMS related methods.
-     */
-    public static void sendMessage(String aNumber, String aMessage, int aRequestId, boolean aShouldNotify) {
-        if (!SmsManager.isEnabled()) {
-            return;
-        }
-
-        SmsManager.getInstance().send(aNumber, aMessage, aRequestId, aShouldNotify);
-    }
-
-    @WrapForJNI(calledFrom = "gecko")
-    private static void sendMessage(String aNumber, String aMessage, int aRequestId) {
-        sendMessage(aNumber, aMessage, aRequestId, /* shouldNotify */ true);
-    }
-
-    @WrapForJNI(calledFrom = "gecko")
-    private static void getMessage(int aMessageId, int aRequestId) {
-        if (!SmsManager.isEnabled()) {
-            return;
-        }
-
-        SmsManager.getInstance().getMessage(aMessageId, aRequestId);
-    }
-
-    @WrapForJNI(calledFrom = "gecko")
-    private static void deleteMessage(int aMessageId, int aRequestId) {
-        if (!SmsManager.isEnabled()) {
-            return;
-        }
-
-        SmsManager.getInstance().deleteMessage(aMessageId, aRequestId);
-    }
-
-    @WrapForJNI(calledFrom = "gecko")
-    private static void markMessageRead(int aMessageId, boolean aValue, boolean aSendReadReport, int aRequestId) {
-        if (!SmsManager.isEnabled()) {
-            return;
-        }
-
-        SmsManager.getInstance().markMessageRead(aMessageId, aValue, aSendReadReport, aRequestId);
-    }
-
-    @WrapForJNI(calledFrom = "gecko")
-    private static void createMessageCursor(long aStartDate, long aEndDate, String[] aNumbers, int aNumbersCount, String aDelivery, boolean aHasRead, boolean aRead, boolean aHasThreadId, long aThreadId, boolean aReverse, int aRequestId) {
-        if (!SmsManager.isEnabled()) {
-            return;
-        }
-
-        SmsManager.getInstance().createMessageCursor(aStartDate, aEndDate, aNumbers, aNumbersCount, aDelivery, aHasRead, aRead, aHasThreadId, aThreadId, aReverse, aRequestId);
-    }
-
-    @WrapForJNI(calledFrom = "gecko")
-    private static void getNextMessage(int aRequestId) {
-        if (!SmsManager.isEnabled()) {
-            return;
-        }
-
-        SmsManager.getInstance().getNextMessage(aRequestId);
-    }
-
-    @WrapForJNI(calledFrom = "gecko")
-    private static void createThreadCursor(int aRequestId) {
-        Log.i("GeckoAppShell", "CreateThreadCursorWrapper!");
-
-        if (!SmsManager.isEnabled()) {
-            return;
-        }
-
-        SmsManager.getInstance().createThreadCursor(aRequestId);
-    }
-
-    @WrapForJNI(calledFrom = "gecko")
-    private static void getNextThread(int aRequestId) {
-        if (!SmsManager.isEnabled()) {
-            return;
-        }
-
-        SmsManager.getInstance().getNextThread(aRequestId);
     }
 
     /* Called by JNI from AndroidBridge, and by reflection from tests/BaseTest.java.in */
@@ -2154,11 +2097,13 @@ public class GeckoAppShell
 
     @WrapForJNI(calledFrom = "gecko")
     private static void lockScreenOrientation(int aOrientation) {
+        // TODO: don't vector through GeckoAppShell.
         GeckoScreenOrientation.getInstance().lock(aOrientation);
     }
 
     @WrapForJNI(calledFrom = "gecko")
     private static void unlockScreenOrientation() {
+        // TODO: don't vector through GeckoAppShell.
         GeckoScreenOrientation.getInstance().unlock();
     }
 
@@ -2368,5 +2313,10 @@ public class GeckoAppShell
             sScreenSize = new Rect(0, 0, disp.getWidth(), disp.getHeight());
         }
         return sScreenSize;
+    }
+
+    @WrapForJNI
+    private static int startGeckoServiceChildProcess(String type, String[] args, int crashFd, int ipcFd) {
+        return GeckoProcessManager.getInstance().start(type, args, crashFd, ipcFd);
     }
 }

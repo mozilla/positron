@@ -43,7 +43,7 @@ function triggerSave(aWindow, aCallback) {
     info("showCallback");
     fileName = fp.defaultString;
     info("fileName: " + fileName);
-    destFile.append (fileName);
+    destFile.append(fileName);
     MockFilePicker.returnFiles = [destFile];
     MockFilePicker.filterIndex = 1; // kSaveAsType_URL
     info("done showCallback");
@@ -80,9 +80,9 @@ function triggerSave(aWindow, aCallback) {
     ok(false, "No Unknown Content Type dialog yet?");
   }
 
-  function onTransferComplete(aWindow, downloadSuccess, destDir) {
+  function onTransferComplete(aWindow2, downloadSuccess) {
     ok(downloadSuccess, "Link should have been downloaded successfully");
-    aWindow.close();
+    aWindow2.close();
 
     executeSoon(aCallback);
   }
@@ -146,7 +146,7 @@ function test() {
 
   mockTransferRegisterer.register();
 
-  registerCleanupFunction(function () {
+  registerCleanupFunction(function() {
     info("Running the cleanup code");
     mockTransferRegisterer.unregister();
     MockFilePicker.cleanup();
@@ -163,8 +163,8 @@ function test() {
     triggerSave(win, function() {
       windowGonePromise.then(function() {
         Services.prefs.setBoolPref(SAVE_PER_SITE_PREF, false);
-        testOnWindow(undefined, function(win) {
-          triggerSave(win, finish);
+        testOnWindow(undefined, function(win2) {
+          triggerSave(win2, finish);
         });
       });
     });

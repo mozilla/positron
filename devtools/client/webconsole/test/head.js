@@ -37,7 +37,7 @@ const SEVERITY_LOG = 3;
 // The indent of a console group in pixels.
 const GROUP_INDENT = 12;
 
-const WEBCONSOLE_STRINGS_URI = "devtools/locale/webconsole.properties";
+const WEBCONSOLE_STRINGS_URI = "devtools/client/locales/webconsole.properties";
 var WCUL10n = new WebConsoleUtils.L10n(WEBCONSOLE_STRINGS_URI);
 
 const DOCS_GA_PARAMS = "?utm_source=mozilla" +
@@ -46,10 +46,10 @@ const DOCS_GA_PARAMS = "?utm_source=mozilla" +
 
 flags.testing = true;
 
-function loadTab(url) {
+function loadTab(url, preferredRemoteType) {
   let deferred = promise.defer();
 
-  let tab = gBrowser.selectedTab = gBrowser.addTab(url);
+  let tab = gBrowser.selectedTab = gBrowser.addTab(url, { preferredRemoteType });
   let browser = gBrowser.getBrowserForTab(tab);
 
   browser.addEventListener("load", function onLoad() {
@@ -61,14 +61,7 @@ function loadTab(url) {
 }
 
 function loadBrowser(browser) {
-  let deferred = promise.defer();
-
-  browser.addEventListener("load", function onLoad() {
-    browser.removeEventListener("load", onLoad, true);
-    deferred.resolve(null);
-  }, true);
-
-  return deferred.promise;
+  return BrowserTestUtils.browserLoaded(browser);
 }
 
 function closeTab(tab) {
@@ -1795,21 +1788,6 @@ function checkLinkToInspector(hasLinkToInspector, msg) {
 function getSourceActor(sources, URL) {
   let item = sources.getItemForAttachment(a => a.source.url === URL);
   return item && item.value;
-}
-
-/**
- * Make a request against an actor and resolve with the packet.
- * @param object client
- *   The client to use when making the request.
- * @param function requestType
- *   The client request function to run.
- * @param array args
- *   The arguments to pass into the function.
- */
-function getPacket(client, requestType, args) {
-  return new Promise(resolve => {
-    client[requestType](...args, packet => resolve(packet));
-  });
 }
 
 /**

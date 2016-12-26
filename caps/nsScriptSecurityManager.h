@@ -67,9 +67,7 @@ public:
     static bool SecurityCompareURIs(nsIURI* aSourceURI, nsIURI* aTargetURI);
     static uint32_t SecurityHashURI(nsIURI* aURI);
 
-    static uint16_t AppStatusForPrincipal(nsIPrincipal *aPrin);
-
-    static nsresult 
+    static nsresult
     ReportError(JSContext* cx, const nsAString& messageTag,
                 nsIURI* aSource, nsIURI* aTarget);
 
@@ -124,10 +122,18 @@ private:
     CheckLoadURIFlags(nsIURI* aSourceURI, nsIURI* aTargetURI, nsIURI* aSourceBaseURI,
                       nsIURI* aTargetBaseURI, uint32_t aFlags);
 
+    // Returns the file URI whitelist, initializing it if it has not been
+    // initialized.
+    const nsTArray<nsCOMPtr<nsIURI>>& EnsureFileURIWhitelist();
+
     nsCOMPtr<nsIPrincipal> mSystemPrincipal;
     bool mPrefInitialized;
     bool mIsJavaScriptEnabled;
-    nsTArray<nsCOMPtr<nsIURI>> mFileURIWhitelist;
+
+    // List of URIs whose domains and sub-domains are whitelisted to allow
+    // access to file: URIs.  Lazily initialized; isNothing() when not yet
+    // initialized.
+    mozilla::Maybe<nsTArray<nsCOMPtr<nsIURI>>> mFileURIWhitelist;
 
     // This machinery controls new-style domain policies. The old-style
     // policy machinery will be removed soon.
@@ -150,14 +156,5 @@ private:
     static nsIStringBundle *sStrBundle;
     static JSContext       *sContext;
 };
-
-namespace mozilla {
-
-void
-GetJarPrefix(uint32_t aAppid,
-             bool aInIsolatedMozBrowser,
-             nsACString& aJarPrefix);
-
-} // namespace mozilla
 
 #endif // nsScriptSecurityManager_h__

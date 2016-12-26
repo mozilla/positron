@@ -36,14 +36,7 @@ nsNSSCertificateFakeTransport::GetDbKey(nsACString&)
 }
 
 NS_IMETHODIMP
-nsNSSCertificateFakeTransport::GetWindowTitle(nsAString&)
-{
-  NS_NOTREACHED("Unimplemented on content process");
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-nsNSSCertificateFakeTransport::GetNickname(nsAString&)
+nsNSSCertificateFakeTransport::GetDisplayName(nsAString&)
 {
   NS_NOTREACHED("Unimplemented on content process");
   return NS_ERROR_NOT_IMPLEMENTED;
@@ -218,10 +211,9 @@ nsNSSCertificateFakeTransport::Write(nsIObjectOutputStream* aStream)
   // nsNSSComponent. nsNSSCertificateFakeTransport object is used only to
   // carry the certificate serialization.
 
-  // This serialization has to match that of nsNSSCertificate,
-  // so write a fake cached EV Status.
-  uint32_t status = static_cast<uint32_t>(nsNSSCertificate::ev_status_unknown);
-  nsresult rv = aStream->Write32(status);
+  // This serialization has to match that of nsNSSCertificate, so include this
+  // now-unused field.
+  nsresult rv = aStream->Write32(0);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -238,10 +230,10 @@ nsNSSCertificateFakeTransport::Write(nsIObjectOutputStream* aStream)
 NS_IMETHODIMP
 nsNSSCertificateFakeTransport::Read(nsIObjectInputStream* aStream)
 {
-  // This serialization has to match that of nsNSSCertificate,
-  // so read the cachedEVStatus but don't actually use it.
-  uint32_t cachedEVStatus;
-  nsresult rv = aStream->Read32(&cachedEVStatus);
+  // This serialization has to match that of nsNSSCertificate, so read the (now
+  // unused) cachedEVStatus.
+  uint32_t unusedCachedEVStatus;
+  nsresult rv = aStream->Read32(&unusedCachedEVStatus);
   if (NS_FAILED(rv)) {
     return rv;
   }

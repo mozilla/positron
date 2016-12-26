@@ -185,7 +185,12 @@ private:
   bool RunPerformAsyncLaunch(StringVector aExtraOpts=StringVector(),
                              base::ProcessArchitecture aArch=base::GetCurrentProcessArchitecture());
 
-  static void GetPathToBinary(FilePath& exePath, GeckoProcessType processType);
+  enum class BinaryPathType {
+    Self,
+    PluginContainer
+  };
+
+  static BinaryPathType GetPathToBinary(FilePath& exePath, GeckoProcessType processType);
 
   // The buffer is passed to preserve its lifetime until we are done
   // with launching the sub-process.
@@ -210,6 +215,14 @@ private:
   static uint32_t sNextUniqueID;
 
   static bool sRunSelfAsContentProc;
+
+#if defined(MOZ_WIDGET_ANDROID)
+  void LaunchAndroidService(const char* type,
+                            const std::vector<std::string>& argv,
+                            const base::file_handle_mapping_vector& fds_to_remap,
+                            ProcessHandle* process_handle);
+#endif // defined(MOZ_WIDGET_ANDROID)
+
 };
 
 } /* namespace ipc */

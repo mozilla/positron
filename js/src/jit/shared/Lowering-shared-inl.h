@@ -587,6 +587,12 @@ LIRGeneratorShared::useFixed(MDefinition* mir, AnyRegister reg)
     return reg.isFloat() ? use(mir, LUse(reg.fpu())) : use(mir, LUse(reg.gpr()));
 }
 
+LUse
+LIRGeneratorShared::useFixedAtStart(MDefinition* mir, AnyRegister reg)
+{
+    return reg.isFloat() ? use(mir, LUse(reg.fpu(), true)) : use(mir, LUse(reg.gpr(), true));
+}
+
 LDefinition
 LIRGeneratorShared::temp(LDefinition::Type type, LDefinition::Policy policy)
 {
@@ -831,6 +837,19 @@ LIRGeneratorShared::useInt64OrConstant(MDefinition* mir, bool useAtStart)
 #endif
     }
     return useInt64(mir, useAtStart);
+}
+
+LInt64Allocation
+LIRGeneratorShared::useInt64RegisterOrConstant(MDefinition* mir, bool useAtStart)
+{
+    if (mir->isConstant()) {
+#if defined(JS_NUNBOX32)
+        return LInt64Allocation(LAllocation(mir->toConstant()), LAllocation());
+#else
+        return LInt64Allocation(LAllocation(mir->toConstant()));
+#endif
+    }
+    return useInt64Register(mir, useAtStart);
 }
 
 } // namespace jit

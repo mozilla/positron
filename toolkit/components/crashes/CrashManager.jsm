@@ -7,15 +7,15 @@
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 const myScope = this;
 
+Cu.import("resource://gre/modules/KeyValueParser.jsm");
 Cu.import("resource://gre/modules/Log.jsm", this);
 Cu.import("resource://gre/modules/osfile.jsm", this);
-Cu.import("resource://gre/modules/Promise.jsm", this);
+Cu.import("resource://gre/modules/PromiseUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm", this);
 Cu.import("resource://gre/modules/Task.jsm", this);
+Cu.import("resource://gre/modules/TelemetryController.jsm");
 Cu.import("resource://gre/modules/Timer.jsm", this);
 Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
-Cu.import("resource://gre/modules/TelemetryController.jsm");
-Cu.import("resource://gre/modules/KeyValueParser.jsm");
 
 this.EXPORTED_SYMBOLS = [
   "CrashManager",
@@ -39,6 +39,36 @@ function dateToDays(date) {
   return Math.floor(date.getTime() / MILLISECONDS_IN_DAY);
 }
 
+/**
+ * Parse the string stored in the specified field as JSON and then remove the
+ * field from the object. The string might also be returned without parsing.
+ *
+ * @param obj {Object} The object holding the field
+ * @param field {String} The name of the field to be parsed and removed
+ * @param [parseAsJson=true] {Boolean} If true parse the field's contents as if
+ *        it were JSON code, otherwise return the rew string.
+ *
+ * @returns {Object|String} the parsed object or the raw string
+ */
+function parseAndRemoveField(obj, field, parseAsJson = true) {
+  let value = null;
+
+  if (field in obj) {
+    if (!parseAsJson) {
+      value = obj[field];
+    } else {
+      try {
+        value = JSON.parse(obj[field]);
+      } catch (e) {
+        Cu.reportError(e);
+      }
+    }
+
+    delete obj[field];
+  }
+
+  return value;
+}
 
 /**
  * A gateway to crash-related data.
@@ -68,7 +98,7 @@ function dateToDays(date) {
  *   telemetryStoreSizeKey (string)
  *     Telemetry histogram to report store size under.
  */
-this.CrashManager = function (options) {
+this.CrashManager = function(options) {
   for (let k of ["pendingDumpsDir", "submittedDumpsDir", "eventsDirs",
     "storeDir"]) {
     if (!(k in options)) {
@@ -111,6 +141,12 @@ this.CrashManager = function (options) {
   // object so it can be returned for in-progress operations.
   this._aggregatePromise = null;
 
+  // Map of crash ID / promise tuples used to track adding new crashes.
+  this._crashPromises = new Map();
+
+  // Promise for the crash ping used only for testing.
+  this._pingPromise = null;
+
   // The CrashStore currently attached to this object.
   this._store = null;
 
@@ -138,6 +174,9 @@ this.CrashManager.prototype = Object.freeze({
 
   // A crash in a Gecko media plugin process.
   PROCESS_TYPE_GMPLUGIN: "gmplugin",
+
+  // A crash in the GPU process.
+  PROCESS_TYPE_GPU: "gpu",
 
   // A real crash.
   CRASH_TYPE_CRASH: "crash",
@@ -168,6 +207,41 @@ this.CrashManager.prototype = Object.freeze({
   // The type of event is unknown.
   EVENT_FILE_ERROR_UNKNOWN_EVENT: "unknown-event",
 
+  // A whitelist of crash annotations which do not contain sensitive data
+  // and are saved in the crash record and sent with Firefox Health Report.
+  ANNOTATION_WHITELIST: [
+    "AsyncShutdownTimeout",
+    "BuildID",
+    "ProductID",
+    "ProductName",
+    "ReleaseChannel",
+    "SecondsSinceLastCrash",
+    "ShutdownProgress",
+    "StartupCrash",
+    "TelemetryEnvironment",
+    "Version",
+    // The following entries are not normal annotations that can be found in
+    // the .extra file but are included in the crash record/FHR:
+    "AvailablePageFile",
+    "AvailablePhysicalMemory",
+    "AvailableVirtualMemory",
+    "BlockedDllList",
+    "BlocklistInitFailed",
+    "ContainsMemoryReport",
+    "CrashTime",
+    "EventLoopNestingLevel",
+    "IsGarbageCollecting",
+    "MozCrashReason",
+    "OOMAllocationSize",
+    "SystemMemoryUsePercentage",
+    "TextureUsage",
+    "TotalPageFile",
+    "TotalPhysicalMemory",
+    "TotalVirtualMemory",
+    "UptimeTS",
+    "User32BeforeBlocklist",
+  ],
+
   /**
    * Obtain a list of all dumps pending upload.
    *
@@ -188,7 +262,7 @@ this.CrashManager.prototype = Object.freeze({
    *
    * @return Promise<Array>
    */
-  pendingDumps: function () {
+  pendingDumps: function() {
     return this._getDirectoryEntries(this._pendingDumpsDir, this.DUMP_REGEX);
   },
 
@@ -212,7 +286,7 @@ this.CrashManager.prototype = Object.freeze({
    *
    * @return Promise<Array>
    */
-  submittedDumps: function () {
+  submittedDumps: function() {
     return this._getDirectoryEntries(this._submittedDumpsDir,
                                      this.SUBMITTED_REGEX);
   },
@@ -232,7 +306,7 @@ this.CrashManager.prototype = Object.freeze({
    *
    * @return promise<int> The number of event files that were examined.
    */
-  aggregateEventsFiles: function () {
+  aggregateEventsFiles: function() {
     if (this._aggregatePromise) {
       return this._aggregatePromise;
     }
@@ -315,7 +389,7 @@ this.CrashManager.prototype = Object.freeze({
    *        (Date) The cutoff point for pruning. Crashes without data newer
    *        than this will be pruned.
    */
-  pruneOldCrashes: function (date) {
+  pruneOldCrashes: function(date) {
     return Task.spawn(function* () {
       let store = yield this._getStore();
       store.pruneOldCrashes(date);
@@ -326,7 +400,7 @@ this.CrashManager.prototype = Object.freeze({
   /**
    * Run tasks that should be periodically performed.
    */
-  runMaintenanceTasks: function () {
+  runMaintenanceTasks: function() {
     return Task.spawn(function* () {
       yield this.aggregateEventsFiles();
 
@@ -341,8 +415,8 @@ this.CrashManager.prototype = Object.freeze({
    * @param delay
    *        (integer) Delay in milliseconds when maintenance should occur.
    */
-  scheduleMaintenance: function (delay) {
-    let deferred = Promise.defer();
+  scheduleMaintenance: function(delay) {
+    let deferred = PromiseUtils.defer();
 
     setTimeout(() => {
       this.runMaintenanceTasks().then(deferred.resolve, deferred.reject);
@@ -365,14 +439,50 @@ this.CrashManager.prototype = Object.freeze({
    *
    * @return promise<null> Resolved when the store has been saved.
    */
-  addCrash: function (processType, crashType, id, date, metadata) {
-    return Task.spawn(function* () {
+  addCrash: function(processType, crashType, id, date, metadata) {
+    let promise = Task.spawn(function* () {
       let store = yield this._getStore();
       if (store.addCrash(processType, crashType, id, date, metadata)) {
         yield store.save();
       }
-    }.bind(this));
+
+      let deferred = this._crashPromises.get(id);
+
+      if (deferred) {
+        this._crashPromises.delete(id);
+        deferred.resolve();
+      }
+
+      // Send a telemetry ping for each content process crash
+      if (processType === this.PROCESS_TYPE_CONTENT) {
+        this._sendCrashPing(id, processType, date, metadata);
+      }
+   }.bind(this));
+
+    return promise;
   },
+
+  /**
+   * Returns a promise that is resolved only the crash with the specified id
+   * has been fully recorded.
+   *
+   * @param id (string) Crash ID. Likely a UUID.
+   *
+   * @return promise<null> Resolved when the crash is present.
+   */
+  ensureCrashIsPresent: Task.async(function* (id) {
+    let store = yield this._getStore();
+    let crash = store.getCrash(id);
+
+    if (crash) {
+      return Promise.resolve();
+    }
+
+    let deferred = PromiseUtils.defer();
+
+    this._crashPromises.set(id, deferred);
+    return deferred.promise;
+  }),
 
   /**
    * Record the remote ID for a crash.
@@ -451,7 +561,7 @@ this.CrashManager.prototype = Object.freeze({
    *
    * The promise-resolved array is sorted by file mtime, oldest to newest.
    */
-  _getUnprocessedEventsFiles: function () {
+  _getUnprocessedEventsFiles: function() {
     return Task.spawn(function* () {
       let entries = [];
 
@@ -468,7 +578,7 @@ this.CrashManager.prototype = Object.freeze({
   },
 
   // See docs/crash-events.rst for the file format specification.
-  _processEventFile: function (entry) {
+  _processEventFile: function(entry) {
     return Task.spawn(function* () {
       let data = yield OS.File.read(entry.path);
       let store = yield this._getStore();
@@ -507,7 +617,52 @@ this.CrashManager.prototype = Object.freeze({
     }.bind(this));
   },
 
-  _handleEventFilePayload: function (store, entry, type, date, payload) {
+  _filterAnnotations: function(annotations) {
+    let filteredAnnotations = {};
+
+    for (let line in annotations) {
+      if (this.ANNOTATION_WHITELIST.includes(line)) {
+        filteredAnnotations[line] = annotations[line];
+      }
+    }
+
+    return filteredAnnotations;
+  },
+
+  _sendCrashPing: function(crashId, type, date, metadata = {}) {
+    // If we have a saved environment, use it. Otherwise report
+    // the current environment.
+    let reportMeta = Cu.cloneInto(metadata, myScope);
+    let crashEnvironment = parseAndRemoveField(reportMeta,
+                                               "TelemetryEnvironment");
+    let sessionId = parseAndRemoveField(reportMeta, "TelemetrySessionId",
+                                        /* parseAsJson */ false);
+    let stackTraces = parseAndRemoveField(reportMeta, "StackTraces");
+
+    // Filter the remaining annotations to remove privacy-sensitive ones
+    reportMeta = this._filterAnnotations(reportMeta);
+
+    this._pingPromise = TelemetryController.submitExternalPing("crash",
+      {
+        version: 1,
+        crashDate: date.toISOString().slice(0, 10), // YYYY-MM-DD
+        sessionId: sessionId,
+        crashId: crashId,
+        processType: type,
+        stackTraces: stackTraces,
+        metadata: reportMeta,
+        hasCrashEnvironment: (crashEnvironment !== null),
+      },
+      {
+        retentionDays: 180,
+        addClientId: true,
+        addEnvironment: true,
+        overrideEnvironment: crashEnvironment,
+      }
+    );
+  },
+
+  _handleEventFilePayload: function(store, entry, type, date, payload) {
       // The payload types and formats are documented in docs/crash-events.rst.
       // Do not change the format of an existing type. Instead, invent a new
       // type.
@@ -528,37 +683,7 @@ this.CrashManager.prototype = Object.freeze({
           store.addCrash(this.PROCESS_TYPE_MAIN, this.CRASH_TYPE_CRASH,
                          crashID, date, metadata);
 
-          // If we have a saved environment, use it. Otherwise report
-          // the current environment.
-          let crashEnvironment = null;
-          let sessionId = null;
-          let reportMeta = Cu.cloneInto(metadata, myScope);
-          if ('TelemetryEnvironment' in reportMeta) {
-            try {
-              crashEnvironment = JSON.parse(reportMeta.TelemetryEnvironment);
-            } catch (e) {
-              Cu.reportError(e);
-            }
-            delete reportMeta.TelemetryEnvironment;
-          }
-          if ('TelemetrySessionId' in reportMeta) {
-            sessionId = reportMeta.TelemetrySessionId;
-            delete reportMeta.TelemetrySessionId;
-          }
-          TelemetryController.submitExternalPing("crash",
-            {
-              version: 1,
-              crashDate: date.toISOString().slice(0, 10), // YYYY-MM-DD
-              sessionId: sessionId,
-              metadata: reportMeta,
-              hasCrashEnvironment: (crashEnvironment !== null),
-            },
-            {
-              retentionDays: 180,
-              addClientId: true,
-              addEnvironment: true,
-              overrideEnvironment: crashEnvironment,
-            });
+          this._sendCrashPing(crashID, this.PROCESS_TYPE_MAIN, date, metadata);
           break;
 
         case "crash.submission.1":
@@ -595,7 +720,7 @@ this.CrashManager.prototype = Object.freeze({
    *   id -- regexp.match()[1] (likely the crash ID)
    *   date -- Date mtime of the file
    */
-  _getDirectoryEntries: function (path, re) {
+  _getDirectoryEntries: function(path, re) {
     return Task.spawn(function* () {
       try {
         yield OS.File.stat(path);
@@ -638,7 +763,7 @@ this.CrashManager.prototype = Object.freeze({
     }.bind(this));
   },
 
-  _getStore: function () {
+  _getStore: function() {
     if (this._getStoreTask) {
       return this._getStoreTask;
     }
@@ -669,7 +794,7 @@ this.CrashManager.prototype = Object.freeze({
 
         // This callback frees resources from the store unless the store
         // is protected from freeing by some other process.
-        let timerCB = function () {
+        let timerCB = function() {
           if (this._storeProtectedCount) {
             this._storeTimer.initWithCallback(timerCB, this.STORE_EXPIRATION_MS,
                                               this._storeTimer.TYPE_ONE_SHOT);
@@ -698,7 +823,7 @@ this.CrashManager.prototype = Object.freeze({
    *
    * Returns an array of CrashRecord instances. Instances are read-only.
    */
-  getCrashes: function () {
+  getCrashes: function() {
     return Task.spawn(function* () {
       let store = yield this._getStore();
 
@@ -706,7 +831,7 @@ this.CrashManager.prototype = Object.freeze({
     }.bind(this));
   },
 
-  getCrashCountsByDay: function () {
+  getCrashCountsByDay: function() {
     return Task.spawn(function* () {
       let store = yield this._getStore();
 
@@ -783,7 +908,7 @@ CrashStore.prototype = Object.freeze({
    *
    * @return Promise
    */
-  load: function () {
+  load: function() {
     return Task.spawn(function* () {
       // Loading replaces data.
       this.reset();
@@ -883,7 +1008,7 @@ CrashStore.prototype = Object.freeze({
    *
    * @return Promise<null>
    */
-  save: function () {
+  save: function() {
     return Task.spawn(function* () {
       if (!this._data) {
         return;
@@ -953,7 +1078,7 @@ CrashStore.prototype = Object.freeze({
    * We convert these to milliseconds since epoch on output and back to
    * Date on input.
    */
-  _normalize: function (o) {
+  _normalize: function(o) {
     let normalized = {};
 
     for (let k in o) {
@@ -971,7 +1096,7 @@ CrashStore.prototype = Object.freeze({
   /**
    * Convert a serialized object back to its native form.
    */
-  _denormalize: function (o) {
+  _denormalize: function(o) {
     let n = {};
 
     for (let k in o) {
@@ -997,7 +1122,7 @@ CrashStore.prototype = Object.freeze({
    *        (Date) The cutoff at which data will be pruned. If an entry
    *        doesn't have data newer than this, it will be pruned.
    */
-  pruneOldCrashes: function (date) {
+  pruneOldCrashes: function(date) {
     for (let crash of this.crashes) {
       let newest = crash.newestDate;
       if (!newest || newest.getTime() < date.getTime()) {
@@ -1029,7 +1154,7 @@ CrashStore.prototype = Object.freeze({
    */
   get crashes() {
     let crashes = [];
-    for (let [id, crash] of this._data.crashes) {
+    for (let [, crash] of this._data.crashes) {
       crashes.push(new CrashRecord(crash));
     }
 
@@ -1042,7 +1167,7 @@ CrashStore.prototype = Object.freeze({
    * A CrashRecord will be returned if the crash exists. null will be returned
    * if the crash is unknown.
    */
-  getCrash: function (id) {
+  getCrash: function(id) {
     for (let crash of this.crashes) {
       if (crash.id == id) {
         return crash;
@@ -1052,7 +1177,7 @@ CrashStore.prototype = Object.freeze({
     return null;
   },
 
-  _ensureCountsForDay: function (day) {
+  _ensureCountsForDay: function(day) {
     if (!this._countsByDay.has(day)) {
       this._countsByDay.set(day, new Map());
     }
@@ -1077,7 +1202,7 @@ CrashStore.prototype = Object.freeze({
    *
    * @return null | object crash record
    */
-  _ensureCrashRecord: function (processType, crashType, id, date, metadata) {
+  _ensureCrashRecord: function(processType, crashType, id, date, metadata) {
     if (!id) {
       // Crashes are keyed on ID, so it's not really helpful to store crashes
       // without IDs.
@@ -1135,14 +1260,14 @@ CrashStore.prototype = Object.freeze({
    *
    * @return boolean True if the crash was recorded and false if not.
    */
-  addCrash: function (processType, crashType, id, date, metadata) {
+  addCrash: function(processType, crashType, id, date, metadata) {
     return !!this._ensureCrashRecord(processType, crashType, id, date, metadata);
   },
 
   /**
    * @return boolean True if the remote ID was recorded and false if not.
    */
-  setRemoteCrashID: function (crashID, remoteID) {
+  setRemoteCrashID: function(crashID, remoteID) {
     let crash = this._data.crashes.get(crashID);
     if (!crash || !remoteID) {
       return false;
@@ -1152,7 +1277,7 @@ CrashStore.prototype = Object.freeze({
     return true;
   },
 
-  getCrashesOfType: function (processType, crashType) {
+  getCrashesOfType: function(processType, crashType) {
     let crashes = [];
     for (let crash of this.crashes) {
       if (crash.isOfType(processType, crashType)) {
@@ -1167,7 +1292,7 @@ CrashStore.prototype = Object.freeze({
    * Ensure the submission record is present in storage.
    * @returns [submission, crash]
    */
-  _ensureSubmissionRecord: function (crashID, submissionID) {
+  _ensureSubmissionRecord: function(crashID, submissionID) {
     let crash = this._data.crashes.get(crashID);
     if (!crash || !submissionID) {
       return null;
@@ -1187,7 +1312,7 @@ CrashStore.prototype = Object.freeze({
   /**
    * @return boolean True if the attempt was recorded.
    */
-  addSubmissionAttempt: function (crashID, submissionID, date) {
+  addSubmissionAttempt: function(crashID, submissionID, date) {
     let [submission, crash] =
       this._ensureSubmissionRecord(crashID, submissionID);
     if (!submission) {
@@ -1203,7 +1328,7 @@ CrashStore.prototype = Object.freeze({
   /**
    * @return boolean True if the response was recorded.
    */
-  addSubmissionResult: function (crashID, submissionID, date, result) {
+  addSubmissionResult: function(crashID, submissionID, date, result) {
     let crash = this._data.crashes.get(crashID);
     if (!crash || !submissionID) {
       return false;
@@ -1223,7 +1348,7 @@ CrashStore.prototype = Object.freeze({
   /**
    * @return boolean True if the classifications were set.
    */
-  setCrashClassifications: function (crashID, classifications) {
+  setCrashClassifications: function(crashID, classifications) {
     let crash = this._data.crashes.get(crashID);
     if (!crash) {
       return false;
@@ -1282,7 +1407,7 @@ CrashRecord.prototype = Object.freeze({
     return this._o.type;
   },
 
-  isOfType: function (processType, crashType) {
+  isOfType: function(processType, crashType) {
     return processType + "-" + crashType == this.type;
   },
 
@@ -1305,7 +1430,7 @@ CrashRecord.prototype = Object.freeze({
  * CrashManager is likely only ever instantiated once per application lifetime.
  * The main reason it's implemented as a reusable type is to facilitate testing.
  */
-XPCOMUtils.defineLazyGetter(this.CrashManager, "Singleton", function () {
+XPCOMUtils.defineLazyGetter(this.CrashManager, "Singleton", function() {
   if (gCrashManager) {
     return gCrashManager;
   }

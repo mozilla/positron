@@ -11,11 +11,13 @@ cp $1/src/cubeb-internal.h src
 cp $1/src/cubeb-speex-resampler.h src
 cp $1/src/cubeb.c src
 cp $1/src/cubeb_alsa.c src
+cp $1/src/cubeb_log.h src
 cp $1/src/cubeb_audiotrack.c src
 cp $1/src/cubeb_audiounit.cpp src
 cp $1/src/cubeb_osx_run_loop.h src
 cp $1/src/cubeb_jack.cpp src
 cp $1/src/cubeb_opensl.c src
+cp $1/src/cubeb_array_queue.h src
 cp $1/src/cubeb_panner.cpp src
 cp $1/src/cubeb_panner.h src
 cp $1/src/cubeb_pulse.c src
@@ -29,16 +31,17 @@ cp $1/src/cubeb_utils_unix.h src
 cp $1/src/cubeb_utils_win.h src
 cp $1/src/cubeb_wasapi.cpp src
 cp $1/src/cubeb_winmm.c src
-cp $1/test/common.h tests/common.h
-cp $1/test/test_audio.cpp tests/test_audio.cpp
-#cp $1/test/test_devices.c tests/test_devices.cpp
-cp $1/test/test_duplex.cpp tests/test_duplex.cpp
-cp $1/test/test_latency.cpp tests/test_latency.cpp
-cp $1/test/test_record.cpp tests/test_record.cpp
-cp $1/test/test_resampler.cpp tests/test_resampler.cpp
-cp $1/test/test_sanity.cpp tests/test_sanity.cpp
-cp $1/test/test_tone.cpp tests/test_tone.cpp
-cp $1/test/test_utils.cpp tests/test_utils.cpp
+cp $1/test/common.h gtest
+cp $1/test/test_audio.cpp gtest
+cp $1/test/test_devices.cpp gtest
+cp $1/test/test_duplex.cpp gtest
+cp $1/test/test_latency.cpp gtest
+cp $1/test/test_record.cpp gtest
+cp $1/test/test_resampler.cpp gtest
+cp $1/test/test_ring_array.cpp gtest
+cp $1/test/test_sanity.cpp gtest
+cp $1/test/test_tone.cpp gtest
+cp $1/test/test_utils.cpp gtest
 
 if [ -d $1/.git ]; then
   rev=$(cd $1 && git rev-parse --verify HEAD)
@@ -56,4 +59,3 @@ if [ -n "$rev" ]; then
 else
   echo "Remember to update README_MOZILLA with the version details."
 fi
-

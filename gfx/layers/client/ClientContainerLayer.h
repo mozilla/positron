@@ -47,15 +47,13 @@ public:
   virtual void RenderLayer() override
   {
     RenderMaskLayers(this);
-    
-    DefaultComputeSupportsComponentAlphaChildren();
 
-    AutoTArray<Layer*, 12> children;
-    SortChildrenBy3DZOrder(children);
+    DefaultComputeSupportsComponentAlphaChildren();
 
     ReadbackProcessor readback;
     readback.BuildUpdates(this);
 
+    nsTArray<Layer*> children = CollectChildren();
     for (uint32_t i = 0; i < children.Length(); i++) {
       Layer* child = children.ElementAt(i);
 
@@ -133,11 +131,6 @@ public:
 
   void SetSupportsComponentAlphaChildren(bool aSupports) { mSupportsComponentAlphaChildren = aSupports; }
 
-  virtual void Disconnect() override
-  {
-    ClientLayer::Disconnect();
-  }
-
 protected:
   ClientLayerManager* ClientManager()
   {
@@ -163,11 +156,6 @@ protected:
 public:
   virtual Layer* AsLayer() { return this; }
   virtual ShadowableLayer* AsShadowableLayer() { return this; }
-
-  virtual void Disconnect()
-  {
-    ClientLayer::Disconnect();
-  }
 
   virtual void RenderLayer() { }
 

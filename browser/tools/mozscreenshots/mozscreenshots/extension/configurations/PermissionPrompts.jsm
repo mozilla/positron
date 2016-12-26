@@ -24,6 +24,7 @@ this.PermissionPrompts = {
     Services.prefs.setCharPref("media.getusermedia.screensharing.allowed_domains",
                                "test1.example.com");
     Services.prefs.setBoolPref("extensions.install.requireBuiltInCerts", false);
+    Services.prefs.setBoolPref("signon.rememberSignons", true);
   },
 
   configurations: {
@@ -108,7 +109,6 @@ function* closeLastTab(selector) {
   if (!lastTab) {
     return;
   }
-  let browserWindow = Services.wm.getMostRecentWindow("navigator:browser");
   yield BrowserTestUtils.removeTab(lastTab);
   lastTab = null;
 }

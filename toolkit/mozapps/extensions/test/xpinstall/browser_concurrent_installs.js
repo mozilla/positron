@@ -6,7 +6,7 @@ var gQueuedForInstall = [];
 var gResults = [];
 
 function frame_script() {
-  /*globals addMessageListener, sendAsyncMessage*/
+  /* globals addMessageListener, sendAsyncMessage*/
   addMessageListener("Test:StartInstall", () => {
     content.document.getElementById("installnow").click()
   });
@@ -47,10 +47,6 @@ var gAddonAndWindowListener = {
 function installNext() {
   let tab = gQueuedForInstall.shift();
   tab.linkedBrowser.messageManager.sendAsyncMessage("Test:StartInstall");
-}
-
-function winForTab(t) {
-  return t.linkedBrowser.contentWindow;
 }
 
 function createTab(url) {

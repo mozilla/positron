@@ -1,2 +1,1 @@
-// |jit-test| test-also-wasm-baseline
-var importedArgs = ['memory_trap.wast']; load(scriptdir + '../spec.js');
+var importedArgs = ['memory_trap.wast']; load(scriptdir + '../wast.js');

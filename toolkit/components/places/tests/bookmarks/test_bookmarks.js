@@ -92,13 +92,13 @@ add_task(function* test_bookmarks() {
 
   // test getFolderIdForItem() with bogus item id will throw
   try {
-    let id = bs.getFolderIdForItem(0);
+    bs.getFolderIdForItem(0);
     do_throw("getFolderIdForItem accepted bad input");
   } catch (ex) {}
 
   // test getFolderIdForItem() with bogus item id will throw
   try {
-    let id = bs.getFolderIdForItem(-1);
+    bs.getFolderIdForItem(-1);
     do_throw("getFolderIdForItem accepted bad input");
   } catch (ex) {}
 
@@ -185,7 +185,7 @@ add_task(function* test_bookmarks() {
 
   // get item title bad input
   try {
-    let title = bs.getItemTitle(-3);
+    bs.getItemTitle(-3);
     do_throw("getItemTitle accepted bad input");
   } catch (ex) {}
 
@@ -264,7 +264,7 @@ add_task(function* test_bookmarks() {
   do_check_eq(bookmarksObserver._itemChangedProperty, "title");
 
   // insert query item
-  let uri6 = uri("place:domain=google.com&type="+
+  let uri6 = uri("place:domain=google.com&type=" +
                  Ci.nsINavHistoryQueryOptions.RESULTS_AS_SITE_QUERY);
   let newId6 = bs.insertBookmark(testRoot, uri6, bs.DEFAULT_INDEX, "");
   do_check_eq(bookmarksObserver._itemAddedParent, testRoot);
@@ -306,7 +306,7 @@ add_task(function* test_bookmarks() {
   // try to get index of the last item within the new parent folder
   do_check_eq(bs.getIdForItemAt(homeFolder, -1), workFolder);
   // XXX expose FolderCount, and check that the old parent has one less child?
-  do_check_eq(getChildCount(testRoot), oldParentCC-1);
+  do_check_eq(getChildCount(testRoot), oldParentCC - 1);
 
   // move item, appending, to different folder
   bs.moveItem(newId5, testRoot, bs.DEFAULT_INDEX);
@@ -370,8 +370,8 @@ add_task(function* test_bookmarks() {
 
   // test bookmark id in query output
   try {
-    let options = hs.getNewQueryOptions();
-    let query = hs.getNewQuery();
+    options = hs.getNewQueryOptions();
+    query = hs.getNewQuery();
     query.setFolders([testRoot], 1);
     let result = hs.executeQuery(query, options);
     let rootNode = result.root;
@@ -379,7 +379,7 @@ add_task(function* test_bookmarks() {
     let cc = rootNode.childCount;
     do_print("bookmark itemId test: CC = " + cc);
     do_check_true(cc > 0);
-    for (let i=0; i < cc; ++i) {
+    for (let i = 0; i < cc; ++i) {
       let node = rootNode.getChild(i);
       if (node.type == node.RESULT_TYPE_FOLDER ||
           node.type == node.RESULT_TYPE_URI ||
@@ -409,8 +409,8 @@ add_task(function* test_bookmarks() {
     bs.insertBookmark(testFolder, mURI, bs.DEFAULT_INDEX, "title 2");
 
     // query
-    let options = hs.getNewQueryOptions();
-    let query = hs.getNewQuery();
+    options = hs.getNewQueryOptions();
+    query = hs.getNewQuery();
     query.setFolders([testFolder], 1);
     let result = hs.executeQuery(query, options);
     let rootNode = result.root;
@@ -499,10 +499,10 @@ add_task(function* test_bookmarks() {
 
   // test search on bookmark title ZZZXXXYYY
   try {
-    let options = hs.getNewQueryOptions();
+    options = hs.getNewQueryOptions();
     options.excludeQueries = 1;
     options.queryType = Ci.nsINavHistoryQueryOptions.QUERY_TYPE_BOOKMARKS;
-    let query = hs.getNewQuery();
+    query = hs.getNewQuery();
     query.searchTerms = "ZZZXXXYYY";
     let result = hs.executeQuery(query, options);
     let rootNode = result.root;
@@ -521,10 +521,10 @@ add_task(function* test_bookmarks() {
   // test dateAdded and lastModified properties
   // for a search query
   try {
-    let options = hs.getNewQueryOptions();
+    options = hs.getNewQueryOptions();
     options.excludeQueries = 1;
     options.queryType = Ci.nsINavHistoryQueryOptions.QUERY_TYPE_BOOKMARKS;
-    let query = hs.getNewQuery();
+    query = hs.getNewQuery();
     query.searchTerms = "ZZZXXXYYY";
     let result = hs.executeQuery(query, options);
     let rootNode = result.root;
@@ -548,8 +548,8 @@ add_task(function* test_bookmarks() {
   // test dateAdded and lastModified properties
   // for a folder query
   try {
-    let options = hs.getNewQueryOptions();
-    let query = hs.getNewQuery();
+    options = hs.getNewQueryOptions();
+    query = hs.getNewQuery();
     query.setFolders([testRoot], 1);
     let result = hs.executeQuery(query, options);
     let rootNode = result.root;

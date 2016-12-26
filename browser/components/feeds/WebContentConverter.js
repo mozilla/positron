@@ -30,7 +30,6 @@ const PREF_SELECTED_WEB = "browser.feeds.handlers.webservice";
 const PREF_SELECTED_ACTION = "browser.feeds.handler";
 const PREF_SELECTED_READER = "browser.feeds.handler.default";
 const PREF_HANDLER_EXTERNAL_PREFIX = "network.protocol-handler.external";
-const PREF_ALLOW_DIFFERENT_HOST = "gecko.handlerService.allowRegisterFromDifferentHost";
 
 const STRING_BUNDLE_URI = "chrome://browser/locale/feeds/subscribe.properties";
 
@@ -156,11 +155,8 @@ const Utils = {
     }
 
     // We also reject handlers registered from a different host (see bug 402287)
-    // The pref allows us to test the feature
-    let pb = Services.prefs;
-    if (!pb.getBoolPref(PREF_ALLOW_DIFFERENT_HOST) &&
-        (!["http:", "https:"].includes(aContentWindow.location.protocol) ||
-         aContentWindow.location.hostname != uri.host)) {
+    if (!["http:", "https:"].includes(aContentWindow.location.protocol) ||
+        aContentWindow.location.hostname != uri.host) {
       throw this.getSecurityError(
         "Permission denied to add " + uri.spec + " as a content or protocol handler",
         aContentWindow);
@@ -435,13 +431,12 @@ WebContentConverterRegistrar.prototype = {
 
       callback(aNotification, aButtonInfo) {
           let protocol = aButtonInfo.protocolInfo.protocol;
-          let uri      = aButtonInfo.protocolInfo.uri;
           let name     = aButtonInfo.protocolInfo.name;
 
           let handler = Cc["@mozilla.org/uriloader/web-handler-app;1"].
                         createInstance(Ci.nsIWebHandlerApp);
           handler.name = name;
-          handler.uriTemplate = uri;
+          handler.uriTemplate = aButtonInfo.protocolInfo.uri;
 
           let eps = Cc["@mozilla.org/uriloader/external-protocol-service;1"].
                     getService(Ci.nsIExternalProtocolService);
@@ -834,7 +829,7 @@ WebContentConverterRegistrar.prototype = {
       autoBranch = ps.getBranch(PREF_CONTENTHANDLERS_AUTO);
     } catch (e) {
       // No auto branch yet, that's fine
-      //LOG("WCCR.init: There is no auto branch, benign");
+      // LOG("WCCR.init: There is no auto branch, benign");
     }
 
     if (autoBranch) {
@@ -920,7 +915,7 @@ WebContentConverterRegistrarContent.prototype = {
       let branch = ps.getBranch(PREF_CONTENTHANDLERS_BRANCH + num + ".");
       try {
         this._registerContentHandlerHavingBranch(branch);
-      } catch(ex) {
+      } catch (ex) {
         // do nothing, the next branch might have values
       }
     }

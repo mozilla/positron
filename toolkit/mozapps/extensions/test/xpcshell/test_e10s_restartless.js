@@ -5,6 +5,14 @@
 const ID = "bootstrap1@tests.mozilla.org";
 const ID2 = "bootstrap2@tests.mozilla.org";
 
+const APP_STARTUP   = 1;
+const ADDON_INSTALL = 5;
+
+function getStartupReason(id) {
+  let info = BootstrapMonitor.started.get(id);
+  return info ? info.reason : undefined;
+}
+
 BootstrapMonitor.init();
 
 createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
@@ -12,8 +20,7 @@ createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
 startupManager();
 
 function* check_normal() {
-  let install = yield new Promise(resolve => AddonManager.getInstallForFile(do_get_addon("test_bootstrap1_1"), resolve));
-  yield promiseCompleteAllInstalls([install]);
+  let install = yield promiseInstallFile(do_get_addon("test_bootstrap1_1"));
   do_check_eq(install.state, AddonManager.STATE_INSTALLED);
   do_check_false(hasFlag(install.addon.pendingOperations, AddonManager.PENDING_INSTALL));
 
@@ -72,8 +79,7 @@ add_task(function*() {
   gAppInfo.browserTabsRemoteAutostart = true;
   Services.prefs.setBoolPref("extensions.e10sBlocksEnabling", true);
 
-  let install = yield new Promise(resolve => AddonManager.getInstallForFile(do_get_addon("test_bootstrap1_1"), resolve));
-  yield promiseCompleteAllInstalls([install]);
+  let install = yield promiseInstallFile(do_get_addon("test_bootstrap1_1"));
   do_check_eq(install.state, AddonManager.STATE_INSTALLED);
   do_check_true(hasFlag(install.addon.pendingOperations, AddonManager.PENDING_INSTALL));
 
@@ -84,6 +90,7 @@ add_task(function*() {
 
   BootstrapMonitor.checkAddonInstalled(ID);
   BootstrapMonitor.checkAddonStarted(ID);
+  do_check_eq(getStartupReason(ID), ADDON_INSTALL);
 
   addon = yield promiseAddonByID(ID);
   do_check_neq(addon, null);
@@ -120,8 +127,7 @@ add_task(function*() {
   gAppInfo.browserTabsRemoteAutostart = true;
   Services.prefs.setBoolPref("extensions.e10sBlocksEnabling", true);
 
-  let install = yield new Promise(resolve => AddonManager.getInstallForFile(do_get_addon("test_bootstrap1_1"), resolve));
-  yield promiseCompleteAllInstalls([install]);
+  let install = yield promiseInstallFile(do_get_addon("test_bootstrap1_1"));
   do_check_eq(install.state, AddonManager.STATE_INSTALLED);
   do_check_true(hasFlag(install.addon.pendingOperations, AddonManager.PENDING_INSTALL));
 
@@ -136,6 +142,7 @@ add_task(function*() {
 
   BootstrapMonitor.checkAddonInstalled(ID);
   BootstrapMonitor.checkAddonStarted(ID);
+  do_check_eq(getStartupReason(ID), ADDON_INSTALL);
 
   addon = yield promiseAddonByID(ID);
   do_check_neq(addon, null);
@@ -170,6 +177,9 @@ add_task(function*() {
 
   do_check_true(addon.isActive);
   BootstrapMonitor.checkAddonStarted(ID);
+  // This should probably be ADDON_ENABLE, but its not easy to make
+  // that happen.  See bug 1304392 for discussion.
+  do_check_eq(getStartupReason(ID), APP_STARTUP);
 
   do_check_false(hasFlag(addon.operationsRequiringRestart, AddonManager.OP_NEEDS_RESTART_UNINSTALL));
   addon.uninstall();
@@ -189,9 +199,11 @@ add_task(function*() {
   gAppInfo.browserTabsRemoteAutostart = true;
   Services.prefs.setBoolPref("extensions.e10sBlocksEnabling", true);
 
-  let install1 = yield new Promise(resolve => AddonManager.getInstallForFile(do_get_addon("test_bootstrap1_1"), resolve));
-  let install2 = yield new Promise(resolve => AddonManager.getInstallForFile(do_get_addon("test_bootstrap2_1"), resolve));
-  yield promiseCompleteAllInstalls([install1, install2]);
+  let [install1, install2] = yield Promise.all([
+    promiseInstallFile(do_get_addon("test_bootstrap1_1")),
+    promiseInstallFile(do_get_addon("test_bootstrap2_1")),
+  ]);
+
   do_check_eq(install1.state, AddonManager.STATE_INSTALLED);
   do_check_eq(install2.state, AddonManager.STATE_INSTALLED);
   do_check_true(hasFlag(install1.addon.pendingOperations, AddonManager.PENDING_INSTALL));
@@ -211,6 +223,11 @@ add_task(function*() {
 
   BootstrapMonitor.checkAddonInstalled(ID);
   BootstrapMonitor.checkAddonStarted(ID);
+  do_check_eq(getStartupReason(ID), ADDON_INSTALL);
+
+  BootstrapMonitor.checkAddonInstalled(ID2);
+  BootstrapMonitor.checkAddonStarted(ID2);
+  do_check_eq(getStartupReason(ID2), ADDON_INSTALL);
 
   addon = yield promiseAddonByID(ID);
   do_check_neq(addon, null);
@@ -262,6 +279,8 @@ add_task(function*() {
 
   do_check_true(addon.isActive);
   BootstrapMonitor.checkAddonStarted(ID);
+  // Bug 1304392 again (see comment above)
+  do_check_eq(getStartupReason(ID), APP_STARTUP);
 
   do_check_false(hasFlag(addon.operationsRequiringRestart, AddonManager.OP_NEEDS_RESTART_UNINSTALL));
   addon.uninstall();
@@ -292,9 +311,10 @@ add_task(function*() {
 
   // Check that the two add-ons can be installed together correctly as
   // check_normal() only perform checks on bootstrap1.
-  let install1 = yield new Promise(resolve => AddonManager.getInstallForFile(do_get_addon("test_bootstrap1_1"), resolve));
-  let install2 = yield new Promise(resolve => AddonManager.getInstallForFile(do_get_addon("test_bootstrap2_1"), resolve));
-  yield promiseCompleteAllInstalls([install1, install2]);
+  let [install1, install2] = yield Promise.all([
+    promiseInstallFile(do_get_addon("test_bootstrap1_1")),
+    promiseInstallFile(do_get_addon("test_bootstrap2_1")),
+  ]);
 
   do_check_eq(install1.state, AddonManager.STATE_INSTALLED);
   do_check_eq(install2.state, AddonManager.STATE_INSTALLED);
@@ -354,9 +374,10 @@ add_task(function*() {
 
   yield promiseRestartManager();
 
-  install1 = yield new Promise(resolve => AddonManager.getInstallForFile(do_get_addon("test_bootstrap1_1"), resolve));
-  install2 = yield new Promise(resolve => AddonManager.getInstallForFile(do_get_addon("test_bootstrap2_1"), resolve));
-  yield promiseCompleteAllInstalls([install1, install2]);
+  [install1, install2] = yield Promise.all([
+    promiseInstallFile(do_get_addon("test_bootstrap1_1")),
+    promiseInstallFile(do_get_addon("test_bootstrap2_1")),
+  ]);
 
   do_check_eq(install1.state, AddonManager.STATE_INSTALLED);
   do_check_eq(install2.state, AddonManager.STATE_INSTALLED);

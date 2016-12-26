@@ -23,6 +23,7 @@
 #include "nsPrincipal.h"
 #include "WrapperFactory.h"
 #include "xpcprivate.h"
+#include "xpc_make_class.h"
 #include "XPCWrapper.h"
 #include "XrayWrapper.h"
 #include "Crypto.h"
@@ -48,6 +49,7 @@
 #include "mozilla/dom/URLBinding.h"
 #include "mozilla/dom/URLSearchParamsBinding.h"
 #include "mozilla/dom/XMLHttpRequest.h"
+#include "mozilla/DeferredFinalize.h"
 
 using namespace mozilla;
 using namespace JS;
@@ -411,8 +413,8 @@ sandbox_finalize(js::FreeOp* fop, JSObject* obj)
     }
 
     static_cast<SandboxPrivate*>(sop)->ForgetGlobalObject();
-    NS_RELEASE(sop);
     DestroyProtoAndIfaceCache(obj);
+    DeferredFinalize(sop);
 }
 
 static void
@@ -890,8 +892,10 @@ xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj)
             JS_ReportErrorASCII(cx, "Property names must be strings");
             return false;
         }
-        JSAutoByteString name(cx, nameValue.toString());
-        NS_ENSURE_TRUE(name, false);
+        RootedString nameStr(cx, nameValue.toString());
+        JSAutoByteString name;
+        if (!name.encodeUtf8(cx, nameStr))
+            return false;
         if (!strcmp(name.ptr(), "CSS")) {
             CSS = true;
         } else if (!strcmp(name.ptr(), "indexedDB")) {
@@ -929,7 +933,7 @@ xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj)
         } else if (!strcmp(name.ptr(), "FileReader")) {
             fileReader = true;
         } else {
-            JS_ReportError(cx, "Unknown property name: %s", name.ptr());
+            JS_ReportErrorUTF8(cx, "Unknown property name: %s", name.ptr());
             return false;
         }
     }
@@ -1203,13 +1207,6 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
 
         if (!options.globalProperties.DefineInSandbox(cx, sandbox))
             return NS_ERROR_XPC_UNEXPECTED;
-
-#ifndef SPIDERMONKEY_PROMISE
-        // Promise is supposed to be part of ES, and therefore should appear on
-        // every global.
-        if (!dom::PromiseBinding::GetConstructorObject(cx))
-            return NS_ERROR_XPC_UNEXPECTED;
-#endif // SPIDERMONKEY_PROMISE
     }
 
     // We handle the case where the context isn't in a compartment for the
@@ -1224,6 +1221,7 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
 
     xpc::SetSandboxMetadata(cx, sandbox, options.metadata);
 
+    JSAutoCompartment ac(cx, sandbox);
     JS_FireOnNewGlobalObject(cx, sandbox);
 
     return NS_OK;
@@ -1380,7 +1378,7 @@ GetExpandedPrincipal(JSContext* cx, HandleObject arrayObj,
 
             if (!options.originAttributes) {
                 const PrincipalOriginAttributes prinAttrs =
-                    BasePrincipal::Cast(principal)->OriginAttributesRef();
+                    principal->OriginAttributesRef();
                 if (attrs.isNothing()) {
                     attrs.emplace(prinAttrs);
                 } else if (prinAttrs != attrs.ref()) {

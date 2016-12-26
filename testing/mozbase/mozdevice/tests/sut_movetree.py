@@ -8,9 +8,14 @@
 import mozdevice
 import logging
 import unittest
+
+import mozunit
+
 from sut import MockAgent
 
+
 class MoveTreeTest(unittest.TestCase):
+
     def test_moveFile(self):
         commands = [('mv /mnt/sdcard/tests/test.txt /mnt/sdcard/tests/test1.txt', ''),
                     ('isdir /mnt/sdcard/tests', 'TRUE'),
@@ -23,7 +28,7 @@ class MoveTreeTest(unittest.TestCase):
         m = MockAgent(self, commands=commands)
         d = mozdevice.DroidSUT("127.0.0.1", port=m.port, logLevel=logging.DEBUG)
         self.assertEqual(None, d.moveTree('/mnt/sdcard/tests/test.txt',
-                '/mnt/sdcard/tests/test1.txt'))
+                                          '/mnt/sdcard/tests/test1.txt'))
         self.assertFalse(d.fileExists('/mnt/sdcard/tests/test.txt'))
         self.assertTrue(d.fileExists('/mnt/sdcard/tests/test1.txt'))
 
@@ -36,7 +41,7 @@ class MoveTreeTest(unittest.TestCase):
         m = MockAgent(self, commands=commands)
         d = mozdevice.DroidSUT("127.0.0.1", port=m.port, logLevel=logging.DEBUG)
         self.assertEqual(None, d.moveTree('/mnt/sdcard/tests/foo',
-                '/mnt/sdcard/tests/bar'))
+                                          '/mnt/sdcard/tests/bar'))
         self.assertTrue(d.fileExists('/mnt/sdcard/tests/bar'))
 
     def test_moveNonEmptyDir(self):
@@ -51,13 +56,13 @@ class MoveTreeTest(unittest.TestCase):
 
         m = MockAgent(self, commands=commands)
         d = mozdevice.DroidSUT("127.0.0.1", port=m.port,
-                logLevel=logging.DEBUG)
+                               logLevel=logging.DEBUG)
 
         self.assertTrue(d.dirExists('/mnt/sdcard/tests/foo/bar'))
         self.assertEqual(None, d.moveTree('/mnt/sdcard/tests/foo',
-                '/mnt/sdcard/tests/foo2'))
+                                          '/mnt/sdcard/tests/foo2'))
         self.assertTrue(d.fileExists('/mnt/sdcard/tests/foo2'))
         self.assertTrue(d.fileExists('/mnt/sdcard/tests/foo2/bar'))
 
 if __name__ == "__main__":
-    unittest.main()
+    mozunit.main()

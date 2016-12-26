@@ -5,10 +5,12 @@
 package org.mozilla.gecko.menu;
 
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.util.ResourceDrawableUtils;
 import org.mozilla.gecko.widget.themed.ThemedImageButton;
 
 import android.content.Context;
 import android.graphics.drawable.Drawable;
+import android.support.v4.graphics.drawable.DrawableCompat;
 import android.util.AttributeSet;
 
 public class MenuItemActionBar extends ThemedImageButton
@@ -45,10 +47,14 @@ public class MenuItemActionBar extends ThemedImageButton
             setVisibility(VISIBLE);
             setImageDrawable(icon);
         }
+        icon = getDrawable();
+        if (icon != null) {
+            DrawableCompat.setAutoMirrored(icon, true);
+        }
     }
 
     void setIcon(int icon) {
-        setIcon((icon == 0) ? null : getResources().getDrawable(icon));
+        setIcon((icon == 0) ? null : ResourceDrawableUtils.getDrawable(getContext(), icon));
     }
 
     void setTitle(CharSequence title) {

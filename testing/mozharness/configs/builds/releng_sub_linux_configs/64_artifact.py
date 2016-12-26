@@ -8,6 +8,7 @@ config = {
         'checkout-sources',
         'setup-mock',
         'build',
+        'sendchange',
         # 'generate-build-stats',
     ],
     "buildbot_json_path": "buildprops.json",
@@ -23,8 +24,10 @@ config = {
     'tooltool_script': ["/builds/tooltool.py"],
     'tooltool_bootstrap': "setup.sh",
     'enable_count_ctors': True,
-    'enable_talos_sendchange': False,
-    'enable_unittest_sendchange': False,
+    # allows triggering of dependent jobs when --artifact try syntax is detected on buildbot
+    'enable_unittest_sendchange': True,
+    'enable_talos_sendchange': True,
+    'perfherder_extra_options': ['artifact'],
     #########################################################################
 
 

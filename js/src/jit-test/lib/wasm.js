@@ -12,7 +12,8 @@ function wasmEvalText(str, imports) {
         m = new WebAssembly.Module(binary);
         assertEq(valid, true);
     } catch(e) {
-        assertEq(valid, false);
+        if (!e.toString().match(/out of memory/))
+            assertEq(valid, false);
         throw e;
     }
 
@@ -112,4 +113,36 @@ function createI64(val) {
         };
     }
     return ret;
+}
+
+function _wasmFullPassInternal(assertValueFunc, text, expected, maybeImports, ...args) {
+    let binary = wasmTextToBinary(text);
+    assertEq(WebAssembly.validate(binary), true, "Must validate.");
+
+    let module = new WebAssembly.Module(binary);
+    let instance = new WebAssembly.Instance(module, maybeImports);
+    assertEq(typeof instance.exports.run, 'function', "A 'run' function must be exported.");
+    assertValueFunc(instance.exports.run(...args), expected, "Initial module must return the expected result.");
+
+    let retext = wasmBinaryToText(binary);
+    let rebinary = wasmTextToBinary(retext);
+
+    assertEq(WebAssembly.validate(rebinary), true, "Recreated binary must validate.");
+    let remodule = new WebAssembly.Module(rebinary);
+    let reinstance = new WebAssembly.Instance(remodule, maybeImports);
+    assertValueFunc(reinstance.exports.run(...args), expected, "Reformed module must return the expected result");
+}
+
+// Fully test a module:
+// - ensure it validates.
+// - ensure it compiles and produces the expected result.
+// - ensure textToBinary(binaryToText(binary)) = binary
+// Preconditions:
+// - the binary module must export a function called "run".
+function wasmFullPass(text, expected, maybeImports, ...args) {
+    _wasmFullPassInternal(assertEq, text, expected, maybeImports, ...args);
+}
+
+function wasmFullPassI64(text, expected, maybeImports, ...args) {
+    _wasmFullPassInternal(assertEqI64, text, expected, maybeImports, ...args);
 }

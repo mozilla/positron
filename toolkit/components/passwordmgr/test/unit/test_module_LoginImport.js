@@ -9,8 +9,7 @@
 
 "use strict";
 
-////////////////////////////////////////////////////////////////////////////////
-//// Globals
+// Globals
 
 Cu.import("resource://gre/modules/Task.jsm");
 
@@ -107,8 +106,7 @@ function promiseInsertDisabledHost(aConnection, aHostname)
                              "VALUES (?)", [aHostname]);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//// Tests
+// Tests
 
 /**
  * Imports login data from a SQLite file constructed using the test data.
@@ -148,8 +146,8 @@ add_task(function* test_import()
 
   // Verify that every login in the test data has a matching imported row.
   do_check_eq(loginList.length, store.data.logins.length);
-  do_check_true(loginList.every(function (loginInfo) {
-    return store.data.logins.some(function (loginDataItem) {
+  do_check_true(loginList.every(function(loginInfo) {
+    return store.data.logins.some(function(loginDataItem) {
       let username = gLoginManagerCrypto.decrypt(loginDataItem.encryptedUsername);
       let password = gLoginManagerCrypto.decrypt(loginDataItem.encryptedPassword);
       return loginDataItem.hostname == loginInfo.hostname &&

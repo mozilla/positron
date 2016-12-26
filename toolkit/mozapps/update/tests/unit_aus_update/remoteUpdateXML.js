@@ -12,8 +12,13 @@ function run_test() {
   debugDump("testing remote update xml attributes");
 
   start_httpserver();
-  setUpdateURLOverride(gURLData + gHTTPHandlerPath);
+  setUpdateURL(gURLData + gHTTPHandlerPath);
   setUpdateChannel("test_channel");
+
+  // This test expects that the app.update.download.backgroundInterval
+  // preference doesn't already exist.
+  Services.prefs.deleteBranch("app.update.download.backgroundInterval");
+
   standardInit();
   do_execute_soon(run_test_pt01);
 }
@@ -58,7 +63,7 @@ function run_test_pt02() {
                                       "20080811053724",
                                       "http://details/",
                                       "true",
-                                      "true", "345600",
+                                      "true", "345600", "1200",
                                       "custom1_attr=\"custom1 value\"",
                                       "custom2_attr=\"custom2 value\"");
   gResponseBody = getRemoteUpdatesXMLString(updates);
@@ -101,6 +106,9 @@ function check_test_pt02() {
             "the update showNeverForVersion attribute" + MSG_SHOULD_EQUAL);
   Assert.equal(bestUpdate.promptWaitTime, "345600",
                "the update promptWaitTime attribute" + MSG_SHOULD_EQUAL);
+  // The default and maximum value for backgroundInterval is 600
+  Assert.equal(bestUpdate.getProperty("backgroundInterval"), "600",
+               "the update backgroundInterval attribute" + MSG_SHOULD_EQUAL);
   Assert.equal(bestUpdate.serviceURL, gURLData + gHTTPHandlerPath + "?force=1",
                "the update serviceURL attribute" + MSG_SHOULD_EQUAL);
   Assert.equal(bestUpdate.channel, "test_channel",
@@ -123,7 +131,7 @@ function check_test_pt02() {
                "the update errorCode attribute" + MSG_SHOULD_EQUAL);
   Assert.equal(bestUpdate.patchCount, 2,
                "the update patchCount attribute" + MSG_SHOULD_EQUAL);
-  //XXX TODO - test nsIUpdate:serialize
+  // XXX TODO - test nsIUpdate:serialize
 
   Assert.equal(bestUpdate.getProperty("custom1_attr"), "custom1 value",
                "the update custom1_attr property" + MSG_SHOULD_EQUAL);
@@ -145,13 +153,13 @@ function check_test_pt02() {
   // is confusing if it returns null which is an invalid value since the test
   // failure output will show a failure for null == null. To lessen the
   // confusion first check that the typeof for patch.state is string.
-  Assert.equal(typeof(patch.state), "string",
+  Assert.equal(typeof patch.state, "string",
                "the update patch state typeof value should equal |string|");
   Assert.equal(patch.state, STATE_NONE,
                "the update patch state attribute" + MSG_SHOULD_EQUAL);
   Assert.ok(!patch.selected,
             "the update patch selected attribute" + MSG_SHOULD_EQUAL);
-  //XXX TODO - test nsIUpdatePatch:serialize
+  // XXX TODO - test nsIUpdatePatch:serialize
 
   patch = bestUpdate.getPatchAt(1);
   Assert.equal(patch.type, "partial",
@@ -168,7 +176,7 @@ function check_test_pt02() {
                "the update patch state attribute" + MSG_SHOULD_EQUAL);
   Assert.ok(!patch.selected,
             "the update patch selected attribute" + MSG_SHOULD_EQUAL);
-  //XXX TODO - test nsIUpdatePatch:serialize
+  // XXX TODO - test nsIUpdatePatch:serialize
 
   run_test_pt03();
 }

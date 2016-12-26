@@ -16,7 +16,6 @@ class WebGLTransformFeedback final
     : public nsWrapperCache
     , public WebGLRefCountedObject<WebGLTransformFeedback>
     , public LinkedListElement<WebGLTransformFeedback>
-    , public WebGLContextBoundObject
 {
     friend class ScopedDrawWithTransformFeedback;
     friend class WebGLContext;
@@ -37,6 +36,9 @@ private:
     MOZ_INIT_OUTSIDE_CTOR size_t mActive_VertPosition;
     MOZ_INIT_OUTSIDE_CTOR size_t mActive_VertCapacity;
 
+    mutable bool mBuffersForTF_Dirty;
+    mutable std::set<const WebGLBuffer*> mBuffersForTF;
+
 public:
     WebGLTransformFeedback(WebGLContext* webgl, GLuint tf);
 private:
@@ -49,6 +51,11 @@ public:
     void Delete();
     WebGLContext* GetParentObject() const { return mContext; }
     virtual JSObject* WrapObject(JSContext*, JS::Handle<JSObject*>) override;
+
+    ////
+
+    void OnIndexedBindingsChanged() const { mBuffersForTF_Dirty = true; }
+    const decltype(mBuffersForTF)& BuffersForTF() const;
 
     // GL Funcs
     void BeginTransformFeedback(GLenum primMode);

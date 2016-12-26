@@ -27,6 +27,7 @@ import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.annotation.RobocopTarget;
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.db.BrowserContract.ActivityStreamBlocklist;
 import org.mozilla.gecko.db.BrowserContract.Bookmarks;
 import org.mozilla.gecko.db.BrowserContract.Combined;
 import org.mozilla.gecko.db.BrowserContract.ExpirePriority;
@@ -36,6 +37,7 @@ import org.mozilla.gecko.db.BrowserContract.SyncColumns;
 import org.mozilla.gecko.db.BrowserContract.Thumbnails;
 import org.mozilla.gecko.db.BrowserContract.TopSites;
 import org.mozilla.gecko.db.BrowserContract.Highlights;
+import org.mozilla.gecko.db.BrowserContract.PageMetadata;
 import org.mozilla.gecko.distribution.Distribution;
 import org.mozilla.gecko.icons.decoders.FaviconDecoder;
 import org.mozilla.gecko.icons.decoders.LoadFaviconResult;
@@ -45,6 +47,7 @@ import org.mozilla.gecko.sync.Utils;
 import org.mozilla.gecko.util.GeckoJarReader;
 import org.mozilla.gecko.util.StringUtils;
 
+import android.content.ContentProviderClient;
 import android.content.ContentProviderOperation;
 import android.content.ContentResolver;
 import android.content.ContentValues;
@@ -57,6 +60,7 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
 import android.net.Uri;
+import android.os.RemoteException;
 import android.os.SystemClock;
 import android.support.annotation.CheckResult;
 import android.support.annotation.NonNull;
@@ -101,11 +105,12 @@ public class LocalBrowserDB extends BrowserDB {
     private volatile SuggestedSites mSuggestedSites;
 
     // Constants used when importing history data from legacy browser.
-    public static String HISTORY_VISITS_DATE = "date";
-    public static String HISTORY_VISITS_COUNT = "visits";
-    public static String HISTORY_VISITS_URL = "url";
+    public static final String HISTORY_VISITS_DATE = "date";
+    public static final String HISTORY_VISITS_COUNT = "visits";
+    public static final String HISTORY_VISITS_URL = "url";
 
-    private static final String TELEMETRY_HISTOGRAM_ACITIVITY_STREAM_TOPSITES = "FENNEC_ACTIVITY_STREAM_TOPSITES_LOADER_TIME_MS";
+    private static final String TELEMETRY_HISTOGRAM_ACTIVITY_STREAM_TOPSITES = "FENNEC_ACTIVITY_STREAM_TOPSITES_LOADER_TIME_MS";
+    private static final String TELEMETRY_HISTOGRAM_ACTIVITY_STREAM_HIGHLIGHTS = "FENNEC_ACTIVITY_STREAM_HIGHLIGHTS_LOADER_TIME_MS";
 
     private final Uri mBookmarksUriWithProfile;
     private final Uri mParentsUriWithProfile;
@@ -118,6 +123,8 @@ public class LocalBrowserDB extends BrowserDB {
     private final Uri mTopSitesUriWithProfile;
     private final Uri mHighlightsUriWithProfile;
     private final Uri mSearchHistoryUri;
+    private final Uri mActivityStreamBlockedUriWithProfile;
+    private final Uri mPageMetadataWithProfile;
 
     private LocalSearches searches;
     private LocalTabsAccessor tabsAccessor;
@@ -145,6 +152,9 @@ public class LocalBrowserDB extends BrowserDB {
         mTopSitesUriWithProfile = DBUtils.appendProfile(profile, TopSites.CONTENT_URI);
         mHighlightsUriWithProfile = DBUtils.appendProfile(profile, Highlights.CONTENT_URI);
         mThumbnailsUriWithProfile = DBUtils.appendProfile(profile, Thumbnails.CONTENT_URI);
+        mActivityStreamBlockedUriWithProfile = DBUtils.appendProfile(profile, ActivityStreamBlocklist.CONTENT_URI);
+
+        mPageMetadataWithProfile = DBUtils.appendProfile(profile, PageMetadata.CONTENT_URI);
 
         mSearchHistoryUri = BrowserContract.SearchHistory.CONTENT_URI;
 
@@ -504,6 +514,81 @@ public class LocalBrowserDB extends BrowserDB {
 
         Log.e(LOGTAG, "Failed to find favicon resource ID for " + name);
         return FAVICON_ID_NOT_FOUND;
+    }
+
+    @Override
+    public boolean insertPageMetadata(ContentProviderClient contentProviderClient, String pageUrl, boolean hasImage, String metadataJSON) {
+        final String historyGUID = lookupHistoryGUIDByPageUri(contentProviderClient, pageUrl);
+
+        if (historyGUID == null) {
+            return false;
+        }
+
+        // We have the GUID, insert the metadata.
+        final ContentValues cv = new ContentValues();
+        cv.put(PageMetadata.HISTORY_GUID, historyGUID);
+        cv.put(PageMetadata.HAS_IMAGE, hasImage);
+        cv.put(PageMetadata.JSON, metadataJSON);
+
+        try {
+            contentProviderClient.insert(mPageMetadataWithProfile, cv);
+        } catch (RemoteException e) {
+            throw new IllegalStateException("Unexpected RemoteException", e);
+        }
+
+        return true;
+    }
+
+    @Override
+    public int deletePageMetadata(ContentProviderClient contentProviderClient, String pageUrl) {
+        final String historyGUID = lookupHistoryGUIDByPageUri(contentProviderClient, pageUrl);
+
+        if (historyGUID == null) {
+            return 0;
+        }
+
+        try {
+            return contentProviderClient.delete(mPageMetadataWithProfile, PageMetadata.HISTORY_GUID + " = ?", new String[]{historyGUID});
+        } catch (RemoteException e) {
+            throw new IllegalStateException("Unexpected RemoteException", e);
+        }
+    }
+
+    @Nullable
+    private String lookupHistoryGUIDByPageUri(ContentProviderClient contentProviderClient, String uri) {
+        // Unfortunately we might have duplicate history records for the same URL.
+        final Cursor cursor;
+        try {
+            cursor = contentProviderClient.query(
+                    mHistoryUriWithProfile
+                            .buildUpon()
+                            .appendQueryParameter(BrowserContract.PARAM_LIMIT, "1")
+                            .build(),
+                    new String[]{
+                            History.GUID,
+                    },
+                    History.URL + "= ?",
+                    new String[]{uri}, History.DATE_LAST_VISITED + " DESC"
+            );
+        } catch (RemoteException e) {
+            // Won't happen, we control the implementation.
+            throw new IllegalStateException("Unexpected RemoteException", e);
+        }
+
+        if (cursor == null) {
+            return null;
+        }
+
+        try {
+            if (!cursor.moveToFirst()) {
+                return null;
+            }
+
+            final int historyGUIDCol = cursor.getColumnIndexOrThrow(History.GUID);
+            return cursor.getString(historyGUIDCol);
+        } finally {
+            cursor.close();
+        }
     }
 
     /**
@@ -1646,6 +1731,55 @@ public class LocalBrowserDB extends BrowserDB {
     }
 
     @Override
+    public void pinSiteForAS(ContentResolver cr, String url, String title) {
+        ContentValues values = new ContentValues();
+        final long now = System.currentTimeMillis();
+        values.put(Bookmarks.TITLE, title);
+        values.put(Bookmarks.URL, url);
+        values.put(Bookmarks.PARENT, Bookmarks.FIXED_PINNED_LIST_ID);
+        values.put(Bookmarks.DATE_MODIFIED, now);
+        values.put(Bookmarks.POSITION, Bookmarks.FIXED_AS_PIN_POSITION);
+        values.put(Bookmarks.IS_DELETED, 0);
+
+        cr.insert(mBookmarksUriWithProfile, values);
+    }
+
+    @Override
+    public void unpinSiteForAS(ContentResolver cr, String url) {
+        cr.delete(mBookmarksUriWithProfile,
+                Bookmarks.PARENT + " == ? AND " +
+                Bookmarks.POSITION + " == ? AND " +
+                Bookmarks.URL + " = ?",
+                new String[] {
+                        String.valueOf(Bookmarks.FIXED_PINNED_LIST_ID),
+                        String.valueOf(Bookmarks.FIXED_AS_PIN_POSITION),
+                        url
+                });
+    }
+
+    @Override
+    public boolean isPinnedForAS(ContentResolver cr, String url) {
+        final Cursor c = cr.query(bookmarksUriWithLimit(1),
+                new String[] { Bookmarks._ID },
+                Bookmarks.URL + " = ? AND " + Bookmarks.PARENT + " = ? AND " + Bookmarks.POSITION + " = ?",
+                new String[] {
+                        url,
+                        String.valueOf(Bookmarks.FIXED_PINNED_LIST_ID),
+                        String.valueOf(Bookmarks.FIXED_AS_PIN_POSITION)
+                }, null);
+
+        if (c == null) {
+            throw new IllegalStateException("Null cursor in isPinnedByUrl");
+        }
+
+        try {
+            return c.getCount() > 0;
+        } finally {
+            c.close();
+        }
+    }
+
+    @Override
     @RobocopTarget
     public Cursor getBookmarkForUrl(ContentResolver cr, String url) {
         Cursor c = cr.query(bookmarksUriWithLimit(1),
@@ -1767,11 +1901,16 @@ public class LocalBrowserDB extends BrowserDB {
         }
     }
 
-    public CursorLoader getActivityStreamTopSites(Context context, int limit) {
+    public CursorLoader getActivityStreamTopSites(Context context, int suggestedRangeLimit, int limit) {
         final Uri uri = mTopSitesUriWithProfile.buildUpon()
                 .appendQueryParameter(BrowserContract.PARAM_LIMIT,
                         String.valueOf(limit))
-                .appendQueryParameter(BrowserContract.PARAM_TOPSITES_DISABLE_PINNED, Boolean.TRUE.toString())
+                .appendQueryParameter(BrowserContract.PARAM_SUGGESTEDSITES_LIMIT,
+                        String.valueOf(suggestedRangeLimit))
+                .appendQueryParameter(BrowserContract.PARAM_NON_POSITIONED_PINS,
+                        String.valueOf(true))
+                .appendQueryParameter(BrowserContract.PARAM_TOPSITES_EXCLUDE_REMOTE_ONLY,
+                        String.valueOf(true))
                 .build();
 
         return new TelemetrisedCursorLoader(context,
@@ -1784,7 +1923,7 @@ public class LocalBrowserDB extends BrowserDB {
                 null,
                 null,
                 null,
-                TELEMETRY_HISTOGRAM_ACITIVITY_STREAM_TOPSITES);
+                TELEMETRY_HISTOGRAM_ACTIVITY_STREAM_TOPSITES);
     }
 
     @Override
@@ -1841,6 +1980,15 @@ public class LocalBrowserDB extends BrowserDB {
                 .appendQueryParameter(BrowserContract.PARAM_LIMIT, String.valueOf(limit))
                 .build();
 
-        return new CursorLoader(context, uri, null, null, null, null);
+        return new TelemetrisedCursorLoader(context, uri, null, null, null, null,
+                TELEMETRY_HISTOGRAM_ACTIVITY_STREAM_HIGHLIGHTS);
     }
+
+    @Override
+    public void blockActivityStreamSite(ContentResolver cr, String url) {
+        final ContentValues values = new ContentValues();
+        values.put(ActivityStreamBlocklist.URL, url);
+        cr.insert(mActivityStreamBlockedUriWithProfile, values);
+    }
+
 }

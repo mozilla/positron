@@ -43,21 +43,36 @@ namespace dom {
 class WidgetPointerHelper
 {
 public:
-  bool convertToPointer;
   uint32_t pointerId;
   uint32_t tiltX;
   uint32_t tiltY;
+  bool convertToPointer;
   bool retargetedByPointerCapture;
 
-  WidgetPointerHelper() : convertToPointer(true), pointerId(0), tiltX(0), tiltY(0),
-                          retargetedByPointerCapture(false) {}
+  WidgetPointerHelper()
+    : pointerId(0)
+    , tiltX(0)
+    , tiltY(0)
+    , convertToPointer(true)
+    , retargetedByPointerCapture(false)
+  {
+  }
+
+  WidgetPointerHelper(uint32_t aPointerId, uint32_t aTiltX, uint32_t aTiltY)
+    : pointerId(aPointerId)
+    , tiltX(aTiltX)
+    , tiltY(aTiltY)
+    , convertToPointer(true)
+    , retargetedByPointerCapture(false)
+  {
+  }
 
   void AssignPointerHelperData(const WidgetPointerHelper& aEvent)
   {
-    convertToPointer = aEvent.convertToPointer;
     pointerId = aEvent.pointerId;
     tiltX = aEvent.tiltX;
     tiltY = aEvent.tiltY;
+    convertToPointer = aEvent.convertToPointer;
     retargetedByPointerCapture = aEvent.retargetedByPointerCapture;
   }
 };
@@ -665,8 +680,8 @@ class WidgetPointerEvent : public WidgetMouseEvent
   friend class mozilla::dom::PBrowserChild;
 
   WidgetPointerEvent()
-    : mWidth(0)
-    , mHeight(0)
+    : mWidth(1)
+    , mHeight(1)
     , mIsPrimary(true)
   {
   }
@@ -676,8 +691,8 @@ public:
 
   WidgetPointerEvent(bool aIsTrusted, EventMessage aMsg, nsIWidget* w)
     : WidgetMouseEvent(aIsTrusted, aMsg, w, ePointerEventClass, eReal)
-    , mWidth(0)
-    , mHeight(0)
+    , mWidth(1)
+    , mHeight(1)
     , mIsPrimary(true)
   {
   }

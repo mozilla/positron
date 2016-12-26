@@ -81,6 +81,14 @@ using namespace mozilla::layers;
 using namespace mozilla::widget;
 using namespace mozilla::image;
 
+IDWriteRenderingParams* GetDwriteRenderingParams(bool aGDI)
+{
+  gfxWindowsPlatform::TextRenderingMode mode = aGDI ?
+    gfxWindowsPlatform::TEXT_RENDERING_GDI_CLASSIC :
+    gfxWindowsPlatform::TEXT_RENDERING_NORMAL;
+  return gfxWindowsPlatform::GetPlatform()->GetRenderingParams(mode);
+}
+
 DCFromDrawTarget::DCFromDrawTarget(DrawTarget& aDrawTarget)
 {
   mDC = nullptr;
@@ -310,9 +318,6 @@ NS_IMPL_ISUPPORTS(D3DSharedTexturesReporter, nsIMemoryReporter)
 
 gfxWindowsPlatform::gfxWindowsPlatform()
   : mRenderMode(RENDER_GDI)
-  , mHasDeviceReset(false)
-  , mHasFakeDeviceReset(false)
-  , mHasD3D9DeviceReset(false)
 {
   mUseClearTypeForDownloadableFonts = UNINITIALIZED_VALUE;
   mUseClearTypeAlways = UNINITIALIZED_VALUE;
@@ -425,6 +430,7 @@ gfxWindowsPlatform::InitDWriteSupport()
   }
 
   mDWriteFactory = factory;
+  Factory::SetDWriteFactory(mDWriteFactory);
 
   SetupClearTypeParams();
   reporter.SetSuccessful();
@@ -439,19 +445,12 @@ gfxWindowsPlatform::HandleDeviceReset()
     return false;
   }
 
-  if (!mHasFakeDeviceReset) {
+  if (resetReason != DeviceResetReason::FORCED_RESET) {
     Telemetry::Accumulate(Telemetry::DEVICE_RESET_REASON, uint32_t(resetReason));
   }
 
   // Remove devices and adapters.
   DeviceManagerDx::Get()->ResetDevices();
-
-  // Reset local state. Note: we leave feature status variables as-is. They
-  // will be recomputed by InitializeDevices().
-  mHasDeviceReset = false;
-  mHasFakeDeviceReset = false;
-  mHasD3D9DeviceReset = false;
-  mDeviceResetReason = DeviceResetReason::OK;
 
   imgLoader::NormalLoader()->ClearCache(true);
   imgLoader::NormalLoader()->ClearCache(false);
@@ -474,17 +473,16 @@ gfxWindowsPlatform::HandleDeviceReset()
 void
 gfxWindowsPlatform::UpdateBackendPrefs()
 {
-  uint32_t canvasMask = BackendTypeBit(BackendType::CAIRO);
-  uint32_t contentMask = BackendTypeBit(BackendType::CAIRO);
+  uint32_t canvasMask = BackendTypeBit(BackendType::CAIRO) |
+                        BackendTypeBit(BackendType::SKIA);
+  uint32_t contentMask = BackendTypeBit(BackendType::CAIRO) |
+                         BackendTypeBit(BackendType::SKIA);
   BackendType defaultBackend = BackendType::CAIRO;
   if (gfxConfig::IsEnabled(Feature::DIRECT2D) && Factory::GetD2D1Device()) {
     contentMask |= BackendTypeBit(BackendType::DIRECT2D1_1);
     canvasMask |= BackendTypeBit(BackendType::DIRECT2D1_1);
     defaultBackend = BackendType::DIRECT2D1_1;
-  } else {
-    canvasMask |= BackendTypeBit(BackendType::SKIA);
   }
-  contentMask |= BackendTypeBit(BackendType::SKIA);
   InitBackendPrefs(canvasMask, defaultBackend, contentMask, defaultBackend);
 }
 
@@ -515,15 +513,6 @@ gfxWindowsPlatform::UpdateRenderMode()
       MOZ_CRASH("GFX: Failed to update reference draw target after device reset");
     }
   }
-}
-
-void
-gfxWindowsPlatform::ForceDeviceReset(ForcedDeviceResetReason aReason)
-{
-  Telemetry::Accumulate(Telemetry::FORCED_DEVICE_RESET_REASON, uint32_t(aReason));
-
-  mDeviceResetReason = DeviceResetReason::FORCED_RESET;
-  mHasDeviceReset = true;
 }
 
 mozilla::gfx::BackendType
@@ -916,57 +905,21 @@ gfxWindowsPlatform::IsFontFormatSupported(nsIURI *aFontURI, uint32_t aFormatFlag
     return true;
 }
 
-void
-gfxWindowsPlatform::CompositorUpdated()
-{
-  ForceDeviceReset(ForcedDeviceResetReason::COMPOSITOR_UPDATED);
-  UpdateRenderMode();
-}
-
-void
-gfxWindowsPlatform::TestDeviceReset(DeviceResetReason aReason)
-{
-  if (mHasDeviceReset) {
-    return;
-  }
-  mHasDeviceReset = true;
-  mHasFakeDeviceReset = true;
-  mDeviceResetReason = aReason;
-}
-
 bool
 gfxWindowsPlatform::DidRenderingDeviceReset(DeviceResetReason* aResetReason)
 {
-  if (mHasDeviceReset) {
-    if (aResetReason) {
-      *aResetReason = mDeviceResetReason;
-    }
-    return true;
+  DeviceManagerDx* dm = DeviceManagerDx::Get();
+  if (!dm) {
+    return false;
   }
-  if (aResetReason) {
-    *aResetReason = DeviceResetReason::OK;
-  }
+  return dm->HasDeviceReset(aResetReason);
+}
 
-  if (DeviceManagerDx::Get()->GetAnyDeviceRemovedReason(&mDeviceResetReason)) {
-    mHasDeviceReset = true;
-    if (aResetReason) {
-      *aResetReason = mDeviceResetReason;
-    }
-    return true;
-  }
-
-  if (mHasD3D9DeviceReset) {
-    return true;
-  }
-  if (XRE_IsParentProcess() && gfxPrefs::DeviceResetForTesting()) {
-    TestDeviceReset((DeviceResetReason)gfxPrefs::DeviceResetForTesting());
-    if (aResetReason) {
-      *aResetReason = mDeviceResetReason;
-    }
-    gfxPrefs::SetDeviceResetForTesting(0);
-    return true;
-  }
-  return false;
+void
+gfxWindowsPlatform::CompositorUpdated()
+{
+  DeviceManagerDx::Get()->ForceDeviceReset(ForcedDeviceResetReason::COMPOSITOR_UPDATED);
+  UpdateRenderMode();
 }
 
 BOOL CALLBACK
@@ -1332,11 +1285,6 @@ gfxWindowsPlatform::SetupClearTypeParams()
     }
 }
 
-void
-gfxWindowsPlatform::D3D9DeviceReset() {
-  mHasD3D9DeviceReset = true;
-}
-
 ReadbackManagerD3D11*
 gfxWindowsPlatform::GetReadbackManager()
 {
@@ -1511,18 +1459,22 @@ gfxWindowsPlatform::RecordContentDeviceFailure(TelemetryDeviceCode aDevice)
 void
 gfxWindowsPlatform::InitializeDevices()
 {
-  // If acceleration is disabled, we refuse to initialize anything.
-  if (!gfxConfig::IsEnabled(Feature::HW_COMPOSITING)) {
-    return;
-  }
-
   MOZ_ASSERT(!InSafeMode());
 
-  // If we're the UI process, and the GPU process is enabled, then we don't
-  // initialize any DirectX devices. We do leave them enabled in gfxConfig
-  // though. If the GPU process fails to create these devices it will send
-  // a message back and we'll update their status.
-  if (gfxConfig::IsEnabled(Feature::GPU_PROCESS) && XRE_IsParentProcess()) {
+  if (XRE_IsParentProcess()) {
+    // If we're the UI process, and the GPU process is enabled, then we don't
+    // initialize any DirectX devices. We do leave them enabled in gfxConfig
+    // though. If the GPU process fails to create these devices it will send
+    // a message back and we'll update their status.
+    if (InitGPUProcessSupport()) {
+      return;
+    }
+
+    // No GPU process, continue initializing devices as normal.
+  }
+
+  // If acceleration is disabled, we refuse to initialize anything.
+  if (!gfxConfig::IsEnabled(Feature::HW_COMPOSITING)) {
     return;
   }
 
@@ -1666,6 +1618,49 @@ gfxWindowsPlatform::InitializeD2D()
 
   MOZ_ASSERT(d2d1.IsEnabled());
   d2d1_1.SetSuccessful();
+}
+
+bool
+gfxWindowsPlatform::InitGPUProcessSupport()
+{
+  FeatureState& gpuProc = gfxConfig::GetFeature(Feature::GPU_PROCESS);
+
+  if (!gpuProc.IsEnabled()) {
+    return false;
+  }
+
+  if (!gfxConfig::IsEnabled(Feature::D3D11_COMPOSITING)) {
+    // Don't use the GPU process if not using D3D11.
+    gpuProc.Disable(
+      FeatureStatus::Unavailable,
+      "Not using GPU Process since D3D11 is unavailable",
+      NS_LITERAL_CSTRING("FEATURE_FAILURE_NO_D3D11"));
+  } else if (!IsWin7SP1OrLater()) {
+    // For Windows XP, we simply don't care enough to support this
+    // configuration. On Windows Vista and 7 Pre-SP1, DXGI 1.2 is not
+    // available and remote presentation for D3D11 will not work. Rather
+    // than take a regression and use D3D9, we revert back to in-process
+    // rendering.
+    gpuProc.Disable(
+      FeatureStatus::Unavailable,
+      "Windows XP, Vista, and 7 Pre-SP1 cannot use the GPU process",
+      NS_LITERAL_CSTRING("FEATURE_FAILURE_OLD_WINDOWS"));
+  } else if (!IsWin8OrLater()) {
+    // Windows 7 SP1 can have DXGI 1.2 only via the Platform Update, so we
+    // explicitly check for that here.
+    if (!DeviceManagerDx::Get()->CheckRemotePresentSupport()) {
+      gpuProc.Disable(
+        FeatureStatus::Unavailable,
+        "GPU Process requires the Windows 7 Platform Update",
+        NS_LITERAL_CSTRING("FEATURE_FAILURE_PLATFORM_UPDATE"));
+    } else {
+      // Clear anything cached by the above call since we don't need it.
+      DeviceManagerDx::Get()->ResetDevices();
+    }
+  }
+
+  // If we're still enabled at this point, the user set the force-enabled pref.
+  return gpuProc.IsEnabled();
 }
 
 bool
@@ -1996,8 +1991,6 @@ gfxWindowsPlatform::GetAcceleratedCompositorBackends(nsTArray<LayersBackend>& aB
 
   if (gfxConfig::IsEnabled(Feature::D3D11_COMPOSITING)) {
     aBackends.AppendElement(LayersBackend::LAYERS_D3D11);
-  } else {
-    NS_WARNING("Direct3D 11-accelerated layers are not supported on this system.");
   }
 
   if (gfxConfig::IsEnabled(Feature::D3D9_COMPOSITING) && !gfxPrefs::LayersPreferD3D9()) {

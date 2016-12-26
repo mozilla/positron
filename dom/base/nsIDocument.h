@@ -32,10 +32,13 @@
 #include "nsExpirationTracker.h"
 #include "nsClassHashtable.h"
 #include "prclist.h"
-#include "mozilla/UniquePtr.h"
 #include "mozilla/CORSMode.h"
+#include "mozilla/dom/Dispatcher.h"
+#include "mozilla/LinkedList.h"
 #include "mozilla/StyleBackendType.h"
 #include "mozilla/StyleSheet.h"
+#include "mozilla/TimeStamp.h"
+#include "mozilla/UniquePtr.h"
 #include <bitset>                        // for member
 
 #ifdef MOZILLA_INTERNAL_API
@@ -121,10 +124,12 @@ class BoxObject;
 class CDATASection;
 class Comment;
 struct CustomElementDefinition;
+class DocGroup;
 class DocumentFragment;
 class DocumentTimeline;
 class DocumentType;
 class DOMImplementation;
+class DOMIntersectionObserver;
 class DOMStringList;
 class Element;
 struct ElementCreationOptions;
@@ -134,6 +139,7 @@ class EventTarget;
 class FontFaceSet;
 class FrameRequestCallback;
 struct FullscreenRequest;
+class ImageTracker;
 class ImportManager;
 class HTMLBodyElement;
 struct LifecycleCallbackArgs;
@@ -152,7 +158,6 @@ class SVGSVGElement;
 class Touch;
 class TouchList;
 class TreeWalker;
-class UndoManager;
 class XPathEvaluator;
 class XPathExpression;
 class XPathNSResolver;
@@ -161,6 +166,8 @@ template<typename> class Sequence;
 
 template<typename, typename> class CallbackObjectHolder;
 typedef CallbackObjectHolder<NodeFilter, nsIDOMNodeFilter> NodeFilterHolder;
+
+enum class CallerType : uint32_t;
 
 } // namespace dom
 } // namespace mozilla
@@ -198,7 +205,8 @@ class nsContentList;
 
 // Document interface.  This is implemented by all document objects in
 // Gecko.
-class nsIDocument : public nsINode
+class nsIDocument : public nsINode,
+                    public mozilla::dom::DispatcherTrait
 {
   typedef mozilla::dom::GlobalObject GlobalObject;
 
@@ -213,6 +221,33 @@ public:
 #ifdef MOZILLA_INTERNAL_API
   nsIDocument();
 #endif
+
+  // This helper class must be set when we dispatch beforeunload and unload
+  // events in order to avoid unterminate sync XHRs.
+  class MOZ_RAII PageUnloadingEventTimeStamp
+  {
+    nsCOMPtr<nsIDocument> mDocument;
+    bool mSet;
+
+  public:
+    explicit PageUnloadingEventTimeStamp(nsIDocument* aDocument)
+      : mDocument(aDocument)
+      , mSet(false)
+    {
+      MOZ_ASSERT(aDocument);
+      if (mDocument->mPageUnloadingEventTimeStamp.IsNull()) {
+        mDocument->SetPageUnloadingEventTimeStamp();
+        mSet = true;
+      }
+    }
+
+    ~PageUnloadingEventTimeStamp()
+    {
+      if (mSet) {
+        mDocument->CleanUnloadEventsTimeStamp();
+      }
+    }
+  };
 
   /**
    * Let the document know that we're starting to load data into it.
@@ -934,8 +969,41 @@ public:
   nsresult GetOrCreateId(nsAString& aId);
   void SetId(const nsAString& aId);
 
+  mozilla::TimeStamp GetPageUnloadingEventTimeStamp() const
+  {
+    if (!mParentDocument) {
+      return mPageUnloadingEventTimeStamp;
+    }
+
+    mozilla::TimeStamp parentTimeStamp(mParentDocument->GetPageUnloadingEventTimeStamp());
+    if (parentTimeStamp.IsNull()) {
+      return mPageUnloadingEventTimeStamp;
+    }
+
+    if (!mPageUnloadingEventTimeStamp ||
+        parentTimeStamp < mPageUnloadingEventTimeStamp) {
+      return parentTimeStamp;
+    }
+
+    return mPageUnloadingEventTimeStamp;
+  }
+
+  virtual void NotifyLayerManagerRecreated() = 0;
+
 protected:
   virtual Element *GetRootElementInternal() const = 0;
+
+  void SetPageUnloadingEventTimeStamp()
+  {
+    MOZ_ASSERT(!mPageUnloadingEventTimeStamp);
+    mPageUnloadingEventTimeStamp = mozilla::TimeStamp::NowLoRes();
+  }
+
+  void CleanUnloadEventsTimeStamp()
+  {
+    MOZ_ASSERT(mPageUnloadingEventTimeStamp);
+    mPageUnloadingEventTimeStamp = mozilla::TimeStamp();
+  }
 
 private:
   class SelectorCacheKey
@@ -1375,7 +1443,8 @@ public:
    */
   void DispatchFullscreenError(const char* aMessage);
 
-  virtual void RequestPointerLock(Element* aElement) = 0;
+  virtual void RequestPointerLock(Element* aElement,
+                                  mozilla::dom::CallerType aCallerType) = 0;
 
   static void UnlockPointer(nsIDocument* aDoc = nullptr);
 
@@ -2070,11 +2139,6 @@ public:
   virtual mozilla::PendingAnimationTracker*
   GetOrCreatePendingAnimationTracker() = 0;
 
-  // Makes the images on this document capable of having their animation
-  // active or suspended. An Image will animate as long as at least one of its
-  // owning Documents needs it to animate; otherwise it can suspend.
-  virtual void SetImagesNeedAnimating(bool aAnimating) = 0;
-
   enum SuppressionType {
     eAnimationsOnly = 0x1,
 
@@ -2322,9 +2386,8 @@ public:
    */
   virtual Element* LookupImageElement(const nsAString& aElementId) = 0;
 
-  virtual already_AddRefed<mozilla::dom::UndoManager> GetUndoManager() = 0;
-
   virtual mozilla::dom::DocumentTimeline* Timeline() = 0;
+  virtual mozilla::LinkedList<mozilla::dom::DocumentTimeline>& Timelines() = 0;
 
   virtual void GetAnimations(
       nsTArray<RefPtr<mozilla::dom::Animation>>& aAnimations) = 0;
@@ -2352,29 +2415,7 @@ public:
   // This returns true when the document tree is being teared down.
   bool InUnlinkOrDeletion() { return mInUnlinkOrDeletion; }
 
-  /*
-   * Image Tracking
-   *
-   * Style and content images register their imgIRequests with their document
-   * so that the document can efficiently tell all descendant images when they
-   * are and are not visible. When an image is on-screen, we want to call
-   * LockImage() on it so that it doesn't do things like discarding frame data
-   * to save memory. The PresShell informs the document whether its images
-   * should be locked or not via SetImageLockingState().
-   *
-   * See bug 512260.
-   */
-
-  // Add/Remove images from the document image tracker
-  virtual nsresult AddImage(imgIRequest* aImage) = 0;
-  // If the REQUEST_DISCARD flag is passed then if the lock count is zero we
-  // will request the image be discarded now (instead of waiting).
-  enum { REQUEST_DISCARD = 0x1 };
-  virtual nsresult RemoveImage(imgIRequest* aImage, uint32_t aFlags = 0) = 0;
-
-  // Makes the images on this document locked/unlocked. By default, the locking
-  // state is unlocked/false.
-  virtual nsresult SetImageLockingState(bool aLocked) = 0;
+  mozilla::dom::ImageTracker* ImageTracker();
 
   virtual nsresult AddPlugin(nsIObjectLoadingContent* aPlugin) = 0;
   virtual void RemovePlugin(nsIObjectLoadingContent* aPlugin) = 0;
@@ -2515,6 +2556,7 @@ public:
   // when accessed from chrome privileged script and
   // from content privileged script for compatibility.
   void GetDocumentURIFromJS(nsString& aDocumentURI,
+                            mozilla::dom::CallerType aCallerType,
                             mozilla::ErrorResult& aRv) const;
   void GetCompatMode(nsString& retval) const;
   void GetCharacterSet(nsAString& retval) const;
@@ -2539,8 +2581,8 @@ public:
                     const mozilla::dom::ElementRegistrationOptions& aOptions,
                     JS::MutableHandle<JSObject*> aRetval,
                     mozilla::ErrorResult& rv) = 0;
-  virtual already_AddRefed<mozilla::dom::CustomElementsRegistry>
-    GetCustomElementsRegistry() = 0;
+  virtual already_AddRefed<mozilla::dom::CustomElementRegistry>
+    GetCustomElementRegistry() = 0;
 
   already_AddRefed<nsContentList>
   GetElementsByTagName(const nsAString& aTagName)
@@ -2631,7 +2673,7 @@ public:
                                   Element* aElement) = 0;
   nsIURI* GetDocumentURIObject() const;
   // Not const because all the full-screen goop is not const
-  virtual bool FullscreenEnabled() = 0;
+  virtual bool FullscreenEnabled(mozilla::dom::CallerType aCallerType) = 0;
   virtual Element* GetFullscreenElement() = 0;
   bool Fullscreen()
   {
@@ -2685,7 +2727,12 @@ public:
                                           const nsAString& aAttrName,
                                           const nsAString& aAttrValue);
   Element* GetBindingParent(nsINode& aNode);
-  void LoadBindingDocument(const nsAString& aURI, mozilla::ErrorResult& rv);
+  void LoadBindingDocument(const nsAString& aURI,
+                           nsIPrincipal& aSubjectPrincipal,
+                           mozilla::ErrorResult& rv);
+  void LoadBindingDocument(const nsAString& aURI,
+                           const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
+                           mozilla::ErrorResult& rv);
   mozilla::dom::XPathExpression*
     CreateExpression(const nsAString& aExpression,
                      mozilla::dom::XPathNSResolver* aResolver,
@@ -2801,11 +2848,40 @@ public:
 
   bool HasScriptsBlockedBySandbox();
 
+  bool InlineScriptAllowedByCSP();
+
   void ReportHasScrollLinkedEffect();
   bool HasScrollLinkedEffect() const
   {
     return mHasScrollLinkedEffect;
   }
+
+  mozilla::dom::DocGroup* GetDocGroup() const;
+
+  virtual void AddIntersectionObserver(
+    mozilla::dom::DOMIntersectionObserver* aObserver) = 0;
+  virtual void RemoveIntersectionObserver(
+    mozilla::dom::DOMIntersectionObserver* aObserver) = 0;
+  
+  virtual void UpdateIntersectionObservations() = 0;
+  virtual void ScheduleIntersectionObserverNotification() = 0;
+  virtual void NotifyIntersectionObservers() = 0;
+
+  // Dispatch a runnable related to the document.
+  virtual nsresult Dispatch(const char* aName,
+                            mozilla::dom::TaskCategory aCategory,
+                            already_AddRefed<nsIRunnable>&& aRunnable) override;
+
+  virtual nsIEventTarget*
+  EventTargetFor(mozilla::dom::TaskCategory aCategory) const override;
+
+  // The URLs passed to these functions should match what
+  // JS::DescribeScriptedCaller() returns, since these APIs are used to
+  // determine whether some code is being called from a tracking script.
+  void NoteScriptTrackingStatus(const nsACString& aURL, bool isTracking);
+  bool IsScriptTracking(const nsACString& aURL) const;
+
+  bool PrerenderHref(nsIURI* aHref);
 
 protected:
   bool GetUseCounter(mozilla::UseCounter aUseCounter)
@@ -2920,6 +2996,9 @@ protected:
   RefPtr<nsHTMLCSSStyleSheet> mStyleAttrStyleSheet;
   RefPtr<mozilla::SVGAttrAnimationRuleProcessor> mSVGAttrAnimationRuleProcessor;
 
+  // Tracking for images in the document.
+  RefPtr<mozilla::dom::ImageTracker> mImageTracker;
+
   // The set of all object, embed, applet, video/audio elements or
   // nsIObjectLoadingContent or nsIDocumentActivity for which this is the
   // owner document. (They might not be in the document.)
@@ -2951,6 +3030,10 @@ protected:
   // Our readyState
   ReadyState mReadyState;
 
+  // Whether this document has (or will have, once we have a pres shell) a
+  // Gecko- or Servo-backed style system.
+  mozilla::StyleBackendType mStyleBackendType;
+
 #ifdef MOZILLA_INTERNAL_API
   // Our visibility state
   mozilla::dom::VisibilityState mVisibilityState;
@@ -2958,10 +3041,6 @@ protected:
 #else
   uint32_t mDummy;
 #endif
-
-  // Whether this document has (or will have, once we have a pres shell) a
-  // Gecko- or Servo-backed style system.
-  mozilla::StyleBackendType mStyleBackendType;
 
   // True if BIDI is enabled.
   bool mBidiEnabled : 1;
@@ -3258,6 +3337,15 @@ protected:
 
   // Whether the user has interacted with the document or not:
   bool mUserHasInteracted;
+
+  mozilla::TimeStamp mPageUnloadingEventTimeStamp;
+
+  RefPtr<mozilla::dom::DocGroup> mDocGroup;
+
+  // The set of all the tracking script URLs.  URLs are added to this set by
+  // calling NoteScriptTrackingStatus().  Currently we assume that a URL not
+  // existing in the set means the corresponding script isn't a tracking script.
+  nsTHashtable<nsCStringHashKey> mTrackingScripts;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIDocument, NS_IDOCUMENT_IID)

@@ -7,7 +7,10 @@
 #ifndef mozilla_dom_AnimationPerformanceWarning_h
 #define mozilla_dom_AnimationPerformanceWarning_h
 
-#include "mozilla/InitializerList.h"
+#include <initializer_list>
+
+#include "mozilla/Maybe.h"
+#include "nsTArray.h"
 
 class nsXPIDLString;
 
@@ -23,6 +26,7 @@ struct AnimationPerformanceWarning
     TransformPreserve3D,
     TransformSVG,
     TransformWithGeometricProperties,
+    TransformWithSyncGeometricAnimations,
     TransformFrameInactive,
     OpacityFrameInactive,
     HasRenderingObserver,

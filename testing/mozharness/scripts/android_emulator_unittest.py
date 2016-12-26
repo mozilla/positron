@@ -27,6 +27,7 @@ from mozharness.base.log import FATAL
 from mozharness.base.script import BaseScript, PreScriptAction, PostScriptAction
 from mozharness.base.vcs.vcsbase import VCSMixin
 from mozharness.mozilla.blob_upload import BlobUploadMixin, blobupload_config_options
+from mozharness.mozilla.buildbot import TBPL_RETRY, EXIT_STATUS_DICT
 from mozharness.mozilla.mozbase import MozbaseMixin
 from mozharness.mozilla.testing.testbase import TestingMixin, testing_config_options
 from mozharness.mozilla.testing.unittest import EmulatorMixin
@@ -150,15 +151,14 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
             dirs['abs_test_install_dir'], 'modules')
         dirs['abs_blob_upload_dir'] = os.path.join(
             abs_dirs['abs_work_dir'], 'blobber_upload_dir')
-        dirs['abs_emulator_dir'] = os.path.join(
-            abs_dirs['abs_work_dir'], 'emulator')
+        dirs['abs_emulator_dir'] = abs_dirs['abs_work_dir']
         dirs['abs_mochitest_dir'] = os.path.join(
             dirs['abs_test_install_dir'], 'mochitest')
         dirs['abs_marionette_dir'] = os.path.join(
-            dirs['abs_test_install_dir'], 'marionette', 'marionette')
+            dirs['abs_test_install_dir'], 'marionette', 'harness', 'marionette_harness')
         dirs['abs_marionette_tests_dir'] = os.path.join(
             dirs['abs_test_install_dir'], 'marionette', 'tests', 'testing',
-            'marionette', 'harness', 'marionette', 'tests')
+            'marionette', 'harness', 'marionette_harness', 'tests')
         dirs['abs_avds_dir'] = self.config.get("avds_dir", "/home/cltbld/.android")
 
         for key in dirs.keys():
@@ -560,8 +560,14 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
         # contents of the tar ball
         self.rmtree(dirs['abs_avds_dir'])
         self.mkdir_p(dirs['abs_avds_dir'])
-        url = self._get_repo_url(c["tooltool_manifest_path"])
-        self._tooltool_fetch(url, dirs['abs_avds_dir'])
+        if 'avd_url' in c:
+            # Intended for experimental setups to evaluate an avd prior to
+            # tooltool deployment.
+            url = c['avd_url']
+            self.download_unpack(url, dirs['abs_avds_dir'])
+        else:
+            url = self._get_repo_url(c["tooltool_manifest_path"])
+            self._tooltool_fetch(url, dirs['abs_avds_dir'])
 
         avd_home_dir = self.abs_dirs['abs_avds_dir']
         if avd_home_dir != "/home/cltbld/.android":
@@ -620,7 +626,8 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
         max_restarts = 5
         emulator_ok = self._retry(max_restarts, 10, self._verify_emulator_and_restart_on_fail, "Check emulator")
         if not emulator_ok:
-            self.fatal('INFRA-ERROR: Unable to start emulator after %d attempts' % max_restarts)
+            self.fatal('INFRA-ERROR: Unable to start emulator after %d attempts' % max_restarts,
+                EXIT_STATUS_DICT[TBPL_RETRY])
         # Start logcat for the emulator. The adb process runs until the
         # corresponding emulator is killed. Output is written directly to
         # the blobber upload directory so that it is uploaded automatically
@@ -662,12 +669,13 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
         """
         Install APKs on the emulator
         """
-        assert self.installer_path is not None, \
-            "Either add installer_path to the config or use --installer-path."
         install_needed = self.config["suite_definitions"][self.test_suite].get("install")
         if install_needed == False:
             self.info("Skipping apk installation for %s" % self.test_suite)
             return
+
+        assert self.installer_path is not None, \
+            "Either add installer_path to the config or use --installer-path."
 
         self.sdk_level = self._run_with_timeout(30, [self.adb_path, '-s', self.emulator['device_id'],
             'shell', 'getprop', 'ro.build.version.sdk'])
@@ -675,13 +683,15 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
         # Install Fennec
         install_ok = self._retry(3, 30, self._install_fennec_apk, "Install Fennec APK")
         if not install_ok:
-            self.fatal('INFRA-ERROR: Failed to install %s on %s' % (self.installer_path, self.emulator["name"]))
+            self.fatal('INFRA-ERROR: Failed to install %s on %s' %
+                (self.installer_path, self.emulator["name"]), EXIT_STATUS_DICT[TBPL_RETRY])
 
         # Install Robocop if required
         if self.test_suite.startswith('robocop'):
             install_ok = self._retry(3, 30, self._install_robocop_apk, "Install Robocop APK")
             if not install_ok:
-                self.fatal('INFRA-ERROR: Failed to install %s on %s' % (self.robocop_path, self.emulator["name"]))
+                self.fatal('INFRA-ERROR: Failed to install %s on %s' %
+                    (self.robocop_path, self.emulator["name"]), EXIT_STATUS_DICT[TBPL_RETRY])
 
         self.info("Finished installing apps for %s" % self.emulator["name"])
 

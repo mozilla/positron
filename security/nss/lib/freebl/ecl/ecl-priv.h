@@ -8,6 +8,7 @@
 #include "ecl.h"
 #include "mpi.h"
 #include "mplogic.h"
+#include "../blapii.h"
 
 /* MAX_FIELD_SIZE_DIGITS is the maximum size of field element supported */
 /* the following needs to go away... */
@@ -116,8 +117,7 @@ struct GFMethodStr {
 /* Construct generic GFMethods. */
 GFMethod *GFMethod_consGFp(const mp_int *irr);
 GFMethod *GFMethod_consGFp_mont(const mp_int *irr);
-GFMethod *GFMethod_consGF2m(const mp_int *irr,
-                            const unsigned int irr_arr[5]);
+
 /* Free the memory allocated (if any) to a GFMethod object. */
 void GFMethod_free(GFMethod *meth);
 

@@ -19,7 +19,7 @@
 #include "nsILayoutHistoryState.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Preferences.h"
-#include "nsISupportsArray.h"
+#include "nsArray.h"
 
 namespace dom = mozilla::dom;
 
@@ -72,7 +72,7 @@ nsSHEntryShared::Shutdown()
 }
 
 nsSHEntryShared::nsSHEntryShared()
-  : mDocShellID(0)
+  : mDocShellID({0})
   , mIsFrameNavigation(false)
   , mSaveLayoutState(true)
   , mSticky(true)

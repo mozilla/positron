@@ -33,9 +33,11 @@ typedef enum mp4parse_track_type {
 typedef enum mp4parse_codec {
 	MP4PARSE_CODEC_UNKNOWN,
 	MP4PARSE_CODEC_AAC,
+	MP4PARSE_CODEC_FLAC,
 	MP4PARSE_CODEC_OPUS,
 	MP4PARSE_CODEC_AVC,
 	MP4PARSE_CODEC_VP9,
+	MP4PARSE_CODEC_MP3,
 } mp4parse_codec;
 
 typedef struct mp4parse_track_info {
@@ -46,16 +48,28 @@ typedef struct mp4parse_track_info {
 	int64_t media_time;
 } mp4parse_track_info;
 
-typedef struct mp4parse_codec_specific_config {
+typedef struct mp4parse_byte_data {
 	uint32_t length;
 	uint8_t const* data;
-} mp4parse_codec_specific_config;
+} mp4parse_byte_data;
+
+typedef struct mp4parse_pssh_info {
+	mp4parse_byte_data data;
+} mp4parse_pssh_info;
+
+typedef struct mp4parser_sinf_info {
+	uint32_t is_encrypted;
+	uint8_t iv_size;
+	mp4parse_byte_data kid;
+} mp4parser_sinf_info;
 
 typedef struct mp4parse_track_audio_info {
 	uint16_t channels;
 	uint16_t bit_depth;
 	uint32_t sample_rate;
-	mp4parse_codec_specific_config codec_specific_config;
+	uint16_t profile;
+	mp4parse_byte_data codec_specific_config;
+	mp4parser_sinf_info protected_data;
 } mp4parse_track_audio_info;
 
 typedef struct mp4parse_track_video_info {
@@ -63,7 +77,13 @@ typedef struct mp4parse_track_video_info {
 	uint32_t display_height;
 	uint16_t image_width;
 	uint16_t image_height;
+	mp4parse_byte_data extra_data;
+	mp4parser_sinf_info protected_data;
 } mp4parse_track_video_info;
+
+typedef struct mp4parse_fragment_info {
+	uint64_t fragment_duration;
+} mp4parse_fragment_info;
 
 typedef struct mp4parse_parser mp4parse_parser;
 
@@ -93,7 +113,19 @@ mp4parse_error mp4parse_get_track_audio_info(mp4parse_parser* parser, uint32_t t
 /// Fill the supplied `mp4parse_track_video_info` with metadata for `track`.
 mp4parse_error mp4parse_get_track_video_info(mp4parse_parser* parser, uint32_t track_index, mp4parse_track_video_info* info);
 
+/// Fill the supplied `mp4parse_fragment_info` with metadata from fragmented file.
+mp4parse_error mp4parse_get_fragment_info(mp4parse_parser* parser, mp4parse_fragment_info* info);
+
+/// A fragmented file needs mvex table and contains no data in stts, stsc, and stco boxes.
 mp4parse_error mp4parse_is_fragmented(mp4parse_parser* parser, uint32_t track_id, uint8_t* fragmented);
+
+/// Get 'pssh' system id and 'pssh' box content for eme playback.
+///
+/// The data format in 'info' passing to gecko is:
+///   system_id
+///   pssh box size (in native endian)
+///   pssh box content (including header)
+mp4parse_error mp4parse_get_pssh_info(mp4parse_parser* parser, mp4parse_pssh_info* info);
 
 
 

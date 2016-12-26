@@ -197,48 +197,6 @@ var gData = [
     test: TestGet
   },
 
-  // Certified application with permision granted
-  {
-    type: 'pictures',
-    shouldPass: true,
-    fileExtension: '.png',
-
-    app: "https://example.com/manifest_cert.webapp",
-    permissions: ["device-storage:pictures"],
-
-    test: TestGet
-  },
-  {
-    type: 'videos',
-    shouldPass: true,
-    fileExtension: '.ogv',
-
-    app: "https://example.com/manifest_cert.webapp",
-    permissions: ["device-storage:videos"],
-
-    test: TestGet
-  },
-  {
-    type: 'music',
-    shouldPass: true,
-    fileExtension: '.ogg',
-
-    app: "https://example.com/manifest_cert.webapp",
-    permissions: ["device-storage:music"],
-
-    test: TestGet
-  },
-  {
-    type: 'sdcard',
-    shouldPass: true,
-    fileExtension: '.txt',
-
-    app: "https://example.com/manifest_cert.webapp",
-    permissions: ["device-storage:sdcard"],
-
-    test: TestGet
-  },
-
 
   // Add
 
@@ -315,52 +273,6 @@ var gData = [
     test: TestAdd
   },
 
-  // Certified application with permision granted
-  {
-    type: 'pictures',
-    mimeType: 'image/png',
-    fileExtension: '.png',
-    shouldPass: true,
-
-    app: "https://example.com/manifest_cert.webapp",
-    permissions: ["device-storage:pictures"],
-
-    test: TestAdd
-  },
-  {
-    type: 'videos',
-    mimeType: 'video/ogv',
-    fileExtension: '.ogv',
-    shouldPass: true,
-
-    app: "https://example.com/manifest_cert.webapp",
-    permissions: ["device-storage:videos"],
-
-    test: TestAdd
-  },
-  {
-    type: 'music',
-    mimeType: 'audio/ogg',
-    fileExtension: '.ogg',
-    shouldPass: true,
-
-    app: "https://example.com/manifest_cert.webapp",
-    permissions: ["device-storage:music"],
-
-    test: TestAdd
-  },
-  {
-    type: 'sdcard',
-    mimeType: 'text/plain',
-    fileExtension: '.txt',
-    shouldPass: true,
-
-    app: "https://example.com/manifest_cert.webapp",
-    permissions: ["device-storage:sdcard"],
-
-    test: TestAdd
-  },
-
 
 // Delete 
 
@@ -423,48 +335,6 @@ var gData = [
     shouldPass: true,
     fileExtension: '.txt',
 
-    permissions: ["device-storage:sdcard"],
-
-    test: TestDelete
-  },
-
-  // Certified application with permision granted
-  {
-    type: 'pictures',
-    shouldPass: true,
-    fileExtension: '.png',
-
-    app: "https://example.com/manifest_cert.webapp",
-    permissions: ["device-storage:pictures"],
-
-    test: TestDelete
-  },
-  {
-    type: 'videos',
-    shouldPass: true,
-    fileExtension: '.ogv',
-
-    app: "https://example.com/manifest_cert.webapp",
-    permissions: ["device-storage:videos"],
-
-    test: TestDelete
-  },
-  {
-    type: 'music',
-    shouldPass: true,
-    fileExtension: '.ogg',
-
-    app: "https://example.com/manifest_cert.webapp",
-    permissions: ["device-storage:music"],
-
-    test: TestDelete
-  },
-  {
-    type: 'sdcard',
-    shouldPass: true,
-    fileExtension: '.txt',
-
-    app: "https://example.com/manifest_cert.webapp",
     permissions: ["device-storage:sdcard"],
 
     test: TestDelete
@@ -536,48 +406,6 @@ var gData = [
     test: TestEnumerate
   },
 
-  // Certified application with permision granted
-  {
-    type: 'pictures',
-    shouldPass: true,
-    fileExtension: '.png',
-
-    app: "https://example.com/manifest_cert.webapp",
-    permissions: ["device-storage:pictures"],
-
-    test: TestEnumerate
-  },
-  {
-    type: 'videos',
-    shouldPass: true,
-    fileExtension: '.ogv',
-
-    app: "https://example.com/manifest_cert.webapp",
-    permissions: ["device-storage:videos"],
-
-    test: TestEnumerate
-  },
-  {
-    type: 'music',
-    shouldPass: true,
-    fileExtension: '.ogg',
-
-    app: "https://example.com/manifest_cert.webapp",
-    permissions: ["device-storage:music"],
-
-    test: TestEnumerate
-  },
-  {
-    type: 'sdcard',
-    shouldPass: true,
-    fileExtension: '.txt',
-
-    app: "https://example.com/manifest_cert.webapp",
-    permissions: ["device-storage:sdcard"],
-
-    test: TestEnumerate
-  },
-
 ];
 
 function setupTest(iframe,data) {
@@ -604,15 +432,12 @@ function testComplete(iframe, data) {
   }
 }
 
-function runTest() {
+function* runTest() {
   while (gData.length > 0) {
     var iframe = document.createElement('iframe');
     var data = gData.pop();
 
     iframe.setAttribute('mozbrowser', '');
-    if (data.app) {
-      iframe.setAttribute('mozapp', data.app);
-    }
 
     iframe.src = gTestUri;
 
@@ -643,16 +468,11 @@ createTestFile('.txt');
 var gTestRunner = runTest();
 SpecialPowers.addPermission("browser", true, gTestUri);
 
-// We are more permissive with CSP in our testing environment....
-const DEFAULT_CSP_PRIV = "default-src *; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'";
-const DEFAULT_CSP_CERT = "default-src *; script-src 'self'; style-src 'self'; object-src 'none'";
-
 SpecialPowers.pushPrefEnv({'set': [["dom.mozBrowserFramesEnabled", true],
+                                   ["network.disable.ipc.security", true],
                                    ["device.storage.enabled", true],
                                    ["device.storage.testing", true],
-                                   ["device.storage.prompt.testing", false],
-                                   ["security.apps.privileged.CSP.default", DEFAULT_CSP_PRIV],
-                                   ["security.apps.certified.CSP.default", DEFAULT_CSP_CERT]]},
+                                   ["device.storage.prompt.testing", false]]},
   function() {  gTestRunner.next(); });
 
 </script>

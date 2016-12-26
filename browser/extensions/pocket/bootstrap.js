@@ -64,7 +64,7 @@ function setDefaultPrefs() {
 
 function createElementWithAttrs(document, type, attrs) {
   let element = document.createElement(type);
-  Object.keys(attrs).forEach(function (attr) {
+  Object.keys(attrs).forEach(function(attr) {
     element.setAttribute(attr, attrs[attr]);
   })
   return element;
@@ -177,7 +177,6 @@ var PocketContextMenu = {
   observe: function(aSubject, aTopic, aData) {
     let subject = aSubject.wrappedJSObject;
     let document = subject.menu.ownerDocument;
-    let window = document.defaultView;
     let pocketEnabled = CustomizableUI.getPlacementOfWidget("pocket-button");
 
     let showSaveCurrentPageToPocket = !(subject.onTextInput || subject.onLink ||

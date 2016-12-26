@@ -18,6 +18,10 @@ const NON_ISSUED_KEY_HASH = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 // separated by newlines ('\n')
 
 function checkStateWritten(aSubject, aTopic, aData) {
+  if (aData == PRELOAD_STATE_FILE_NAME) {
+    return;
+  }
+
   equal(aData, SSS_STATE_FILE_NAME);
 
   let stateFile = gProfileDir.clone();
@@ -25,15 +29,15 @@ function checkStateWritten(aSubject, aTopic, aData) {
   ok(stateFile.exists());
   let stateFileContents = readFile(stateFile);
   // the last line is removed because it's just a trailing newline
-  let lines = stateFileContents.split('\n').slice(0, -1);
+  let lines = stateFileContents.split("\n").slice(0, -1);
   equal(lines.length, EXPECTED_ENTRIES);
   let sites = {}; // a map of domain name -> [the entry in the state file]
   for (let line of lines) {
-    let parts = line.split('\t');
+    let parts = line.split("\t");
     let host = parts[0];
     let score = parts[1];
     let lastAccessed = parts[2];
-    let entry = parts[3].split(',');
+    let entry = parts[3].split(",");
     let expectedColumns = EXPECTED_HSTS_COLUMNS;
     if (host.indexOf("HPKP") != -1) {
       expectedColumns = EXPECTED_HPKP_COLUMNS;
@@ -97,7 +101,8 @@ function run_test() {
   let SSService = Cc["@mozilla.org/ssservice;1"]
                     .getService(Ci.nsISiteSecurityService);
   // Put an HPKP entry
-  SSService.setKeyPins("dynamic-pin.example.com", true, 1000, 1,
+  SSService.setKeyPins("dynamic-pin.example.com", true,
+                       new Date().getTime() + 1000000, 1,
                        [NON_ISSUED_KEY_HASH]);
 
   let uris = [ Services.io.newURI("http://bugzilla.mozilla.org", null, null),

@@ -70,6 +70,8 @@ JS_SetGrayGCRootsTracer(JSContext* cx, JSTraceDataOp traceOp, void* data)
 JS_FRIEND_API(JSObject*)
 JS_FindCompilationScope(JSContext* cx, HandleObject objArg)
 {
+    assertSameCompartment(cx, objArg);
+
     RootedObject obj(cx, objArg);
 
     /*
@@ -103,6 +105,7 @@ JS_SplicePrototype(JSContext* cx, HandleObject obj, HandleObject proto)
      * does not nuke type information for the object.
      */
     CHECK_REQUEST(cx);
+    assertSameCompartment(cx, obj, proto);
 
     if (!obj->isSingleton()) {
         /*
@@ -137,6 +140,7 @@ JS_NewObjectWithUniqueType(JSContext* cx, const JSClass* clasp, HandleObject pro
 JS_FRIEND_API(JSObject*)
 JS_NewObjectWithoutMetadata(JSContext* cx, const JSClass* clasp, JS::Handle<JSObject*> proto)
 {
+    assertSameCompartment(cx, proto);
     AutoSuppressAllocationMetadataBuilder suppressMetadata(cx);
     return JS_NewObjectWithGivenProto(cx, clasp, proto);
 }
@@ -310,6 +314,7 @@ js::GetBuiltinClass(JSContext* cx, HandleObject obj, ESClass* cls)
 JS_FRIEND_API(const char*)
 js::ObjectClassName(JSContext* cx, HandleObject obj)
 {
+    assertSameCompartment(cx, obj);
     return GetObjectClassName(cx, obj);
 }
 
@@ -504,6 +509,8 @@ js::FunctionHasNativeReserved(JSObject* fun)
 JS_FRIEND_API(bool)
 js::GetObjectProto(JSContext* cx, JS::Handle<JSObject*> obj, JS::MutableHandle<JSObject*> proto)
 {
+    assertSameCompartment(cx, obj);
+
     if (IsProxy(obj))
         return JS_GetPrototype(cx, obj, proto);
 
@@ -597,7 +604,7 @@ JS_FRIEND_API(bool)
 js::ZoneGlobalsAreAllGray(JS::Zone* zone)
 {
     for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next()) {
-        JSObject* obj = comp->maybeGlobal();
+        JSObject* obj = comp->unsafeUnbarrieredMaybeGlobal();
         if (!obj || !JS::ObjectIsMarkedGray(obj))
             return false;
     }
@@ -652,6 +659,8 @@ JS_SetAccumulateTelemetryCallback(JSContext* cx, JSAccumulateTelemetryDataCallba
 JS_FRIEND_API(JSObject*)
 JS_CloneObject(JSContext* cx, HandleObject obj, HandleObject protoArg)
 {
+    // |obj| might be in a different compartment.
+    assertSameCompartment(cx, protoArg);
     Rooted<TaggedProto> proto(cx, TaggedProto(protoArg.get()));
     return CloneObject(cx, obj, proto);
 }
@@ -763,11 +772,16 @@ FormatValue(JSContext* cx, const Value& vArg, JSAutoByteString& bytes)
 
 // Wrapper for JS_sprintf_append() that reports allocation failure to the
 // context.
-template <typename... Args>
 static char*
-sprintf_append(JSContext* cx, char* buf, Args&&... args)
+MOZ_FORMAT_PRINTF(3, 4)
+sprintf_append(JSContext* cx, char* buf, const char* fmt, ...)
 {
-    char* result = JS_sprintf_append(buf, mozilla::Forward<Args>(args)...);
+    va_list ap;
+
+    va_start(ap, fmt);
+    char* result = JS_vsprintf_append(buf, fmt, ap);
+    va_end(ap);
+
     if (!result) {
         ReportOutOfMemory(cx);
         return nullptr;
@@ -797,7 +811,8 @@ FormatFrame(JSContext* cx, const FrameIter& iter, char* buf, int num,
     RootedValue thisVal(cx);
     if (iter.hasUsableAbstractFramePtr() &&
         iter.isFunctionFrame() &&
-        fun && !fun->isArrow() && !fun->isDerivedClassConstructor())
+        fun && !fun->isArrow() && !fun->isDerivedClassConstructor() &&
+        !(fun->isBoundFunction() && iter.isConstructing()))
     {
         if (!GetFunctionThis(cx, iter.abstractFramePtr(), &thisVal))
             return nullptr;
@@ -1332,22 +1347,8 @@ js::GetAllocationMetadata(JSObject* obj)
 JS_FRIEND_API(bool)
 js::ReportIsNotFunction(JSContext* cx, HandleValue v)
 {
+    assertSameCompartment(cx, v);
     return ReportIsNotFunction(cx, v, -1);
-}
-
-JS_FRIEND_API(void)
-js::ReportErrorWithId(JSContext* cx, const char* msg, HandleId id)
-{
-    RootedValue idv(cx);
-    if (!JS_IdToValue(cx, id, &idv))
-        return;
-    JSString* idstr = JS::ToString(cx, idv);
-    if (!idstr)
-        return;
-    JSAutoByteString bytes(cx, idstr);
-    if (!bytes)
-        return;
-    JS_ReportError(cx, msg, bytes.ptr());
 }
 
 #ifdef DEBUG
@@ -1426,4 +1427,10 @@ JS_FRIEND_API(bool)
 js::detail::IsWindowSlow(JSObject* obj)
 {
     return obj->as<GlobalObject>().maybeWindowProxy();
+}
+
+JS_FRIEND_API(bool)
+js::AllowGCBarriers(JSContext* cx)
+{
+    return cx->allowGCBarriers();
 }

@@ -28,7 +28,6 @@
 #include "nsIContent.h"
 #include "nsIDocument.h"
 #include "nsIPresShell.h"
-#include "nsIScreen.h"
 #include "nsIScrollableFrame.h"
 #include "nsJSEnvironment.h"
 #include "nsLayoutUtils.h"
@@ -247,14 +246,6 @@ Event::WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
   return EventBinding::Wrap(aCx, this, aGivenProto);
 }
 
-bool
-Event::IsChrome(JSContext* aCx) const
-{
-  return mIsMainThreadEvent ?
-    xpc::AccessCheck::isChrome(js::GetContextCompartment(aCx)) :
-    mozilla::dom::workers::IsCurrentThreadRunningChromeWorker();
-}
-
 // nsIDOMEventInterface
 NS_IMETHODIMP
 Event::GetType(nsAString& aType)
@@ -416,6 +407,7 @@ Event::Constructor(const GlobalObject& aGlobal,
   bool trusted = e->Init(t);
   e->InitEvent(aType, aParam.mBubbles, aParam.mCancelable);
   e->SetTrusted(trusted);
+  e->SetComposed(aParam.mComposed);
   return e.forget();
 }
 
@@ -504,15 +496,13 @@ Event::PreventDefault()
 }
 
 void
-Event::PreventDefault(JSContext* aCx)
+Event::PreventDefault(JSContext* aCx, CallerType aCallerType)
 {
-  MOZ_ASSERT(aCx, "JS context must be specified");
-
   // Note that at handling default action, another event may be dispatched.
   // Then, JS in content mey be call preventDefault()
   // even in the event is in system event group.  Therefore, don't refer
   // mInSystemGroup here.
-  PreventDefaultInternal(IsChrome(aCx));
+  PreventDefaultInternal(aCallerType == CallerType::System);
 }
 
 void
@@ -568,11 +558,42 @@ Event::SetEventType(const nsAString& aEventTypeArg)
     mEvent->mSpecifiedEventType =
       nsContentUtils::GetEventMessageAndAtom(aEventTypeArg, mEvent->mClass,
                                              &(mEvent->mMessage));
+    mEvent->SetDefaultComposed();
   } else {
     mEvent->mSpecifiedEventType = nullptr;
     mEvent->mMessage = eUnidentifiedEvent;
     mEvent->mSpecifiedEventTypeString = aEventTypeArg;
+    mEvent->SetComposed(aEventTypeArg);
   }
+  mEvent->SetDefaultComposedInNativeAnonymousContent();
+}
+
+already_AddRefed<EventTarget>
+Event::EnsureWebAccessibleRelatedTarget(EventTarget* aRelatedTarget)
+{
+  nsCOMPtr<EventTarget> relatedTarget = aRelatedTarget;
+  if (relatedTarget) {
+    nsCOMPtr<nsIContent> content = do_QueryInterface(relatedTarget);
+    nsCOMPtr<nsIContent> currentTarget =
+      do_QueryInterface(mEvent->mCurrentTarget);
+
+    if (content && content->ChromeOnlyAccess() &&
+        !nsContentUtils::CanAccessNativeAnon()) {
+      content = content->FindFirstNonChromeOnlyAccessContent();
+      relatedTarget = do_QueryInterface(content);
+    }
+
+    nsIContent* shadowRelatedTarget =
+      GetShadowRelatedTarget(currentTarget, content);
+    if (shadowRelatedTarget) {
+      relatedTarget = shadowRelatedTarget;
+    }
+
+    if (relatedTarget) {
+      relatedTarget = relatedTarget->GetTargetForDOMEvent();
+    }
+  }
+  return relatedTarget.forget();
 }
 
 void
@@ -900,12 +921,6 @@ Event::GetScreenCoords(nsPresContext* aPresContext,
                        WidgetEvent* aEvent,
                        LayoutDeviceIntPoint aPoint)
 {
-  if (!nsContentUtils::LegacyIsCallerChromeOrNativeCode() &&
-      nsContentUtils::ResistFingerprinting()) {
-    // When resisting fingerprinting, return client coordinates instead.
-    return GetClientCoords(aPresContext, aEvent, aPoint, CSSIntPoint(0, 0));
-  }
-
   if (EventStateManager::sIsPointerLocked) {
     return EventStateManager::sLastScreenPoint;
   }
@@ -928,46 +943,17 @@ Event::GetScreenCoords(nsPresContext* aPresContext,
     return CSSIntPoint(aPoint.x, aPoint.y);
   }
 
+  nsPoint pt =
+    LayoutDevicePixel::ToAppUnits(aPoint, aPresContext->DeviceContext()->AppUnitsPerDevPixelAtUnitFullZoom());
 
-  int32_t appPerDevFullZoom =
-    aPresContext->DeviceContext()->AppUnitsPerDevPixelAtUnitFullZoom();
-
-  LayoutDevicePoint devPt = aPoint;
   if (nsIPresShell* ps = aPresContext->GetPresShell()) {
-    // convert to appUnits in order to use RemoveResolution, then back to
-    // device pixels
-    nsPoint pt =
-      LayoutDevicePixel::ToAppUnits(aPoint, appPerDevFullZoom);
     pt = pt.RemoveResolution(nsLayoutUtils::GetCurrentAPZResolutionScale(ps));
-    devPt = LayoutDevicePixel::FromAppUnits(pt, appPerDevFullZoom);
   }
 
-  devPt += guiEvent->mWidget->WidgetToScreenOffset();
+  pt += LayoutDevicePixel::ToAppUnits(guiEvent->mWidget->WidgetToScreenOffset(),
+                                      aPresContext->DeviceContext()->AppUnitsPerDevPixelAtUnitFullZoom());
 
-  nsCOMPtr<nsIScreen> screen = guiEvent->mWidget->GetWidgetScreen();
-  if (screen) {
-    // subtract device-pixel origin of current screen
-    int32_t x, y, w, h;
-    screen->GetRect(&x, &y, &w, &h);
-    devPt.x -= x;
-    devPt.y -= y;
-    // then convert position *within the current screen* to unscaled CSS px
-    double cssToDevScale;
-    screen->GetDefaultCSSScaleFactor(&cssToDevScale);
-    CSSIntPoint cssPt(NSToIntRound(devPt.x / cssToDevScale),
-                      NSToIntRound(devPt.y / cssToDevScale));
-    // finally, add the desktop-pixel origin of the screen, to get a global
-    // CSS pixel value that is compatible with window.screenX/Y positions
-    screen->GetRectDisplayPix(&x, &y, &w, &h);
-    cssPt.x += x;
-    cssPt.y += y;
-    return cssPt;
-  }
-
-  // this shouldn't happen, but just in case...
-  NS_WARNING("failed to find screen, using default CSS px conversion");
-  return CSSPixel::FromAppUnitsRounded(
-      LayoutDevicePixel::ToAppUnits(aPoint, appPerDevFullZoom));
+  return CSSPixel::FromAppUnitsRounded(pt);
 }
 
 // static
@@ -1091,10 +1077,8 @@ Event::GetEventName(EventMessage aEventType)
 }
 
 bool
-Event::DefaultPrevented(JSContext* aCx) const
+Event::DefaultPrevented(CallerType aCallerType) const
 {
-  MOZ_ASSERT(aCx, "JS context must be specified");
-
   NS_ENSURE_TRUE(mEvent, false);
 
   // If preventDefault() has never been called, just return false.
@@ -1105,7 +1089,8 @@ Event::DefaultPrevented(JSContext* aCx) const
   // If preventDefault() has been called by content, return true.  Otherwise,
   // i.e., preventDefault() has been called by chrome, return true only when
   // this is called by chrome.
-  return mEvent->DefaultPreventedByContent() || IsChrome(aCx);
+  return mEvent->DefaultPreventedByContent() ||
+         aCallerType == CallerType::System;
 }
 
 double
@@ -1137,16 +1122,11 @@ Event::TimeStamp() const
     return perf->GetDOMTiming()->TimeStampToDOMHighRes(mEvent->mTimeStamp);
   }
 
-  // For dedicated workers, we should make times relative to the navigation
-  // start of the document that created the worker, which is the same as the
-  // timebase for performance.now().
   workers::WorkerPrivate* workerPrivate =
     workers::GetCurrentThreadWorkerPrivate();
   MOZ_ASSERT(workerPrivate);
 
-  TimeDuration duration =
-    mEvent->mTimeStamp - workerPrivate->NowBaseTimeStamp();
-  return duration.ToMilliseconds();
+  return workerPrivate->TimeStampToDOMHighRes(mEvent->mTimeStamp);
 }
 
 bool
@@ -1197,6 +1177,7 @@ Event::Serialize(IPC::Message* aMsg, bool aSerializeInterfaceType)
   IPC::WriteParam(aMsg, Bubbles());
   IPC::WriteParam(aMsg, Cancelable());
   IPC::WriteParam(aMsg, IsTrusted());
+  IPC::WriteParam(aMsg, Composed());
 
   // No timestamp serialization for now!
 }
@@ -1216,8 +1197,12 @@ Event::Deserialize(const IPC::Message* aMsg, PickleIterator* aIter)
   bool trusted = false;
   NS_ENSURE_TRUE(IPC::ReadParam(aMsg, aIter, &trusted), false);
 
+  bool composed = false;
+  NS_ENSURE_TRUE(IPC::ReadParam(aMsg, aIter, &composed), false);
+
   InitEvent(type, bubbles, cancelable);
   SetTrusted(trusted);
+  SetComposed(composed);
 
   return true;
 }
@@ -1291,6 +1276,23 @@ Event::GetShadowRelatedTarget(nsIContent* aCurrentTarget,
   }
 
   return nullptr;
+}
+
+NS_IMETHODIMP
+Event::GetCancelBubble(bool* aCancelBubble)
+{
+  NS_ENSURE_ARG_POINTER(aCancelBubble);
+  *aCancelBubble = CancelBubble();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+Event::SetCancelBubble(bool aCancelBubble)
+{
+  if (aCancelBubble) {
+    mEvent->StopPropagation();
+  }
+  return NS_OK;
 }
 
 } // namespace dom

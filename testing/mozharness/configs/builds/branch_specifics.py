@@ -52,7 +52,7 @@ config = {
                 'force_clobber': True,
             },
             'macosx64': {
-                'src_mozconfig': 'browser/config/mozconfigs/macosx-universal/release',
+                'src_mozconfig': 'browser/config/mozconfigs/macosx64/release',
                 'force_clobber': True,
             },
             'win32': {
@@ -75,16 +75,10 @@ config = {
             'linux64-asan': {
                 'update_channel': 'default',
             },
-            'linux64-cc': {
-                'update_channel': 'default',
-            },
             'linux64-st-an-debug': {
                 'update_channel': 'default',
             },
             'linux64-st-an': {
-                'update_channel': 'default',
-            },
-            'linux64-tsan': {
                 'update_channel': 'default',
             },
             'linux64-add-on-devel': {
@@ -96,9 +90,6 @@ config = {
             'macosx64-st-an': {
                 'update_channel': 'default',
             },
-            'macosx64-mulet': {
-                'update_channel': 'default',
-            },
             'macosx64-st-an-debug': {
                 'update_channel': 'default',
             },
@@ -106,9 +97,6 @@ config = {
                 'update_channel': 'default',
             },
             'win32-debug': {
-                'update_channel': 'default',
-            },
-            'win32-mulet': {
                 'update_channel': 'default',
             },
             'win32-add-on-devel': {
@@ -138,7 +126,7 @@ config = {
                 'force_clobber': True,
             },
             'macosx64': {
-                'src_mozconfig': 'browser/config/mozconfigs/macosx-universal/beta',
+                'src_mozconfig': 'browser/config/mozconfigs/macosx64/beta',
                 'force_clobber': True,
             },
             'win32': {
@@ -161,16 +149,10 @@ config = {
             'linux64-asan': {
                 'update_channel': 'default',
             },
-            'linux64-cc': {
-                'update_channel': 'default',
-            },
             'linux64-st-an-debug': {
                 'update_channel': 'default',
             },
             'linux64-st-an': {
-                'update_channel': 'default',
-            },
-            'linux64-tsan': {
                 'update_channel': 'default',
             },
             'linux64-add-on-devel': {
@@ -182,9 +164,6 @@ config = {
             'macosx64-st-an': {
                 'update_channel': 'default',
             },
-            'macosx64-mulet': {
-                'update_channel': 'default',
-            },
             'macosx64-st-an-debug': {
                 'update_channel': 'default',
             },
@@ -192,9 +171,6 @@ config = {
                 'update_channel': 'default',
             },
             'win32-debug': {
-                'update_channel': 'default',
-            },
-            'win32-mulet': {
                 'update_channel': 'default',
             },
             'win32-add-on-devel': {
@@ -248,16 +224,10 @@ config = {
             'linux64-asan': {
                 'update_channel': 'default',
             },
-            'linux64-cc': {
-                'update_channel': 'default',
-            },
             'linux64-st-an-debug': {
                 'update_channel': 'default',
             },
             'linux64-st-an': {
-                'update_channel': 'default',
-            },
-            'linux64-tsan': {
                 'update_channel': 'default',
             },
             'macosx64-debug': {
@@ -266,16 +236,10 @@ config = {
             'macosx64-st-an': {
                 'update_channel': 'default',
             },
-            'macosx64-mulet': {
-                'update_channel': 'default',
-            },
             'macosx64-st-an-debug': {
                 'update_channel': 'default',
             },
             'win32-debug': {
-                'update_channel': 'default',
-            },
-            'win32-mulet': {
                 'update_channel': 'default',
             },
             'win64-debug': {
@@ -308,10 +272,7 @@ config = {
     },
 
     ### project branches
-    'fx-team': {
-        'repo_path': 'integration/fx-team',
-        'stage_server': 'upload.ffxbld.productdelivery.prod.mozaws.net',
-    },
+    #'fx-team': {},   #Bug 1296396
     'gum': {
         'branch_uses_per_checkin_strategy': True,
         'stage_server': 'upload.ffxbld.productdelivery.prod.mozaws.net',
@@ -352,16 +313,10 @@ config = {
             'linux64-asan': {
                 'update_channel': 'default',
             },
-            'linux64-cc': {
-                'update_channel': 'default',
-            },
             'linux64-st-an-debug': {
                 'update_channel': 'default',
             },
             'linux64-st-an': {
-                'update_channel': 'default',
-            },
-            'linux64-tsan': {
                 'update_channel': 'default',
             },
             'macosx64': {
@@ -373,9 +328,6 @@ config = {
             'macosx64-st-an': {
                 'update_channel': 'default',
             },
-            'macosx64-mulet': {
-                'update_channel': 'default',
-            },
             'macosx64-st-an-debug': {
                 'update_channel': 'default',
             },
@@ -383,9 +335,6 @@ config = {
                 'src_mozconfig': 'browser/config/mozconfigs/win32/beta',
             },
             'win32-debug': {
-                'update_channel': 'default',
-            },
-            'win32-mulet': {
                 'update_channel': 'default',
             },
             'win64': {
@@ -421,7 +370,9 @@ config = {
         'stage_server': 'upload.ffxbld.productdelivery.prod.mozaws.net',
     },
     'fig': {},
-    # 'graphics': {}
+    'graphics': {
+        'stage_server': 'upload.ffxbld.productdelivery.prod.mozaws.net',
+    },
     # 'holly': {},
     'jamun': {
         'update_channel': 'release-dev',
@@ -445,16 +396,10 @@ config = {
             'linux64-asan': {
                 'update_channel': 'default',
             },
-            'linux64-cc': {
-                'update_channel': 'default',
-            },
             'linux64-st-an-debug': {
                 'update_channel': 'default',
             },
             'linux64-st-an': {
-                'update_channel': 'default',
-            },
-            'linux64-tsan': {
                 'update_channel': 'default',
             },
             'macosx64': {
@@ -466,9 +411,6 @@ config = {
             'macosx64-st-an': {
                 'update_channel': 'default',
             },
-            'macosx64-mulet': {
-                'update_channel': 'default',
-            },
             'macosx64-st-an-debug': {
                 'update_channel': 'default',
             },
@@ -476,9 +418,6 @@ config = {
                 'src_mozconfig': 'browser/config/mozconfigs/win32/release',
             },
             'win32-debug': {
-                'update_channel': 'default',
-            },
-            'win32-mulet': {
                 'update_channel': 'default',
             },
             'win64': {

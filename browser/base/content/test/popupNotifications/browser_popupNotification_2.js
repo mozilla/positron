@@ -9,22 +9,21 @@ function test() {
   ok(PopupNotifications.panel, "PopupNotifications panel exists");
 
   setup();
-  goNext();
 }
 
 var tests = [
   // Test optional params
   { id: "Test#1",
-    run: function () {
+    run: function() {
       this.notifyObj = new BasicNotification(this.id);
       this.notifyObj.secondaryActions = undefined;
       this.notification = showNotification(this.notifyObj);
     },
-    onShown: function (popup) {
+    onShown: function(popup) {
       checkPopup(popup, this.notifyObj);
       dismissNotification(popup);
     },
-    onHidden: function (popup) {
+    onHidden: function(popup) {
       ok(this.notifyObj.dismissalCallbackTriggered, "dismissal callback triggered");
       this.notification.remove();
       ok(this.notifyObj.removedCallbackTriggered, "removed callback triggered");
@@ -32,19 +31,19 @@ var tests = [
   },
   // Test that icons appear
   { id: "Test#2",
-    run: function () {
+    run: function() {
       this.notifyObj = new BasicNotification(this.id);
       this.notifyObj.id = "geolocation";
       this.notifyObj.anchorID = "geo-notification-icon";
       this.notification = showNotification(this.notifyObj);
     },
-    onShown: function (popup) {
+    onShown: function(popup) {
       checkPopup(popup, this.notifyObj);
       isnot(document.getElementById("geo-notification-icon").boxObject.width, 0,
             "geo anchor should be visible");
       dismissNotification(popup);
     },
-    onHidden: function (popup) {
+    onHidden: function(popup) {
       let icon = document.getElementById("geo-notification-icon");
       isnot(icon.boxObject.width, 0,
             "geo anchor should be visible after dismissal");
@@ -58,8 +57,7 @@ var tests = [
   { id: "Test#3",
     run: function* () {
       this.oldSelectedTab = gBrowser.selectedTab;
-      gBrowser.selectedTab = gBrowser.addTab("about:blank");
-      yield promiseTabLoadEvent(gBrowser.selectedTab, "http://example.com/");
+      yield BrowserTestUtils.openNewForegroundTab(gBrowser, "http://example.com/");
       this.notifyObj = new BasicNotification(this.id);
       this.notifyObj.addOptions({
         persistence: 2
@@ -69,12 +67,12 @@ var tests = [
     onShown: function* (popup) {
       this.complete = false;
       yield promiseTabLoadEvent(gBrowser.selectedTab, "http://example.org/");
-      yield promiseTabLoadEvent(gBrowser.selectedTab, "http://example.com/")
+      yield promiseTabLoadEvent(gBrowser.selectedTab, "http://example.com/");
       // Next load will remove the notification
       this.complete = true;
       yield promiseTabLoadEvent(gBrowser.selectedTab, "http://example.org/");
     },
-    onHidden: function (popup) {
+    onHidden: function(popup) {
       ok(this.complete, "Should only have hidden the notification after 3 page loads");
       ok(this.notifyObj.removedCallbackTriggered, "removal callback triggered");
       gBrowser.removeTab(gBrowser.selectedTab);
@@ -85,8 +83,7 @@ var tests = [
   { id: "Test#4",
     run: function* () {
       this.oldSelectedTab = gBrowser.selectedTab;
-      gBrowser.selectedTab = gBrowser.addTab("about:blank");
-      yield promiseTabLoadEvent(gBrowser.selectedTab, "http://example.com/");
+      yield BrowserTestUtils.openNewForegroundTab(gBrowser, "http://example.com/");
       this.notifyObj = new BasicNotification(this.id);
       // Set a timeout of 10 minutes that should never be hit
       this.notifyObj.addOptions({
@@ -103,7 +100,7 @@ var tests = [
       this.complete = true;
       yield promiseTabLoadEvent(gBrowser.selectedTab, "http://example.org/");
     },
-    onHidden: function (popup) {
+    onHidden: function(popup) {
       ok(this.complete, "Should only have hidden the notification after the timeout was passed");
       this.notification.remove();
       gBrowser.removeTab(gBrowser.selectedTab);
@@ -115,8 +112,7 @@ var tests = [
   { id: "Test#5",
     run: function* () {
       this.oldSelectedTab = gBrowser.selectedTab;
-      gBrowser.selectedTab = gBrowser.addTab("about:blank");
-      yield promiseTabLoadEvent(gBrowser.selectedTab, "http://example.com/");
+      yield BrowserTestUtils.openNewForegroundTab(gBrowser, "http://example.com/");
       this.notifyObj = new BasicNotification(this.id);
       this.notifyObj.addOptions({
         persistWhileVisible: true
@@ -132,7 +128,7 @@ var tests = [
       this.complete = true;
       dismissNotification(popup);
     },
-    onHidden: function (popup) {
+    onHidden: function(popup) {
       ok(this.complete, "Should only have hidden the notification after it was dismissed");
       this.notification.remove();
       gBrowser.removeTab(gBrowser.selectedTab);
@@ -187,34 +183,18 @@ var tests = [
       goNext();
     }
   },
-  // Test notification "Not Now" menu item
-  { id: "Test#8",
-    run: function () {
-      this.notifyObj = new BasicNotification(this.id);
-      this.notification = showNotification(this.notifyObj);
-    },
-    onShown: function (popup) {
-      checkPopup(popup, this.notifyObj);
-      triggerSecondaryCommand(popup, 1);
-    },
-    onHidden: function (popup) {
-      ok(this.notifyObj.dismissalCallbackTriggered, "dismissal callback triggered");
-      this.notification.remove();
-      ok(this.notifyObj.removedCallbackTriggered, "removed callback triggered");
-    }
-  },
   // Test notification close button
   { id: "Test#9",
-    run: function () {
+    run: function() {
       this.notifyObj = new BasicNotification(this.id);
       this.notification = showNotification(this.notifyObj);
     },
-    onShown: function (popup) {
+    onShown: function(popup) {
       checkPopup(popup, this.notifyObj);
       let notification = popup.childNodes[0];
       EventUtils.synthesizeMouseAtCenter(notification.closebutton, {});
     },
-    onHidden: function (popup) {
+    onHidden: function(popup) {
       ok(this.notifyObj.dismissalCallbackTriggered, "dismissal callback triggered");
       this.notification.remove();
       ok(this.notifyObj.removedCallbackTriggered, "removed callback triggered");
@@ -222,45 +202,21 @@ var tests = [
   },
   // Test notification when chrome is hidden
   { id: "Test#10",
-    run: function () {
+    run: function() {
       window.locationbar.visible = false;
       this.notifyObj = new BasicNotification(this.id);
       this.notification = showNotification(this.notifyObj);
     },
-    onShown: function (popup) {
+    onShown: function(popup) {
       checkPopup(popup, this.notifyObj);
       is(popup.anchorNode.className, "tabbrowser-tab", "notification anchored to tab");
       dismissNotification(popup);
     },
-    onHidden: function (popup) {
+    onHidden: function(popup) {
       ok(this.notifyObj.dismissalCallbackTriggered, "dismissal callback triggered");
       this.notification.remove();
       ok(this.notifyObj.removedCallbackTriggered, "removed callback triggered");
       window.locationbar.visible = true;
     }
   },
-  // Test that dismissed popupnotifications can be opened on about:blank
-  // (where the rest of the identity block is disabled)
-  { id: "Test#11",
-    run: function() {
-      this.oldSelectedTab = gBrowser.selectedTab;
-      gBrowser.selectedTab = gBrowser.addTab("about:blank");
-
-      this.notifyObj = new BasicNotification(this.id);
-      this.notifyObj.anchorID = "geo-notification-icon";
-      this.notifyObj.addOptions({dismissed: true});
-      this.notification = showNotification(this.notifyObj);
-
-      EventUtils.synthesizeMouse(document.getElementById("geo-notification-icon"), 0, 0, {});
-    },
-    onShown: function(popup) {
-      checkPopup(popup, this.notifyObj);
-      dismissNotification(popup);
-    },
-    onHidden: function(popup) {
-      this.notification.remove();
-      gBrowser.removeTab(gBrowser.selectedTab);
-      gBrowser.selectedTab = this.oldSelectedTab;
-    }
-  }
 ];

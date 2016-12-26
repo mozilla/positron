@@ -53,6 +53,7 @@
 #include "nsIIOService.h"
 #include "nsDocument.h"
 #include "nsAttrValueOrString.h"
+#include "nsDateTimeControlFrame.h"
 
 #include "nsPresState.h"
 #include "nsIDOMEvent.h"
@@ -150,6 +151,8 @@ namespace dom {
 #define NS_CONTROL_TYPE(bits)  ((bits) & ~( \
   NS_OUTER_ACTIVATE_EVENT | NS_ORIGINAL_CHECKED_VALUE | NS_NO_CONTENT_DISPATCH | \
   NS_ORIGINAL_INDETERMINATE_VALUE))
+#define NS_PRE_HANDLE_BLUR_EVENT  (1 << 13)
+#define NS_PRE_HANDLE_INPUT_EVENT (1 << 14)
 
 // whether textfields should be selected once focused:
 //  -1: no, 1: yes, 0: uninitialized
@@ -161,6 +164,7 @@ static const nsAttrValue::EnumTable kInputTypeTable[] = {
   { "checkbox", NS_FORM_INPUT_CHECKBOX },
   { "color", NS_FORM_INPUT_COLOR },
   { "date", NS_FORM_INPUT_DATE },
+  { "datetime-local", NS_FORM_INPUT_DATETIME_LOCAL },
   { "email", NS_FORM_INPUT_EMAIL },
   { "file", NS_FORM_INPUT_FILE },
   { "hidden", NS_FORM_INPUT_HIDDEN },
@@ -182,7 +186,7 @@ static const nsAttrValue::EnumTable kInputTypeTable[] = {
 };
 
 // Default type is 'text'.
-static const nsAttrValue::EnumTable* kInputDefaultType = &kInputTypeTable[17];
+static const nsAttrValue::EnumTable* kInputDefaultType = &kInputTypeTable[18];
 
 static const uint8_t NS_INPUT_INPUTMODE_AUTO              = 0;
 static const uint8_t NS_INPUT_INPUTMODE_NUMERIC           = 1;
@@ -210,14 +214,20 @@ const Decimal HTMLInputElement::kStepScaleFactorDate = Decimal(86400000);
 const Decimal HTMLInputElement::kStepScaleFactorNumberRange = Decimal(1);
 const Decimal HTMLInputElement::kStepScaleFactorTime = Decimal(1000);
 const Decimal HTMLInputElement::kStepScaleFactorMonth = Decimal(1);
+const Decimal HTMLInputElement::kStepScaleFactorWeek = Decimal(7 * 86400000);
 const Decimal HTMLInputElement::kDefaultStepBase = Decimal(0);
+const Decimal HTMLInputElement::kDefaultStepBaseWeek = Decimal(-259200000);
 const Decimal HTMLInputElement::kDefaultStep = Decimal(1);
 const Decimal HTMLInputElement::kDefaultStepTime = Decimal(60);
 const Decimal HTMLInputElement::kStepAny = Decimal(0);
 
-const double HTMLInputElement::kMaximumYear = 275760;
 const double HTMLInputElement::kMinimumYear = 1;
+const double HTMLInputElement::kMaximumYear = 275760;
+const double HTMLInputElement::kMaximumWeekInMaximumYear = 37;
+const double HTMLInputElement::kMaximumDayInMaximumYear = 13;
+const double HTMLInputElement::kMaximumMonthInMaximumYear = 9;
 const double HTMLInputElement::kMaximumWeekInYear = 53;
+const double HTMLInputElement::kMsPerDay = 24 * 60 * 60 * 1000;
 
 #define NS_INPUT_ELEMENT_STATE_IID                 \
 { /* dc3b3d14-23e2-4479-b513-7b369343e3a0 */       \
@@ -350,18 +360,7 @@ class HTMLInputElementState final : public nsISupports
         if (aArray[i].IsFile()) {
           BlobImplOrDirectoryPath* data = mBlobImplsOrDirectoryPaths.AppendElement();
 
-          RefPtr<File> file = aArray[i].GetAsFile();
-
-          nsAutoString name;
-          file->GetName(name);
-
-          nsAutoString path;
-          path.AssignLiteral(FILESYSTEM_DOM_PATH_SEPARATOR_LITERAL);
-          path.Append(name);
-
-          file->SetPath(path);
-
-          data->mBlobImpl = file->Impl();
+          data->mBlobImpl = aArray[i].GetAsFile()->Impl();
           data->mType = BlobImplOrDirectoryPath::eBlobImpl;
         } else {
           MOZ_ASSERT(aArray[i].IsDirectory());
@@ -475,28 +474,37 @@ namespace {
  * where the file picker can create Blobs.
  */
 static already_AddRefed<nsIFile>
-DOMFileOrDirectoryToLocalFile(const OwningFileOrDirectory& aData)
+LastUsedDirectory(const OwningFileOrDirectory& aData)
 {
-  nsString path;
-
   if (aData.IsFile()) {
-    ErrorResult rv;
-    aData.GetAsFile()->GetMozFullPathInternal(path, rv);
-    if (rv.Failed() || path.IsEmpty()) {
-      rv.SuppressException();
+    nsAutoString path;
+    ErrorResult error;
+    aData.GetAsFile()->GetMozFullPathInternal(path, error);
+    if (error.Failed() || path.IsEmpty()) {
+      error.SuppressException();
       return nullptr;
     }
-  } else {
-    MOZ_ASSERT(aData.IsDirectory());
-    aData.GetAsDirectory()->GetFullRealPath(path);
+
+    nsCOMPtr<nsIFile> localFile;
+    nsresult rv = NS_NewNativeLocalFile(NS_ConvertUTF16toUTF8(path), true,
+                                        getter_AddRefs(localFile));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return nullptr;
+    }
+
+    nsCOMPtr<nsIFile> parentFile;
+    rv = localFile->GetParent(getter_AddRefs(parentFile));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return nullptr;
+    }
+
+    return parentFile.forget();
   }
 
-  nsCOMPtr<nsIFile> localFile;
-  nsresult rv = NS_NewNativeLocalFile(NS_ConvertUTF16toUTF8(path), true,
-                                      getter_AddRefs(localFile));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return nullptr;
-  }
+  MOZ_ASSERT(aData.IsDirectory());
+
+  nsCOMPtr<nsIFile> localFile = aData.GetAsDirectory()->GetInternalNsIFile();
+  MOZ_ASSERT(localFile);
 
   return localFile.forget();
 }
@@ -606,12 +614,9 @@ HTMLInputElement::nsFilePickerShownCallback::Done(int16_t aResult)
   }
 
   // Store the last used directory using the content pref service:
-  nsCOMPtr<nsIFile> file =
-    DOMFileOrDirectoryToLocalFile(newFilesOrDirectories[0]);
+  nsCOMPtr<nsIFile> lastUsedDir = LastUsedDirectory(newFilesOrDirectories[0]);
 
-  if (file) {
-    nsCOMPtr<nsIFile> lastUsedDir;
-    file->GetParent(getter_AddRefs(lastUsedDir));
+  if (lastUsedDir) {
     HTMLInputElement::gUploadLastDir->StoreLastUsedDirectory(
       mInput->OwnerDoc(), lastUsedDir);
   }
@@ -683,14 +688,15 @@ nsColorPickerShownCallback::UpdateInternal(const nsAString& aColor,
   if (aTrustedUpdate) {
     valueChanged = true;
   } else {
-    mInput->GetValue(oldValue);
+    mInput->GetValue(oldValue, CallerType::System);
   }
 
-  mInput->SetValue(aColor);
+  IgnoredErrorResult rv;
+  mInput->SetValue(aColor, CallerType::System, rv);
 
   if (!aTrustedUpdate) {
     nsAutoString newValue;
-    mInput->GetValue(newValue);
+    mInput->GetValue(newValue, CallerType::System);
     if (!oldValue.Equals(newValue)) {
       valueChanged = true;
     }
@@ -776,10 +782,11 @@ DatePickerShownCallback::Done(const nsAString& aDate)
   nsAutoString oldValue;
 
   mInput->PickerClosed();
-  mInput->GetValue(oldValue);
+  mInput->GetValue(oldValue, CallerType::System);
 
   if(!oldValue.Equals(aDate)){
-    mInput->SetValue(aDate);
+    IgnoredErrorResult rv;
+    mInput->SetValue(aDate, CallerType::System, rv);
     nsContentUtils::DispatchTrustedEvent(mInput->OwnerDoc(),
                             static_cast<nsIDOMHTMLInputElement*>(mInput.get()),
                             NS_LITERAL_STRING("input"), true,
@@ -856,7 +863,7 @@ HTMLInputElement::InitDatePicker()
   }
 
   nsAutoString initialValue;
-  GetValueInternal(initialValue);
+  GetNonFileValueInternal(initialValue);
   rv = datePicker->Init(win, title, initialValue);
 
   nsCOMPtr<nsIDatePickerShownCallback> callback =
@@ -901,7 +908,7 @@ HTMLInputElement::InitColorPicker()
   }
 
   nsAutoString initialValue;
-  GetValueInternal(initialValue);
+  GetNonFileValueInternal(initialValue);
   nsresult rv = colorPicker->Init(win, title, initialValue);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -982,7 +989,7 @@ HTMLInputElement::InitFilePicker(FilePickerType aType)
     filePicker->AppendFilters(nsIFilePicker::filterAll);
   }
 
-  // Set default directry and filename
+  // Set default directory and filename
   nsAutoString defaultName;
 
   const nsTArray<OwningFileOrDirectory>& oldFiles =
@@ -993,15 +1000,11 @@ HTMLInputElement::InitFilePicker(FilePickerType aType)
 
   if (!oldFiles.IsEmpty() &&
       aType != FILE_PICKER_DIRECTORY) {
-    nsString path;
+    nsAutoString path;
 
-    nsCOMPtr<nsIFile> localFile = DOMFileOrDirectoryToLocalFile(oldFiles[0]);
-    if (localFile) {
-      nsCOMPtr<nsIFile> parentFile;
-      nsresult rv = localFile->GetParent(getter_AddRefs(parentFile));
-      if (NS_SUCCEEDED(rv)) {
-        filePicker->SetDisplayDirectory(parentFile);
-      }
+    nsCOMPtr<nsIFile> parentFile = LastUsedDirectory(oldFiles[0]);
+    if (parentFile) {
+      filePicker->SetDisplayDirectory(parentFile);
     }
 
     // Unfortunately nsIFilePicker doesn't allow multiple files to be
@@ -1155,7 +1158,7 @@ static nsresult FireEventForAccessibility(nsIDOMHTMLInputElement* aTarget,
 //
 
 HTMLInputElement::HTMLInputElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo,
-                                   FromParser aFromParser)
+                                   FromParser aFromParser, FromClone aFromClone)
   : nsGenericHTMLFormElementWithState(aNodeInfo)
   , mType(kInputDefaultType->value)
   , mAutocompleteAttrState(nsContentUtils::eAutocompleteAttrState_Unknown)
@@ -1166,7 +1169,8 @@ HTMLInputElement::HTMLInputElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
   , mChecked(false)
   , mHandlingSelectEvent(false)
   , mShouldInitChecked(false)
-  , mParserCreating(aFromParser != NOT_FROM_PARSER)
+  , mDoneCreating(aFromParser == NOT_FROM_PARSER &&
+                  aFromClone == FromClone::no)
   , mInInternalActivate(false)
   , mCheckedIsToggled(false)
   , mIndeterminate(false)
@@ -1301,7 +1305,8 @@ HTMLInputElement::Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult) co
   *aResult = nullptr;
 
   already_AddRefed<mozilla::dom::NodeInfo> ni = RefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();
-  RefPtr<HTMLInputElement> it = new HTMLInputElement(ni, NOT_FROM_PARSER);
+  RefPtr<HTMLInputElement> it = new HTMLInputElement(ni, NOT_FROM_PARSER,
+                                                     FromClone::yes);
 
   nsresult rv = const_cast<HTMLInputElement*>(this)->CopyInnerTo(it);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1312,7 +1317,7 @@ HTMLInputElement::Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult) co
         // We don't have our default value anymore.  Set our value on
         // the clone.
         nsAutoString value;
-        GetValueInternal(value);
+        GetNonFileValueInternal(value);
         // SetValueInternal handles setting the VALUE_CHANGED bit for us
         rv = it->SetValueInternal(value, nsTextEditorState::eSetValue_Notify);
         NS_ENSURE_SUCCESS(rv, rv);
@@ -1334,6 +1339,8 @@ HTMLInputElement::Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult) co
         // We no longer have our original checked state.  Set our
         // checked state on the clone.
         it->DoSetChecked(mChecked, false, true);
+        // Then tell DoneCreatingElement() not to overwrite:
+        it->mShouldInitChecked = false;
       }
       break;
     case VALUE_MODE_DEFAULT:
@@ -1342,6 +1349,8 @@ HTMLInputElement::Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult) co
       }
       break;
   }
+
+  it->DoneCreatingElement();
 
   it->mLastValueChangeWasInteractive = mLastValueChangeWasInteractive;
   it.forget(aResult);
@@ -1357,12 +1366,12 @@ HTMLInputElement::BeforeSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
     //
     // When name or type changes, radio should be removed from radio group.
     // (type changes are handled in the form itself currently)
-    // If the parser is not done creating the radio, we also should not do it.
+    // If we are not done creating the radio, we also should not do it.
     //
     if ((aName == nsGkAtoms::name ||
          (aName == nsGkAtoms::type && !mForm)) &&
         mType == NS_FORM_INPUT_RADIO &&
-        (mForm || !mParserCreating)) {
+        (mForm || mDoneCreating)) {
       WillRemoveFromRadioGroup();
     } else if (aNotify && aName == nsGkAtoms::src &&
                mType == NS_FORM_INPUT_IMAGE) {
@@ -1407,12 +1416,12 @@ HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
     //
     // When name or type changes, radio should be added to radio group.
     // (type changes are handled in the form itself currently)
-    // If the parser is not done creating the radio, we also should not do it.
+    // If we are not done creating the radio, we also should not do it.
     //
     if ((aName == nsGkAtoms::name ||
          (aName == nsGkAtoms::type && !mForm)) &&
         mType == NS_FORM_INPUT_RADIO &&
-        (mForm || !mParserCreating)) {
+        (mForm || mDoneCreating)) {
       AddedToRadioGroup();
       UpdateValueMissingValidityStateForRadio(false);
     }
@@ -1430,9 +1439,9 @@ HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
     // Checked must be set no matter what type of control it is, since
     // mChecked must reflect the new value
     if (aName == nsGkAtoms::checked && !mCheckedChanged) {
-      // Delay setting checked if the parser is creating this element (wait
+      // Delay setting checked if we are creating this element (wait
       // until everything is set)
-      if (mParserCreating) {
+      if (!mDoneCreating) {
         mShouldInitChecked = true;
       } else {
         DoSetChecked(DefaultChecked(), true, true);
@@ -1486,7 +1495,7 @@ HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
       UpdateTooLongValidityState();
     } else if (MinOrMaxLengthApplies() && aName == nsGkAtoms::minlength) {
       UpdateTooShortValidityState();
-    } else if (aName == nsGkAtoms::pattern && !mParserCreating) {
+    } else if (aName == nsGkAtoms::pattern && mDoneCreating) {
       UpdatePatternMismatchValidityState();
     } else if (aName == nsGkAtoms::multiple) {
       UpdateTypeMismatchValidityState();
@@ -1505,17 +1514,17 @@ HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
         // a step mismatch and a value that results in overflow. For example,
         // if @max in the example above were to change from 1 to -1.
         nsAutoString value;
-        GetValue(value);
+        GetNonFileValueInternal(value);
         nsresult rv =
           SetValueInternal(value, nsTextEditorState::eSetValue_Internal);
         NS_ENSURE_SUCCESS(rv, rv);
       }
       // Validity state must be updated *after* the SetValueInternal call above
       // or else the following assert will not be valid.
-      // We don't assert the state of underflow during parsing since
+      // We don't assert the state of underflow during creation since
       // DoneCreatingElement sanitizes.
       UpdateRangeOverflowValidityState();
-      MOZ_ASSERT(mParserCreating ||
+      MOZ_ASSERT(!mDoneCreating ||
                  mType != NS_FORM_INPUT_RANGE ||
                  !GetValidityState(VALIDITY_STATE_RANGE_UNDERFLOW),
                  "HTML5 spec does not allow underflow for type=range");
@@ -1524,7 +1533,7 @@ HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
       if (mType == NS_FORM_INPUT_RANGE) {
         // See @max comment
         nsAutoString value;
-        GetValue(value);
+        GetNonFileValueInternal(value);
         nsresult rv =
           SetValueInternal(value, nsTextEditorState::eSetValue_Internal);
         NS_ENSURE_SUCCESS(rv, rv);
@@ -1532,7 +1541,7 @@ HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
       // See corresponding @max comment
       UpdateRangeUnderflowValidityState();
       UpdateStepMismatchValidityState();
-      MOZ_ASSERT(mParserCreating ||
+      MOZ_ASSERT(!mDoneCreating ||
                  mType != NS_FORM_INPUT_RANGE ||
                  !GetValidityState(VALIDITY_STATE_RANGE_UNDERFLOW),
                  "HTML5 spec does not allow underflow for type=range");
@@ -1540,14 +1549,14 @@ HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
       if (mType == NS_FORM_INPUT_RANGE) {
         // See @max comment
         nsAutoString value;
-        GetValue(value);
+        GetNonFileValueInternal(value);
         nsresult rv =
           SetValueInternal(value, nsTextEditorState::eSetValue_Internal);
         NS_ENSURE_SUCCESS(rv, rv);
       }
       // See corresponding @max comment
       UpdateStepMismatchValidityState();
-      MOZ_ASSERT(mParserCreating ||
+      MOZ_ASSERT(!mDoneCreating ||
                  mType != NS_FORM_INPUT_RANGE ||
                  !GetValidityState(VALIDITY_STATE_RANGE_UNDERFLOW),
                  "HTML5 spec does not allow underflow for type=range");
@@ -1558,7 +1567,7 @@ HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
       if (mType == NS_FORM_INPUT_NUMBER) {
         // Update the value that is displayed to the user to the new locale:
         nsAutoString value;
-        GetValueInternal(value);
+        GetNonFileValueInternal(value);
         nsNumberControlFrame* numberControlFrame =
           do_QueryFrame(GetPrimaryFrame());
         if (numberControlFrame) {
@@ -1740,71 +1749,76 @@ HTMLInputElement::SetWidth(uint32_t aWidth)
   return rv.StealNSResult();
 }
 
-NS_IMETHODIMP
-HTMLInputElement::GetValue(nsAString& aValue)
+void
+HTMLInputElement::GetValue(nsAString& aValue, CallerType aCallerType)
 {
-  nsresult rv = GetValueInternal(aValue);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
+  GetValueInternal(aValue, aCallerType);
 
   // Don't return non-sanitized value for types that are experimental on mobile
   // or datetime types
   if (IsExperimentalMobileType(mType) || IsDateTimeInputType(mType)) {
     SanitizeValue(aValue);
   }
-
-  return NS_OK;
 }
 
-nsresult
-HTMLInputElement::GetValueInternal(nsAString& aValue) const
+void
+HTMLInputElement::GetValueInternal(nsAString& aValue,
+                                   CallerType aCallerType) const
+{
+  if (mType != NS_FORM_INPUT_FILE) {
+    GetNonFileValueInternal(aValue);
+    return;
+  }
+
+  if (aCallerType == CallerType::System) {
+    aValue.Assign(mFirstFilePath);
+  } else {
+    // Just return the leaf name
+    if (mFilesOrDirectories.IsEmpty()) {
+      aValue.Truncate();
+    } else {
+      GetDOMFileOrDirectoryName(mFilesOrDirectories[0], aValue);
+    }
+  }
+}
+
+void
+HTMLInputElement::GetNonFileValueInternal(nsAString& aValue) const
 {
   switch (GetValueMode()) {
     case VALUE_MODE_VALUE:
       if (IsSingleLineTextControl(false)) {
         mInputData.mState->GetValue(aValue, true);
       } else if (!aValue.Assign(mInputData.mValue, fallible)) {
-        return NS_ERROR_OUT_OF_MEMORY;
+        aValue.Truncate();
       }
-      return NS_OK;
+      return;
 
     case VALUE_MODE_FILENAME:
-      if (nsContentUtils::LegacyIsCallerChromeOrNativeCode()) {
-        aValue.Assign(mFirstFilePath);
-      } else {
-        // Just return the leaf name
-        if (mFilesOrDirectories.IsEmpty()) {
-          aValue.Truncate();
-        } else {
-          GetDOMFileOrDirectoryName(mFilesOrDirectories[0], aValue);
-        }
-      }
-
-      return NS_OK;
+      NS_NOTREACHED("Someone screwed up here");
+      // We'll just return empty string if someone does screw up.
+      aValue.Truncate();
+      return;
 
     case VALUE_MODE_DEFAULT:
       // Treat defaultValue as value.
       GetAttr(kNameSpaceID_None, nsGkAtoms::value, aValue);
-      return NS_OK;
+      return;
 
     case VALUE_MODE_DEFAULT_ON:
       // Treat default value as value and returns "on" if no value.
       if (!GetAttr(kNameSpaceID_None, nsGkAtoms::value, aValue)) {
         aValue.AssignLiteral("on");
       }
-      return NS_OK;
+      return;
   }
-
-  // This return statement is required for some compilers.
-  return NS_OK;
 }
 
 bool
 HTMLInputElement::IsValueEmpty() const
 {
   nsAutoString value;
-  GetValueInternal(value);
+  GetNonFileValueInternal(value);
 
   return value.IsEmpty();
 }
@@ -1880,17 +1894,37 @@ HTMLInputElement::ConvertStringToNumber(nsAString& aValue,
           return false;
         }
 
-        // Maximum valid month is 275760-09.
         if (year < kMinimumYear || year > kMaximumYear) {
           return false;
         }
 
-        if (year == kMaximumYear && month > 9) {
+        // Maximum valid month is 275760-09.
+        if (year == kMaximumYear && month > kMaximumMonthInMaximumYear) {
           return false;
         }
 
         int32_t months = MonthsSinceJan1970(year, month);
         aResultValue = Decimal(int32_t(months));
+        return true;
+      }
+    case NS_FORM_INPUT_WEEK:
+      {
+        uint32_t year, week;
+        if (!ParseWeek(aValue, &year, &week)) {
+          return false;
+        }
+
+        if (year < kMinimumYear || year > kMaximumYear) {
+          return false;
+        }
+
+        // Maximum week is 275760-W37, the week of 275760-09-13.
+        if (year == kMaximumYear && week > kMaximumWeekInMaximumYear) {
+          return false;
+        }
+
+        double days = DaysSinceEpochFromWeek(year, week);
+        aResultValue = Decimal::fromDouble(days * kMsPerDay);
         return true;
       }
     default:
@@ -1905,29 +1939,21 @@ HTMLInputElement::GetValueAsDecimal() const
   Decimal decimalValue;
   nsAutoString stringValue;
 
-  GetValueInternal(stringValue);
+  GetNonFileValueInternal(stringValue);
 
   return !ConvertStringToNumber(stringValue, decimalValue) ? Decimal::nan()
                                                            : decimalValue;
 }
 
 void
-HTMLInputElement::GetValue(nsAString& aValue, ErrorResult& aRv)
-{
-  nsresult rv = GetValue(aValue);
-  if (NS_FAILED(rv)) {
-    aRv.Throw(rv);
-  }
-}
-
-void
-HTMLInputElement::SetValue(const nsAString& aValue, ErrorResult& aRv)
+HTMLInputElement::SetValue(const nsAString& aValue, CallerType aCallerType,
+                           ErrorResult& aRv)
 {
   // check security.  Note that setting the value to the empty string is always
   // OK and gives pages a way to clear a file input if necessary.
   if (mType == NS_FORM_INPUT_FILE) {
     if (!aValue.IsEmpty()) {
-      if (!nsContentUtils::IsCallerChrome()) {
+      if (aCallerType != CallerType::System) {
         // setting the value of a "FILE" input widget requires
         // chrome privilege
         aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
@@ -1956,7 +1982,7 @@ HTMLInputElement::SetValue(const nsAString& aValue, ErrorResult& aRv)
       // NOTE: this is currently quite expensive work (too much string
       // manipulation). We should probably optimize that.
       nsAutoString currentValue;
-      GetValue(currentValue);
+      GetValue(currentValue, aCallerType);
 
       nsresult rv =
         SetValueInternal(aValue, nsTextEditorState::eSetValue_ByContent |
@@ -1967,7 +1993,7 @@ HTMLInputElement::SetValue(const nsAString& aValue, ErrorResult& aRv)
       }
 
       if (mFocusedValue.Equals(currentValue)) {
-        GetValue(mFocusedValue);
+        GetValue(mFocusedValue, aCallerType);
       }
     } else {
       nsresult rv =
@@ -1979,14 +2005,6 @@ HTMLInputElement::SetValue(const nsAString& aValue, ErrorResult& aRv)
       }
     }
   }
-}
-
-NS_IMETHODIMP
-HTMLInputElement::SetValue(const nsAString& aValue)
-{
-  ErrorResult rv;
-  SetValue(aValue, rv);
-  return rv.StealNSResult();
 }
 
 nsGenericHTMLElement*
@@ -2027,18 +2045,20 @@ HTMLInputElement::GetList(nsIDOMHTMLElement** aValue)
 }
 
 void
-HTMLInputElement::SetValue(Decimal aValue)
+HTMLInputElement::SetValue(Decimal aValue, CallerType aCallerType)
 {
   MOZ_ASSERT(!aValue.isInfinity(), "aValue must not be Infinity!");
 
   if (aValue.isNaN()) {
-    SetValue(EmptyString());
+    IgnoredErrorResult rv;
+    SetValue(EmptyString(), aCallerType, rv);
     return;
   }
 
   nsAutoString value;
   ConvertNumberToString(aValue, value);
-  SetValue(value);
+  IgnoredErrorResult rv;
+  SetValue(value, aCallerType, rv);
 }
 
 bool
@@ -2131,6 +2151,41 @@ HTMLInputElement::ConvertNumberToString(Decimal aValue,
         aResultString.AppendPrintf("%04.0f-%02.0f", year, month + 1);
         return true;
       }
+    case NS_FORM_INPUT_WEEK:
+      {
+        aValue = aValue.floor();
+
+        // Based on ISO 8601 date.
+        double year = JS::YearFromTime(aValue.toDouble());
+        double month = JS::MonthFromTime(aValue.toDouble());
+        double day = JS::DayFromTime(aValue.toDouble());
+        // Adding 1 since day starts from 0.
+        double dayInYear = JS::DayWithinYear(aValue.toDouble(), year) + 1;
+
+        // Adding 1 since month starts from 0.
+        uint32_t isoWeekday = DayOfWeek(year, month + 1, day, true);
+        // Target on Wednesday since ISO 8601 states that week 1 is the week
+        // with the first Thursday of that year.
+        uint32_t week = (dayInYear - isoWeekday + 10) / 7;
+
+        if (week < 1) {
+          year--;
+          if (year < 1) {
+            return false;
+          }
+          week = MaximumWeekInYear(year);
+        } else if (week > MaximumWeekInYear(year)) {
+          year++;
+          if (year > kMaximumYear ||
+              (year == kMaximumYear && week > kMaximumWeekInMaximumYear)) {
+            return false;
+          }
+          week = 1;
+        }
+
+        aResultString.AppendPrintf("%04.0f-W%02d", year, week);
+        return true;
+      }
     default:
       MOZ_ASSERT(false, "Unrecognized input type");
       return false;
@@ -2141,8 +2196,8 @@ HTMLInputElement::ConvertNumberToString(Decimal aValue,
 Nullable<Date>
 HTMLInputElement::GetValueAsDate(ErrorResult& aRv)
 {
-  // TODO: this is temporary until bug 888316 is fixed.
-  if (!IsDateTimeInputType(mType) || mType == NS_FORM_INPUT_WEEK) {
+  // TODO: this is temporary until bug 888331 is fixed.
+  if (!IsDateTimeInputType(mType) || mType == NS_FORM_INPUT_DATETIME_LOCAL) {
     return Nullable<Date>();
   }
 
@@ -2151,7 +2206,7 @@ HTMLInputElement::GetValueAsDate(ErrorResult& aRv)
     {
       uint32_t year, month, day;
       nsAutoString value;
-      GetValueInternal(value);
+      GetNonFileValueInternal(value);
       if (!ParseDate(value, &year, &month, &day)) {
         return Nullable<Date>();
       }
@@ -2163,7 +2218,7 @@ HTMLInputElement::GetValueAsDate(ErrorResult& aRv)
     {
       uint32_t millisecond;
       nsAutoString value;
-      GetValueInternal(value);
+      GetNonFileValueInternal(value);
       if (!ParseTime(value, &millisecond)) {
         return Nullable<Date>();
       }
@@ -2178,12 +2233,26 @@ HTMLInputElement::GetValueAsDate(ErrorResult& aRv)
     {
       uint32_t year, month;
       nsAutoString value;
-      GetValueInternal(value);
+      GetNonFileValueInternal(value);
       if (!ParseMonth(value, &year, &month)) {
         return Nullable<Date>();
       }
 
       JS::ClippedTime time = JS::TimeClip(JS::MakeDate(year, month - 1, 1));
+      return Nullable<Date>(Date(time));
+    }
+    case NS_FORM_INPUT_WEEK:
+    {
+      uint32_t year, week;
+      nsAutoString value;
+      GetNonFileValueInternal(value);
+      if (!ParseWeek(value, &year, &week)) {
+        return Nullable<Date>();
+      }
+
+      double days = DaysSinceEpochFromWeek(year, week);
+      JS::ClippedTime time = JS::TimeClip(days * kMsPerDay);
+
       return Nullable<Date>(Date(time));
     }
   }
@@ -2196,21 +2265,24 @@ HTMLInputElement::GetValueAsDate(ErrorResult& aRv)
 void
 HTMLInputElement::SetValueAsDate(Nullable<Date> aDate, ErrorResult& aRv)
 {
-  // TODO: this is temporary until bug 888316 is fixed.
-  if (!IsDateTimeInputType(mType) || mType == NS_FORM_INPUT_WEEK) {
+  // TODO: this is temporary until bug 888331 is fixed.
+  if (!IsDateTimeInputType(mType) || mType == NS_FORM_INPUT_DATETIME_LOCAL) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
 
+  // At this point we know we're not a file input, so we can just pass "not
+  // system" as the caller type, since the caller type only matters in the file
+  // input case.
   if (aDate.IsNull() || aDate.Value().IsUndefined()) {
-    aRv = SetValue(EmptyString());
+    SetValue(EmptyString(), CallerType::NonSystem, aRv);
     return;
   }
 
   double milliseconds = aDate.Value().TimeStamp().toDouble();
 
   if (mType != NS_FORM_INPUT_MONTH) {
-    SetValue(Decimal::fromDouble(milliseconds));
+    SetValue(Decimal::fromDouble(milliseconds), CallerType::NonSystem);
     return;
   }
 
@@ -2219,19 +2291,12 @@ HTMLInputElement::SetValueAsDate(Nullable<Date> aDate, ErrorResult& aRv)
   double month = JS::MonthFromTime(milliseconds);
 
   if (IsNaN(year) || IsNaN(month)) {
-    SetValue(EmptyString());
+    SetValue(EmptyString(), CallerType::NonSystem, aRv);
     return;
   }
 
   int32_t months = MonthsSinceJan1970(year, month + 1);
-  SetValue(Decimal(int32_t(months)));
-}
-
-NS_IMETHODIMP
-HTMLInputElement::GetValueAsNumber(double* aValueAsNumber)
-{
-  *aValueAsNumber = ValueAsNumber();
-  return NS_OK;
+  SetValue(Decimal(int32_t(months)), CallerType::NonSystem);
 }
 
 void
@@ -2249,15 +2314,10 @@ HTMLInputElement::SetValueAsNumber(double aValueAsNumber, ErrorResult& aRv)
     return;
   }
 
-  SetValue(Decimal::fromDouble(aValueAsNumber));
-}
-
-NS_IMETHODIMP
-HTMLInputElement::SetValueAsNumber(double aValueAsNumber)
-{
-  ErrorResult rv;
-  SetValueAsNumber(aValueAsNumber, rv);
-  return rv.StealNSResult();
+  // At this point we know we're not a file input, so we can just pass "not
+  // system" as the caller type, since the caller type only matters in the file
+  // input case.
+  SetValue(Decimal::fromDouble(aValueAsNumber), CallerType::NonSystem);
 }
 
 Decimal
@@ -2309,6 +2369,7 @@ HTMLInputElement::GetStepBase() const
              mType == NS_FORM_INPUT_DATE ||
              mType == NS_FORM_INPUT_TIME ||
              mType == NS_FORM_INPUT_MONTH ||
+             mType == NS_FORM_INPUT_WEEK ||
              mType == NS_FORM_INPUT_RANGE,
              "Check that kDefaultStepBase is correct for this new type");
 
@@ -2327,6 +2388,10 @@ HTMLInputElement::GetStepBase() const
   if (GetAttr(kNameSpaceID_None, nsGkAtoms::value, valueStr) &&
       ConvertStringToNumber(valueStr, stepBase)) {
     return stepBase;
+  }
+
+  if (mType == NS_FORM_INPUT_WEEK) {
+    return kDefaultStepBaseWeek;
   }
 
   return kDefaultStepBase;
@@ -2425,7 +2490,9 @@ HTMLInputElement::ApplyStep(int32_t aStep)
   nsresult rv = GetValueIfStepped(aStep, CALLED_FOR_SCRIPT, &nextStep);
 
   if (NS_SUCCEEDED(rv) && nextStep.isFinite()) {
-    SetValue(nextStep);
+    // We know we're not a file input, so the caller type does not matter; just
+    // pass "not system" to be safe.
+    SetValue(nextStep, CallerType::NonSystem);
   }
 
   return rv;
@@ -2448,7 +2515,8 @@ HTMLInputElement::IsDateTimeInputType(uint8_t aType)
   return aType == NS_FORM_INPUT_DATE ||
          aType == NS_FORM_INPUT_TIME ||
          aType == NS_FORM_INPUT_MONTH ||
-         aType == NS_FORM_INPUT_WEEK;
+         aType == NS_FORM_INPUT_WEEK ||
+         aType == NS_FORM_INPUT_DATETIME_LOCAL;
 }
 
 NS_IMETHODIMP
@@ -2484,39 +2552,6 @@ HTMLInputElement::MozGetFileNameArray(nsTArray<nsString>& aArray,
 
     aArray.AppendElement(str);
   }
-}
-
-
-NS_IMETHODIMP
-HTMLInputElement::MozGetFileNameArray(uint32_t* aLength, char16_t*** aFileNames)
-{
-  if (!nsContentUtils::IsCallerChrome()) {
-    // Since this function returns full paths it's important that normal pages
-    // can't call it.
-    return NS_ERROR_DOM_SECURITY_ERR;
-  }
-
-  ErrorResult rv;
-  nsTArray<nsString> array;
-  MozGetFileNameArray(array, rv);
-  if (NS_WARN_IF(rv.Failed())) {
-    return rv.StealNSResult();
-  }
-
-  *aLength = array.Length();
-  char16_t** ret =
-    static_cast<char16_t**>(moz_xmalloc(*aLength * sizeof(char16_t*)));
-  if (!ret) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  for (uint32_t i = 0; i < *aLength; ++i) {
-    ret[i] = NS_strdup(array[i].get());
-  }
-
-  *aFileNames = ret;
-
-  return NS_OK;
 }
 
 void
@@ -2585,30 +2620,6 @@ HTMLInputElement::MozSetFileNameArray(const Sequence<nsString>& aFileNames,
   SetFilesOrDirectories(files, true);
 }
 
-NS_IMETHODIMP
-HTMLInputElement::MozSetFileNameArray(const char16_t** aFileNames,
-                                      uint32_t aLength)
-{
-  if (!nsContentUtils::IsCallerChrome()) {
-    // setting the value of a "FILE" input widget requires chrome privilege
-    return NS_ERROR_DOM_SECURITY_ERR;
-  }
-
-  Sequence<nsString> list;
-  nsString* names = list.AppendElements(aLength, fallible);
-  if (!names) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-  for (uint32_t i = 0; i < aLength; ++i) {
-    const char16_t* filename = aFileNames[i];
-    names[i].Rebind(filename, nsCharTraits<char16_t>::length(filename));
-  }
-
-  ErrorResult rv;
-  MozSetFileNameArray(list, rv);
-  return rv.StealNSResult();
-}
-
 void
 HTMLInputElement::MozSetDirectory(const nsAString& aDirectoryPath,
                                   ErrorResult& aRv)
@@ -2634,6 +2645,82 @@ HTMLInputElement::MozSetDirectory(const nsAString& aDirectoryPath,
   element->SetAsDirectory() = directory;
 
   SetFilesOrDirectories(array, true);
+}
+
+void HTMLInputElement::GetDateTimeInputBoxValue(DateTimeValue& aValue)
+{
+  if (NS_WARN_IF(!IsDateTimeInputType(mType)) || !mDateTimeInputBoxValue) {
+    return;
+  }
+
+  aValue = *mDateTimeInputBoxValue;
+}
+
+void
+HTMLInputElement::UpdateDateTimeInputBox(const DateTimeValue& aValue)
+{
+  if (NS_WARN_IF(!IsDateTimeInputType(mType))) {
+    return;
+  }
+
+  nsDateTimeControlFrame* frame = do_QueryFrame(GetPrimaryFrame());
+  if (frame) {
+    frame->SetValueFromPicker(aValue);
+  }
+}
+
+void
+HTMLInputElement::SetDateTimePickerState(bool aOpen)
+{
+  if (NS_WARN_IF(!IsDateTimeInputType(mType))) {
+    return;
+  }
+
+  nsDateTimeControlFrame* frame = do_QueryFrame(GetPrimaryFrame());
+  if (frame) {
+    frame->SetPickerState(aOpen);
+  }
+}
+
+void
+HTMLInputElement::OpenDateTimePicker(const DateTimeValue& aInitialValue)
+{
+  if (NS_WARN_IF(!IsDateTimeInputType(mType))) {
+    return;
+  }
+
+  mDateTimeInputBoxValue = new DateTimeValue(aInitialValue);
+  nsContentUtils::DispatchChromeEvent(OwnerDoc(),
+                                      static_cast<nsIDOMHTMLInputElement*>(this),
+                                      NS_LITERAL_STRING("MozOpenDateTimePicker"),
+                                      true, true);
+}
+
+void
+HTMLInputElement::UpdateDateTimePicker(const DateTimeValue& aValue)
+{
+  if (NS_WARN_IF(!IsDateTimeInputType(mType))) {
+    return;
+  }
+
+  mDateTimeInputBoxValue = new DateTimeValue(aValue);
+  nsContentUtils::DispatchChromeEvent(OwnerDoc(),
+                                      static_cast<nsIDOMHTMLInputElement*>(this),
+                                      NS_LITERAL_STRING("MozUpdateDateTimePicker"),
+                                      true, true);
+}
+
+void
+HTMLInputElement::CloseDateTimePicker()
+{
+  if (NS_WARN_IF(!IsDateTimeInputType(mType))) {
+    return;
+  }
+
+  nsContentUtils::DispatchChromeEvent(OwnerDoc(),
+                                      static_cast<nsIDOMHTMLInputElement*>(this),
+                                      NS_LITERAL_STRING("MozCloseDateTimePicker"),
+                                      true, true);
 }
 
 bool
@@ -2662,11 +2749,45 @@ HTMLInputElement::GetOwnerNumberControl()
   return nullptr;
 }
 
+HTMLInputElement*
+HTMLInputElement::GetOwnerDateTimeControl()
+{
+  if (IsInNativeAnonymousSubtree() &&
+      mType == NS_FORM_INPUT_TEXT &&
+      GetParent() &&
+      GetParent()->GetParent() &&
+      GetParent()->GetParent()->GetParent() &&
+      GetParent()->GetParent()->GetParent()->GetParent()) {
+    // Yes, this is very very deep.
+    HTMLInputElement* ownerDateTimeControl =
+      HTMLInputElement::FromContentOrNull(
+        GetParent()->GetParent()->GetParent()->GetParent());
+    if (ownerDateTimeControl &&
+        (ownerDateTimeControl->mType == NS_FORM_INPUT_TIME ||
+         ownerDateTimeControl->mType == NS_FORM_INPUT_DATE)) {
+      return ownerDateTimeControl;
+    }
+  }
+  return nullptr;
+}
+
+
 NS_IMETHODIMP
 HTMLInputElement::MozIsTextField(bool aExcludePassword, bool* aResult)
 {
   *aResult = MozIsTextField(aExcludePassword);
   return NS_OK;
+}
+
+void
+HTMLInputElement::SetUserInput(const nsAString& aInput,
+                               nsIPrincipal& aSubjectPrincipal) {
+  if (mType == NS_FORM_INPUT_FILE &&
+      !nsContentUtils::IsSystemPrincipal(&aSubjectPrincipal)) {
+    return;
+  }
+
+  SetUserInput(aInput);
 }
 
 NS_IMETHODIMP
@@ -2970,8 +3091,10 @@ HTMLInputElement::AfterSetFilesOrDirectories(bool aSetValueChanged)
 void
 HTMLInputElement::FireChangeEventIfNeeded()
 {
+  // We're not exposing the GetValue return value anywhere here, so it's safe to
+  // claim to be a system caller.
   nsAutoString value;
-  GetValue(value);
+  GetValue(value, CallerType::System);
 
   if (!MayFireChangeOnBlur() || mFocusedValue.Equals(value)) {
     return;
@@ -3057,10 +3180,10 @@ HTMLInputElement::SetValueInternal(const nsAString& aValue, uint32_t aFlags)
       // it if it's useless.
       nsAutoString value(aValue);
 
-      if (!mParserCreating) {
+      if (mDoneCreating) {
         SanitizeValue(value);
       }
-      // else DoneCreatingElement calls us again once mParserCreating is false
+      // else DoneCreatingElement calls us again once mDoneCreating is true
 
       bool setValueChanged = !!(aFlags & nsTextEditorState::eSetValue_Notify);
       if (setValueChanged) {
@@ -3072,7 +3195,7 @@ HTMLInputElement::SetValueInternal(const nsAString& aValue, uint32_t aFlags)
           return NS_ERROR_OUT_OF_MEMORY;
         }
         if (mType == NS_FORM_INPUT_EMAIL) {
-          UpdateAllValidityStates(mParserCreating);
+          UpdateAllValidityStates(!mDoneCreating);
         }
       } else {
         free(mInputData.mValue);
@@ -3093,12 +3216,19 @@ HTMLInputElement::SetValueInternal(const nsAString& aValue, uint32_t aFlags)
           if (frame) {
             frame->UpdateForValueChange();
           }
+        } else if ((mType == NS_FORM_INPUT_TIME ||
+                    mType == NS_FORM_INPUT_DATE) &&
+                   !IsExperimentalMobileType(mType)) {
+          nsDateTimeControlFrame* frame = do_QueryFrame(GetPrimaryFrame());
+          if (frame) {
+            frame->UpdateInputBoxValue();
+          }
         }
-        if (!mParserCreating) {
+        if (mDoneCreating) {
           OnValueChanged(/* aNotify = */ true,
                          /* aWasInteractiveUserChange = */ false);
         }
-        // else DoneCreatingElement calls us again once mParserCreating is false
+        // else DoneCreatingElement calls us again once mDoneCreating is true
       }
 
       if (mType == NS_FORM_INPUT_COLOR) {
@@ -3395,6 +3525,16 @@ HTMLInputElement::Blur(ErrorResult& aError)
       }
     }
   }
+
+  if ((mType == NS_FORM_INPUT_TIME || mType == NS_FORM_INPUT_DATE) &&
+      !IsExperimentalMobileType(mType)) {
+    nsDateTimeControlFrame* frame = do_QueryFrame(GetPrimaryFrame());
+    if (frame) {
+      frame->HandleBlurEvent();
+      return;
+    }
+  }
+
   nsGenericHTMLElement::Blur(aError);
 }
 
@@ -3411,6 +3551,15 @@ HTMLInputElement::Focus(ErrorResult& aError)
         textControl->Focus(aError);
         return;
       }
+    }
+  }
+
+  if ((mType == NS_FORM_INPUT_TIME || mType == NS_FORM_INPUT_DATE) &&
+      !IsExperimentalMobileType(mType)) {
+    nsDateTimeControlFrame* frame = do_QueryFrame(GetPrimaryFrame());
+    if (frame) {
+      frame->HandleFocusEvent();
+      return;
     }
   }
 
@@ -3458,6 +3607,12 @@ HTMLInputElement::IsInteractiveHTMLContent(bool aIgnoreTabindex) const
 {
   return mType != NS_FORM_INPUT_HIDDEN ||
          nsGenericHTMLFormElementWithState::IsInteractiveHTMLContent(aIgnoreTabindex);
+}
+
+void
+HTMLInputElement::AsyncEventRunning(AsyncEventDispatcher* aEvent)
+{
+  nsImageLoadingContent::AsyncEventRunning(aEvent);
 }
 
 NS_IMETHODIMP
@@ -3529,7 +3684,7 @@ HTMLInputElement::DispatchSelectEvent(nsPresContext* aPresContext)
 
   // If already handling select event, don't dispatch a second.
   if (!mHandlingSelectEvent) {
-    WidgetEvent event(nsContentUtils::LegacyIsCallerChromeOrNativeCode(), eFormSelect);
+    WidgetEvent event(true, eFormSelect);
 
     mHandlingSelectEvent = true;
     EventDispatcher::Dispatch(static_cast<nsIContent*>(this),
@@ -3587,7 +3742,7 @@ HTMLInputElement::IsDisabledForEvents(EventMessage aMessage)
 }
 
 nsresult
-HTMLInputElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
+HTMLInputElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   // Do not process any DOM events if the element is disabled
   aVisitor.mCanHandle = false;
@@ -3604,7 +3759,7 @@ HTMLInputElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
 
   //FIXME Allow submission etc. also when there is no prescontext, Bug 329509.
   if (!aVisitor.mPresContext) {
-    return nsGenericHTMLElement::PreHandleEvent(aVisitor);
+    return nsGenericHTMLFormElementWithState::GetEventTargetParent(aVisitor);
   }
   //
   // Web pages expect the value of a radio button or checkbox to be set
@@ -3709,32 +3864,37 @@ HTMLInputElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
       // StartRangeThumbDrag already set mFocusedValue on 'mousedown' before
       // we get the 'focus' event.
       !mIsDraggingRange) {
-    GetValue(mFocusedValue);
+    GetValue(mFocusedValue, CallerType::System);
   }
 
   // Fire onchange (if necessary), before we do the blur, bug 357684.
   if (aVisitor.mEvent->mMessage == eBlur) {
-    // Experimental mobile types rely on the system UI to prevent users to not
-    // set invalid values but we have to be extra-careful. Especially if the
-    // option has been enabled on desktop.
-    if (IsExperimentalMobileType(mType) || IsDateTimeInputType(mType)) {
-      nsAutoString aValue;
-      GetValueInternal(aValue);
-      nsresult rv =
-        SetValueInternal(aValue, nsTextEditorState::eSetValue_Internal);
-      NS_ENSURE_SUCCESS(rv, rv);
-    }
-    FireChangeEventIfNeeded();
+    // We set NS_PRE_HANDLE_BLUR_EVENT here and handle it in PreHandleEvent to
+    // prevent breaking event target chain creation.
+    aVisitor.mWantsPreHandleEvent = true;
+    aVisitor.mItemFlags |= NS_PRE_HANDLE_BLUR_EVENT;
   }
 
   if (mType == NS_FORM_INPUT_RANGE &&
       (aVisitor.mEvent->mMessage == eFocus ||
        aVisitor.mEvent->mMessage == eBlur)) {
-    // Just as nsGenericHTMLFormElementWithState::PreHandleEvent calls
+    // Just as nsGenericHTMLFormElementWithState::GetEventTargetParent calls
     // nsIFormControlFrame::SetFocus, we handle focus here.
     nsIFrame* frame = GetPrimaryFrame();
     if (frame) {
       frame->InvalidateFrameSubtree();
+    }
+  }
+
+  if ((mType == NS_FORM_INPUT_TIME || mType == NS_FORM_INPUT_DATE) &&
+      !IsExperimentalMobileType(mType) &&
+      aVisitor.mEvent->mMessage == eFocus &&
+      aVisitor.mEvent->mOriginalTarget == this) {
+    // If original target is this and not the anonymous text control, we should
+    // pass the focus to the anonymous text control.
+    nsDateTimeControlFrame* frame = do_QueryFrame(GetPrimaryFrame());
+    if (frame) {
+      frame->HandleFocusEvent();
     }
   }
 
@@ -3806,10 +3966,11 @@ HTMLInputElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
     }
   }
 
-  nsresult rv = nsGenericHTMLFormElementWithState::PreHandleEvent(aVisitor);
+  nsresult rv = nsGenericHTMLFormElementWithState::GetEventTargetParent(aVisitor);
 
-  // We do this after calling the base class' PreHandleEvent so that
-  // nsIContent::PreHandleEvent doesn't reset any change we make to mCanHandle.
+  // We do this after calling the base class' GetEventTargetParent so that
+  // nsIContent::GetEventTargetParent doesn't reset any change we make to
+  // mCanHandle.
   if (mType == NS_FORM_INPUT_NUMBER &&
       aVisitor.mEvent->IsTrusted()  &&
       aVisitor.mEvent->mOriginalTarget != this) {
@@ -3824,18 +3985,10 @@ HTMLInputElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
     }
     if (textControl && aVisitor.mEvent->mOriginalTarget == textControl) {
       if (aVisitor.mEvent->mMessage == eEditorInput) {
-        // Propogate the anon text control's new value to our HTMLInputElement:
-        nsAutoString value;
-        numberControlFrame->GetValueOfAnonTextControl(value);
-        numberControlFrame->HandlingInputEvent(true);
-        nsWeakFrame weakNumberControlFrame(numberControlFrame);
-        rv = SetValueInternal(value,
-                              nsTextEditorState::eSetValue_BySetUserInput |
-                              nsTextEditorState::eSetValue_Notify);
-        NS_ENSURE_SUCCESS(rv, rv);
-        if (weakNumberControlFrame.IsAlive()) {
-          numberControlFrame->HandlingInputEvent(false);
-        }
+        aVisitor.mWantsPreHandleEvent = true;
+        // We set NS_PRE_HANDLE_INPUT_EVENT here and handle it in PreHandleEvent
+        // to prevent breaking event target chain creation.
+        aVisitor.mItemFlags |= NS_PRE_HANDLE_INPUT_EVENT;
       }
       else if (aVisitor.mEvent->mMessage == eFormChange) {
         // We cancel the DOM 'change' event that is fired for any change to our
@@ -3850,6 +4003,70 @@ HTMLInputElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
     }
   }
 
+  // Stop the event if the related target's first non-native ancestor is the
+  // same as the original target's first non-native ancestor (we are moving
+  // inside of the same element).
+  if ((mType == NS_FORM_INPUT_TIME || mType == NS_FORM_INPUT_DATE) &&
+      !IsExperimentalMobileType(mType) &&
+      (aVisitor.mEvent->mMessage == eFocus ||
+       aVisitor.mEvent->mMessage == eFocusIn ||
+       aVisitor.mEvent->mMessage == eFocusOut ||
+       aVisitor.mEvent->mMessage == eBlur)) {
+    nsCOMPtr<nsIContent> originalTarget =
+      do_QueryInterface(aVisitor.mEvent->AsFocusEvent()->mRelatedTarget);
+    nsCOMPtr<nsIContent> relatedTarget =
+      do_QueryInterface(aVisitor.mEvent->AsFocusEvent()->mRelatedTarget);
+
+    if (originalTarget && relatedTarget &&
+        originalTarget->FindFirstNonChromeOnlyAccessContent() ==
+        relatedTarget->FindFirstNonChromeOnlyAccessContent()) {
+      aVisitor.mCanHandle = false;
+    }
+  }
+
+  return rv;
+}
+
+nsresult
+HTMLInputElement::PreHandleEvent(EventChainVisitor& aVisitor)
+{
+  if (!aVisitor.mPresContext) {
+    return nsGenericHTMLFormElementWithState::PreHandleEvent(aVisitor);
+  }
+  nsresult rv;
+  if (aVisitor.mItemFlags & NS_PRE_HANDLE_BLUR_EVENT) {
+    MOZ_ASSERT(aVisitor.mEvent->mMessage == eBlur);
+    // Experimental mobile types rely on the system UI to prevent users to not
+    // set invalid values but we have to be extra-careful. Especially if the
+    // option has been enabled on desktop.
+    if (IsExperimentalMobileType(mType)) {
+      nsAutoString aValue;
+      GetNonFileValueInternal(aValue);
+      rv = SetValueInternal(aValue, nsTextEditorState::eSetValue_Internal);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
+    FireChangeEventIfNeeded();
+  }
+  rv = nsGenericHTMLFormElementWithState::PreHandleEvent(aVisitor);
+  if (aVisitor.mItemFlags & NS_PRE_HANDLE_INPUT_EVENT) {
+    nsNumberControlFrame* numberControlFrame = do_QueryFrame(GetPrimaryFrame());
+    MOZ_ASSERT(aVisitor.mEvent->mMessage == eEditorInput);
+    MOZ_ASSERT(numberControlFrame);
+    MOZ_ASSERT(numberControlFrame->GetAnonTextControl() ==
+               aVisitor.mEvent->mOriginalTarget);
+    // Propogate the anon text control's new value to our HTMLInputElement:
+    nsAutoString value;
+    numberControlFrame->GetValueOfAnonTextControl(value);
+    numberControlFrame->HandlingInputEvent(true);
+    nsWeakFrame weakNumberControlFrame(numberControlFrame);
+    rv = SetValueInternal(value,
+                          nsTextEditorState::eSetValue_BySetUserInput |
+                          nsTextEditorState::eSetValue_Notify);
+    NS_ENSURE_SUCCESS(rv, rv);
+    if (weakNumberControlFrame.IsAlive()) {
+      numberControlFrame->HandlingInputEvent(false);
+    }
+  }
   return rv;
 }
 
@@ -3868,7 +4085,7 @@ HTMLInputElement::StartRangeThumbDrag(WidgetGUIEvent* aEvent)
   // because the 'focus' event is handled after the 'mousedown' event that
   // we're being called for (i.e. too late to update mFocusedValue, since we'll
   // have changed it by then).
-  GetValue(mFocusedValue);
+  GetValue(mFocusedValue, CallerType::System);
 
   SetValueOfRangeForUserEvent(rangeFrame->GetValueAtEventPoint(aEvent));
 }
@@ -4849,7 +5066,9 @@ HTMLInputElement::HandleTypeChange(uint8_t aNewType)
   nsAutoString aOldValue;
 
   if (aOldValueMode == VALUE_MODE_VALUE) {
-    GetValue(aOldValue);
+    // Doesn't matter what caller type we pass here, since we know we're not a
+    // file input anyway.
+    GetValue(aOldValue, CallerType::NonSystem);
   }
 
   nsTextEditorState::SelectionProperties sp;
@@ -4914,7 +5133,7 @@ HTMLInputElement::HandleTypeChange(uint8_t aNewType)
   // Otherwise, if the new type doesn't fire a change event on blur, but the
   // previous type does, we should clear out mFocusedValue.
   if (MayFireChangeOnBlur(mType) && !MayFireChangeOnBlur(oldType)) {
-    GetValue(mFocusedValue);
+    GetValue(mFocusedValue, CallerType::System);
   } else if (!IsSingleLineTextControl(false, mType) &&
              IsSingleLineTextControl(false, oldType)) {
     mFocusedValue.Truncate();
@@ -4931,7 +5150,7 @@ HTMLInputElement::HandleTypeChange(uint8_t aNewType)
 void
 HTMLInputElement::SanitizeValue(nsAString& aValue)
 {
-  NS_ASSERTION(!mParserCreating, "The element parsing should be finished!");
+  NS_ASSERTION(mDoneCreating, "The element creation should be finished!");
 
   switch (mType) {
     case NS_FORM_INPUT_TEXT:
@@ -5057,6 +5276,15 @@ HTMLInputElement::SanitizeValue(nsAString& aValue)
         }
       }
       break;
+    case NS_FORM_INPUT_DATETIME_LOCAL:
+      {
+        if (!aValue.IsEmpty() && !IsValidDateTimeLocal(aValue)) {
+          aValue.Truncate();
+        } else {
+          NormalizeDateTimeLocal(aValue);
+        }
+      }
+      break;
     case NS_FORM_INPUT_COLOR:
       {
         if (IsValidSimpleColor(aValue)) {
@@ -5096,24 +5324,31 @@ HTMLInputElement::IsLeapYear(uint32_t aYear) const
 }
 
 uint32_t
-HTMLInputElement::DayOfWeek(uint32_t aYear, uint32_t aMonth, uint32_t aDay) const
+HTMLInputElement::DayOfWeek(uint32_t aYear, uint32_t aMonth, uint32_t aDay,
+                            bool isoWeek) const
 {
   // Tomohiko Sakamoto algorithm.
   int monthTable[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
   aYear -= aMonth < 3;
 
-  return (aYear + aYear / 4 - aYear / 100 + aYear / 400 +
-          monthTable[aMonth - 1] + aDay) % 7;
+  uint32_t day = (aYear + aYear / 4 - aYear / 100 + aYear / 400 +
+                  monthTable[aMonth - 1] + aDay) % 7;
+
+  if (isoWeek) {
+    return ((day + 6) % 7) + 1;
+  }
+
+  return day;
 }
 
 uint32_t
 HTMLInputElement::MaximumWeekInYear(uint32_t aYear) const
 {
-  int day = DayOfWeek(aYear, 1, 1); // January 1.
+  int day = DayOfWeek(aYear, 1, 1, true); // January 1.
   // A year starting on Thursday or a leap year starting on Wednesday has 53
   // weeks. All other years have 52 weeks.
-  return day == 4 || (day == 3 && IsLeapYear(aYear)) ? kMaximumWeekInYear
-                                                     : kMaximumWeekInYear - 1;
+  return day == 4 || (day == 3 && IsLeapYear(aYear)) ?
+    kMaximumWeekInYear : kMaximumWeekInYear - 1;
 }
 
 bool
@@ -5137,7 +5372,15 @@ HTMLInputElement::IsValidDate(const nsAString& aValue) const
   return ParseDate(aValue, &year, &month, &day);
 }
 
-bool HTMLInputElement::ParseYear(const nsAString& aValue, uint32_t* aYear) const
+bool
+HTMLInputElement::IsValidDateTimeLocal(const nsAString& aValue) const
+{
+  uint32_t year, month, day, time;
+  return ParseDateTimeLocal(aValue, &year, &month, &day, &time);
+}
+
+bool
+HTMLInputElement::ParseYear(const nsAString& aValue, uint32_t* aYear) const
 {
   if (aValue.Length() < 4) {
     return false;
@@ -5147,9 +5390,9 @@ bool HTMLInputElement::ParseYear(const nsAString& aValue, uint32_t* aYear) const
       *aYear > 0;
 }
 
-bool HTMLInputElement::ParseMonth(const nsAString& aValue,
-                                  uint32_t* aYear,
-                                  uint32_t* aMonth) const
+bool
+HTMLInputElement::ParseMonth(const nsAString& aValue, uint32_t* aYear,
+                             uint32_t* aMonth) const
 {
   // Parse the year, month values out a string formatted as 'yyyy-mm'.
   if (aValue.Length() < 7) {
@@ -5170,9 +5413,9 @@ bool HTMLInputElement::ParseMonth(const nsAString& aValue,
          *aMonth > 0 && *aMonth <= 12;
 }
 
-bool HTMLInputElement::ParseWeek(const nsAString& aValue,
-                                 uint32_t* aYear,
-                                 uint32_t* aWeek) const
+bool
+HTMLInputElement::ParseWeek(const nsAString& aValue, uint32_t* aYear,
+                            uint32_t* aWeek) const
 {
   // Parse the year, month values out a string formatted as 'yyyy-Www'.
   if (aValue.Length() < 8) {
@@ -5198,10 +5441,9 @@ bool HTMLInputElement::ParseWeek(const nsAString& aValue,
 
 }
 
-bool HTMLInputElement::ParseDate(const nsAString& aValue,
-                                 uint32_t* aYear,
-                                 uint32_t* aMonth,
-                                 uint32_t* aDay) const
+bool
+HTMLInputElement::ParseDate(const nsAString& aValue, uint32_t* aYear,
+                            uint32_t* aMonth, uint32_t* aDay) const
 {
 /*
  * Parse the year, month, day values out a date string formatted as 'yyyy-mm-dd'.
@@ -5228,6 +5470,115 @@ bool HTMLInputElement::ParseDate(const nsAString& aValue,
          *aDay > 0 && *aDay <= NumberOfDaysInMonth(*aMonth, *aYear);
 }
 
+bool
+HTMLInputElement::ParseDateTimeLocal(const nsAString& aValue, uint32_t* aYear,
+                                     uint32_t* aMonth, uint32_t* aDay,
+                                     uint32_t* aTime) const
+{
+  // Parse the year, month, day and time values out a string formatted as
+  // 'yyyy-mm-ddThh:mm[:ss.s] or 'yyyy-mm-dd hh:mm[:ss.s]', where fractions of
+  // seconds can be 1 to 3 digits.
+  // The minimum length allowed is 16, which is of the form 'yyyy-mm-ddThh:mm'
+  // or 'yyyy-mm-dd hh:mm'.
+  if (aValue.Length() < 16) {
+    return false;
+  }
+
+  int32_t sepIndex = aValue.FindChar('T');
+  if (sepIndex == -1) {
+    sepIndex = aValue.FindChar(' ');
+
+    if (sepIndex == -1) {
+      return false;
+    }
+  }
+
+  const nsAString& dateStr = Substring(aValue, 0, sepIndex);
+  if (!ParseDate(dateStr, aYear, aMonth, aDay)) {
+    return false;
+  }
+
+  const nsAString& timeStr = Substring(aValue, sepIndex + 1,
+                                       aValue.Length() - sepIndex + 1);
+  if (!ParseTime(timeStr, aTime)) {
+    return false;
+  }
+
+  return true;
+}
+
+void
+HTMLInputElement::NormalizeDateTimeLocal(nsAString& aValue) const
+{
+  if (aValue.IsEmpty()) {
+    return;
+  }
+
+  // Use 'T' as the separator between date string and time string.
+  int32_t sepIndex = aValue.FindChar(' ');
+  if (sepIndex != -1) {
+    aValue.Replace(sepIndex, 1, NS_LITERAL_STRING("T"));
+  } else {
+    sepIndex = aValue.FindChar('T');
+  }
+
+  // Time expressed as the shortest possible string, which is hh:mm.
+  if ((aValue.Length() - sepIndex) == 6) {
+    return;
+  }
+
+  // Fractions of seconds part is optional, ommit it if it's 0.
+  if ((aValue.Length() - sepIndex) > 9) {
+    const uint32_t millisecSepIndex = sepIndex + 9;
+    uint32_t milliseconds;
+    if (!DigitSubStringToNumber(aValue, millisecSepIndex + 1,
+                                aValue.Length() - (millisecSepIndex + 1),
+                                &milliseconds)) {
+      return;
+    }
+
+    if (milliseconds != 0) {
+      return;
+    }
+
+    aValue.Cut(millisecSepIndex, aValue.Length() - millisecSepIndex);
+  }
+
+  // Seconds part is optional, ommit it if it's 0.
+  const uint32_t secondSepIndex = sepIndex + 6;
+  uint32_t seconds;
+  if (!DigitSubStringToNumber(aValue, secondSepIndex + 1,
+                              aValue.Length() - (secondSepIndex + 1),
+                              &seconds)) {
+    return;
+  }
+
+  if (seconds != 0) {
+    return;
+  }
+
+  aValue.Cut(secondSepIndex, aValue.Length() - secondSepIndex);
+}
+
+double
+HTMLInputElement::DaysSinceEpochFromWeek(uint32_t aYear, uint32_t aWeek) const
+{
+  double days = JS::DayFromYear(aYear) + (aWeek - 1) * 7;
+  uint32_t dayOneIsoWeekday = DayOfWeek(aYear, 1, 1, true);
+
+  // If day one of that year is on/before Thursday, we should subtract the
+  // days that belong to last year in our first week, otherwise, our first
+  // days belong to last year's last week, and we should add those days
+  // back.
+  if (dayOneIsoWeekday <= 4) {
+    days -= (dayOneIsoWeekday - 1);
+  } else {
+    days += (7 - dayOneIsoWeekday + 1);
+  }
+
+  return days;
+}
+
 uint32_t
 HTMLInputElement::NumberOfDaysInMonth(uint32_t aMonth, uint32_t aYear) const
 {
@@ -5251,8 +5602,7 @@ HTMLInputElement::NumberOfDaysInMonth(uint32_t aMonth, uint32_t aYear) const
     return 30;
   }
 
-  return (aYear % 400 == 0 || (aYear % 100 != 0 && aYear % 4 == 0))
-          ? 29 : 28;
+  return IsLeapYear(aYear) ? 29 : 28;
 }
 
 /* static */ bool
@@ -5371,7 +5721,8 @@ IsDateTimeEnabled(int32_t aNewType)
           (Preferences::GetBool("dom.forms.datetime", false) ||
            Preferences::GetBool("dom.experimental_forms", false))) ||
          ((aNewType == NS_FORM_INPUT_MONTH ||
-           aNewType == NS_FORM_INPUT_WEEK) &&
+           aNewType == NS_FORM_INPUT_WEEK ||
+           aNewType == NS_FORM_INPUT_DATETIME_LOCAL) &&
           Preferences::GetBool("dom.forms.datetime", false));
 }
 
@@ -5707,19 +6058,11 @@ HTMLInputElement::GetControllers(nsIControllers** aResult)
 }
 
 int32_t
-HTMLInputElement::GetTextLength(ErrorResult& aRv)
+HTMLInputElement::InputTextLength(CallerType aCallerType)
 {
   nsAutoString val;
-  GetValue(val);
+  GetValue(val, aCallerType);
   return val.Length();
-}
-
-NS_IMETHODIMP
-HTMLInputElement::GetTextLength(int32_t* aTextLength)
-{
-  ErrorResult rv;
-  *aTextLength = GetTextLength(rv);
-  return rv.StealNSResult();
 }
 
 void
@@ -5811,7 +6154,7 @@ HTMLInputElement::SetRangeText(const nsAString& aReplacement, uint32_t aStart,
   }
 
   nsAutoString value;
-  GetValueInternal(value);
+  GetNonFileValueInternal(value);
   uint32_t inputValueLength = value.Length();
 
   if (aStart > inputValueLength) {
@@ -6232,7 +6575,7 @@ HTMLInputElement::SetDirectionIfAuto(bool aAuto, bool aNotify)
     SetHasDirAuto();
     if (IsSingleLineTextControl(true)) {
       nsAutoString value;
-      GetValue(value);
+      GetValue(value, CallerType::System);
       SetDirectionalityFromValue(this, value, aNotify);
     }
   } else {
@@ -6315,29 +6658,9 @@ HTMLInputElement::SubmitNamesValues(HTMLFormSubmission* aFormSubmission)
     return NS_OK;
   }
 
-  //
-  // Submit name=value
-  //
-
   // If name not there, don't submit
   if (name.IsEmpty()) {
     return NS_OK;
-  }
-
-  // Get the value
-  nsAutoString value;
-  nsresult rv = GetValue(value);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-
-  if (mType == NS_FORM_INPUT_SUBMIT && value.IsEmpty() &&
-      !HasAttr(kNameSpaceID_None, nsGkAtoms::value)) {
-    // Get our default value, which is the same as our default label
-    nsXPIDLString defaultValue;
-    nsContentUtils::GetLocalizedString(nsContentUtils::eFORMS_PROPERTIES,
-                                       "Submit", defaultValue);
-    value = defaultValue;
   }
 
   //
@@ -6372,6 +6695,24 @@ HTMLInputElement::SubmitNamesValues(HTMLFormSubmission* aFormSubmission)
     return aFormSubmission->AddNameValuePair(name,
                                              NS_ConvertASCIItoUTF16(charset));
   }
+
+  //
+  // Submit name=value
+  //
+
+  // Get the value
+  nsAutoString value;
+  GetValue(value, CallerType::System);
+
+  if (mType == NS_FORM_INPUT_SUBMIT && value.IsEmpty() &&
+      !HasAttr(kNameSpaceID_None, nsGkAtoms::value)) {
+    // Get our default value, which is the same as our default label
+    nsXPIDLString defaultValue;
+    nsContentUtils::GetLocalizedString(nsContentUtils::eFORMS_PROPERTIES,
+                                       "Submit", defaultValue);
+    value = defaultValue;
+  }
+
   if (IsSingleLineTextControl(true) &&
       name.EqualsLiteral("isindex") &&
       aFormSubmission->SupportsIsindexSubmission()) {
@@ -6410,13 +6751,10 @@ HTMLInputElement::SaveState()
 
       inputState = new HTMLInputElementState();
       nsAutoString value;
-      nsresult rv = GetValue(value);
-      if (NS_FAILED(rv)) {
-        return rv;
-      }
+      GetValue(value, CallerType::System);
 
       if (!IsSingleLineTextControl(false)) {
-        rv = nsLinebreakConverter::ConvertStringLineBreaks(
+        nsresult rv = nsLinebreakConverter::ConvertStringLineBreaks(
                value,
                nsLinebreakConverter::eLinebreakPlatform,
                nsLinebreakConverter::eLinebreakContent);
@@ -6453,7 +6791,7 @@ HTMLInputElement::SaveState()
 void
 HTMLInputElement::DoneCreatingElement()
 {
-  mParserCreating = false;
+  mDoneCreating = true;
 
   //
   // Restore state as needed.  Note that disabled state applies to all control
@@ -6474,7 +6812,7 @@ HTMLInputElement::DoneCreatingElement()
   // Sanitize the value.
   if (GetValueMode() == VALUE_MODE_VALUE) {
     nsAutoString aValue;
-    GetValue(aValue);
+    GetValue(aValue, CallerType::System);
     // TODO: What should we do if SetValueInternal fails?  (The allocation
     // may potentially be big, but most likely we've failed to allocate
     // before the type change.)
@@ -6586,6 +6924,11 @@ HTMLInputElement::AddStates(EventStates aStates)
       HTMLInputElement* ownerNumberControl = GetOwnerNumberControl();
       if (ownerNumberControl) {
         ownerNumberControl->AddStates(focusStates);
+      } else {
+        HTMLInputElement* ownerDateTimeControl = GetOwnerDateTimeControl();
+        if (ownerDateTimeControl) {
+          ownerDateTimeControl->AddStates(focusStates);
+        }
       }
     }
   }
@@ -6602,6 +6945,11 @@ HTMLInputElement::RemoveStates(EventStates aStates)
       HTMLInputElement* ownerNumberControl = GetOwnerNumberControl();
       if (ownerNumberControl) {
         ownerNumberControl->RemoveStates(focusStates);
+      } else {
+        HTMLInputElement* ownerDateTimeControl = GetOwnerDateTimeControl();
+        if (ownerDateTimeControl) {
+          ownerDateTimeControl->RemoveStates(focusStates);
+        }
       }
     }
   }
@@ -6679,8 +7027,8 @@ HTMLInputElement::AddedToRadioGroup()
     return;
   }
 
-  // Make sure not to notify if we're still being created by the parser
-  bool notify = !mParserCreating;
+  // Make sure not to notify if we're still being created
+  bool notify = mDoneCreating;
 
   //
   // If the input element is checked, and we add it to the group, it will
@@ -6779,12 +7127,16 @@ HTMLInputElement::IsHTMLFocusable(bool aWithMouse, bool* aIsFocusable, int32_t* 
 #endif
 
   if (mType == NS_FORM_INPUT_FILE ||
-      mType == NS_FORM_INPUT_NUMBER) {
+      mType == NS_FORM_INPUT_NUMBER ||
+      mType == NS_FORM_INPUT_TIME ||
+      mType == NS_FORM_INPUT_DATE) {
     if (aTabIndex) {
       // We only want our native anonymous child to be tabable to, not ourself.
       *aTabIndex = -1;
     }
-    if (mType == NS_FORM_INPUT_NUMBER) {
+    if (mType == NS_FORM_INPUT_NUMBER ||
+        mType == NS_FORM_INPUT_TIME ||
+        mType == NS_FORM_INPUT_DATE) {
       *aIsFocusable = true;
     } else {
       *aIsFocusable = defaultFocusable;
@@ -6879,6 +7231,7 @@ HTMLInputElement::GetValueMode() const
     case NS_FORM_INPUT_COLOR:
     case NS_FORM_INPUT_MONTH:
     case NS_FORM_INPUT_WEEK:
+    case NS_FORM_INPUT_DATETIME_LOCAL:
       return VALUE_MODE_VALUE;
     default:
       NS_NOTYETIMPLEMENTED("Unexpected input type in GetValueMode()");
@@ -6926,6 +7279,7 @@ HTMLInputElement::DoesReadOnlyApply() const
     case NS_FORM_INPUT_TIME:
     case NS_FORM_INPUT_MONTH:
     case NS_FORM_INPUT_WEEK:
+    case NS_FORM_INPUT_DATETIME_LOCAL:
       return true;
     default:
       NS_NOTYETIMPLEMENTED("Unexpected input type in DoesReadOnlyApply()");
@@ -6965,6 +7319,7 @@ HTMLInputElement::DoesRequiredApply() const
     case NS_FORM_INPUT_TIME:
     case NS_FORM_INPUT_MONTH:
     case NS_FORM_INPUT_WEEK:
+    case NS_FORM_INPUT_DATETIME_LOCAL:
       return true;
     default:
       NS_NOTYETIMPLEMENTED("Unexpected input type in DoesRequiredApply()");
@@ -7008,8 +7363,7 @@ HTMLInputElement::DoesMinMaxApply() const
     case NS_FORM_INPUT_RANGE:
     case NS_FORM_INPUT_MONTH:
     case NS_FORM_INPUT_WEEK:
-    // TODO:
-    // All date/time types.
+    case NS_FORM_INPUT_DATETIME_LOCAL:
       return true;
 #ifdef DEBUG
     case NS_FORM_INPUT_RESET:
@@ -7057,6 +7411,7 @@ HTMLInputElement::DoesAutocompleteApply() const
     case NS_FORM_INPUT_COLOR:
     case NS_FORM_INPUT_MONTH:
     case NS_FORM_INPUT_WEEK:
+    case NS_FORM_INPUT_DATETIME_LOCAL:
       return true;
 #ifdef DEBUG
     case NS_FORM_INPUT_RESET:
@@ -7100,7 +7455,8 @@ HTMLInputElement::GetStep() const
   }
 
   // For input type=date, we round the step value to have a rounded day.
-  if (mType == NS_FORM_INPUT_DATE || mType == NS_FORM_INPUT_MONTH) {
+  if (mType == NS_FORM_INPUT_DATE || mType == NS_FORM_INPUT_MONTH ||
+      mType == NS_FORM_INPUT_WEEK) {
     step = std::max(step.round(), Decimal(1));
   }
 
@@ -7136,10 +7492,7 @@ HTMLInputElement::IsTooLong()
     return false;
   }
 
-  int32_t textLength = -1;
-  GetTextLength(&textLength);
-
-  return textLength > maxLength;
+  return InputTextLength(CallerType::System) > maxLength;
 }
 
 bool
@@ -7159,8 +7512,7 @@ HTMLInputElement::IsTooShort()
     return false;
   }
 
-  int32_t textLength = -1;
-  GetTextLength(&textLength);
+  int32_t textLength = InputTextLength(CallerType::System);
 
   return textLength && textLength < minLength;
 }
@@ -7206,7 +7558,7 @@ HTMLInputElement::HasTypeMismatch() const
   }
 
   nsAutoString value;
-  NS_ENSURE_SUCCESS(GetValueInternal(value), false);
+  GetNonFileValueInternal(value);
 
   if (value.IsEmpty()) {
     return false;
@@ -7249,7 +7601,7 @@ HTMLInputElement::HasPatternMismatch() const
   GetAttr(kNameSpaceID_None, nsGkAtoms::pattern, pattern);
 
   nsAutoString value;
-  NS_ENSURE_SUCCESS(GetValueInternal(value), false);
+  GetNonFileValueInternal(value);
 
   if (value.IsEmpty()) {
     return false;
@@ -7263,8 +7615,8 @@ HTMLInputElement::HasPatternMismatch() const
 bool
 HTMLInputElement::IsRangeOverflow() const
 {
-  // TODO: this is temporary until bug 888316 is fixed.
-  if (!DoesMinMaxApply() || mType == NS_FORM_INPUT_WEEK) {
+  // TODO: this is temporary until bug 888331 is fixed.
+  if (!DoesMinMaxApply() || mType == NS_FORM_INPUT_DATETIME_LOCAL) {
     return false;
   }
 
@@ -7284,8 +7636,8 @@ HTMLInputElement::IsRangeOverflow() const
 bool
 HTMLInputElement::IsRangeUnderflow() const
 {
-  // TODO: this is temporary until bug 888316 is fixed.
-  if (!DoesMinMaxApply() || mType == NS_FORM_INPUT_WEEK) {
+  // TODO: this is temporary until bug 888331 is fixed.
+  if (!DoesMinMaxApply() || mType == NS_FORM_INPUT_DATETIME_LOCAL) {
     return false;
   }
 
@@ -7384,7 +7736,7 @@ HTMLInputElement::HasBadInput() const
 {
   if (mType == NS_FORM_INPUT_NUMBER) {
     nsAutoString value;
-    GetValueInternal(value);
+    GetNonFileValueInternal(value);
     if (!value.IsEmpty()) {
       // The input can't be bad, otherwise it would have been sanitized to the
       // empty string.
@@ -7408,7 +7760,7 @@ HTMLInputElement::HasBadInput() const
     nsAutoString value;
     nsAutoCString unused;
     uint32_t unused2;
-    NS_ENSURE_SUCCESS(GetValueInternal(value), false);
+    GetNonFileValueInternal(value);
     HTMLSplitOnSpacesTokenizer tokenizer(value, ',');
     while (tokenizer.hasMoreTokens()) {
       if (!PunycodeEncodeEmailAddress(tokenizer.nextToken(), unused, &unused2)) {
@@ -7435,7 +7787,7 @@ HTMLInputElement::UpdateTooShortValidityState()
 void
 HTMLInputElement::UpdateValueMissingValidityStateForRadio(bool aIgnoreSelf)
 {
-  bool notify = !mParserCreating;
+  bool notify = mDoneCreating;
   nsCOMPtr<nsIDOMHTMLInputElement> selection = GetSelectedRadioButton();
 
   aIgnoreSelf = aIgnoreSelf || !IsMutable();
@@ -7575,11 +7927,9 @@ HTMLInputElement::GetValidationMessage(nsAString& aValidationMessage,
     {
       nsXPIDLString message;
       int32_t maxLength = MaxLength();
-      int32_t textLength = -1;
+      int32_t textLength = InputTextLength(CallerType::System);
       nsAutoString strMaxLength;
       nsAutoString strTextLength;
-
-      GetTextLength(&textLength);
 
       strMaxLength.AppendInt(maxLength);
       strTextLength.AppendInt(textLength);
@@ -7595,11 +7945,9 @@ HTMLInputElement::GetValidationMessage(nsAString& aValidationMessage,
     {
       nsXPIDLString message;
       int32_t minLength = MinLength();
-      int32_t textLength = -1;
+      int32_t textLength = InputTextLength(CallerType::System);
       nsAutoString strMinLength;
       nsAutoString strTextLength;
-
-      GetTextLength(&textLength);
 
       strMinLength.AppendInt(minLength);
       strTextLength.AppendInt(textLength);
@@ -7958,7 +8306,7 @@ HTMLInputElement::GetDefaultValueFromContent(nsAString& aValue)
     GetDefaultValue(aValue);
     // This is called by the frame to show the value.
     // We have to sanitize it when needed.
-    if (!mParserCreating) {
+    if (mDoneCreating) {
       SanitizeValue(aValue);
     }
   }
@@ -8238,6 +8586,8 @@ HTMLInputElement::GetStepScaleFactor() const
       return kStepScaleFactorTime;
     case NS_FORM_INPUT_MONTH:
       return kStepScaleFactorMonth;
+    case NS_FORM_INPUT_WEEK:
+      return kStepScaleFactorWeek;
     default:
       MOZ_ASSERT(false, "Unrecognized input type");
       return Decimal::nan();
@@ -8252,6 +8602,7 @@ HTMLInputElement::GetDefaultStep() const
   switch (mType) {
     case NS_FORM_INPUT_DATE:
     case NS_FORM_INPUT_MONTH:
+    case NS_FORM_INPUT_WEEK:
     case NS_FORM_INPUT_NUMBER:
     case NS_FORM_INPUT_RANGE:
       return kDefaultStep;
@@ -8290,8 +8641,8 @@ HTMLInputElement::UpdateHasRange()
 
   mHasRange = false;
 
-  // TODO: this is temporary until bug 888316 is fixed.
-  if (!DoesMinMaxApply() || mType == NS_FORM_INPUT_WEEK) {
+  // TODO: this is temporary until bug 888331 is fixed.
+  if (!DoesMinMaxApply() || mType == NS_FORM_INPUT_DATETIME_LOCAL) {
     return;
   }
 

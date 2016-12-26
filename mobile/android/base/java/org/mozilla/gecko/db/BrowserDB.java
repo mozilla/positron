@@ -15,6 +15,7 @@ import org.mozilla.gecko.db.BrowserContract.ExpirePriority;
 import org.mozilla.gecko.distribution.Distribution;
 import org.mozilla.gecko.icons.decoders.LoadFaviconResult;
 
+import android.content.ContentProviderClient;
 import android.content.ContentProviderOperation;
 import android.content.ContentResolver;
 import android.content.Context;
@@ -72,7 +73,7 @@ public abstract class BrowserDB {
      */
     public abstract Cursor getTopSites(ContentResolver cr, int suggestedRangeLimit, int limit);
 
-    public abstract CursorLoader getActivityStreamTopSites(Context context, int limit);
+    public abstract CursorLoader getActivityStreamTopSites(Context context, int suggestedRangeLimit, int limit);
 
     public abstract void updateVisitedHistory(ContentResolver cr, String uri);
 
@@ -112,6 +113,8 @@ public abstract class BrowserDB {
     public abstract void updateBookmark(ContentResolver cr, int id, String uri, String title, String keyword);
     public abstract boolean hasBookmarkWithGuid(ContentResolver cr, String guid);
 
+    public abstract boolean insertPageMetadata(ContentProviderClient contentProviderClient, String pageUrl, boolean hasImage, String metadataJSON);
+    public abstract int deletePageMetadata(ContentProviderClient contentProviderClient, String pageUrl);
     /**
      * Can return <code>null</code>.
      */
@@ -158,8 +161,16 @@ public abstract class BrowserDB {
             String title, String guid, long parent, long added, long modified,
             long position, String keyword, int type);
 
+    // Used by regular top sites, which observe pinning position.
     public abstract void pinSite(ContentResolver cr, String url, String title, int position);
     public abstract void unpinSite(ContentResolver cr, int position);
+
+    // Used by activity stream top sites, which ignore position - it's always 0.
+    // Pins show up in front of other top sites.
+    public abstract void pinSiteForAS(ContentResolver cr, String url, String title);
+    public abstract void unpinSiteForAS(ContentResolver cr, String url);
+
+    public abstract boolean isPinnedForAS(ContentResolver cr, String url);
 
     public abstract boolean hideSuggestedSite(String url);
     public abstract void setSuggestedSites(SuggestedSites suggestedSites);
@@ -175,6 +186,13 @@ public abstract class BrowserDB {
      * @param limit Maximum number of results to return.
      */
     public abstract CursorLoader getHighlights(Context context, int limit);
+
+    /**
+     * Block a page from the highlights list.
+     *
+     * @param url The page URL. Only pages exactly matching this URL will be blocked.
+     */
+    public abstract void blockActivityStreamSite(ContentResolver cr, String url);
 
     public static BrowserDB from(final Context context) {
         return from(GeckoProfile.get(context));

@@ -84,6 +84,11 @@ public:
     return gTheInstance.get()->mCamerasChildThread;
   }
 
+  static nsCOMPtr<nsIThread>& FakeDeviceChangeEventThread() {
+    Mutex().AssertCurrentThreadOwns();
+    return gTheInstance.get()->mFakeDeviceChangeEventThread;
+  }
+
 private:
   static Singleton<CamerasSingleton> gTheInstance;
 
@@ -100,6 +105,7 @@ private:
   // will be before actual destruction.
   CamerasChild* mCameras;
   nsCOMPtr<nsIThread> mCamerasChildThread;
+  nsCOMPtr<nsIThread> mFakeDeviceChangeEventThread;
 };
 
 // Get a pointer to a CamerasChild object we can use to do IPC with.
@@ -143,24 +149,26 @@ public:
 
   // IPC messages recevied, received on the PBackground thread
   // these are the actual callbacks with data
-  virtual bool RecvDeliverFrame(const CaptureEngine&, const int&, mozilla::ipc::Shmem&&,
-                                const size_t&, const uint32_t&, const int64_t&,
-                                const int64_t&) override;
-  virtual bool RecvFrameSizeChange(const CaptureEngine&, const int&,
-                                   const int& w, const int& h) override;
+  virtual mozilla::ipc::IPCResult RecvDeliverFrame(const CaptureEngine&, const int&, mozilla::ipc::Shmem&&,
+                                                   const size_t&, const uint32_t&, const int64_t&,
+                                                   const int64_t&) override;
+  virtual mozilla::ipc::IPCResult RecvFrameSizeChange(const CaptureEngine&, const int&,
+                                                      const int& w, const int& h) override;
 
-  virtual bool RecvDeviceChange() override;
+  virtual mozilla::ipc::IPCResult RecvDeviceChange() override;
+  virtual int AddDeviceChangeCallback(DeviceChangeCallback* aCallback) override;
   int SetFakeDeviceChangeEvents();
 
   // these are response messages to our outgoing requests
-  virtual bool RecvReplyNumberOfCaptureDevices(const int&) override;
-  virtual bool RecvReplyNumberOfCapabilities(const int&) override;
-  virtual bool RecvReplyAllocateCaptureDevice(const int&) override;
-  virtual bool RecvReplyGetCaptureCapability(const CaptureCapability& capability) override;
-  virtual bool RecvReplyGetCaptureDevice(const nsCString& device_name,
-                                         const nsCString& device_id) override;
-  virtual bool RecvReplyFailure(void) override;
-  virtual bool RecvReplySuccess(void) override;
+  virtual mozilla::ipc::IPCResult RecvReplyNumberOfCaptureDevices(const int&) override;
+  virtual mozilla::ipc::IPCResult RecvReplyNumberOfCapabilities(const int&) override;
+  virtual mozilla::ipc::IPCResult RecvReplyAllocateCaptureDevice(const int&) override;
+  virtual mozilla::ipc::IPCResult RecvReplyGetCaptureCapability(const CaptureCapability& capability) override;
+  virtual mozilla::ipc::IPCResult RecvReplyGetCaptureDevice(const nsCString& device_name,
+                                                            const nsCString& device_id,
+                                                            const bool& scary) override;
+  virtual mozilla::ipc::IPCResult RecvReplyFailure(void) override;
+  virtual mozilla::ipc::IPCResult RecvReplySuccess(void) override;
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
   // the webrtc.org ViECapture calls are mirrored here, but with access
@@ -188,8 +196,10 @@ public:
                        unsigned int list_number, char* device_nameUTF8,
                        const unsigned int device_nameUTF8Length,
                        char* unique_idUTF8,
-                       const unsigned int unique_idUTF8Length);
+                       const unsigned int unique_idUTF8Length,
+                       bool* scary = nullptr);
   void ShutdownAll();
+  int EnsureInitialized(CaptureEngine aCapEngine);
 
   webrtc::ExternalRenderer* Callback(CaptureEngine aCapEngine, int capture_id);
 
@@ -231,6 +241,7 @@ private:
   webrtc::CaptureCapability mReplyCapability;
   nsCString mReplyDeviceName;
   nsCString mReplyDeviceID;
+  bool mReplyScary;
 };
 
 } // namespace camera

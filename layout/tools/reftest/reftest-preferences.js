@@ -5,6 +5,7 @@
 user_pref("dom.use_xbl_scopes_for_remote_xul", false);
 user_pref("gfx.color_management.mode", 2);
 user_pref("gfx.color_management.force_srgb", true);
+user_pref("gfx.logging.level", 1);
 user_pref("browser.dom.window.dump.enabled", true);
 user_pref("ui.caretBlinkTime", -1);
 user_pref("dom.send_after_paint_to_content", true);
@@ -29,7 +30,9 @@ user_pref("urlclassifier.updateinterval", 172800);
 // Disable downscale-during-decode, since it makes reftests more difficult.
 user_pref("image.downscale-during-decode.enabled", false);
 // Checking whether two files are the same is slow on Windows.
-// Setting this pref makes tests run much faster there.
+// Setting this pref makes tests run much faster there. Reftests also
+// rely on this to load downloadable fonts (which are restricted to same
+// origin policy by default) from outside their directory.
 user_pref("security.fileuri.strict_origin_policy", false);
 // Disable the thumbnailing service
 user_pref("browser.pagethumbnails.capturing_disabled", true);
@@ -59,6 +62,7 @@ user_pref("browser.search.geoSpecificDefaults", false);
 
 // Make sure SelfSupport doesn't hit the network.
 user_pref("browser.selfsupport.url", "https://localhost/selfsupport-dummy/");
+user_pref("extensions.shield-recipe-client.api_url", "https://localhost/selfsupport-dummy/");
 
 // use about:blank, not browser.startup.homepage
 user_pref("browser.startup.page", 0);
@@ -107,7 +111,6 @@ user_pref("browser.tabs.remote.autostart.2", false);
 user_pref("startup.homepage_welcome_url", "");
 user_pref("startup.homepage_welcome_url.additional", "");
 user_pref("startup.homepage_override_url", "");
-user_pref("browser.usedOnWindows10.introURL", "");
 
 user_pref("media.gmp-manager.url.override", "http://localhost/dummy-gmp-manager.xml");
 user_pref("media.gmp-manager.updateEnabled", false);
@@ -119,3 +122,9 @@ user_pref("testing.supports.moz-bool-pref", true);
 // unnecessary I/O pressure on the Places DB (measured to be in the
 // gigabytes).
 user_pref("places.history.enabled", false);
+
+// For Firefox 52 only, ESR will support non-Flash plugins while release will
+// not, so we keep testing the non-Flash pathways
+user_pref("plugin.load_flash_only", false);
+
+user_pref("media.openUnsupportedTypeWithExternalApp", false);

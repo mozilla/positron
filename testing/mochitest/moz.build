@@ -45,7 +45,6 @@ TEST_HARNESS_FILES.testing.mochitest += [
     'browser-harness.xul',
     'browser-test-overlay.xul',
     'browser-test.js',
-    'cc-analyzer.js',
     'chrome-harness.js',
     'chunkifyTests.js',
     'gen_template.pl',
@@ -64,10 +63,8 @@ TEST_HARNESS_FILES.testing.mochitest += [
     'redirect.html',
     'runrobocop.py',
     'runtests.py',
-    'runtestsb2g.py',
     'runtestsremote.py',
     'server.js',
-    'start_b2g.js',
     'start_desktop.js',
 ]
 

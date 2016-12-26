@@ -13,6 +13,7 @@
 #include "mozilla/dom/HTMLCanvasElement.h"
 #include "mozilla/dom/SVGFilterElement.h"
 #include "nsReferencedElement.h"
+#include "nsSVGEffects.h"
 #include "nsSVGFilterFrame.h"
 #include "nsSVGUtils.h"
 #include "SVGContentUtils.h"
@@ -131,7 +132,7 @@ nsSVGFilterInstance::GetFilterFrame(nsIFrame* aTargetFrame)
   // CanvasRenderingContext2D.
   nsCOMPtr<nsIURI> url = aTargetFrame
     ? nsSVGEffects::GetFilterURI(aTargetFrame, mFilter)
-    : mFilter.GetURL()->Resolve(mTargetContent);
+    : mFilter.GetURL()->ResolveLocalRef(mTargetContent);
 
   if (!url) {
     NS_NOTREACHED("an nsStyleFilter of type URL should have a non-null URL");
@@ -366,23 +367,10 @@ nsSVGFilterInstance::GetSourceIndices(nsSVGFE* aPrimitiveElement,
   return NS_OK;
 }
 
-static bool
-IsFilterInputTainted(nsIContent* aElement)
-{
-  // When the filter is applied during canvas drawing, we might be allowed to
-  // read from the canvas.
-  if (HTMLCanvasElement* canvas =
-        HTMLCanvasElement::FromContentOrNull(aElement)) {
-    return canvas->IsWriteOnly();
-  }
-
-  // Always treat normal filtered elements as tainted.
-  return true;
-}
-
 nsresult
 nsSVGFilterInstance::BuildPrimitives(nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs,
-                                     nsTArray<RefPtr<SourceSurface>>& aInputImages)
+                                     nsTArray<RefPtr<SourceSurface>>& aInputImages,
+                                     bool aInputIsTainted)
 {
   mSourceGraphicIndex = GetLastResultIndex(aPrimitiveDescrs);
 
@@ -410,8 +398,6 @@ nsSVGFilterInstance::BuildPrimitives(nsTArray<FilterPrimitiveDescription>& aPrim
   // The principal that we check principals of any loaded images against.
   nsCOMPtr<nsIPrincipal> principal = mTargetContent->NodePrincipal();
 
-  bool filterInputIsTainted = IsFilterInputTainted(mTargetContent);
-
   for (uint32_t primitiveElementIndex = 0;
        primitiveElementIndex < primitives.Length();
        ++primitiveElementIndex) {
@@ -427,7 +413,7 @@ nsSVGFilterInstance::BuildPrimitives(nsTArray<FilterPrimitiveDescription>& aPrim
       ComputeFilterPrimitiveSubregion(filter, aPrimitiveDescrs, sourceIndices);
 
     nsTArray<bool> sourcesAreTainted;
-    GetInputsAreTainted(aPrimitiveDescrs, sourceIndices, filterInputIsTainted, sourcesAreTainted);
+    GetInputsAreTainted(aPrimitiveDescrs, sourceIndices, aInputIsTainted, sourcesAreTainted);
 
     FilterPrimitiveDescription descr =
       filter->GetPrimitiveDescription(this, primitiveSubregion, sourcesAreTainted, aInputImages);

@@ -161,6 +161,8 @@ public:
 
   bool IsEmpty() const { return mEffects.IsEmpty(); }
 
+  size_t Count() const { return mEffects.Count(); }
+
   RefPtr<AnimValuesStyleRule>& AnimationRule(EffectCompositor::CascadeLevel
                                              aCascadeLevel)
   {
@@ -188,6 +190,35 @@ public:
 
   static nsIAtom** GetEffectSetPropertyAtoms();
 
+  nsCSSPropertyIDSet& PropertiesWithImportantRules()
+  {
+    return mPropertiesWithImportantRules;
+  }
+  nsCSSPropertyIDSet& PropertiesForAnimationsLevel()
+  {
+    return mPropertiesForAnimationsLevel;
+  }
+
+  // This function is intended to be called by EffectCompositor::GetBaseStyle
+  // and should not be called directly.
+  StyleAnimationValue GetBaseStyle(nsCSSPropertyID aProperty) const
+  {
+    StyleAnimationValue result;
+    DebugOnly<bool> hasProperty = mBaseStyleValues.Get(aProperty, &result);
+    MOZ_ASSERT(hasProperty || result.IsNull());
+    return result;
+  }
+
+  void PutBaseStyle(nsCSSPropertyID aProperty,
+                    const StyleAnimationValue& aValue)
+  {
+    return mBaseStyleValues.Put(aProperty, aValue);
+  }
+  void ClearBaseStyles()
+  {
+    return mBaseStyleValues.Clear();
+  }
+
 private:
   static nsIAtom* GetEffectSetPropertyAtom(CSSPseudoElementType aPseudoType);
 
@@ -212,8 +243,9 @@ private:
                     EffectCompositor::kCascadeLevelCount),
                   TimeStamp> mAnimationRuleRefreshTime;
 
-  // Dirty flag to represent when the mWinsInCascade flag on effects in
-  // this set might need to be updated.
+  // Dirty flag to represent when the mPropertiesWithImportantRules and
+  // mPropertiesForAnimationsLevel on effects in this set might need to be
+  // updated.
   //
   // Set to true any time the set of effects is changed or when
   // one the effects goes in or out of the "in effect" state.
@@ -226,6 +258,19 @@ private:
   // corresponding layer so we can check that the layer is up to date with
   // the animation manager.
   uint64_t mAnimationGeneration;
+
+  // Specifies the compositor-animatable properties that are overridden by
+  // !important rules.
+  nsCSSPropertyIDSet mPropertiesWithImportantRules;
+  // Specifies the properties for which the result will be added to the
+  // animations level of the cascade and hence should be skipped when we are
+  // composing the animation style for the transitions level of the cascede.
+  nsCSSPropertyIDSet mPropertiesForAnimationsLevel;
+
+  // The non-animated values for properties animated by effects in this set that
+  // contain at least one animation value that is composited with the underlying
+  // value (i.e. it uses the additive or accumulate composite mode).
+  nsDataHashtable<nsUint32HashKey, StyleAnimationValue> mBaseStyleValues;
 
 #ifdef DEBUG
   // Track how many iterators are referencing this effect set when we are

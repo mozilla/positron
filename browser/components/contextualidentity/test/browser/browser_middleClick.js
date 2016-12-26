@@ -14,11 +14,11 @@ add_task(function* () {
   yield BrowserTestUtils.browserLoaded(browser);
 
   info("Create a HTMLAnchorElement...");
-  let position = yield ContentTask.spawn(browser, URI,
-    function(URI) {
+  yield ContentTask.spawn(browser, URI,
+    function(uri) {
       let anchor = content.document.createElement("a");
       anchor.setAttribute('id', 'clickMe');
-      anchor.setAttribute("href", URI);
+      anchor.setAttribute("href", uri);
       anchor.appendChild(content.document.createTextNode("click me!"));
       content.document.body.appendChild(anchor);
     }

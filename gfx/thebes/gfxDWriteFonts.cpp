@@ -47,6 +47,9 @@ GetCairoAntialiasOption(gfxFont::AntialiasOption anAntialiasOption)
 #define FE_FONTSMOOTHINGCLEARTYPE 2
 #endif
 
+bool gfxDWriteFont::mUseClearType = true;
+
+// This function is expensive so we only want to call it when we have to.
 static bool
 UsingClearType()
 {
@@ -103,21 +106,6 @@ gfxDWriteFont::gfxDWriteFont(gfxFontEntry *aFontEntry,
         return;
     }
 
-    mFont = fe->GetFont();
-    if (!mFont) {
-        gfxPlatformFontList* fontList = gfxPlatformFontList::PlatformFontList();
-        gfxDWriteFontFamily* defaultFontFamily =
-            static_cast<gfxDWriteFontFamily*>(fontList->GetDefaultFont(aFontStyle));
-
-        mFont = defaultFontFamily->GetDefaultFont();
-        NS_WARNING("Using default font");
-    }
-
-    HRESULT hr = mFont->GetFontFamily(getter_AddRefs(mFontFamily));
-    if (FAILED(hr)) {
-        MOZ_ASSERT(false);
-    }
-
     ComputeMetrics(anAAOption);
 }
 
@@ -130,6 +118,12 @@ gfxDWriteFont::~gfxDWriteFont()
         cairo_scaled_font_destroy(mScaledFont);
     }
     delete mMetrics;
+}
+
+void
+gfxDWriteFont::UpdateClearTypeUsage()
+{
+  mUseClearType = UsingClearType();
 }
 
 gfxFont*
@@ -188,7 +182,7 @@ gfxDWriteFont::ComputeMetrics(AntialiasOption anAAOption)
 
     // Note that GetMeasuringMode depends on mAdjustedSize
     if ((anAAOption == gfxFont::kAntialiasDefault &&
-         UsingClearType() &&
+         mUseClearType &&
          GetMeasuringMode() == DWRITE_MEASURING_MODE_NATURAL) ||
         anAAOption == gfxFont::kAntialiasSubpixel)
     {
@@ -615,7 +609,7 @@ gfxDWriteFont::GetGlyphWidth(DrawTarget& aDrawTarget, uint16_t aGID)
 already_AddRefed<GlyphRenderingOptions>
 gfxDWriteFont::GetGlyphRenderingOptions(const TextRunDrawParams* aRunParams)
 {
-  if (UsingClearType()) {
+  if (mUseClearType) {
     return Factory::CreateDWriteGlyphRenderingOptions(
       gfxWindowsPlatform::GetPlatform()->GetRenderingParams(GetForceGDIClassic() ?
         gfxWindowsPlatform::TEXT_RENDERING_GDI_CLASSIC : gfxWindowsPlatform::TEXT_RENDERING_NORMAL));
@@ -706,9 +700,10 @@ gfxDWriteFont::GetScaledFont(mozilla::gfx::DrawTarget *aTarget)
         static_cast<gfxDWriteFontEntry*>(mFontEntry.get());
     bool useEmbeddedBitmap = (fe->IsCJKFont() && HasBitmapStrikeForSize(NS_lround(mAdjustedSize)));
 
+    const gfxFontStyle* fontStyle = GetStyle();
     mAzureScaledFont =
-            Factory::CreateScaledFontForDWriteFont(mFont, mFontFamily,
-                                                   mFontFace, GetAdjustedSize(),
+            Factory::CreateScaledFontForDWriteFont(mFontFace, fontStyle,
+                                                   GetAdjustedSize(),
                                                    useEmbeddedBitmap,
                                                    GetForceGDIClassic());
   } else {

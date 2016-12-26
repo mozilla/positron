@@ -76,6 +76,24 @@ function loadAddonTestFunctions() {
   createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
 }
 
+function webExtensionsTestPath(path) {
+  if (path[0] != "/") {
+    throw Error("Path must begin with '/': " + path);
+  }
+
+  return "../../../../toolkit/components/extensions/test/xpcshell" + path;
+}
+
+/**
+ * Loads the WebExtension test functions by importing its test file.
+ */
+function loadWebExtensionTestFunctions() {
+  const path = webExtensionsTestPath("/head_sync.js");
+  let file = do_get_file(path);
+  let uri = Services.io.newFileURI(file);
+  Services.scriptloader.loadSubScript(uri.spec, gGlobalScope);
+}
+
 function getAddonInstall(name) {
   let f = do_get_file(ExtensionsTestPath("/addons/" + name + ".xpi"));
   let cb = Async.makeSyncCallback();
@@ -263,6 +281,11 @@ function assert_valid_ping(record) {
     equal(record.version, 1);
     record.syncs.forEach(p => {
       lessOrEqual(p.when, Date.now());
+      if (p.devices) {
+        ok(!p.devices.some(device => device.id == p.deviceID));
+        equal(new Set(p.devices.map(device => device.id)).size,
+              p.devices.length, "Duplicate device ids in ping devices list");
+      }
     });
   }
 }
@@ -272,7 +295,7 @@ function assert_success_ping(ping) {
   ok(!!ping);
   assert_valid_ping(ping);
   ping.syncs.forEach(record => {
-    ok(!record.failureReason);
+    ok(!record.failureReason, JSON.stringify(record.failureReason));
     equal(undefined, record.status);
     greater(record.engines.length, 0);
     for (let e of record.engines) {
@@ -413,6 +436,27 @@ function sync_engine_and_validate_telem(engine, allowErrorPings, onError) {
   });
 }
 
+// Returns a promise that resolves once the specified observer notification
+// has fired.
+function promiseOneObserver(topic, callback) {
+  return new Promise((resolve, reject) => {
+    let observer = function(subject, data) {
+      Svc.Obs.remove(topic, observer);
+      resolve({ subject: subject, data: data });
+    }
+    Svc.Obs.add(topic, observer)
+  });
+}
+
+function promiseStopServer(server) {
+  return new Promise(resolve => server.stop(resolve));
+}
+
+function promiseNextTick() {
+  return new Promise(resolve => {
+    Utils.nextTick(resolve);
+  });
+}
 // Avoid an issue where `client.name2` containing unicode characters causes
 // a number of tests to fail, due to them assuming that we do not need to utf-8
 // encode or decode data sent through the mocked server (see bug 1268912).

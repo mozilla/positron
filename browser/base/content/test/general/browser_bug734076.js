@@ -15,7 +15,7 @@ add_task(function* ()
       name: "view background image",
       url: "http://mochi.test:8888/",
       element: "body",
-      go: function () {
+      go: function() {
         return ContentTask.spawn(gBrowser.selectedBrowser, { writeDomainURL: writeDomainURL }, function* (arg) {
           let contentBody = content.document.body;
           contentBody.style.backgroundImage = "url('" + arg.writeDomainURL + "')";
@@ -23,7 +23,7 @@ add_task(function* ()
           return "context-viewbgimage";
         });
       },
-      verify: function () {
+      verify: function() {
         return ContentTask.spawn(gBrowser.selectedBrowser, null, function* (arg) {
           Assert.ok(!content.document.body.textContent,
             "no domain was inherited for view background image");
@@ -34,17 +34,19 @@ add_task(function* ()
       name: "view image",
       url: "http://mochi.test:8888/",
       element: "img",
-      go: function () {
+      go: function() {
         return ContentTask.spawn(gBrowser.selectedBrowser, { writeDomainURL: writeDomainURL }, function* (arg) {
           let doc = content.document;
           let img = doc.createElement("img");
+          img.height = 100;
+          img.width = 100;
           img.setAttribute("src", arg.writeDomainURL);
           doc.body.insertBefore(img, doc.body.firstChild);
 
           return "context-viewimage";
         });
       },
-      verify: function () {
+      verify: function() {
         return ContentTask.spawn(gBrowser.selectedBrowser, null, function* (arg) {
           Assert.ok(!content.document.body.textContent,
             "no domain was inherited for view image");
@@ -55,7 +57,7 @@ add_task(function* ()
       name: "show only this frame",
       url: "http://mochi.test:8888/",
       element: "iframe",
-      go: function () {
+      go: function() {
         return ContentTask.spawn(gBrowser.selectedBrowser, { writeDomainURL: writeDomainURL }, function* (arg) {
           let doc = content.document;
           let iframe = doc.createElement("iframe");
@@ -71,7 +73,7 @@ add_task(function* ()
           });
         });
       },
-      verify: function () {
+      verify: function() {
         return ContentTask.spawn(gBrowser.selectedBrowser, null, function* (arg) {
           Assert.ok(!content.document.body.textContent,
             "no domain was inherited for 'show only this frame'");
@@ -94,6 +96,8 @@ add_task(function* ()
     yield BrowserTestUtils.synthesizeMouse(test.element, 3, 3,
           { type: "contextmenu", button: 2 }, gBrowser.selectedBrowser);
     yield popupShownPromise;
+    info("onImage: " + gContextMenu.onImage);
+    info("target: " + gContextMenu.target.tagName);
 
     let loadedAfterCommandPromise = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
     document.getElementById(commandToRun).click();

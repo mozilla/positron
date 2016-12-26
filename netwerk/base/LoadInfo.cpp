@@ -21,6 +21,7 @@
 #include "nsContentUtils.h"
 #include "nsDocShell.h"
 #include "nsGlobalWindow.h"
+#include "nsNullPrincipal.h"
 
 using namespace mozilla::dom;
 
@@ -31,7 +32,7 @@ static void
 InheritOriginAttributes(nsIPrincipal* aLoadingPrincipal, NeckoOriginAttributes& aAttrs)
 {
   const PrincipalOriginAttributes attrs =
-    BasePrincipal::Cast(aLoadingPrincipal)->OriginAttributesRef();
+    aLoadingPrincipal->OriginAttributesRef();
   aAttrs.InheritFromDocToNecko(attrs);
 }
 
@@ -44,7 +45,7 @@ LoadInfo::LoadInfo(nsIPrincipal* aLoadingPrincipal,
                         aLoadingContext->NodePrincipal() : aLoadingPrincipal)
   , mTriggeringPrincipal(aTriggeringPrincipal ?
                            aTriggeringPrincipal : mLoadingPrincipal.get())
-  , mPrincipalToInherit(mTriggeringPrincipal)
+  , mPrincipalToInherit(nullptr)
   , mLoadingContext(do_GetWeakReference(aLoadingContext))
   , mSecurityFlags(aSecurityFlags)
   , mInternalContentPolicyType(aContentPolicyType)
@@ -67,7 +68,6 @@ LoadInfo::LoadInfo(nsIPrincipal* aLoadingPrincipal,
 {
   MOZ_ASSERT(mLoadingPrincipal);
   MOZ_ASSERT(mTriggeringPrincipal);
-  MOZ_ASSERT(mPrincipalToInherit);
 
 #ifdef DEBUG
   // TYPE_DOCUMENT loads initiated by javascript tests will go through
@@ -218,7 +218,7 @@ LoadInfo::LoadInfo(nsPIDOMWindowOuter* aOuterWindow,
                    nsSecurityFlags aSecurityFlags)
   : mLoadingPrincipal(nullptr)
   , mTriggeringPrincipal(aTriggeringPrincipal)
-  , mPrincipalToInherit(mTriggeringPrincipal)
+  , mPrincipalToInherit(nullptr)
   , mSecurityFlags(aSecurityFlags)
   , mInternalContentPolicyType(nsIContentPolicy::TYPE_DOCUMENT)
   , mTainting(LoadTainting::Basic)
@@ -242,7 +242,6 @@ LoadInfo::LoadInfo(nsPIDOMWindowOuter* aOuterWindow,
   // Grab the information we can out of the window.
   MOZ_ASSERT(aOuterWindow);
   MOZ_ASSERT(mTriggeringPrincipal);
-  MOZ_ASSERT(mPrincipalToInherit);
 
   // if the load is sandboxed, we can not also inherit the principal
   if (mSecurityFlags & nsILoadInfo::SEC_SANDBOXED) {
@@ -355,7 +354,6 @@ LoadInfo::LoadInfo(nsIPrincipal* aLoadingPrincipal,
   // Only top level TYPE_DOCUMENT loads can have a null loadingPrincipal
   MOZ_ASSERT(mLoadingPrincipal || aContentPolicyType == nsIContentPolicy::TYPE_DOCUMENT);
   MOZ_ASSERT(mTriggeringPrincipal);
-  MOZ_ASSERT(mPrincipalToInherit);
 
   mRedirectChainIncludingInternalRedirects.SwapElements(
     aRedirectChainIncludingInternalRedirects);
@@ -443,7 +441,7 @@ LoadInfo::TriggeringPrincipal()
 NS_IMETHODIMP
 LoadInfo::GetPrincipalToInherit(nsIPrincipal** aPrincipalToInherit)
 {
-  NS_ADDREF(*aPrincipalToInherit = mPrincipalToInherit);
+  NS_IF_ADDREF(*aPrincipalToInherit = mPrincipalToInherit);
   return NS_OK;
 }
 
@@ -540,6 +538,14 @@ LoadInfo::GetForceInheritPrincipal(bool* aInheritPrincipal)
 {
   *aInheritPrincipal =
     (mSecurityFlags & nsILoadInfo::SEC_FORCE_INHERIT_PRINCIPAL);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+LoadInfo::GetForceInheritPrincipalOverruleOwner(bool* aInheritPrincipal)
+{
+  *aInheritPrincipal =
+    (mSecurityFlags & nsILoadInfo::SEC_FORCE_INHERIT_PRINCIPAL_OVERRULE_OWNER);
   return NS_OK;
 }
 
@@ -683,6 +689,34 @@ LoadInfo::GetScriptableOriginAttributes(JSContext* aCx,
   if (NS_WARN_IF(!ToJSValue(aCx, mOriginAttributes, aOriginAttributes))) {
     return NS_ERROR_FAILURE;
   }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+LoadInfo::ResetPrincipalsToNullPrincipal()
+{
+  // take the originAttributes from the LoadInfo and create
+  // a new NullPrincipal using those origin attributes.
+  PrincipalOriginAttributes pAttrs;
+  pAttrs.InheritFromNecko(mOriginAttributes);
+  nsCOMPtr<nsIPrincipal> newNullPrincipal = nsNullPrincipal::Create(pAttrs);
+
+  MOZ_ASSERT(mInternalContentPolicyType != nsIContentPolicy::TYPE_DOCUMENT ||
+             !mLoadingPrincipal,
+             "LoadingPrincipal should be null for toplevel loads");
+
+  // the loadingPrincipal for toplevel loads is always a nullptr;
+  if (mInternalContentPolicyType != nsIContentPolicy::TYPE_DOCUMENT) {
+    mLoadingPrincipal = newNullPrincipal;
+  }
+  mTriggeringPrincipal = newNullPrincipal;
+  mPrincipalToInherit = newNullPrincipal;
+
+  // setting SEC_FORCE_INHERIT_PRINCIPAL_OVERRULE_OWNER will overrule
+  // any non null owner set on the channel and will return the principal
+  // form the loadinfo instead.
+  mSecurityFlags |= SEC_FORCE_INHERIT_PRINCIPAL_OVERRULE_OWNER;
+
   return NS_OK;
 }
 

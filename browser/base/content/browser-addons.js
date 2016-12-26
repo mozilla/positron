@@ -30,7 +30,7 @@ function removeNotificationOnEnd(notification, installs) {
 }
 
 const gXPInstallObserver = {
-  _findChildShell: function (aDocShell, aSoughtShell)
+  _findChildShell: function(aDocShell, aSoughtShell)
   {
     if (aDocShell == aSoughtShell)
       return aDocShell;
@@ -45,7 +45,7 @@ const gXPInstallObserver = {
     return null;
   },
 
-  _getBrowser: function (aDocShell)
+  _getBrowser: function(aDocShell)
   {
     for (let browser of gBrowser.browsers) {
       if (this._findChildShell(browser.docShell, aDocShell))
@@ -88,10 +88,20 @@ const gXPInstallObserver = {
 
     const anchorID = "addons-notification-icon";
 
-    // Make notifications persist a minimum of 30 seconds
+    // Make notifications persistent
     var options = {
       displayURI: installInfo.originatingURI,
-      timeout: Date.now() + 30000,
+      persistent: true,
+    };
+
+    let acceptInstallation = () => {
+      for (let install of installInfo.installs)
+        install.install();
+      installInfo = null;
+
+      Services.telemetry
+              .getHistogramById("SECURITY_UI")
+              .add(Ci.nsISecurityUITelemetry.WARNING_CONFIRM_ADDON_INSTALL_CLICK_THROUGH);
     };
 
     let cancelInstallation = () => {
@@ -104,8 +114,6 @@ const gXPInstallObserver = {
             install.cancel();
         }
       }
-
-      this.acceptInstallation = null;
 
       showNextConfirmation();
     };
@@ -132,24 +140,16 @@ const gXPInstallObserver = {
             container.appendChild(name);
 
             if (someUnsigned && install.addon.signedState <= AddonManager.SIGNEDSTATE_MISSING) {
-              let unsigned = document.createElement("label");
-              unsigned.setAttribute("value", gNavigatorBundle.getString("addonInstall.unsigned"));
-              unsigned.setAttribute("class", "addon-install-confirmation-unsigned");
-              container.appendChild(unsigned);
+              let unsignedLabel = document.createElement("label");
+              unsignedLabel.setAttribute("value",
+                gNavigatorBundle.getString("addonInstall.unsigned"));
+              unsignedLabel.setAttribute("class",
+                "addon-install-confirmation-unsigned");
+              container.appendChild(unsignedLabel);
             }
 
             addonList.appendChild(container);
           }
-
-          this.acceptInstallation = () => {
-            for (let install of installInfo.installs)
-              install.install();
-            installInfo = null;
-
-            Services.telemetry
-                    .getHistogramById("SECURITY_UI")
-                    .add(Ci.nsISecurityUITelemetry.WARNING_CONFIRM_ADDON_INSTALL_CLICK_THROUGH);
-          };
           break;
       }
     };
@@ -185,16 +185,19 @@ const gXPInstallObserver = {
     messageString = messageString.replace("#1", brandShortName);
     messageString = messageString.replace("#2", installInfo.installs.length);
 
-    let cancelButton = document.getElementById("addon-install-confirmation-cancel");
-    cancelButton.label = gNavigatorBundle.getString("addonInstall.cancelButton.label");
-    cancelButton.accessKey = gNavigatorBundle.getString("addonInstall.cancelButton.accesskey");
+    let action = {
+      label: gNavigatorBundle.getString("addonInstall.acceptButton.label"),
+      accessKey: gNavigatorBundle.getString("addonInstall.acceptButton.accesskey"),
+      callback: acceptInstallation,
+    };
 
-    let acceptButton = document.getElementById("addon-install-confirmation-accept");
-    acceptButton.label = gNavigatorBundle.getString("addonInstall.acceptButton.label");
-    acceptButton.accessKey = gNavigatorBundle.getString("addonInstall.acceptButton.accesskey");
+    let secondaryAction = {
+      label: gNavigatorBundle.getString("addonInstall.cancelButton.label"),
+      accessKey: gNavigatorBundle.getString("addonInstall.cancelButton.accesskey"),
+      callback: () => {},
+    };
 
     if (height) {
-      let notification = document.getElementById("addon-install-confirmation-notification");
       notification.style.minHeight = height + "px";
     }
 
@@ -204,8 +207,8 @@ const gXPInstallObserver = {
     }
 
     let popup = PopupNotifications.show(browser, "addon-install-confirmation",
-                                        messageString, anchorID, null, null,
-                                        options);
+                                        messageString, anchorID, action,
+                                        [secondaryAction], options);
 
     removeNotificationOnEnd(popup, installInfo.installs);
 
@@ -214,7 +217,7 @@ const gXPInstallObserver = {
             .add(Ci.nsISecurityUITelemetry.WARNING_CONFIRM_ADDON_INSTALL);
   },
 
-  observe: function (aSubject, aTopic, aData)
+  observe: function(aSubject, aTopic, aData)
   {
     var brandBundle = document.getElementById("bundle_brand");
     var installInfo = aSubject.QueryInterface(Components.interfaces.amIWebInstallInfo);
@@ -229,9 +232,11 @@ const gXPInstallObserver = {
     var brandShortName = brandBundle.getString("brandShortName");
 
     var notificationID = aTopic;
-    // Make notifications persist a minimum of 30 seconds
+    // Make notifications persistent
     var options = {
       displayURI: installInfo.originatingURI,
+      persistent: true,
+      hideClose: true,
       timeout: Date.now() + 30000,
     };
 
@@ -304,29 +309,46 @@ const gXPInstallObserver = {
       options.installs = installInfo.installs;
       options.contentWindow = browser.contentWindow;
       options.sourceURI = browser.currentURI;
-      options.eventCallback = (aEvent) => {
+      options.eventCallback = function(aEvent) {
         switch (aEvent) {
+          case "shown":
+            let notificationElement = [...this.owner.panel.childNodes]
+                                      .find(n => n.notification == this);
+            if (notificationElement) {
+              if (Preferences.get("xpinstall.customConfirmationUI", false)) {
+                notificationElement.setAttribute("mainactiondisabled", "true");
+              } else {
+                notificationElement.button.hidden = true;
+              }
+            }
+            break;
           case "removed":
             options.contentWindow = null;
             options.sourceURI = null;
             break;
         }
       };
+      action = {
+        label: gNavigatorBundle.getString("addonInstall.acceptButton.label"),
+        accessKey: gNavigatorBundle.getString("addonInstall.acceptButton.accesskey"),
+        callback: () => {},
+      };
+      let secondaryAction = {
+        label: gNavigatorBundle.getString("addonInstall.cancelButton.label"),
+        accessKey: gNavigatorBundle.getString("addonInstall.cancelButton.accesskey"),
+        callback: () => {
+          for (let install of installInfo.installs) {
+            if (install.state != AddonManager.STATE_CANCELLED) {
+              install.cancel();
+            }
+          }
+        },
+      };
       let notification = PopupNotifications.show(browser, notificationID, messageString,
-                                                 anchorID, null, null, options);
+                                                 anchorID, action,
+                                                 [secondaryAction], options);
       notification._startTime = Date.now();
 
-      let cancelButton = document.getElementById("addon-progress-cancel");
-      cancelButton.label = gNavigatorBundle.getString("addonInstall.cancelButton.label");
-      cancelButton.accessKey = gNavigatorBundle.getString("addonInstall.cancelButton.accesskey");
-
-      let acceptButton = document.getElementById("addon-progress-accept");
-      if (Preferences.get("xpinstall.customConfirmationUI", false)) {
-        acceptButton.label = gNavigatorBundle.getString("addonInstall.acceptButton.label");
-        acceptButton.accessKey = gNavigatorBundle.getString("addonInstall.acceptButton.accesskey");
-      } else {
-        acceptButton.hidden = true;
-      }
       break; }
     case "addon-install-failed": {
       // TODO This isn't terribly ideal for the multiple failure case
@@ -428,6 +450,7 @@ const gXPInstallObserver = {
       // install through the addons manager UI, making the "restart" prompt
       // irrelevant.
       options.removeOnDismissal = true;
+      options.persistent = false;
 
       PopupNotifications.show(browser, notificationID, messageString, anchorID,
                               action, null, options);
@@ -442,14 +465,14 @@ const gXPInstallObserver = {
 };
 
 var LightWeightThemeWebInstaller = {
-  init: function () {
+  init: function() {
     let mm = window.messageManager;
     mm.addMessageListener("LightWeightThemeWebInstaller:Install", this);
     mm.addMessageListener("LightWeightThemeWebInstaller:Preview", this);
     mm.addMessageListener("LightWeightThemeWebInstaller:ResetPreview", this);
   },
 
-  receiveMessage: function (message) {
+  receiveMessage: function(message) {
     // ignore requests from background tabs
     if (message.target != gBrowser.selectedBrowser) {
       return;
@@ -473,7 +496,7 @@ var LightWeightThemeWebInstaller = {
     }
   },
 
-  handleEvent: function (event) {
+  handleEvent: function(event) {
     switch (event.type) {
       case "TabSelect": {
         this._resetPreview();
@@ -482,22 +505,41 @@ var LightWeightThemeWebInstaller = {
     }
   },
 
-  get _manager () {
+  get _manager() {
     let temp = {};
     Cu.import("resource://gre/modules/LightweightThemeManager.jsm", temp);
     delete this._manager;
     return this._manager = temp.LightweightThemeManager;
   },
 
-  _installRequest: function (dataString, baseURI) {
+  _installRequest: function(dataString, baseURI) {
     let data = this._manager.parseTheme(dataString, baseURI);
 
     if (!data) {
       return;
     }
 
+    let uri = makeURI(baseURI);
+
+    // A notification bar with the option to undo is normally shown after a
+    // theme is installed.  But the discovery pane served from the url(s)
+    // below has its own toggle switch for quick undos, so don't show the
+    // notification in that case.
+    let notify = uri.prePath != "https://discovery.addons.mozilla.org";
+    if (notify) {
+      try {
+        if (Services.prefs.getBoolPref("extensions.webapi.testing")
+            && (uri.prePath == "https://discovery.addons.allizom.org"
+                || uri.prePath == "https://discovery.addons-dev.allizom.org")) {
+          notify = false;
+        }
+      } catch (e) {
+        // getBoolPref() throws if the testing pref isn't set.  ignore it.
+      }
+    }
+
     if (this._isAllowed(baseURI)) {
-      this._install(data);
+      this._install(data, notify);
       return;
     }
 
@@ -507,12 +549,12 @@ var LightWeightThemeWebInstaller = {
       gNavigatorBundle.getString("lwthemeInstallRequest.allowButton.accesskey");
     let message =
       gNavigatorBundle.getFormattedString("lwthemeInstallRequest.message",
-                                          [makeURI(baseURI).host]);
+                                          [uri.host]);
     let buttons = [{
       label: allowButtonText,
       accessKey: allowButtonAccesskey,
-      callback: function () {
-        LightWeightThemeWebInstaller._install(data);
+      callback: function() {
+        LightWeightThemeWebInstaller._install(data, notify);
       }
     }];
 
@@ -526,7 +568,7 @@ var LightWeightThemeWebInstaller = {
     notificationBar.persistence = 1;
   },
 
-  _install: function (newLWTheme) {
+  _install: function(newLWTheme, notify) {
     let previousLWTheme = this._manager.currentTheme;
 
     let listener = {
@@ -541,13 +583,13 @@ var LightWeightThemeWebInstaller = {
         let action = {
           label: gNavigatorBundle.getString("lwthemeNeedsRestart.button"),
           accessKey: gNavigatorBundle.getString("lwthemeNeedsRestart.accesskey"),
-          callback: function () {
+          callback: function() {
             BrowserUtils.restartApplication();
           }
         };
 
         let options = {
-          timeout: Date.now() + 30000
+          persistent: true
         };
 
         PopupNotifications.show(gBrowser.selectedBrowser, "addon-theme-change",
@@ -556,7 +598,9 @@ var LightWeightThemeWebInstaller = {
       },
 
       onEnabled: function(aAddon) {
-        LightWeightThemeWebInstaller._postInstallNotification(newLWTheme, previousLWTheme);
+        if (notify) {
+          LightWeightThemeWebInstaller._postInstallNotification(newLWTheme, previousLWTheme);
+        }
       }
     };
 
@@ -565,7 +609,7 @@ var LightWeightThemeWebInstaller = {
     AddonManager.removeAddonListener(listener);
   },
 
-  _postInstallNotification: function (newTheme, previousTheme) {
+  _postInstallNotification: function(newTheme, previousTheme) {
     function text(id) {
       return gNavigatorBundle.getString("lwthemePostInstallNotification." + id);
     }
@@ -573,14 +617,14 @@ var LightWeightThemeWebInstaller = {
     let buttons = [{
       label: text("undoButton"),
       accessKey: text("undoButton.accesskey"),
-      callback: function () {
+      callback: function() {
         LightWeightThemeWebInstaller._manager.forgetUsedTheme(newTheme.id);
         LightWeightThemeWebInstaller._manager.currentTheme = previousTheme;
       }
     }, {
       label: text("manageButton"),
       accessKey: text("manageButton.accesskey"),
-      callback: function () {
+      callback: function() {
         BrowserOpenAddonsMgr("addons://list/theme");
       }
     }];
@@ -597,18 +641,18 @@ var LightWeightThemeWebInstaller = {
     notificationBar.timeout = Date.now() + 20000; // 20 seconds
   },
 
-  _removePreviousNotifications: function () {
+  _removePreviousNotifications: function() {
     let box = gBrowser.getNotificationBox();
 
     ["lwtheme-install-request",
-     "lwtheme-install-notification"].forEach(function (value) {
+     "lwtheme-install-notification"].forEach(function(value) {
         let notification = box.getNotificationWithValue(value);
         if (notification)
           box.removeNotification(notification);
       });
   },
 
-  _preview: function (dataString, baseURI) {
+  _preview: function(dataString, baseURI) {
     if (!this._isAllowed(baseURI))
       return;
 
@@ -621,20 +665,20 @@ var LightWeightThemeWebInstaller = {
     this._manager.previewTheme(data);
   },
 
-  _resetPreview: function (baseURI) {
+  _resetPreview: function(baseURI) {
     if (baseURI && !this._isAllowed(baseURI))
       return;
     gBrowser.tabContainer.removeEventListener("TabSelect", this, false);
     this._manager.resetPreview();
   },
 
-  _isAllowed: function (srcURIString) {
+  _isAllowed: function(srcURIString) {
     let uri;
     try {
       uri = makeURI(srcURIString);
     }
     catch (e) {
-      //makeURI fails if srcURIString is a nonsense URI
+      // makeURI fails if srcURIString is a nonsense URI
       return false;
     }
 
@@ -653,7 +697,7 @@ var LightWeightThemeWebInstaller = {
 var LightweightThemeListener = {
   _modifiedStyles: [],
 
-  init: function () {
+  init: function() {
     XPCOMUtils.defineLazyGetter(this, "styleSheet", function() {
       for (let i = document.styleSheets.length - 1; i >= 0; i--) {
         let sheet = document.styleSheets[i];
@@ -669,7 +713,7 @@ var LightweightThemeListener = {
       this.updateStyleSheet(document.documentElement.style.backgroundImage);
   },
 
-  uninit: function () {
+  uninit: function() {
     Services.obs.removeObserver(this, "lightweight-theme-styling-update");
     Services.obs.removeObserver(this, "lightweight-theme-optimized");
   },
@@ -710,7 +754,7 @@ var LightweightThemeListener = {
   },
 
   // nsIObserver
-  observe: function (aSubject, aTopic, aData) {
+  observe: function(aSubject, aTopic, aData) {
     if ((aTopic != "lightweight-theme-styling-update" && aTopic != "lightweight-theme-optimized") ||
           !this.styleSheet)
       return;

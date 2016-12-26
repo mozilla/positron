@@ -59,7 +59,7 @@
   }
 }
 
-#nav-bar[brighttext] {
+toolbar[brighttext] {
   --toolbarbutton-hover-background: rgba(255,255,255,.25);
   --toolbarbutton-hover-bordercolor: rgba(255,255,255,.5);
 
@@ -70,7 +70,7 @@
   --toolbarbutton-checkedhover-backgroundcolor: rgba(255,255,255,.3);
 }
 
-#nav-bar:-moz-lwtheme {
+toolbar:-moz-lwtheme {
   --toolbarbutton-hover-background: rgba(255,255,255,.25);
   --toolbarbutton-hover-bordercolor: rgba(0,0,0,.2);
 
@@ -187,8 +187,8 @@
   transition: min-height 170ms ease-out, max-height 170ms ease-out, visibility 170ms linear;
 }
 
-@media not all and (-moz-windows-compositor),
-       not all and (-moz-windows-default-theme) {
+@media (-moz-windows-compositor: 0),
+       (-moz-windows-default-theme: 0) {
   /* Please keep the menu text colors in this media block in sync with
    * devedition.css, minus the :not(:-moz-lwtheme) condition - see Bug 1165718.
    */
@@ -203,7 +203,7 @@
   }
 }
 
-@media not all and (-moz-windows-compositor) {
+@media (-moz-windows-compositor: 0) {
   #main-window[tabsintitlebar] #titlebar:-moz-lwtheme {
     visibility: hidden;
   }
@@ -383,7 +383,7 @@
   border-top: 1px solid @toolbarShadowColor@ !important;
   box-shadow: 0 1px 0 @toolbarHighlight@ inset;
 }
-@media not all and (-moz-windows-compositor) {
+@media (-moz-windows-compositor: 0) {
   #TabsToolbar[collapsed="true"] + #nav-bar {
     border-top-style: none !important;
   }
@@ -476,6 +476,8 @@ toolbarbutton.bookmark-item:not(.subviewbutton),
   -moz-appearance: none;
   border: 1px solid transparent;
   border-radius: 1px;
+  background-origin: padding-box !important;
+  background-clip: padding-box !important;
   transition-property: background-color, border-color, box-shadow;
   transition-duration: 150ms;
 }
@@ -490,12 +492,6 @@ toolbarbutton.bookmark-item[open="true"] {
   border-color: var(--toolbarbutton-active-bordercolor);
   box-shadow: var(--toolbarbutton-active-boxshadow);
   background: var(--toolbarbutton-active-background);
-}
-
-toolbarbutton.bookmark-item:not(.subviewbutton):hover:not([disabled="true"]):-moz-lwtheme {
-  background-color: rgba(255,255,255,.25);
-  background-origin: padding-box;
-  background-clip: padding-box;
 }
 
 .bookmark-item > .toolbarbutton-icon,
@@ -826,7 +822,7 @@ toolbar[brighttext] .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
 
 #nav-bar .toolbarbutton-1[type=panel] > .toolbarbutton-icon,
 #nav-bar .toolbarbutton-1[type=panel] > .toolbarbutton-badge-stack,
-#nav-bar .toolbarbutton-1[type=menu]:not(#PanelUI-menu-button):not(#back-button):not(#forward-button) > .toolbarbutton-icon,
+#nav-bar .toolbarbutton-1[type=menu]:not(#PanelUI-menu-button):not(#back-button):not(#forward-button):not(#new-tab-button) > .toolbarbutton-icon,
 #nav-bar .toolbarbutton-1[type=menu]:not(#PanelUI-menu-button) > .toolbarbutton-badge-stack,
 #nav-bar .toolbarbutton-1[type=menu] > .toolbarbutton-text /* hack for add-ons that forcefully display the label */ {
   padding-inline-end: 17px;
@@ -1110,7 +1106,11 @@ toolbar[brighttext] #close-button {
   #minimize-button,
   #restore-button,
   #close-button {
-    list-style-image: url("chrome://global/skin/icons/windowControls.png");
+    /* Important to ensure this applies even on toolbar[brighttext] */
+    list-style-image: url("chrome://global/skin/icons/windowControls.png") !important;
+    /* Also override background color to a avoid hover background styling
+     * leaking through around the image. */
+    background-color: transparent !important;
     padding: 0;
   }
 
@@ -1397,6 +1397,7 @@ html|*.urlbar-input:-moz-lwtheme::placeholder,
   padding: 0 8px;
   border-radius: 1em;
   background-color: hsla(0,0%,0%,.05);
+  color: inherit;
   border: 1px solid ThreeDLightShadow;
 }
 
@@ -1449,14 +1450,13 @@ html|*.urlbar-input:-moz-lwtheme::placeholder,
 }
 
 #urlbar-search-splitter {
-  min-width: 6px;
-  margin-inline-start: -3px;
+  /* The splitter width should equal the location and search bars' combined
+     neighboring margin and border width. */
+  min-width: 8px;
+  margin: 0 -4px;
+  position: relative;
   border: none;
   background: transparent;
-}
-
-#urlbar-search-splitter + #search-container > #searchbar > .searchbar-textbox {
-  margin-inline-start: 0;
 }
 
 .urlbar-display {
@@ -1535,6 +1535,12 @@ html|*.urlbar-input:-moz-lwtheme::placeholder,
 
 /* autocomplete */
 
+%include ../shared/autocomplete.inc.css
+
+#PopupAutoComplete > richlistbox > richlistitem[originaltype~="datalist-first"] {
+  border-top: 1px solid ThreeDShadow;
+}
+
 #treecolAutoCompleteImage {
   max-width: 36px;
 }
@@ -1608,7 +1614,7 @@ html|span.ac-emphasize-text-url {
   font-weight: 600;
 }
 
-@media not all and (-moz-windows-default-theme) {
+@media (-moz-windows-default-theme: 0) {
   .autocomplete-richlistitem[selected=true] {
     background-color: Highlight;
   }
@@ -1642,54 +1648,14 @@ html|span.ac-emphasize-text-url {
   list-style-image: url("chrome://browser/skin/urlbar-star.svg#star-inverted");
 }
 
-.autocomplete-treebody::-moz-tree-image(bookmark, treecolAutoCompleteImage) {
-  list-style-image: url("chrome://browser/skin/places/autocomplete-star.png");
-  -moz-image-region: rect(0 16px 16px 0);
-  width: 16px;
-  height: 16px;
-}
-
-@media (min-resolution: 1.1dppx) {
-  .autocomplete-treebody::-moz-tree-image(bookmark, treecolAutoCompleteImage) {
-    list-style-image: url("chrome://browser/skin/places/autocomplete-star@2x.png");
-    -moz-image-region: rect(0 32px 32px 0);
-  }
-}
-
-@media not all and (-moz-os-version: windows-vista) and (-moz-windows-default-theme) {
-  @media not all and (-moz-os-version: windows-win7) and (-moz-windows-default-theme) {
-    .autocomplete-treebody::-moz-tree-image(selected, current, bookmark, treecolAutoCompleteImage) {
-      -moz-image-region: rect(0 32px 16px 16px);
-    }
-
-    @media (min-resolution: 1.1dppx) {
-      .autocomplete-treebody::-moz-tree-image(selected, current, bookmark, treecolAutoCompleteImage) {
-        -moz-image-region: rect(0 64px 32px 32px);
-      }
-    }
-
-    .autocomplete-treebody::-moz-tree-image(keyword, treecolAutoCompleteImage, selected) {
-      list-style-image: url(chrome://global/skin/icons/autocomplete-search.svg#search-icon-inverted);
-    }
-  }
-}
-
 .ac-type-icon[type=keyword],
-.ac-site-icon[type=searchengine],
-.autocomplete-treebody::-moz-tree-image(keyword, treecolAutoCompleteImage) {
+.ac-site-icon[type=searchengine] {
   list-style-image: url(chrome://global/skin/icons/autocomplete-search.svg#search-icon);
 }
 
 .ac-type-icon[type=keyword][selected],
-.ac-site-icon[type=searchengine][selected],
-.autocomplete-treebody::-moz-tree-image(keyword, treecolAutoCompleteImage, selected) {
+.ac-site-icon[type=searchengine][selected] {
   list-style-image: url(chrome://global/skin/icons/autocomplete-search.svg#search-icon-inverted);
-}
-
-.autocomplete-treebody::-moz-tree-image(tag, treecolAutoCompleteImage) {
-  list-style-image: url("chrome://browser/skin/places/tag.png");
-  width: 16px;
-  height: 16px;
 }
 
 .ac-type-icon[type=switchtab],
@@ -2594,7 +2560,7 @@ notification.pluginVulnerable > .notification-inner > .messageCloseButton {
    * window caption buttons, and therefore needs to be special-cased.
    */
   @media (-moz-windows-default-theme) {
-    @media not all and (-moz-windows-compositor) {
+    @media (-moz-windows-compositor: 0) {
       #main-window[sizemode="normal"] > #titlebar > #titlebar-content > #titlebar-buttonbox-container > #private-browsing-indicator-titlebar > .private-browsing-indicator {
         background-image: url("chrome://browser/skin/privatebrowsing-mask-titlebar-XPVista7-tall.png");
         height: 28px;
@@ -2649,4 +2615,56 @@ notification.pluginVulnerable > .notification-inner > .messageCloseButton {
 
 .webextension-popup-browser {
   border-radius: inherit;
+}
+
+.contentSelectDropdown-ingroup > .menu-iconic-text {
+  padding-inline-start: 20px;
+}
+
+#ContentSelectDropdown > menupopup {
+  background-color: -moz-field;
+  -moz-border-top-colors: GrayText;
+  -moz-border-right-colors: GrayText;
+  -moz-border-bottom-colors: GrayText;
+  -moz-border-left-colors: GrayText;
+}
+
+#ContentSelectDropdown > menupopup > menucaption,
+#ContentSelectDropdown > menupopup > menuitem {
+  padding: 0 6px;
+  border-width: 0;
+  font: -moz-list;
+}
+
+#ContentSelectDropdown > menupopup > menucaption > .menu-iconic-text,
+#ContentSelectDropdown > menupopup > menuitem > .menu-iconic-text {
+  /* Padding should follow the 4/12 ratio, where 12px is the default font-size
+     with 4px being the preferred padding size. */
+  padding-top: .3333em;
+  padding-bottom: .3333em;
+}
+
+#ContentSelectDropdown > menupopup > menucaption > .menu-iconic-text {
+  font-weight: bold;
+}
+
+#ContentSelectDropdown > menupopup > menuitem[_moz-menuactive="true"][disabled="true"] {
+  color: GrayText;
+  background-color: unset;
+}
+
+#ContentSelectDropdown > menupopup > menucaption {
+  background-color: buttonface;
+}
+
+#ContentSelectDropdown > menupopup > menucaption[disabled="true"] {
+  color: GrayText;
+}
+
+#ContentSelectDropdown > .isOpenedViaTouch > menucaption > .menu-iconic-text,
+#ContentSelectDropdown > .isOpenedViaTouch > menuitem > .menu-iconic-text {
+  /* Touch padding should follow the 11/12 ratio, where 12px is the default
+     font-size with 11px being the preferred padding size. */
+  padding-top: .9167em;
+  padding-bottom: .9167em;
 }

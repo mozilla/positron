@@ -7,8 +7,13 @@ registerCleanupFunction(function() {
 });
 
 function promiseReloadFrame(aFrameId) {
-  return ContentTask.spawn(gBrowser.selectedBrowser, aFrameId, function*(aFrameId) {
-    content.wrappedJSObject.document.getElementById(aFrameId).contentWindow.location.reload();
+  return ContentTask.spawn(gBrowser.selectedBrowser, aFrameId, function*(contentFrameId) {
+    content.wrappedJSObject
+           .document
+           .getElementById(contentFrameId)
+           .contentWindow
+           .location
+           .reload();
   });
 }
 
@@ -34,8 +39,8 @@ var gTests = [
     });
     yield expectObserverCalled("getUserMedia:response:allow");
     yield expectObserverCalled("recording-device-events");
-    is((yield getMediaCaptureState()), "CameraAndMicrophone",
-       "expected camera and microphone to be shared");
+    Assert.deepEqual((yield getMediaCaptureState()), {audio: true, video: true},
+                     "expected camera and microphone to be shared");
 
     yield indicator;
     yield checkSharingUI({audio: true, video: true});
@@ -58,8 +63,8 @@ var gTests = [
     });
     yield expectObserverCalled("getUserMedia:response:allow");
     yield expectObserverCalled("recording-device-events");
-    is((yield getMediaCaptureState()), "CameraAndMicrophone",
-       "expected camera and microphone to be shared");
+    Assert.deepEqual((yield getMediaCaptureState()), {audio: true, video: true},
+                     "expected camera and microphone to be shared");
 
     yield indicator;
     yield checkSharingUI({video: true, audio: true});
@@ -99,8 +104,8 @@ var gTests = [
     });
     yield expectObserverCalled("getUserMedia:response:allow");
     yield expectObserverCalled("recording-device-events");
-    is((yield getMediaCaptureState()), "CameraAndMicrophone",
-       "expected camera and microphone to be shared");
+    Assert.deepEqual((yield getMediaCaptureState()), {audio: true, video: true},
+                     "expected camera and microphone to be shared");
 
     yield indicator;
     yield checkSharingUI({video: true, audio: true});
@@ -110,9 +115,6 @@ var gTests = [
     yield promiseReloadFrame("frame1");
     yield promise;
 
-    if ((yield promiseTodoObserverNotCalled("recording-device-events")) == 1) {
-      todo(false, "Got the 'recording-device-events' notification twice, likely because of bug 962719");
-    }
     yield expectObserverCalled("recording-window-ended");
     yield expectNoObserverCalled();
     yield checkNotSharing();
@@ -158,7 +160,8 @@ var gTests = [
     });
     yield expectObserverCalled("getUserMedia:response:allow");
     yield expectObserverCalled("recording-device-events");
-    is((yield getMediaCaptureState()), "Microphone", "microphone to be shared");
+    Assert.deepEqual((yield getMediaCaptureState()), {audio: true},
+                     "expected microphone to be shared");
 
     yield indicator;
     yield checkSharingUI({video: false, audio: true});
@@ -175,8 +178,8 @@ var gTests = [
     });
     yield expectObserverCalled("getUserMedia:response:allow");
     yield expectObserverCalled("recording-device-events");
-    is((yield getMediaCaptureState()), "CameraAndMicrophone",
-       "expected camera and microphone to be shared");
+    Assert.deepEqual((yield getMediaCaptureState()), {audio: true, video: true},
+                     "expected camera and microphone to be shared");
 
     yield checkSharingUI({video: true, audio: true});
     yield expectNoObserverCalled();
@@ -188,9 +191,6 @@ var gTests = [
 
     yield expectObserverCalled("recording-window-ended");
     yield checkSharingUI({video: false, audio: true});
-    if ((yield promiseTodoObserverNotCalled("recording-device-events")) == 1) {
-      todo(false, "Got the 'recording-device-events' notification twice, likely because of bug 962719");
-    }
     yield expectNoObserverCalled();
 
     yield closeStream(false, "frame1");
@@ -214,23 +214,13 @@ var gTests = [
     });
     yield expectObserverCalled("getUserMedia:response:allow");
     yield expectObserverCalled("recording-device-events");
-    is((yield getMediaCaptureState()), "CameraAndMicrophone",
-       "expected camera and microphone to be shared");
+    Assert.deepEqual((yield getMediaCaptureState()), {audio: true, video: true},
+                     "expected camera and microphone to be shared");
 
     yield indicator;
     yield checkSharingUI({video: true, audio: true});
 
-    info("reloading the web page");
-    promise = promiseObserverCalled("recording-device-events");
-    content.location.reload();
-    yield promise;
-
-    if ((yield promiseTodoObserverNotCalled("recording-device-events")) == 1) {
-      todo(false, "Got the 'recording-device-events' notification twice, likely because of bug 962719");
-    }
-    yield expectObserverCalled("recording-window-ended");
-    yield expectNoObserverCalled();
-    yield checkNotSharing();
+    yield reloadAndAssertClosedStreams();
   }
 }
 
@@ -254,9 +244,9 @@ function test() {
     Task.spawn(function* () {
       yield SpecialPowers.pushPrefEnv({"set": [[PREF_PERMISSION_FAKE, true]]});
 
-      for (let test of gTests) {
-        info(test.desc);
-        yield test.run();
+      for (let testCase of gTests) {
+        info(testCase.desc);
+        yield testCase.run();
 
         // Cleanup before the next test
         yield expectNoObserverCalled();

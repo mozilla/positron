@@ -107,7 +107,7 @@ function* setupEMEKey(browser) {
     let res = {};
 
     // Insert the EME key.
-    let result = yield new Promise(resolve => {
+    yield new Promise(resolve => {
       session.addEventListener("message", function(event) {
         session.update(aKeyInfo.keyObj).then(
           () => { resolve(); }
@@ -181,6 +181,7 @@ add_task(function* setup() {
       [ "media.mediasource.enabled", true ],
       [ "media.eme.apiVisible", true ],
       [ "media.mediasource.webm.enabled", true ],
+      [ "media.clearkey.persistent-license.enabled", true ],
   ]});
 });
 
@@ -190,7 +191,7 @@ add_task(function* test_EME_forgetThisSite() {
 
   for (let userContextId of Object.keys(USER_CONTEXTS)) {
     // Open our tab in the given user context.
-    tabs[userContextId] = yield* openTabInUserContext(TEST_URL+ "empty_file.html", userContextId);
+    tabs[userContextId] = yield* openTabInUserContext(TEST_URL + "empty_file.html", userContextId);
 
     // Setup EME Key.
     emeSessionIds[userContextId] = yield setupEMEKey(tabs[userContextId].browser);
@@ -207,7 +208,7 @@ add_task(function* test_EME_forgetThisSite() {
   // Open tabs again to check EME keys have been cleared.
   for (let userContextId of Object.keys(USER_CONTEXTS)) {
     // Open our tab in the given user context.
-    tabs[userContextId] = yield* openTabInUserContext(TEST_URL+ "empty_file.html", userContextId);
+    tabs[userContextId] = yield* openTabInUserContext(TEST_URL + "empty_file.html", userContextId);
 
     // Check whether EME Key has been cleared.
     yield checkEMEKey(tabs[userContextId].browser, emeSessionIds[userContextId]);

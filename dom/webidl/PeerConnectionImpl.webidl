@@ -45,6 +45,12 @@ interface PeerConnectionImpl  {
   [Throws]
   void removeTrack(MediaStreamTrack track);
   [Throws]
+  void insertDTMF(RTCRtpSender sender, DOMString tones,
+                  optional unsigned long duration = 100,
+                  optional unsigned long interToneGap = 70);
+  [Throws]
+  DOMString getDTMFToneBuffer(RTCRtpSender sender);
+  [Throws]
   void replaceTrack(MediaStreamTrack thisTrack, MediaStreamTrack withTrack);
   [Throws]
   void setParameters(MediaStreamTrack track,
@@ -95,7 +101,7 @@ interface PeerConnectionImpl  {
   /* Data channels */
   [Throws]
   DataChannel createDataChannel(DOMString label, DOMString protocol,
-    unsigned short type, boolean outOfOrderAllowed,
+    unsigned short type, boolean ordered,
     unsigned short maxTime, unsigned short maxNum,
     boolean externalNegotiated, unsigned short stream);
 };

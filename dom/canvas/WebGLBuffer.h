@@ -22,7 +22,6 @@ class WebGLBuffer final
     : public nsWrapperCache
     , public WebGLRefCountedObject<WebGLBuffer>
     , public LinkedListElement<WebGLBuffer>
-    , public WebGLContextBoundObject
 {
     friend class WebGLContext;
     friend class WebGL2Context;
@@ -54,6 +53,7 @@ public:
                                         size_t updateSizeInBytes);
 
     bool Validate(GLenum type, uint32_t max_allowed, size_t first, size_t count) const;
+    bool ValidateRange(const char* funcName, size_t byteOffset, size_t byteLen) const;
 
     bool IsElementArrayUsedWithMultipleTypes() const;
 
@@ -78,8 +78,6 @@ protected:
     GLenum mUsage;
     size_t mByteLength;
     UniquePtr<WebGLElementArrayCache> mCache;
-    size_t mNumActiveTFOs;
-    bool mBoundForTF;
 };
 
 } // namespace mozilla

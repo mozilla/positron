@@ -66,7 +66,7 @@ class JS_FRIEND_API(Wrapper) : public BaseProxyHandler
         mFlags(aFlags)
     { }
 
-    virtual bool finalizeInBackground(Value priv) const override;
+    virtual bool finalizeInBackground(const Value& priv) const override;
 
     /* Standard internal methods. */
     virtual bool getOwnPropertyDescriptor(JSContext* cx, HandleObject proxy, HandleId id,
@@ -357,6 +357,9 @@ CheckedUnwrap(JSObject* obj, bool stopAtWindowProxy = true);
 // above. This is the checked version of Wrapper::wrappedObject.
 JS_FRIEND_API(JSObject*)
 UnwrapOneChecked(JSObject* obj, bool stopAtWindowProxy = true);
+
+void
+ReportAccessDenied(JSContext* cx);
 
 JS_FRIEND_API(bool)
 IsCrossCompartmentWrapper(JSObject* obj);

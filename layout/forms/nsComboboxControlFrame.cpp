@@ -383,13 +383,11 @@ public:
   explicit nsResizeDropdownAtFinalPosition(nsComboboxControlFrame* aFrame)
     : mFrame(aFrame)
   {
-    MOZ_COUNT_CTOR(nsResizeDropdownAtFinalPosition);
   }
 
 protected:
   ~nsResizeDropdownAtFinalPosition()
   {
-    MOZ_COUNT_DTOR(nsResizeDropdownAtFinalPosition);
   }
 
 public:
@@ -1163,9 +1161,10 @@ nsComboboxControlFrame::HandleEvent(nsPresContext* aPresContext,
   // If we have style that affects how we are selected, feed event down to
   // nsFrame::HandleEvent so that selection takes place when appropriate.
   const nsStyleUserInterface* uiStyle = StyleUserInterface();
-  if (uiStyle->mUserInput == NS_STYLE_USER_INPUT_NONE || uiStyle->mUserInput == NS_STYLE_USER_INPUT_DISABLED)
+  if (uiStyle->mUserInput == StyleUserInput::None ||
+      uiStyle->mUserInput == StyleUserInput::Disabled) {
     return nsBlockFrame::HandleEvent(aPresContext, aEvent, aEventStatus);
-
+  }
   return NS_OK;
 }
 

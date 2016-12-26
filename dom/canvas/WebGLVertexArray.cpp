@@ -17,11 +17,11 @@ namespace mozilla {
 JSObject*
 WebGLVertexArray::WrapObject(JSContext* cx, JS::Handle<JSObject*> givenProto)
 {
-    return dom::WebGLVertexArrayObjectOESBinding::Wrap(cx, this, givenProto);
+    return dom::WebGLVertexArrayObjectBinding::Wrap(cx, this, givenProto);
 }
 
 WebGLVertexArray::WebGLVertexArray(WebGLContext* webgl)
-    : WebGLContextBoundObject(webgl)
+    : WebGLRefCountedObject(webgl)
     , mGLName(0)
 {
     mContext->mVertexArrays.insertBack(this);
@@ -50,7 +50,7 @@ WebGLVertexArray::Delete()
 }
 
 bool
-WebGLVertexArray::IsVertexArray()
+WebGLVertexArray::IsVertexArray() const
 {
     return IsVertexArrayImpl();
 }

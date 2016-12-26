@@ -38,14 +38,12 @@ public:
   NS_DECL_NSIASYNCSHUTDOWNBLOCKER
 
   // mozIGeckoMediaPluginService
-  NS_IMETHOD GetPluginVersionForAPI(const nsACString& aAPI,
-                                    nsTArray<nsCString>* aTags,
-                                    bool* aHasPlugin,
-                                    nsACString& aOutVersion) override;
+  NS_IMETHOD HasPluginForAPI(const nsACString& aAPI,
+                             nsTArray<nsCString>* aTags,
+                             bool *aRetVal) override;
   NS_IMETHOD GetNodeId(const nsAString& aOrigin,
                        const nsAString& aTopLevelOrigin,
                        const nsAString& aGMPName,
-                       bool aInPrivateBrowsingMode,
                        UniquePtr<GetNodeIdCallback>&& aCallback) override;
 
   NS_DECL_MOZIGECKOMEDIAPLUGINCHROMESERVICE
@@ -72,6 +70,8 @@ public:
   void ServiceUserCreated();
   void ServiceUserDestroyed();
 
+  void UpdateContentProcessGMPCapabilities();
+
 private:
   friend class GMPServiceParent;
 
@@ -89,8 +89,7 @@ private:
                                                    size_t* aOutPluginIndex);
 
   nsresult GetNodeId(const nsAString& aOrigin, const nsAString& aTopLevelOrigin,
-                     const nsAString& aGMPName,
-                     bool aInPrivateBrowsing, nsACString& aOutId);
+                     const nsAString& aGMPName, nsACString& aOutId);
 
   void UnloadPlugins();
   void CrashPlugins();
@@ -125,12 +124,13 @@ protected:
   void InitializePlugins(AbstractThread* aAbstractGMPThread) override;
   RefPtr<GenericPromise::AllPromiseType> LoadFromEnvironment();
   RefPtr<GenericPromise> AddOnGMPThread(nsString aDirectory);
-  bool GetContentParentFrom(GMPCrashHelper* aHelper,
-                            const nsACString& aNodeId,
-                            const nsCString& aAPI,
-                            const nsTArray<nsCString>& aTags,
-                            UniquePtr<GetGMPContentParentCallback>&& aCallback)
-    override;
+
+  virtual RefPtr<GetGMPContentParentPromise>
+  GetContentParent(GMPCrashHelper* aHelper,
+                   const nsACString& aNodeId,
+                   const nsCString& aAPI,
+                   const nsTArray<nsCString>& aTags) override;
+
 private:
   // Creates a copy of aOriginal. Note that the caller is responsible for
   // adding this to GeckoMediaPluginServiceParent::mPlugins.
@@ -245,30 +245,22 @@ public:
   }
   virtual ~GMPServiceParent();
 
-  bool RecvGetGMPNodeId(const nsString& aOrigin,
-                        const nsString& aTopLevelOrigin,
-                        const nsString& aGMPName,
-                        const bool& aInPrivateBrowsing,
-                        nsCString* aID) override;
-  static bool RecvGetGMPPluginVersionForAPI(const nsCString& aAPI,
-                                            nsTArray<nsCString>&& aTags,
-                                            bool* aHasPlugin,
-                                            nsCString* aVersion);
+  mozilla::ipc::IPCResult RecvGetGMPNodeId(const nsString& aOrigin,
+                                           const nsString& aTopLevelOrigin,
+                                           const nsString& aGMPName,
+                                           nsCString* aID) override;
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
   static PGMPServiceParent* Create(Transport* aTransport, ProcessId aOtherPid);
 
-  bool RecvSelectGMP(const nsCString& aNodeId,
-                     const nsCString& aAPI,
-                     nsTArray<nsCString>&& aTags,
-                     uint32_t* aOutPluginId,
-                     nsresult* aOutRv) override;
-
-  bool RecvLaunchGMP(const uint32_t& aPluginId,
-                     nsTArray<ProcessId>&& aAlreadyBridgedTo,
-                     ProcessId* aOutID,
-                     nsCString* aOutDisplayName,
-                     nsresult* aOutRv) override;
+  mozilla::ipc::IPCResult RecvLaunchGMP(const nsCString& aNodeId,
+                                        const nsCString& aAPI,
+                                        nsTArray<nsCString>&& aTags,
+                                        nsTArray<ProcessId>&& aAlreadyBridgedTo,
+                                        uint32_t* aOutPluginId,
+                                        ProcessId* aOutID,
+                                        nsCString* aOutDisplayName,
+                                        nsresult* aOutRv) override;
 
 private:
   void CloseTransport(Monitor* aSyncMonitor, bool* aCompleted);

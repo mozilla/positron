@@ -5,6 +5,7 @@
 
 const nsICookie = Components.interfaces.nsICookie;
 
+Components.utils.import("resource://gre/modules/AppConstants.jsm");
 Components.utils.import("resource://gre/modules/PluralForm.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm")
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -15,14 +16,12 @@ XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
 var gCookiesWindow = {
   _cm               : Components.classes["@mozilla.org/cookiemanager;1"]
                                 .getService(Components.interfaces.nsICookieManager),
-  _ds               : Components.classes["@mozilla.org/intl/scriptabledateformat;1"]
-                                .getService(Components.interfaces.nsIScriptableDateFormat),
   _hosts            : {},
   _hostOrder        : [],
   _tree             : null,
   _bundle           : null,
 
-  init: function () {
+  init: function() {
     var os = Components.classes["@mozilla.org/observer-service;1"]
                        .getService(Components.interfaces.nsIObserverService);
     os.addObserver(this, "cookie-changed", false);
@@ -40,14 +39,14 @@ var gCookiesWindow = {
     }
   },
 
-  uninit: function () {
+  uninit: function() {
     var os = Components.classes["@mozilla.org/observer-service;1"]
                        .getService(Components.interfaces.nsIObserverService);
     os.removeObserver(this, "cookie-changed");
     os.removeObserver(this, "perm-changed");
   },
 
-  _populateList: function (aInitialLoad) {
+  _populateList: function(aInitialLoad) {
     this._loadCookies();
     this._tree.view = this._view;
     if (aInitialLoad)
@@ -70,7 +69,7 @@ var gCookiesWindow = {
     this._saveState();
   },
 
-  _cookieEquals: function (aCookieA, aCookieB, aStrippedHost) {
+  _cookieEquals: function(aCookieA, aCookieB, aStrippedHost) {
     return aCookieA.rawHost == aStrippedHost &&
            aCookieA.name == aCookieB.name &&
            aCookieA.path == aCookieB.path &&
@@ -78,7 +77,7 @@ var gCookiesWindow = {
                                                aCookieB.originAttributes);
   },
 
-  _isPrivateCookie: function (aCookie) {
+  _isPrivateCookie: function(aCookie) {
       let { userContextId } = aCookie.originAttributes;
       if (!userContextId) {
         // Default identity is public.
@@ -87,7 +86,7 @@ var gCookiesWindow = {
       return !ContextualIdentityService.getIdentityFromId(userContextId).public;
   },
 
-  observe: function (aCookie, aTopic, aData) {
+  observe: function(aCookie, aTopic, aData) {
     if (aTopic != "cookie-changed")
       return;
 
@@ -124,19 +123,18 @@ var gCookiesWindow = {
     // and is rather complicated as selection tracking is difficult
   },
 
-  _handleCookieChanged: function (changedCookie, strippedHost) {
+  _handleCookieChanged: function(changedCookie, strippedHost) {
     var rowIndex = 0;
     var cookieItem = null;
     if (!this._view._filtered) {
-      for (var i = 0; i < this._hostOrder.length; ++i) { // (var host in this._hosts) {
+      for (let host of this._hostOrder) {
         ++rowIndex;
-        var hostItem = this._hosts[this._hostOrder[i]]; // var hostItem = this._hosts[host];
-        if (this._hostOrder[i] == strippedHost) { // host == strippedHost) {
+        var hostItem = this._hosts[host];
+        if (host == strippedHost) {
           // Host matches, look for the cookie within this Host collection
           // and update its data
-          for (var j = 0; j < hostItem.cookies.length; ++j) {
+          for (let currCookie of hostItem.cookies) {
             ++rowIndex;
-            var currCookie = hostItem.cookies[j];
             if (this._cookieEquals(currCookie, changedCookie, strippedHost)) {
               currCookie.value    = changedCookie.value;
               currCookie.isSecure = changedCookie.isSecure;
@@ -155,8 +153,7 @@ var gCookiesWindow = {
       // Just walk the filter list to find the item. It doesn't matter that
       // we don't update the main Host collection when we do this, because
       // when the filter is reset the Host collection is rebuilt anyway.
-      for (rowIndex = 0; rowIndex < this._view._filterSet.length; ++rowIndex) {
-        currCookie = this._view._filterSet[rowIndex];
+      for (let currCookie of this._view._filterSet) {
         if (this._cookieEquals(currCookie, changedCookie, strippedHost)) {
           currCookie.value    = changedCookie.value;
           currCookie.isSecure = changedCookie.isSecure;
@@ -175,7 +172,7 @@ var gCookiesWindow = {
       this._updateCookieData(cookieItem);
   },
 
-  _handleCookieAdded: function (changedCookie, strippedHost) {
+  _handleCookieAdded: function(changedCookie, strippedHost) {
     var rowCountImpact = 0;
     var addedHost = { value: 0 };
     this._addCookie(strippedHost, changedCookie, addedHost);
@@ -215,7 +212,7 @@ var gCookiesWindow = {
       return this._rowCount;
     },
 
-    _getItemAtIndex: function (aIndex) {
+    _getItemAtIndex: function(aIndex) {
       if (this._filtered)
         return this._filterSet[aIndex];
 
@@ -229,8 +226,8 @@ var gCookiesWindow = {
         count = hostIndex = cacheItem['count'];
       }
 
-      for (var i = start; i < gCookiesWindow._hostOrder.length; ++i) { // var host in gCookiesWindow._hosts) {
-        var currHost = gCookiesWindow._hosts[gCookiesWindow._hostOrder[i]]; // gCookiesWindow._hosts[host];
+      for (let i = start; i < gCookiesWindow._hostOrder.length; ++i) { // var host in gCookiesWindow._hosts) {
+        let currHost = gCookiesWindow._hosts[gCookiesWindow._hostOrder[i]];// gCookiesWindow._hosts[host];
         if (!currHost) continue;
         if (count == aIndex)
           return currHost;
@@ -244,9 +241,8 @@ var gCookiesWindow = {
             // We are looking for an entry within this host's children,
             // enumerate them looking for the index.
             ++count;
-            for (var j = 0; j < currHost.cookies.length; ++j) {
+            for (let cookie of currHost.cookies) {
               if (count == aIndex) {
-                var cookie = currHost.cookies[j];
                 cookie.parentIndex = hostIndex;
                 return cookie;
               }
@@ -264,14 +260,14 @@ var gCookiesWindow = {
         else
           ++count;
 
-        for (var k = cacheStart; k < count; k++)
+        for (let k = cacheStart; k < count; k++)
           this._cacheItems[k] = cacheEntry;
         this._cacheValid = count - 1;
       }
       return null;
     },
 
-    _removeItemAtIndex: function (aIndex, aCount) {
+    _removeItemAtIndex: function(aIndex, aCount) {
       let removeCount = aCount === undefined ? 1 : aCount;
       if (this._filtered) {
         // remove the cookies from the unfiltered set so that they
@@ -310,11 +306,11 @@ var gCookiesWindow = {
       }
     },
 
-    _invalidateCache: function (aIndex) {
+    _invalidateCache: function(aIndex) {
       this._cacheValid = Math.min(this._cacheValid, aIndex);
     },
 
-    getCellText: function (aIndex, aColumn) {
+    getCellText: function(aIndex, aColumn) {
       if (!this._filtered) {
         var item = this._getItemAtIndex(aIndex);
         if (!item)
@@ -333,12 +329,12 @@ var gCookiesWindow = {
     },
 
     _selection: null,
-    get selection () { return this._selection; },
-    set selection (val) { this._selection = val; return val; },
-    getRowProperties: function (aIndex) { return ""; },
-    getCellProperties: function (aIndex, aColumn) { return ""; },
-    getColumnProperties: function (aColumn) { return ""; },
-    isContainer: function (aIndex) {
+    get selection() { return this._selection; },
+    set selection(val) { this._selection = val; return val; },
+    getRowProperties: function(aIndex) { return ""; },
+    getCellProperties: function(aIndex, aColumn) { return ""; },
+    getColumnProperties: function(aColumn) { return ""; },
+    isContainer: function(aIndex) {
       if (!this._filtered) {
         var item = this._getItemAtIndex(aIndex);
         if (!item) return false;
@@ -346,7 +342,7 @@ var gCookiesWindow = {
       }
       return false;
     },
-    isContainerOpen: function (aIndex) {
+    isContainerOpen: function(aIndex) {
       if (!this._filtered) {
         var item = this._getItemAtIndex(aIndex);
         if (!item) return false;
@@ -354,7 +350,7 @@ var gCookiesWindow = {
       }
       return false;
     },
-    isContainerEmpty: function (aIndex) {
+    isContainerEmpty: function(aIndex) {
       if (!this._filtered) {
         var item = this._getItemAtIndex(aIndex);
         if (!item) return false;
@@ -362,11 +358,11 @@ var gCookiesWindow = {
       }
       return false;
     },
-    isSeparator: function (aIndex) { return false; },
-    isSorted: function (aIndex) { return false; },
-    canDrop: function (aIndex, aOrientation) { return false; },
-    drop: function (aIndex, aOrientation) {},
-    getParentIndex: function (aIndex) {
+    isSeparator: function(aIndex) { return false; },
+    isSorted: function(aIndex) { return false; },
+    canDrop: function(aIndex, aOrientation) { return false; },
+    drop: function(aIndex, aOrientation) {},
+    getParentIndex: function(aIndex) {
       if (!this._filtered) {
         var item = this._getItemAtIndex(aIndex);
         // If an item has no parent index (i.e. it is at the top level) this
@@ -378,7 +374,7 @@ var gCookiesWindow = {
       }
       return -1;
     },
-    hasNextSibling: function (aParentIndex, aIndex) {
+    hasNextSibling: function(aParentIndex, aIndex) {
       if (!this._filtered) {
         // |aParentIndex| appears to be bogus, but we can get the real
         // parent index by getting the entry for |aIndex| and reading the
@@ -389,7 +385,7 @@ var gCookiesWindow = {
         var item = this._getItemAtIndex(aIndex);
         if (item) {
           if (item.container) {
-            for (var i = aIndex + 1; i < this.rowCount; ++i) {
+            for (let i = aIndex + 1; i < this.rowCount; ++i) {
               var subsequent = this._getItemAtIndex(i);
               if (subsequent.container)
                 return true;
@@ -403,7 +399,7 @@ var gCookiesWindow = {
       }
       return aIndex < this.rowCount - 1;
     },
-    hasPreviousSibling: function (aIndex) {
+    hasPreviousSibling: function(aIndex) {
       if (!this._filtered) {
         var item = this._getItemAtIndex(aIndex);
         if (!item) return false;
@@ -413,7 +409,7 @@ var gCookiesWindow = {
       }
       return aIndex > 0;
     },
-    getLevel: function (aIndex) {
+    getLevel: function(aIndex) {
       if (!this._filtered) {
         var item = this._getItemAtIndex(aIndex);
         if (!item) return 0;
@@ -421,11 +417,11 @@ var gCookiesWindow = {
       }
       return 0;
     },
-    getImageSrc: function (aIndex, aColumn) {},
-    getProgressMode: function (aIndex, aColumn) {},
-    getCellValue: function (aIndex, aColumn) {},
-    setTree: function (aTree) {},
-    toggleOpenState: function (aIndex) {
+    getImageSrc: function(aIndex, aColumn) {},
+    getProgressMode: function(aIndex, aColumn) {},
+    getCellValue: function(aIndex, aColumn) {},
+    setTree: function(aTree) {},
+    toggleOpenState: function(aIndex) {
       if (!this._filtered) {
         var item = this._getItemAtIndex(aIndex);
         if (!item) return;
@@ -438,28 +434,28 @@ var gCookiesWindow = {
         gCookiesWindow._tree.treeBoxObject.invalidateRow(aIndex);
       }
     },
-    cycleHeader: function (aColumn) {},
-    selectionChanged: function () {},
-    cycleCell: function (aIndex, aColumn) {},
-    isEditable: function (aIndex, aColumn) {
+    cycleHeader: function(aColumn) {},
+    selectionChanged: function() {},
+    cycleCell: function(aIndex, aColumn) {},
+    isEditable: function(aIndex, aColumn) {
       return false;
     },
-    isSelectable: function (aIndex, aColumn) {
+    isSelectable: function(aIndex, aColumn) {
       return false;
     },
-    setCellValue: function (aIndex, aColumn, aValue) {},
-    setCellText: function (aIndex, aColumn, aValue) {},
-    performAction: function (aAction) {},
-    performActionOnRow: function (aAction, aIndex) {},
-    performActionOnCell: function (aAction, aindex, aColumn) {}
+    setCellValue: function(aIndex, aColumn, aValue) {},
+    setCellText: function(aIndex, aColumn, aValue) {},
+    performAction: function(aAction) {},
+    performActionOnRow: function(aAction, aIndex) {},
+    performActionOnCell: function(aAction, aindex, aColumn) {}
   },
 
-  _makeStrippedHost: function (aHost) {
+  _makeStrippedHost: function(aHost) {
     var formattedHost = aHost.charAt(0) == "." ? aHost.substring(1, aHost.length) : aHost;
     return formattedHost.substring(0, 4) == "www." ? formattedHost.substring(4, formattedHost.length) : formattedHost;
   },
 
-  _addCookie: function (aStrippedHost, aCookie, aHostCount) {
+  _addCookie: function(aStrippedHost, aCookie, aHostCount) {
     if (!(aStrippedHost in this._hosts) || !this._hosts[aStrippedHost]) {
       this._hosts[aStrippedHost] = { cookies   : [],
                                      rawHost   : aStrippedHost,
@@ -474,9 +470,7 @@ var gCookiesWindow = {
     this._hosts[aStrippedHost].cookies.push(c);
   },
 
-  _makeCookieObject: function (aStrippedHost, aCookie) {
-    var host = aCookie.host;
-    var formattedHost = host.charAt(0) == "." ? host.substring(1, host.length) : host;
+  _makeCookieObject: function(aStrippedHost, aCookie) {
     var c = { name            : aCookie.name,
               value           : aCookie.value,
               isDomain        : aCookie.isDomain,
@@ -491,7 +485,7 @@ var gCookiesWindow = {
     return c;
   },
 
-  _loadCookies: function () {
+  _loadCookies: function() {
     var e = this._cm.enumerator;
     var hostCount = { value: 0 };
     this._hosts = {};
@@ -512,17 +506,15 @@ var gCookiesWindow = {
     this._view._rowCount = hostCount.value;
   },
 
-  formatExpiresString: function (aExpires) {
+  formatExpiresString: function(aExpires) {
     if (aExpires) {
       var date = new Date(1000 * aExpires);
-      return this._ds.FormatDateTime("", this._ds.dateFormatLong,
-                                     this._ds.timeFormatSeconds,
-                                     date.getFullYear(),
-                                     date.getMonth() + 1,
-                                     date.getDate(),
-                                     date.getHours(),
-                                     date.getMinutes(),
-                                     date.getSeconds());
+      const locale = Components.classes["@mozilla.org/chrome/chrome-registry;1"]
+                     .getService(Components.interfaces.nsIXULChromeRegistry)
+                     .getSelectedLocale("global", true);
+      const dtOptions = { year: 'numeric', month: 'long', day: 'numeric',
+                          hour: 'numeric', minute: 'numeric', second: 'numeric' };
+      return date.toLocaleString(locale, dtOptions);
     }
     return this._bundle.getString("expireAtEndOfSession");
   },
@@ -535,7 +527,7 @@ var gCookiesWindow = {
     return ContextualIdentityService.getUserContextLabel(aUserContextId);
   },
 
-  _updateCookieData: function (aItem) {
+  _updateCookieData: function(aItem) {
     var seln = this._view.selection;
     var ids = ["name", "value", "host", "path", "isSecure", "expires", "userContext"];
     var properties;
@@ -548,8 +540,8 @@ var gCookiesWindow = {
                      isSecure: aItem.isSecure ? this._bundle.getString("forSecureOnly")
                                               : this._bundle.getString("forAnyConnection"),
                      userContext: this._getUserContextString(aItem.originAttributes.userContextId) };
-      for (var i = 0; i < ids.length; ++i) {
-        document.getElementById(ids[i]).disabled = false;
+      for (let id of ids) {
+        document.getElementById(id).disabled = false;
       }
     }
     else {
@@ -557,15 +549,15 @@ var gCookiesWindow = {
       properties = { name: noneSelected, value: noneSelected, host: noneSelected,
                      path: noneSelected, expires: noneSelected,
                      isSecure: noneSelected, userContext: noneSelected };
-      for (i = 0; i < ids.length; ++i) {
-        document.getElementById(ids[i]).disabled = true;
+      for (let id of ids) {
+        document.getElementById(id).disabled = true;
       }
     }
-    for (var property in properties)
+    for (let property in properties)
       document.getElementById(property).value = properties[property];
   },
 
-  onCookieSelected: function () {
+  onCookieSelected: function() {
     var item;
     var seln = this._tree.view.selection;
     if (!this._view._filtered)
@@ -577,10 +569,10 @@ var gCookiesWindow = {
 
     var rangeCount = seln.getRangeCount();
     var selectedCookieCount = 0;
-    for (var i = 0; i < rangeCount; ++i) {
+    for (let i = 0; i < rangeCount; ++i) {
       var min = {}; var max = {};
       seln.getRangeAt(i, min, max);
-      for (var j = min.value; j <= max.value; ++j) {
+      for (let j = min.value; j <= max.value; ++j) {
         item = this._view._getItemAtIndex(j);
         if (!item) continue;
         if (item.container)
@@ -604,14 +596,13 @@ var gCookiesWindow = {
     var blockFutureCookies = false;
     if (psvc.prefHasUserValue("network.cookie.blockFutureCookies"))
       blockFutureCookies = psvc.getBoolPref("network.cookie.blockFutureCookies");
-    for (var i = 0; i < deleteItems.length; ++i) {
-      var item = deleteItems[i];
+    for (let item of deleteItems) {
       this._cm.remove(item.host, item.name, item.path,
                       blockFutureCookies, item.originAttributes);
     }
   },
 
-  deleteCookie: function () {
+  deleteCookie: function() {
     // Selection Notes
     // - Selection always moves to *NEXT* adjacent item unless item
     //   is last child at a given level in which case it moves to *PREVIOUS*
@@ -710,11 +701,11 @@ var gCookiesWindow = {
       // Traverse backwards through selections to avoid messing
       // up the indices when they are deleted.
       // See bug 388079.
-      for (var i = rangeCount - 1; i >= 0; --i) {
+      for (let i = rangeCount - 1; i >= 0; --i) {
         var min = {}; var max = {};
         seln.getRangeAt(i, min, max);
         nextSelected = min.value;
-        for (var j = min.value; j <= max.value; ++j) {
+        for (let j = min.value; j <= max.value; ++j) {
           deleteItems.push(this._view._getItemAtIndex(j));
           if (!this._view.hasNextSibling(-1, max.value))
             --nextSelected;
@@ -737,11 +728,11 @@ var gCookiesWindow = {
     }
   },
 
-  deleteAllCookies: function () {
+  deleteAllCookies: function() {
     if (this._view._filtered) {
       var rowCount = this._view.rowCount;
       var deleteItems = [];
-      for (var index = 0; index < rowCount; index++) {
+      for (let index = 0; index < rowCount; index++) {
         deleteItems.push(this._view._getItemAtIndex(index));
       }
       this._view._removeItemAtIndex(0, rowCount);
@@ -756,7 +747,7 @@ var gCookiesWindow = {
     this.focusFilterBox();
   },
 
-  onCookieKeyPress: function (aEvent) {
+  onCookieKeyPress: function(aEvent) {
     if (aEvent.keyCode == KeyEvent.DOM_VK_DELETE) {
       this.deleteCookie();
     } else if (AppConstants.platform == "macosx" &&
@@ -767,7 +758,7 @@ var gCookiesWindow = {
 
   _lastSortProperty : "",
   _lastSortAscending: false,
-  sort: function (aProperty) {
+  sort: function(aProperty) {
     var ascending = (aProperty == this._lastSortProperty) ? !this._lastSortAscending : true;
     // Sort the Non-Filtered Host Collections
     if (aProperty == "rawHost") {
@@ -782,7 +773,7 @@ var gCookiesWindow = {
     function sortByProperty(a, b) {
       return a[aProperty].toLowerCase().localeCompare(b[aProperty].toLowerCase());
     }
-    for (var host in this._hosts) {
+    for (let host in this._hosts) {
       var cookies = this._hosts[host].cookies;
       cookies.sort(sortByProperty);
       if (!ascending)
@@ -818,7 +809,7 @@ var gCookiesWindow = {
     this._lastSortProperty = aProperty;
   },
 
-  clearFilter: function () {
+  clearFilter: function() {
     // Revert to single-select in the tree
     this._tree.setAttribute("seltype", "single");
 
@@ -844,14 +835,14 @@ var gCookiesWindow = {
     }
 
     // Restore open state
-    for (var i = 0; i < this._openIndices.length; ++i)
-      this._view.toggleOpenState(this._openIndices[i]);
+    for (let openIndex of this._openIndices) {
+      this._view.toggleOpenState(openIndex);
+    }
     this._openIndices = [];
 
     // Restore selection
     this._view.selection.clearSelection();
-    for (i = 0; i < this._lastSelectedRanges.length; ++i) {
-      var range = this._lastSelectedRanges[i];
+    for (let range of this._lastSelectedRanges) {
       this._view.selection.rangedSelect(range.min, range.max, true);
     }
     this._lastSelectedRanges = [];
@@ -860,20 +851,19 @@ var gCookiesWindow = {
     this._updateRemoveAllButton();
   },
 
-  _cookieMatchesFilter: function (aCookie) {
+  _cookieMatchesFilter: function(aCookie) {
     return aCookie.rawHost.indexOf(this._view._filterValue) != -1 ||
            aCookie.name.indexOf(this._view._filterValue) != -1 ||
            aCookie.value.indexOf(this._view._filterValue) != -1;
   },
 
-  _filterCookies: function (aFilterValue) {
+  _filterCookies: function(aFilterValue) {
     this._view._filterValue = aFilterValue;
     var cookies = [];
-    for (var i = 0; i < gCookiesWindow._hostOrder.length; ++i) { //var host in gCookiesWindow._hosts) {
-      var currHost = gCookiesWindow._hosts[gCookiesWindow._hostOrder[i]]; // gCookiesWindow._hosts[host];
+    for (let i = 0; i < gCookiesWindow._hostOrder.length; ++i) { // var host in gCookiesWindow._hosts) {
+      let currHost = gCookiesWindow._hosts[gCookiesWindow._hostOrder[i]]; // gCookiesWindow._hosts[host];
       if (!currHost) continue;
-      for (var j = 0; j < currHost.cookies.length; ++j) {
-        var cookie = currHost.cookies[j];
+      for (let cookie of currHost.cookies) {
         if (this._cookieMatchesFilter(cookie))
           cookies.push(cookie);
       }
@@ -883,12 +873,12 @@ var gCookiesWindow = {
 
   _lastSelectedRanges: [],
   _openIndices: [],
-  _saveState: function () {
+  _saveState: function() {
     // Save selection
     var seln = this._view.selection;
     this._lastSelectedRanges = [];
     var rangeCount = seln.getRangeCount();
-    for (var i = 0; i < rangeCount; ++i) {
+    for (let i = 0; i < rangeCount; ++i) {
       var min = {}; var max = {};
       seln.getRangeAt(i, min, max);
       this._lastSelectedRanges.push({ min: min.value, max: max.value });
@@ -896,7 +886,7 @@ var gCookiesWindow = {
 
     // Save open states
     this._openIndices = [];
-    for (i = 0; i < this._view.rowCount; ++i) {
+    for (let i = 0; i < this._view.rowCount; ++i) {
       var item = this._view._getItemAtIndex(i);
       if (item && item.container && item.open)
         this._openIndices.push(i);
@@ -907,7 +897,7 @@ var gCookiesWindow = {
     document.getElementById("removeAllCookies").disabled = this._view._rowCount == 0;
   },
 
-  filter: function () {
+  filter: function() {
     var filter = document.getElementById("filter").value;
     if (filter == "") {
       gCookiesWindow.clearFilter();
@@ -940,18 +930,18 @@ var gCookiesWindow = {
     this._updateRemoveAllButton();
   },
 
-  setFilter: function (aFilterString) {
+  setFilter: function(aFilterString) {
     document.getElementById("filter").value = aFilterString;
     this.filter();
   },
 
-  focusFilterBox: function () {
+  focusFilterBox: function() {
     var filter = document.getElementById("filter");
     filter.focus();
     filter.select();
   },
 
-  onWindowKeyPress: function (aEvent) {
+  onWindowKeyPress: function(aEvent) {
     if (aEvent.keyCode == KeyEvent.DOM_VK_ESCAPE)
       window.close();
   }

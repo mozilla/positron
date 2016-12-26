@@ -7,8 +7,6 @@
 #ifndef mozilla_BasePrincipal_h
 #define mozilla_BasePrincipal_h
 
-#include "nsIPrincipal.h"
-#include "nsIScriptSecurityManager.h"
 #include "nsJSPrincipals.h"
 
 #include "mozilla/Attributes.h"
@@ -36,7 +34,6 @@ public:
            mInIsolatedMozBrowser == aOther.mInIsolatedMozBrowser &&
            mAddonId == aOther.mAddonId &&
            mUserContextId == aOther.mUserContextId &&
-           mSignedPkg == aOther.mSignedPkg &&
            mPrivateBrowsingId == aOther.mPrivateBrowsingId &&
            mFirstPartyDomain == aOther.mFirstPartyDomain;
   }
@@ -49,12 +46,16 @@ public:
   // |!key1=value1&key2=value2|. If there are no non-default attributes, this
   // returns an empty string.
   void CreateSuffix(nsACString& aStr) const;
+
+  // Don't use this method for anything else than debugging!
+  void CreateAnonymizedSuffix(nsACString& aStr) const;
+
   MOZ_MUST_USE bool PopulateFromSuffix(const nsACString& aStr);
 
   // Populates the attributes from a string like
   // |uri!key1=value1&key2=value2| and returns the uri without the suffix.
   MOZ_MUST_USE bool PopulateFromOrigin(const nsACString& aOrigin,
-                          nsACString& aOriginNoSuffix);
+                                       nsACString& aOriginNoSuffix);
 
   // Helper function to match mIsPrivateBrowsing to existing private browsing
   // flags. Once all other flags are removed, this can be removed too.
@@ -62,13 +63,17 @@ public:
 
   void SetFromGenericAttributes(const GenericOriginAttributes& aAttrs);
 
+  // check if "privacy.firstparty.isolate" is enabled.
+  static bool IsFirstPartyEnabled();
+
+  // returns true if the originAttributes suffix has mPrivateBrowsingId value
+  // different than 0.
+  static bool IsPrivateBrowsing(const nsACString& aOrigin);
+
 protected:
   OriginAttributes() {}
   explicit OriginAttributes(const OriginAttributesDictionary& aOther)
     : OriginAttributesDictionary(aOther) {}
-
-  // check if "privacy.firstparty.isolate" is enabled.
-  bool IsFirstPartyEnabled();
 };
 
 class PrincipalOriginAttributes;
@@ -191,10 +196,6 @@ public:
       return false;
     }
 
-    if (mSignedPkg.WasPassed() && mSignedPkg.Value() != aAttrs.mSignedPkg) {
-      return false;
-    }
-
     if (mPrivateBrowsingId.WasPassed() && mPrivateBrowsingId.Value() != aAttrs.mPrivateBrowsingId) {
       return false;
     }
@@ -226,11 +227,6 @@ public:
 
     if (mUserContextId.WasPassed() && aOther.mUserContextId.WasPassed() &&
         mUserContextId.Value() != aOther.mUserContextId.Value()) {
-      return false;
-    }
-
-    if (mSignedPkg.WasPassed() && aOther.mSignedPkg.WasPassed() &&
-        mSignedPkg.Value() != aOther.mSignedPkg.Value()) {
       return false;
     }
 
@@ -279,7 +275,6 @@ public:
   NS_IMETHOD GetIsCodebasePrincipal(bool* aResult) override;
   NS_IMETHOD GetIsExpandedPrincipal(bool* aResult) override;
   NS_IMETHOD GetIsSystemPrincipal(bool* aResult) override;
-  NS_IMETHOD GetJarPrefix(nsACString& aJarPrefix) final;
   NS_IMETHOD GetOriginAttributes(JSContext* aCx, JS::MutableHandle<JS::Value> aVal) final;
   NS_IMETHOD GetOriginSuffix(nsACString& aOriginSuffix) final;
   NS_IMETHOD GetAppStatus(uint16_t* aAppStatus) final;
@@ -289,6 +284,8 @@ public:
   NS_IMETHOD GetUnknownAppId(bool* aUnknownAppId) final;
   NS_IMETHOD GetUserContextId(uint32_t* aUserContextId) final;
   NS_IMETHOD GetPrivateBrowsingId(uint32_t* aPrivateBrowsingId) final;
+
+  bool EqualsIgnoringAddonId(nsIPrincipal *aOther);
 
   virtual bool AddonHasPermission(const nsAString& aPerm);
 
@@ -301,7 +298,7 @@ public:
   CreateCodebasePrincipal(nsIURI* aURI, const PrincipalOriginAttributes& aAttrs);
   static already_AddRefed<BasePrincipal> CreateCodebasePrincipal(const nsACString& aOrigin);
 
-  const PrincipalOriginAttributes& OriginAttributesRef() { return mOriginAttributes; }
+  const PrincipalOriginAttributes& OriginAttributesRef() override { return mOriginAttributes; }
   uint32_t AppId() const { return mOriginAttributes.mAppId; }
   uint32_t UserContextId() const { return mOriginAttributes.mUserContextId; }
   uint32_t PrivateBrowsingId() const { return mOriginAttributes.mPrivateBrowsingId; }
@@ -322,6 +319,8 @@ protected:
   virtual ~BasePrincipal();
 
   virtual nsresult GetOriginInternal(nsACString& aOrigin) = 0;
+  // Note that this does not check OriginAttributes. Callers that depend on
+  // those must call Subsumes instead.
   virtual bool SubsumesInternal(nsIPrincipal* aOther, DocumentDomainConsideration aConsider) = 0;
 
   // Internal, side-effect-free check to determine whether the concrete

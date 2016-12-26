@@ -10,6 +10,10 @@ var gSSService = null;
 var gProfileDir = null;
 
 function do_state_written(aSubject, aTopic, aData) {
+  if (aData == PRELOAD_STATE_FILE_NAME) {
+    return;
+  }
+
   equal(aData, SSS_STATE_FILE_NAME);
 
   let stateFile = gProfileDir.clone();
@@ -17,7 +21,7 @@ function do_state_written(aSubject, aTopic, aData) {
   ok(stateFile.exists());
   let stateFileContents = readFile(stateFile);
   // the last part is removed because it's the empty string after the final \n
-  let lines = stateFileContents.split('\n').slice(0, -1);
+  let lines = stateFileContents.split("\n").slice(0, -1);
   // We can receive multiple data-storage-written events. In particular, we
   // may receive one where DataStorage wrote out data before we were done
   // processing all of our headers. In this case, the data may not be
@@ -41,6 +45,10 @@ function do_state_written(aSubject, aTopic, aData) {
 }
 
 function do_state_read(aSubject, aTopic, aData) {
+  if (aData == PRELOAD_STATE_FILE_NAME) {
+    return;
+  }
+
   equal(aData, SSS_STATE_FILE_NAME);
 
   ok(gSSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,

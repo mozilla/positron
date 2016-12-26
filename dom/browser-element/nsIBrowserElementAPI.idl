@@ -92,8 +92,6 @@ interface nsIBrowserElementAPI : nsISupports
   void addNextPaintListener(in nsIBrowserElementNextPaintListener listener);
   void removeNextPaintListener(in nsIBrowserElementNextPaintListener listener);
 
-  nsIDOMDOMRequest setInputMethodActive(in boolean isActive);
-
   nsIDOMDOMRequest getAudioChannelVolume(in uint32_t audioChannel);
   nsIDOMDOMRequest setAudioChannelVolume(in uint32_t audioChannel, in float volume);
 
@@ -101,8 +99,6 @@ interface nsIBrowserElementAPI : nsISupports
   nsIDOMDOMRequest setAudioChannelMuted(in uint32_t audioChannel, in bool muted);
 
   nsIDOMDOMRequest isAudioChannelActive(in uint32_t audioChannel);
-
-  void setNFCFocus(in boolean isFocus);
 
   nsIDOMDOMRequest executeScript(in DOMString script, in jsval options);
 

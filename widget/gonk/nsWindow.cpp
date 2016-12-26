@@ -123,7 +123,7 @@ nsWindow::DoDraw(void)
         if (mozilla::layers::LayersBackend::LAYERS_CLIENT == lm->GetBackendType()) {
             // No need to do anything, the compositor will handle drawing
         } else {
-            NS_RUNTIMEABORT("Unexpected layer manager type");
+            MOZ_CRASH("Unexpected layer manager type");
         }
 
         listener->DidPaintWindow();
@@ -385,22 +385,21 @@ nsWindow::IsVisible() const
     return mVisible;
 }
 
-NS_IMETHODIMP
+void
 nsWindow::Move(double aX,
                double aY)
 {
-    return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 nsWindow::Resize(double aWidth,
                  double aHeight,
                  bool   aRepaint)
 {
-    return Resize(0, 0, aWidth, aHeight, aRepaint);
+    Resize(0, 0, aWidth, aHeight, aRepaint);
 }
 
-NS_IMETHODIMP
+void
 nsWindow::Resize(double aX,
                  double aY,
                  double aWidth,
@@ -416,14 +415,11 @@ nsWindow::Resize(double aX,
     if (aRepaint) {
         Invalidate(mBounds);
     }
-
-    return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 nsWindow::Enable(bool aState)
 {
-    return NS_OK;
 }
 
 bool
@@ -623,9 +619,7 @@ nsWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
     if (mLayerManager) {
         // This layer manager might be used for painting outside of DoDraw(), so we need
         // to set the correct rotation on it.
-        if (mLayerManager->GetBackendType() == LayersBackend::LAYERS_CLIENT) {
-            ClientLayerManager* manager =
-                static_cast<ClientLayerManager*>(mLayerManager.get());
+        if (ClientLayerManager* manager = mLayerManager->AsClientLayerManager()) {
             uint32_t rotation = mScreen->EffectiveScreenRotation();
             manager->SetDefaultTargetConfiguration(mozilla::layers::BufferMode::BUFFER_NONE,
                                                    ScreenRotation(rotation));

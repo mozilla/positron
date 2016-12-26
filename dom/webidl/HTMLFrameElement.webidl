@@ -11,6 +11,7 @@
  */
 
 // http://www.whatwg.org/specs/web-apps/current-work/#htmlframeelement
+[HTMLConstructor]
 interface HTMLFrameElement : HTMLElement {
            [SetterThrows]
            attribute DOMString name;
@@ -24,6 +25,7 @@ interface HTMLFrameElement : HTMLElement {
            attribute DOMString longDesc;
            [SetterThrows]
            attribute boolean noResize;
+  [NeedsSubjectPrincipal]
   readonly attribute Document? contentDocument;
   readonly attribute WindowProxy? contentWindow;
 

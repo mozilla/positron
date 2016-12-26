@@ -9,7 +9,6 @@
 #include "jscompartment.h"
 #include "jsobj.h"
 
-#include "asmjs/WasmJS.h"
 #include "builtin/TypedObject.h"
 #include "gc/Policy.h"
 #include "gc/Zone.h"
@@ -18,6 +17,7 @@
 #include "vm/EnvironmentObject.h"
 #include "vm/SharedArrayObject.h"
 #include "vm/Symbol.h"
+#include "wasm/WasmJS.h"
 
 namespace js {
 
@@ -29,7 +29,7 @@ RuntimeFromMainThreadIsHeapMajorCollecting(JS::shadow::Zone* shadowZone)
 
 #ifdef DEBUG
 
-static bool
+bool
 IsMarkedBlack(NativeObject* obj)
 {
     // Note: we assume conservatively that Nursery things will be live.
@@ -51,16 +51,17 @@ HeapSlot::preconditionForSet(NativeObject* owner, Kind kind, uint32_t slot) cons
          : &owner->getDenseElement(slot) == (const Value*)this;
 }
 
-bool
-HeapSlot::preconditionForWriteBarrierPost(NativeObject* obj, Kind kind, uint32_t slot,
-                                          const Value& target) const
+void
+HeapSlot::assertPreconditionForWriteBarrierPost(NativeObject* obj, Kind kind, uint32_t slot,
+                                                const Value& target) const
 {
-    bool isCorrectSlot = kind == Slot
-                         ? obj->getSlotAddressUnchecked(slot)->get() == target
-                         : static_cast<HeapSlot*>(obj->getDenseElements() + slot)->get() == target;
-    bool isBlackToGray = target.isMarkable() &&
-                         IsMarkedBlack(obj) && JS::GCThingIsMarkedGray(JS::GCCellPtr(target));
-    return isCorrectSlot && !isBlackToGray;
+    if (kind == Slot)
+        MOZ_ASSERT(obj->getSlotAddressUnchecked(slot)->get() == target);
+    else
+        MOZ_ASSERT(static_cast<HeapSlot*>(obj->getDenseElements() + slot)->get() == target);
+
+    MOZ_ASSERT_IF(target.isMarkable() && IsMarkedBlack(obj),
+                  !JS::GCThingIsMarkedGray(JS::GCCellPtr(target)));
 }
 
 bool

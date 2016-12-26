@@ -10,6 +10,8 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/PodOperations.h"
 
+#include <string.h>
+
 #include "frontend/ParseNode.h"
 #include "frontend/SharedContext.h"
 
@@ -226,6 +228,21 @@ class FullParseHandler
         return new_<UnaryNode>(kind, op, pos, kid);
     }
 
+    ParseNode* newUpdate(ParseNodeKind kind, uint32_t begin, ParseNode* kid) {
+        TokenPos pos(begin, kid->pn_pos.end);
+        return new_<UnaryNode>(kind, JSOP_NOP, pos, kid);
+    }
+
+    ParseNode* newSpread(uint32_t begin, ParseNode* kid) {
+        TokenPos pos(begin, kid->pn_pos.end);
+        return new_<UnaryNode>(PNK_SPREAD, JSOP_NOP, pos, kid);
+    }
+
+    ParseNode* newArrayPush(uint32_t begin, ParseNode* kid) {
+        TokenPos pos(begin, kid->pn_pos.end);
+        return new_<UnaryNode>(PNK_ARRAYPUSH, JSOP_ARRAYPUSH, pos, kid);
+    }
+
     ParseNode* newBinary(ParseNodeKind kind, JSOp op = JSOP_NOP) {
         return new_<BinaryNode>(kind, op, pos(), (ParseNode*) nullptr, (ParseNode*) nullptr);
     }
@@ -415,6 +432,11 @@ class FullParseHandler
     ParseNode* newYieldStarExpression(uint32_t begin, ParseNode* value, ParseNode* gen) {
         TokenPos pos(begin, value->pn_pos.end);
         return new_<BinaryNode>(PNK_YIELD_STAR, JSOP_NOP, pos, value, gen);
+    }
+
+    ParseNode* newAwaitExpression(uint32_t begin, ParseNode* value, ParseNode* gen) {
+        TokenPos pos(begin, value ? value->pn_pos.end : begin + 1);
+        return new_<BinaryNode>(PNK_AWAIT, JSOP_YIELD, pos, value, gen);
     }
 
     // Statements
@@ -645,9 +667,23 @@ class FullParseHandler
                                                                    ParseNode* pn);
     inline void setLastFunctionFormalParameterDestructuring(ParseNode* funcpn, ParseNode* pn);
 
-    ParseNode* newFunctionDefinition() {
-        return new_<CodeNode>(PNK_FUNCTION, pos());
+    void checkAndSetIsDirectRHSAnonFunction(ParseNode* pn) {
+        if (IsAnonymousFunctionDefinition(pn))
+            pn->setDirectRHSAnonFunction(true);
     }
+
+    ParseNode* newFunctionStatement() {
+        return new_<CodeNode>(PNK_FUNCTION, JSOP_NOP, pos());
+    }
+
+    ParseNode* newFunctionExpression() {
+        return new_<CodeNode>(PNK_FUNCTION, JSOP_LAMBDA, pos());
+    }
+
+    ParseNode* newArrowFunction() {
+        return new_<CodeNode>(PNK_FUNCTION, JSOP_LAMBDA_ARROW, pos());
+    }
+
     bool setComprehensionLambdaBody(ParseNode* pn, ParseNode* body) {
         MOZ_ASSERT(body->isKind(PNK_STATEMENTLIST));
         ParseNode* paramsBody = newList(PNK_PARAMSBODY, body);
@@ -674,7 +710,7 @@ class FullParseHandler
     }
 
     ParseNode* newModule() {
-        return new_<CodeNode>(PNK_MODULE, pos());
+        return new_<CodeNode>(PNK_MODULE, JSOP_NOP, pos());
     }
 
     ParseNode* newLexicalScope(LexicalScope::Data* bindings, ParseNode* body) {
@@ -704,6 +740,15 @@ class FullParseHandler
             return true;
         }
 
+        return false;
+    }
+
+    bool isUnparenthesizedUnaryExpression(ParseNode* node) {
+        if (!node->isInParens()) {
+            ParseNodeKind kind = node->getKind();
+            return kind == PNK_VOID || kind == PNK_NOT || kind == PNK_BITNOT || kind == PNK_POS ||
+                   kind == PNK_NEG || IsTypeofKind(kind) || IsDeleteKind(kind);
+        }
         return false;
     }
 
@@ -811,7 +856,7 @@ class FullParseHandler
     MOZ_MUST_USE ParseNode* setLikelyIIFE(ParseNode* pn) {
         return parenthesize(pn);
     }
-    void setPrologue(ParseNode* pn) {
+    void setInDirectivePrologue(ParseNode* pn) {
         pn->pn_prologue = true;
     }
 
@@ -827,22 +872,25 @@ class FullParseHandler
         return node->isKind(PNK_NAME);
     }
 
-    bool nameIsEvalAnyParentheses(ParseNode* node, ExclusiveContext* cx) {
-        MOZ_ASSERT(isNameAnyParentheses(node),
-                   "must only call this function on known names");
-
-        return node->pn_atom == cx->names().eval;
+    bool isEvalAnyParentheses(ParseNode* node, ExclusiveContext* cx) {
+        return node->isKind(PNK_NAME) && node->pn_atom == cx->names().eval;
     }
 
     const char* nameIsArgumentsEvalAnyParentheses(ParseNode* node, ExclusiveContext* cx) {
         MOZ_ASSERT(isNameAnyParentheses(node),
                    "must only call this function on known names");
 
-        if (nameIsEvalAnyParentheses(node, cx))
+        if (isEvalAnyParentheses(node, cx))
             return js_eval_str;
         if (node->pn_atom == cx->names().arguments)
             return js_arguments_str;
         return nullptr;
+    }
+
+    bool isAsyncKeyword(ParseNode* node, ExclusiveContext* cx) {
+        return node->isKind(PNK_NAME) &&
+               node->pn_pos.begin + strlen("async") == node->pn_pos.end &&
+               node->pn_atom == cx->names().async;
     }
 
     bool isCall(ParseNode* pn) {
@@ -905,6 +953,8 @@ FullParseHandler::setLastFunctionFormalParameterDefault(ParseNode* funcpn, Parse
     ParseNode* pn = newBinary(PNK_ASSIGN, arg, defaultValue, JSOP_NOP);
     if (!pn)
         return false;
+
+    checkAndSetIsDirectRHSAnonFunction(defaultValue);
 
     funcpn->pn_body->pn_pos.end = pn->pn_pos.end;
     ParseNode* pnchild = funcpn->pn_body->pn_head;

@@ -31,7 +31,7 @@ let promise = require("promise");
 let defer = require("devtools/shared/defer");
 const Services = require("Services");
 const {Task} = require("devtools/shared/task");
-const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
+const KeyShortcuts = require("devtools/client/shared/key-shortcuts");
 
 const TEST_DIR = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
 const CHROME_URL_ROOT = TEST_DIR + "/";
@@ -96,6 +96,7 @@ registerCleanupFunction(() => {
   Services.prefs.clearUserPref("devtools.dump.emit");
   Services.prefs.clearUserPref("devtools.toolbox.host");
   Services.prefs.clearUserPref("devtools.toolbox.previousHost");
+  Services.prefs.clearUserPref("devtools.toolbox.splitconsoleEnabled");
 });
 
 registerCleanupFunction(function* cleanup() {
@@ -201,15 +202,18 @@ function synthesizeKeyShortcut(key, target) {
   // parseElectronKey requires any window, just to access `KeyboardEvent`
   let window = Services.appShell.hiddenDOMWindow;
   let shortcut = KeyShortcuts.parseElectronKey(window, key);
-
-  info("Synthesizing key shortcut: " + key);
-  EventUtils.synthesizeKey(shortcut.key || "", {
-    keyCode: shortcut.keyCode,
+  let keyEvent = {
     altKey: shortcut.alt,
     ctrlKey: shortcut.ctrl,
     metaKey: shortcut.meta,
     shiftKey: shortcut.shift
-  }, target);
+  };
+  if (shortcut.keyCode) {
+    keyEvent.keyCode = shortcut.keyCode;
+  }
+
+  info("Synthesizing key shortcut: " + key);
+  EventUtils.synthesizeKey(shortcut.key || "", keyEvent, target);
 }
 
 /**
@@ -575,4 +579,49 @@ function emptyClipboard() {
  */
 function isWindows() {
   return Services.appinfo.OS === "WINNT";
+}
+
+/**
+ * Wait for a given toolbox to get its title updated.
+ */
+function waitForTitleChange(toolbox) {
+  let deferred = defer();
+  toolbox.win.parent.addEventListener("message", function onmessage(event) {
+    if (event.data.name == "set-host-title") {
+      toolbox.win.parent.removeEventListener("message", onmessage);
+      deferred.resolve();
+    }
+  });
+  return deferred.promise;
+}
+
+/**
+ * Create an HTTP server that can be used to simulate custom requests within
+ * a test.  It is automatically cleaned up when the test ends, so no need to
+ * call `destroy`.
+ *
+ * See https://developer.mozilla.org/en-US/docs/Httpd.js/HTTP_server_for_unit_tests
+ * for more information about how to register handlers.
+ *
+ * The server can be accessed like:
+ *
+ *   const server = createTestHTTPServer();
+ *   let url = "http://localhost: " + server.identity.primaryPort + "/path";
+ *
+ * @returns {HttpServer}
+ */
+function createTestHTTPServer() {
+  const {HttpServer} = Cu.import("resource://testing-common/httpd.js", {});
+  let server = new HttpServer();
+
+  registerCleanupFunction(function* cleanup() {
+    let destroyed = defer();
+    server.stop(() => {
+      destroyed.resolve();
+    });
+    yield destroyed.promise;
+  });
+
+  server.start(-1);
+  return server;
 }

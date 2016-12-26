@@ -62,8 +62,14 @@ PrincipalInfoToPrincipal(const PrincipalInfo& aPrincipalInfo,
     case PrincipalInfo::TNullPrincipalInfo: {
       const NullPrincipalInfo& info =
         aPrincipalInfo.get_NullPrincipalInfo();
-      principal = nsNullPrincipal::Create(info.attrs());
 
+      nsCOMPtr<nsIURI> uri;
+      rv = NS_NewURI(getter_AddRefs(uri), info.spec());
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return nullptr;
+      }
+
+      principal = nsNullPrincipal::Create(info.attrs(), uri);
       return principal.forget();
     }
 
@@ -131,7 +137,24 @@ PrincipalToPrincipalInfo(nsIPrincipal* aPrincipal,
   MOZ_ASSERT(aPrincipalInfo);
 
   if (aPrincipal->GetIsNullPrincipal()) {
-    *aPrincipalInfo = NullPrincipalInfo(BasePrincipal::Cast(aPrincipal)->OriginAttributesRef());
+    nsCOMPtr<nsIURI> uri;
+    nsresult rv = aPrincipal->GetURI(getter_AddRefs(uri));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    if (NS_WARN_IF(!uri)) {
+      return NS_ERROR_FAILURE;
+    }
+
+    nsAutoCString spec;
+    rv = uri->GetSpec(spec);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    *aPrincipalInfo =
+      NullPrincipalInfo(aPrincipal->OriginAttributesRef(), spec);
     return NS_OK;
   }
 
@@ -174,7 +197,7 @@ PrincipalToPrincipalInfo(nsIPrincipal* aPrincipal,
     }
 
     *aPrincipalInfo =
-      ExpandedPrincipalInfo(BasePrincipal::Cast(aPrincipal)->OriginAttributesRef(),
+      ExpandedPrincipalInfo(aPrincipal->OriginAttributesRef(),
                             Move(whitelistInfo));
     return NS_OK;
   }
@@ -191,13 +214,13 @@ PrincipalToPrincipalInfo(nsIPrincipal* aPrincipal,
     return NS_ERROR_FAILURE;
   }
 
-  nsCString spec;
+  nsAutoCString spec;
   rv = uri->GetSpec(spec);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
-  *aPrincipalInfo = ContentPrincipalInfo(BasePrincipal::Cast(aPrincipal)->OriginAttributesRef(),
+  *aPrincipalInfo = ContentPrincipalInfo(aPrincipal->OriginAttributesRef(),
                                          spec);
   return NS_OK;
 }
@@ -226,9 +249,14 @@ LoadInfoToLoadInfoArgs(nsILoadInfo *aLoadInfo,
   rv = PrincipalToPrincipalInfo(aLoadInfo->TriggeringPrincipal(),
                                 &triggeringPrincipalInfo);
 
-  PrincipalInfo principalToInheritInfo;
-  rv = PrincipalToPrincipalInfo(aLoadInfo->PrincipalToInherit(),
-                                &principalToInheritInfo);
+  OptionalPrincipalInfo principalToInheritInfo = mozilla::void_t();
+  if (aLoadInfo->PrincipalToInherit()) {
+    PrincipalInfo principalToInheritInfoTemp;
+    rv = PrincipalToPrincipalInfo(aLoadInfo->PrincipalToInherit(),
+                                  &principalToInheritInfoTemp);
+    NS_ENSURE_SUCCESS(rv, rv);
+    principalToInheritInfo = principalToInheritInfoTemp;
+  }
 
   nsTArray<PrincipalInfo> redirectChainIncludingInternalRedirects;
   for (const nsCOMPtr<nsIPrincipal>& principal : aLoadInfo->RedirectChainIncludingInternalRedirects()) {
@@ -297,9 +325,11 @@ LoadInfoArgsToLoadInfo(const OptionalLoadInfoArgs& aOptionalLoadInfoArgs,
     PrincipalInfoToPrincipal(loadInfoArgs.triggeringPrincipalInfo(), &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIPrincipal> principalToInherit =
-  PrincipalInfoToPrincipal(loadInfoArgs.principalToInheritInfo(), &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsIPrincipal> principalToInherit;
+  if (loadInfoArgs.principalToInheritInfo().type() != OptionalPrincipalInfo::Tvoid_t) {
+    principalToInherit = PrincipalInfoToPrincipal(loadInfoArgs.principalToInheritInfo(), &rv);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
 
   nsTArray<nsCOMPtr<nsIPrincipal>> redirectChainIncludingInternalRedirects;
   for (const PrincipalInfo& principalInfo : loadInfoArgs.redirectChainIncludingInternalRedirects()) {

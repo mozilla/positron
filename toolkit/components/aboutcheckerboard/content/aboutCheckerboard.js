@@ -40,6 +40,10 @@ function toggleEnabled() {
   updateEnabled();
 }
 
+function flushReports() {
+  service.flushActiveReports();
+}
+
 function showReport(index) {
   trace.value = reports[index].log;
   loadData();
@@ -92,7 +96,7 @@ function loadData() {
         charPos += lastLineLength;
         lastLineLength = lines[i].length + 1;
         // skip lines without RENDERTRACE
-        if (! /RENDERTRACE/.test(lines[i])) {
+        if (!/RENDERTRACE/.test(lines[i])) {
             continue;
         }
 
@@ -159,7 +163,7 @@ function loadData() {
         }
     }
 
-    if (! renderFrame()) {
+    if (!renderFrame()) {
         alert("No data found; nothing to render!");
     }
 }
@@ -174,7 +178,7 @@ function renderFrame() {
     }
 
     var canvas = document.getElementById('canvas');
-    if (! canvas.getContext) {
+    if (!canvas.getContext) {
         log("No canvas context");
     }
 
@@ -238,7 +242,7 @@ function step(backwards) {
         togglePlay();
     }
     currentFrame += (backwards ? -1 : 1);
-    if (! renderFrame()) {
+    if (!renderFrame()) {
         currentFrame -= (backwards ? -1 : 1);
     }
 }
@@ -254,7 +258,7 @@ function togglePlay() {
     } else {
         timerId = setInterval(function() {
             currentFrame++;
-            if (! renderFrame()) {
+            if (!renderFrame()) {
                 currentFrame--;
                 togglePlay();
             }

@@ -11,6 +11,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource:///modules/RecentWindow.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
@@ -179,7 +180,6 @@ this.UITour = {
     ["searchPrefsLink", {
       query: (aDocument) => {
         let element = null;
-        let searchbar = aDocument.getElementById("searchbar");
         let popup = aDocument.getElementById("PopupSearchAutoComplete");
         if (popup.state != "open")
           return null;
@@ -225,7 +225,7 @@ this.UITour = {
     });
 
     delete this.url;
-    XPCOMUtils.defineLazyGetter(this, "url", function () {
+    XPCOMUtils.defineLazyGetter(this, "url", function() {
       return Services.urlFormatter.formatURLPref("browser.uitour.url");
     });
 
@@ -524,6 +524,11 @@ this.UITour = {
 
       case "hideMenu": {
         this.hideMenu(window, data.name);
+        break;
+      }
+
+      case "showNewTab": {
+        this.showNewTab(window, browser);
         break;
       }
 
@@ -1301,7 +1306,7 @@ this.UITour = {
       ratingElement.setAttribute("data-score", starIndex);
 
       // Add the click handler.
-      ratingElement.addEventListener("click", function (evt) {
+      ratingElement.addEventListener("click", function(evt) {
         let rating = Number(evt.target.getAttribute("data-score"), 10);
 
         // Let the consumer know user voted.
@@ -1744,6 +1749,10 @@ this.UITour = {
     }
   },
 
+  showNewTab: function(aWindow, aBrowser) {
+    aWindow.openLinkIn("about:newtab", "current", {targetBrowser: aBrowser});
+  },
+
   hideAnnotationsForPanel: function(aEvent, aTargetPositionCallback) {
     let win = aEvent.target.ownerGlobal;
     let annotationElements = new Map([
@@ -1831,7 +1840,7 @@ this.UITour = {
         } else if (AppConstants.platform == "linux") {
           // The ShellService may not exist on some versions of Linux.
           try {
-            let shell = aWindow.getShellService();
+            aWindow.getShellService();
           } catch (e) {
             canSetDefaultBrowserInBackground = null;
           }
@@ -1865,6 +1874,9 @@ this.UITour = {
       case "sync":
         this.sendPageCallback(aMessageManager, aCallbackID, {
           setup: Services.prefs.prefHasUserValue("services.sync.username"),
+          desktopDevices: Preferences.get("services.sync.clients.devices.desktop", 0),
+          mobileDevices: Preferences.get("services.sync.clients.devices.mobile", 0),
+          totalDevices: Preferences.get("services.sync.numClients", 0),
         });
         break;
       case "canReset":
@@ -1929,7 +1941,7 @@ this.UITour = {
     });
   },
 
-  startSubTour: function (aFeature) {
+  startSubTour: function(aFeature) {
     if (aFeature != "string") {
       log.error("startSubTour: No feature option specified");
       return;
@@ -1943,7 +1955,7 @@ this.UITour = {
     }
   },
 
-  addNavBarWidget: function (aTarget, aMessageManager, aCallbackID) {
+  addNavBarWidget: function(aTarget, aMessageManager, aCallbackID) {
     if (aTarget.node) {
       log.error("addNavBarWidget: can't add a widget already present:", aTarget);
       return;

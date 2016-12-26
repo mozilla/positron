@@ -8,7 +8,7 @@
 
 #include "mozilla/dom/MediaQueryList.h"
 #include "nsPresContext.h"
-#include "nsIMediaList.h"
+#include "nsMediaList.h"
 #include "nsCSSParser.h"
 #include "nsIDocument.h"
 
@@ -24,7 +24,7 @@ MediaQueryList::MediaQueryList(nsIDocument *aDocument,
   PR_INIT_CLIST(this);
 
   nsCSSParser parser;
-  parser.ParseMediaList(aMediaQueryList, nullptr, 0, mMediaList, false);
+  parser.ParseMediaList(aMediaQueryList, nullptr, 0, mMediaList);
 }
 
 MediaQueryList::~MediaQueryList()

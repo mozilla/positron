@@ -8,10 +8,12 @@
  */
 
 add_task(function* () {
+  let { L10N } = require("devtools/client/netmonitor/l10n");
+
   let { tab, monitor } = yield initNetMonitor(POST_DATA_URL);
   info("Starting test... ");
 
-  let { document, EVENTS, L10N, Editor, NetMonitorView } = monitor.panelWin;
+  let { document, EVENTS, Editor, NetMonitorView } = monitor.panelWin;
   let { RequestsMenu, NetworkDetails } = NetMonitorView;
 
   RequestsMenu.lazyUpdate = false;
@@ -23,7 +25,7 @@ add_task(function* () {
   });
   yield wait;
 
-  verifyRequestItemTarget(RequestsMenu.getItemAtIndex(0),
+  verifyRequestItemTarget(RequestsMenu, RequestsMenu.getItemAtIndex(0),
     "POST", SIMPLE_SJS + "?foo=bar&baz=42&type=urlencoded", {
       status: 200,
       statusText: "Och Aye",
@@ -32,7 +34,7 @@ add_task(function* () {
       size: L10N.getFormatStrWithNumbers("networkMenu.sizeB", 12),
       time: true
     });
-  verifyRequestItemTarget(RequestsMenu.getItemAtIndex(1),
+  verifyRequestItemTarget(RequestsMenu, RequestsMenu.getItemAtIndex(1),
     "POST", SIMPLE_SJS + "?foo=bar&baz=42&type=multipart", {
       status: 200,
       statusText: "Och Aye",

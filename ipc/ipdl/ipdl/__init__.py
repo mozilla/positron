@@ -8,8 +8,8 @@ import os, sys
 from cStringIO import StringIO
 
 from ipdl.cgen import IPDLCodeGen
-from ipdl.lower import LowerToCxx
-from ipdl.parser import Parser
+from ipdl.lower import LowerToCxx, msgenums
+from ipdl.parser import Parser, ParseError
 from ipdl.type import TypeCheck
 
 from ipdl.cxx.cgen import CxxCodeGen
@@ -26,8 +26,12 @@ def parse(specstring, filename='/stdin', includedirs=[ ], errout=sys.stderr):
         type = 'header'
     else:
         type = 'protocol'
-    return Parser(type, name).parse(specstring, os.path.abspath(filename), includedirs, errout)
 
+    try:
+        return Parser(type, name).parse(specstring, os.path.abspath(filename), includedirs)
+    except ParseError as p:
+        print >>errout, p
+        return None
 
 def typecheck(ast, errout=sys.stderr):
     '''Return True iff |ast| is well typed.  Print errors to |errout| if
@@ -40,7 +44,7 @@ def gencxx(ipdlfilename, ast, outheadersdir, outcppdir):
 
     def resolveHeader(hdr):
         return [
-            hdr, 
+            hdr,
             os.path.join(
                 outheadersdir,
                 *([ns.name for ns in ast.namespaces] + [hdr.name]))
@@ -58,6 +62,9 @@ def gencxx(ipdlfilename, ast, outheadersdir, outcppdir):
 def genipdl(ast, outdir):
     return IPDLCodeGen().cgen(ast)
 
+
+def genmsgenum(ast):
+    return msgenums(ast.protocol, pretty=True)
 
 def writeifmodified(contents, file):
     dir = os.path.dirname(file)

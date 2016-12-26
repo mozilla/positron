@@ -128,6 +128,13 @@ function testStartConnection() {
       teardown();
       aReject();
     });
+
+    let request2 = new PresentationRequest("/");
+    request2.start().then(() => {
+      ok(false, "Sender: session start should fail while there is an unsettled promise.");
+    }).catch((aError) => {
+      is(aError.name, "OperationError", "Expect to get OperationError.");
+    });
   });
 }
 
@@ -231,6 +238,24 @@ function testCloseConnection() {
       };
     }),
     new Promise(function(aResolve, aReject) {
+      let timeout = setTimeout(function() {
+        gScript.removeMessageListener('device-disconnected',
+                                      deviceDisconnectedHandler);
+        ok(true, "terminate after close should not trigger device.disconnect");
+        aResolve();
+      }, 3000);
+
+      function deviceDisconnectedHandler() {
+        gScript.removeMessageListener('device-disconnected',
+                                      deviceDisconnectedHandler);
+        ok(false, "terminate after close should not trigger device.disconnect");
+        clearTimeout(timeout);
+        aResolve();
+      }
+
+      gScript.addMessageListener('device-disconnected', deviceDisconnectedHandler);
+    }),
+    new Promise(function(aResolve, aReject) {
       gScript.addMessageListener('receiver-closed', function onReceiverClosed() {
         gScript.removeMessageListener('receiver-closed', onReceiverClosed);
         gScript.removeMessageListener('control-channel-established',
@@ -294,6 +319,8 @@ function testReconnect() {
         aReject();
       });
     });
+
+    postMessageToIframe('prepare-for-reconnect');
   });
 }
 
@@ -337,6 +364,7 @@ SpecialPowers.pushPermissions([
                                       ["dom.presentation.test.enabled", true],
                                       ["dom.presentation.test.stage", 0],
                                       ["dom.mozBrowserFramesEnabled", true],
+                                      ["network.disable.ipc.security", true],
                                       ["media.navigator.permission.disabled", true]]},
                             runTests);
 });

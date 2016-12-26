@@ -9,10 +9,9 @@ import android.net.Uri;
 import android.support.annotation.NonNull;
 import android.text.TextUtils;
 
-import org.mozilla.gecko.AppConstants.Versions;
-
 import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
 public class StringUtils {
@@ -43,15 +42,15 @@ public class StringUtils {
     public static boolean isSearchQuery(String text, boolean wasSearchQuery) {
         // We remove leading and trailing white spaces when decoding URLs
         text = text.trim();
-        if (text.length() == 0)
+        if (text.length() == 0) {
             return wasSearchQuery;
-
+        }
         int colon = text.indexOf(':');
         int dot = text.indexOf('.');
         int space = text.indexOf(' ');
 
-        // If a space is found before any dot and colon, we assume this is a search query
-        if (space > -1 && (colon == -1 || space < colon) && (dot == -1 || space < dot)) {
+        // If a space is found in a trimmed string, we assume this is a search query(Bug 1278245)
+        if (space > -1) {
             return true;
         }
         // Otherwise, if a dot or a colon is found, we assume this is a URL
@@ -235,39 +234,7 @@ public class StringUtils {
      * @return a set of decoded names
      */
     public static Set<String> getQueryParameterNames(Uri uri) {
-        if (Versions.feature11Plus) {
-            return uri.getQueryParameterNames();
-        }
-
-        // Logic below copied from Uri.java included with Android 5.0.0.
-        if (uri.isOpaque()) {
-            throw new UnsupportedOperationException("This isn't a hierarchical URI.");
-        }
-
-        String query = uri.getEncodedQuery();
-        if (query == null) {
-            return Collections.emptySet();
-        }
-
-        Set<String> names = new LinkedHashSet<String>();
-        int start = 0;
-        do {
-            int next = query.indexOf('&', start);
-            int end = (next == -1) ? query.length() : next;
-
-            int separator = query.indexOf('=', start);
-            if (separator > end || separator == -1) {
-                separator = end;
-            }
-
-            String name = query.substring(start, separator);
-            names.add(Uri.decode(name));
-
-            // Move start to end of name.
-            start = end + 1;
-        } while (start < query.length());
-
-        return Collections.unmodifiableSet(names);
+        return uri.getQueryParameterNames();
     }
 
     public static String safeSubstring(@NonNull final String str, final int start, final int end) {
@@ -302,5 +269,24 @@ public class StringUtils {
         }
 
         return "\u200E" + text;
+    }
+
+    /**
+     * Joining together a sequence of strings with a separator.
+     */
+    public static String join(@NonNull String separator, @NonNull List<String> parts) {
+        if (parts.size() == 0) {
+            return "";
+        }
+
+        final StringBuilder builder = new StringBuilder();
+        builder.append(parts.get(0));
+
+        for (int i = 1; i < parts.size(); i++) {
+            builder.append(separator);
+            builder.append(parts.get(i));
+        }
+
+        return builder.toString();
     }
 }

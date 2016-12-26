@@ -51,7 +51,6 @@ TEST_HARNESS_DLLS = [
 ]
 
 TEST_PLUGIN_DLLS = [
-    'npctrltest',
     'npsecondtest',
     'npswftest',
     'nptest',
@@ -64,7 +63,6 @@ TEST_PLUGIN_DIRS = [
     'SecondTest.plugin/**',
     'Test.plugin/**',
     'ThirdTest.plugin/**',
-    'npctrltest.plugin/**',
     'npswftest.plugin/**',
 ]
 
@@ -101,28 +99,26 @@ ARCHIVE_FILES = {
             'base': 'testing/marionette',
             'patterns': [
                 'client/**',
+                'harness/**',
+                'puppeteer/**',
                 'mach_test_package_commands.py',
             ],
             'dest': 'marionette',
-        },
-        {
-            'source': buildconfig.topsrcdir,
-            'base': 'testing/marionette/harness',
-            'pattern': '**',
-            'dest': 'marionette',
             'ignore': [
-                'marionette/tests'
-            ]
+                'client/docs',
+                'harness/marionette_harness/tests',
+                'puppeteer/firefox/docs',
+            ],
         },
         {
             'source': buildconfig.topsrcdir,
             'base': '',
             'manifests': [
-                'testing/marionette/harness/marionette/tests/unit-tests.ini',
-                'testing/marionette/harness/marionette/tests/webapi-tests.ini',
+                'testing/marionette/harness/marionette_harness/tests/unit-tests.ini',
+                'testing/marionette/harness/marionette_harness/tests/webapi-tests.ini',
             ],
             # We also need the manifests and harness_unit tests
-            'pattern': 'testing/marionette/harness/marionette/tests/**',
+            'pattern': 'testing/marionette/harness/marionette_harness/tests/**',
             'dest': 'marionette/tests',
         },
         {
@@ -170,11 +166,6 @@ ARCHIVE_FILES = {
             'base': 'js/src',
             'pattern': 'jsapi.h',
             'dest': 'jit-test',
-        },
-        {
-            'source': buildconfig.topsrcdir,
-            'base': 'testing',
-            'pattern': 'puppeteer/**',
         },
         {
             'source': buildconfig.topsrcdir,

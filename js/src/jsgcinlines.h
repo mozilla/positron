@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sts=4 et sw=4 tw=99:
+* vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -181,18 +181,34 @@ template<>
 JSObject*
 ArenaCellIterImpl::get<JSObject>() const;
 
+class ArenaCellIter : public ArenaCellIterImpl
+{
+  public:
+    explicit ArenaCellIter(Arena* arena)
+      : ArenaCellIterImpl(arena)
+    {
+        MOZ_ASSERT(arena->zone->runtimeFromMainThread()->isHeapTracing());
+    }
+};
+
 class ArenaCellIterUnderGC : public ArenaCellIterImpl
 {
   public:
-    explicit ArenaCellIterUnderGC(Arena* arena) : ArenaCellIterImpl(arena) {
-        MOZ_ASSERT(arena->zone->runtimeFromAnyThread()->isHeapBusy());
+    explicit ArenaCellIterUnderGC(Arena* arena)
+      : ArenaCellIterImpl(arena)
+    {
+        MOZ_ASSERT(CurrentThreadIsPerformingGC());
     }
 };
 
 class ArenaCellIterUnderFinalize : public ArenaCellIterImpl
 {
   public:
-    explicit ArenaCellIterUnderFinalize(Arena* arena) : ArenaCellIterImpl(arena) {}
+    explicit ArenaCellIterUnderFinalize(Arena* arena)
+      : ArenaCellIterImpl(arena)
+    {
+        MOZ_ASSERT(CurrentThreadIsGCSweeping());
+    }
 };
 
 template <typename T>
@@ -202,22 +218,26 @@ template <>
 class ZoneCellIter<TenuredCell> {
     ArenaIter arenaIter;
     ArenaCellIterImpl cellIter;
-    JS::AutoAssertNoAlloc noAlloc;
+    mozilla::Maybe<JS::AutoAssertNoGC> nogc;
 
   protected:
     // For use when a subclass wants to insert some setup before init().
     ZoneCellIter() {}
 
     void init(JS::Zone* zone, AllocKind kind) {
+        MOZ_ASSERT_IF(IsNurseryAllocable(kind),
+                      zone->runtimeFromAnyThread()->gc.nursery.isEmpty());
+        initForTenuredIteration(zone, kind);
+    }
+
+    void initForTenuredIteration(JS::Zone* zone, AllocKind kind) {
         JSRuntime* rt = zone->runtimeFromAnyThread();
-        MOZ_ASSERT(zone);
-        MOZ_ASSERT_IF(IsNurseryAllocable(kind), rt->gc.nursery.isEmpty());
 
         // If called from outside a GC, ensure that the heap is in a state
         // that allows us to iterate.
         if (!rt->isHeapBusy()) {
             // Assert that no GCs can occur while a ZoneCellIter is live.
-            noAlloc.disallowAlloc(rt);
+            nogc.emplace(rt);
         }
 
         // We have a single-threaded runtime, so there's no need to protect
@@ -346,6 +366,17 @@ class ZoneCellIter : public ZoneCellIter<TenuredCell> {
     GCType* operator ->() const { return get(); }
 };
 
+class GrayObjectIter : public ZoneCellIter<TenuredCell> {
+  public:
+    explicit GrayObjectIter(JS::Zone* zone, AllocKind kind) : ZoneCellIter<TenuredCell>() {
+        initForTenuredIteration(zone, kind);
+    }
+
+    JSObject* get() const { return ZoneCellIter<TenuredCell>::get<JSObject>(); }
+    operator JSObject*() const { return get(); }
+    JSObject* operator ->() const { return get(); }
+};
+
 class GCZonesIter
 {
   private:
@@ -353,6 +384,7 @@ class GCZonesIter
 
   public:
     explicit GCZonesIter(JSRuntime* rt, ZoneSelector selector = WithAtoms) : zone(rt, selector) {
+        MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt) && rt->isHeapBusy());
         if (!zone->isCollecting())
             next();
     }
@@ -384,7 +416,7 @@ class GCZoneGroupIter {
 
   public:
     explicit GCZoneGroupIter(JSRuntime* rt) {
-        MOZ_ASSERT(rt->isHeapBusy());
+        MOZ_ASSERT(CurrentThreadIsPerformingGC());
         current = rt->gc.getCurrentZoneGroup();
     }
 

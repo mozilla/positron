@@ -290,7 +290,8 @@ PushNodeChildren(ParseNode* pn, NodeStack* stack)
       // variable, or an assignment of a PNK_GENERATOR node to the '.generator'
       // local, for a synthesized, prepended initial yield.  Yum!
       case PNK_YIELD_STAR:
-      case PNK_YIELD: {
+      case PNK_YIELD:
+      case PNK_AWAIT: {
         MOZ_ASSERT(pn->isArity(PN_BINARY));
         MOZ_ASSERT(pn->pn_right);
         MOZ_ASSERT(pn->pn_right->isKind(PNK_NAME) ||
@@ -900,4 +901,22 @@ FunctionBox::trace(JSTracer* trc)
     ObjectBox::trace(trc);
     if (enclosingScope_)
         TraceRoot(trc, &enclosingScope_, "funbox-enclosingScope");
+}
+
+bool
+js::frontend::IsAnonymousFunctionDefinition(ParseNode* pn)
+{
+    // ES 2017 draft
+    // 12.15.2 (ArrowFunction, AsyncArrowFunction).
+    // 14.1.12 (FunctionExpression).
+    // 14.4.8 (GeneratorExpression).
+    // 14.6.8 (AsyncFunctionExpression)
+    if (pn->isKind(PNK_FUNCTION) && !pn->pn_funbox->function()->explicitName())
+        return true;
+
+    // 14.5.8 (ClassExpression)
+    if (pn->is<ClassNode>() && !pn->as<ClassNode>().names())
+        return true;
+
+    return false;
 }

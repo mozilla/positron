@@ -141,7 +141,17 @@ var gEditItemOverlay = {
       yield PlacesUtils.keywords.fetch({ url: this._paneInfo.uri.spec },
                                        e => entries.push(e));
       if (entries.length > 0) {
-        this._keyword = newKeyword = entries[0].keyword;
+        // We show an existing keyword if either POST data was not provided, or
+        // if the POST data is the same.
+        let existingKeyword = entries[0].keyword;
+        let postData = this._paneInfo.postData;
+        if (postData) {
+          let sameEntry = entries.find(e => e.postData === postData);
+          existingKeyword = sameEntry ? sameEntry.keyword : "";
+        }
+        if (existingKeyword) {
+          this._keyword = newKeyword = existingKeyword;
+        }
       }
     }
     this._initTextField(this._keywordField, newKeyword);
@@ -177,14 +187,25 @@ var gEditItemOverlay = {
   initPanel(aInfo) {
     if (typeof(aInfo) != "object" || aInfo === null)
       throw new Error("aInfo must be an object.");
+    if ("node" in aInfo) {
+      try {
+        aInfo.node.type;
+      } catch (e) {
+        // If the lazy loader for |type| generates an exception, it means that
+        // this bookmark could not be loaded. This sometimes happens when tests
+        // create a bookmark by clicking the bookmark star, then try to cleanup
+        // before the bookmark panel has finished opening. Either way, if we
+        // cannot retrieve the bookmark information, we cannot open the panel.
+        return;
+      }
+    }
 
     // For sanity ensure that the implementer has uninited the panel before
     // trying to init it again, or we could end up leaking due to observers.
     if (this.initialized)
       this.uninitPanel(false);
 
-    let { itemId, itemGuid, isItem,
-          isURI, uri, title,
+    let { itemId, isItem, isURI,
           isBookmark, bulkTagging, uris,
           visibleRows, focusedElement } = this._setPaneInfo(aInfo);
 
@@ -614,7 +635,6 @@ var gEditItemOverlay = {
       return;
 
     if (!PlacesUIUtils.useAsyncTransactions) {
-      let itemId = this._paneInfo.itemId;
       let txn = new PlacesEditBookmarkURITransaction(this._paneInfo.itemId, newURI);
       PlacesUtils.transactionManager.doTransaction(txn);
       return;
@@ -716,7 +736,7 @@ var gEditItemOverlay = {
   _getFolderMenuItem(aFolderId) {
     let menupopup = this._folderMenuList.menupopup;
     let menuItem = Array.prototype.find.call(
-      menupopup.childNodes, menuItem => menuItem.folderId === aFolderId);
+      menupopup.childNodes, item => item.folderId === aFolderId);
     if (menuItem !== undefined)
       return menuItem;
 

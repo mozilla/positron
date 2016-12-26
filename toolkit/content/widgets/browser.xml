@@ -281,6 +281,10 @@
                 onget="return document.getElementById(this.getAttribute('autocompletepopup'))"
                 readonly="true"/>
 
+      <property name="dateTimePicker"
+                onget="return document.getElementById(this.getAttribute('datetimepicker'))"
+                readonly="true"/>
+
       <property name="docShellIsActive">
         <getter>
           <![CDATA[
@@ -303,17 +307,6 @@
         </body>
       </method>
 
-      <method name="makePrerenderedBrowserActive">
-        <body>
-        <![CDATA[
-          let frameLoader = this.QueryInterface(Components.interfaces.nsIFrameLoaderOwner).frameLoader;
-          if (frameLoader) {
-            frameLoader.makePrerenderedLoaderActive();
-          }
-        ]]>
-        </body>
-      </method>
-
       <property name="imageDocument"
                 readonly="true">
         <getter>
@@ -333,6 +326,25 @@
       <property name="isRemoteBrowser"
                 onget="return (this.getAttribute('remote') == 'true');"
                 readonly="true"/>
+
+      <property name="remoteType"
+                readonly="true">
+        <getter>
+          <![CDATA[
+            if (!this.isRemoteBrowser) {
+              return null;
+            }
+
+            let remoteType = this.getAttribute("remoteType");
+            if (remoteType) {
+              return remoteType;
+            }
+
+            let E10SUtils = Components.utils.import("resource://gre/modules/E10SUtils.jsm", {}).E10SUtils;
+            return E10SUtils.DEFAULT_REMOTE_TYPE;
+          ]]>
+        </getter>
+      </property>
 
       <property name="messageManager"
                 readonly="true">
@@ -686,6 +698,12 @@
             let event = document.createEvent("Events");
             event.initEvent("DOMAudioPlaybackStarted", true, false);
             this.dispatchEvent(event);
+            if (this._audioBlocked) {
+              this._audioBlocked = false;
+              event = document.createEvent("Events");
+              event.initEvent("DOMAudioPlaybackBlockStopped", true, false);
+              this.dispatchEvent(event);
+            }
           ]]>
         </body>
       </method>
@@ -700,9 +718,26 @@
         </body>
       </method>
 
+      <method name="audioPlaybackBlocked">
+        <body>
+          <![CDATA[
+            this._audioBlocked = true;
+            let event = document.createEvent("Events");
+            event.initEvent("DOMAudioPlaybackBlockStarted", true, false);
+            this.dispatchEvent(event);
+          ]]>
+        </body>
+      </method>
+
       <field name="_audioMuted">false</field>
       <property name="audioMuted"
                 onget="return this._audioMuted;"
+                readonly="true"/>
+
+
+      <field name="_audioBlocked">false</field>
+      <property name="audioBlocked"
+                onget="return this._audioBlocked;"
                 readonly="true"/>
 
       <method name="mute">
@@ -754,6 +789,7 @@
       <method name="blockMedia">
         <body>
           <![CDATA[
+            this._audioBlocked = true;
             this.messageManager.sendAsyncMessage("AudioPlayback",
                                                  {type: "blockInactivePageMedia"});
           ]]>
@@ -763,8 +799,12 @@
       <method name="resumeMedia">
         <body>
           <![CDATA[
+            this._audioBlocked = false;
             this.messageManager.sendAsyncMessage("AudioPlayback",
                                                  {type: "resumeMedia"});
+            let  event = document.createEvent("Events");
+            event.initEvent("DOMAudioPlaybackBlockStopped", true, false);
+            this.dispatchEvent(event);
           ]]>
         </body>
       </method>
@@ -893,7 +933,8 @@
             Components.utils.reportError(e);
           }
           try {
-            var securityUI = this.securityUI;
+            // Ensures the securityUI is initialized.
+            var securityUI = this.securityUI; // eslint-disable-line no-unused-vars
           }
           catch (e) {
           }
@@ -918,6 +959,7 @@
             this.messageManager.addMessageListener("Autoscroll:Cancel", this);
             this.messageManager.addMessageListener("AudioPlayback:Start", this);
             this.messageManager.addMessageListener("AudioPlayback:Stop", this);
+            this.messageManager.addMessageListener("AudioPlayback:Block", this);
           }
         ]]>
       </constructor>
@@ -1004,6 +1046,9 @@
             case "AudioPlayback:Stop":
               this.audioPlaybackStopped();
               break;
+            case "AudioPlayback:Block":
+              this.audioPlaybackBlocked();
+              break;
           }
           return undefined;
         ]]></body>
@@ -1063,6 +1108,7 @@
               window.removeEventListener("mousemove", this, true);
               window.removeEventListener("mousedown", this, true);
               window.removeEventListener("mouseup", this, true);
+              window.removeEventListener("DOMMouseScroll", this, true);
               window.removeEventListener("contextmenu", this, true);
               window.removeEventListener("keydown", this, true);
               window.removeEventListener("keypress", this, true);
@@ -1082,6 +1128,7 @@
             // We set this attribute on the element so that mousemove
             // events can be handled by browser-content.js.
             popup.setAttribute("mousethrough", "always");
+            popup.setAttribute("rolluponmousewheel", "true");
             return popup;
           ]]>
         </body>
@@ -1128,6 +1175,7 @@
             window.addEventListener("mousemove", this, true);
             window.addEventListener("mousedown", this, true);
             window.addEventListener("mouseup", this, true);
+            window.addEventListener("DOMMouseScroll", this, true);
             window.addEventListener("contextmenu", this, true);
             window.addEventListener("keydown", this, true);
             window.addEventListener("keypress", this, true);
@@ -1163,6 +1211,11 @@
                 this._ignoreMouseEvents = false;
                 break;
               }
+              case "DOMMouseScroll": {
+                this._autoScrollPopup.hidePopup();
+                event.preventDefault();
+                break;
+              }
               case "popuphidden": {
                 this._autoScrollPopup.removeEventListener("popuphidden", this, true);
                 this.stopScroll();
@@ -1186,6 +1239,48 @@
               }
             }
           }
+        ]]>
+        </body>
+      </method>
+
+      <method name="closeBrowser">
+        <body>
+        <![CDATA[
+          // The request comes from a XPCOM component, we'd want to redirect
+          // the request to tabbrowser.
+          let tabbrowser = this.getTabBrowser();
+          if (tabbrowser) {
+            let tab = tabbrowser.getTabForBrowser(this);
+            if (tab) {
+              tabbrowser.removeTab(tab);
+              return;
+            }
+          }
+
+          throw new Error("Closing a browser which was not attached to a tabbrowser is unsupported.");
+        ]]>
+        </body>
+      </method>
+
+      <method name="swapBrowsers">
+        <parameter name="aOtherBrowser"/>
+        <parameter name="aFlags"/>
+        <body>
+        <![CDATA[
+          // The request comes from a XPCOM component, we'd want to redirect
+          // the request to tabbrowser so tabbrowser will be setup correctly,
+          // and it will eventually call swapDocShells.
+          let ourTabBrowser = this.getTabBrowser();
+          let otherTabBrowser = aOtherBrowser.getTabBrowser();
+          if (ourTabBrowser && otherTabBrowser) {
+            let ourTab = ourTabBrowser.getTabForBrowser(this);
+            let otherTab = otherTabBrowser.getTabForBrowser(aOtherBrowser);
+            ourTabBrowser.swapBrowsers(ourTab, otherTab, aFlags);
+            return;
+          }
+
+          // One of us is not connected to a tabbrowser, so just swap.
+          this.swapDocShells(aOtherBrowser);
         ]]>
         </body>
       </method>
@@ -1263,8 +1358,7 @@
             PopupNotifications._swapBrowserNotifications(aOtherBrowser, this);
 
           try {
-            this.QueryInterface(Components.interfaces.nsIFrameLoaderOwner)
-                .swapFrameLoaders(aOtherBrowser);
+            this.swapFrameLoaders(aOtherBrowser);
           } catch (ex) {
             // This may not be implemented for browser elements that are not
             // attached to a BrowserDOMWindow.
@@ -1441,7 +1535,7 @@
         // set the dropEffect to 'none'. This prevents the drop even if some
         // other listener cancelled the event.
         var types = event.dataTransfer.types;
-        if (types.contains("text/x-moz-text-internal") && !types.contains("text/plain")) {
+        if (types.includes("text/x-moz-text-internal") && !types.includes("text/plain")) {
           event.dataTransfer.dropEffect = "none";
           event.stopPropagation();
           event.preventDefault();
@@ -1465,7 +1559,6 @@
         if (!this.droppedLinkHandler || event.defaultPrevented || this.isRemoteBrowser)
           return;
 
-        let name = { };
         let linkHandler = Components.classes["@mozilla.org/content/dropped-link-handler;1"].
                             getService(Components.interfaces.nsIDroppedLinkHandler);
         try {

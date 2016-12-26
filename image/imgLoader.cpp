@@ -65,7 +65,7 @@ MOZ_DEFINE_MALLOC_SIZE_OF(ImagesMallocSizeOf)
 
 class imgMemoryReporter final : public nsIMemoryReporter
 {
-  ~imgMemoryReporter() { }
+  ~imgMemoryReporter() = default;
 
 public:
   NS_DECL_ISUPPORTS
@@ -743,14 +743,28 @@ NewImageChannel(nsIChannel** aResult,
                                               nullptr,   // loadGroup
                                               callbacks,
                                               aLoadFlags);
+
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+
+    if (aPolicyType == nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON) {
+      // If this is a favicon loading, we will use the originAttributes from the
+      // loadingPrincipal as the channel's originAttributes. This allows the favicon
+      // loading from XUL will use the correct originAttributes.
+      NeckoOriginAttributes neckoAttrs;
+      neckoAttrs.InheritFromDocToNecko(aLoadingPrincipal->OriginAttributesRef());
+
+      nsCOMPtr<nsILoadInfo> loadInfo = (*aResult)->GetLoadInfo();
+      rv = loadInfo->SetOriginAttributes(neckoAttrs);
+    }
   } else {
     // either we are loading something inside a document, in which case
     // we should always have a requestingNode, or we are loading something
     // outside a document, in which case the loadingPrincipal and
     // triggeringPrincipal should always be the systemPrincipal.
-    // However, there are two exceptions: one is Notifications and the
-    // other one is Favicons which create a channel in the parent prcoess
-    // in which case we can't get a requestingNode.
+    // However, there are exceptions: one is Notifications which create a
+    // channel in the parent prcoess in which case we can't get a requestingNode.
     rv = NS_NewChannel(aResult,
                        aURI,
                        nsContentUtils::GetSystemPrincipal(),
@@ -769,7 +783,7 @@ NewImageChannel(nsIChannel** aResult,
     // has asked us to perform.
     NeckoOriginAttributes neckoAttrs;
     if (aLoadingPrincipal) {
-      neckoAttrs.InheritFromDocToNecko(BasePrincipal::Cast(aLoadingPrincipal)->OriginAttributesRef());
+      neckoAttrs.InheritFromDocToNecko(aLoadingPrincipal->OriginAttributesRef());
     }
     neckoAttrs.mPrivateBrowsingId = aRespectPrivacy ? 1 : 0;
 
@@ -924,7 +938,7 @@ using namespace std;
 void
 imgCacheQueue::Remove(imgCacheEntry* entry)
 {
-  queueContainer::iterator it = find(mQueue.begin(), mQueue.end(), entry);
+  auto it = find(mQueue.begin(), mQueue.end(), entry);
   if (it != mQueue.end()) {
     mSize -= (*it)->GetDataSize();
     mQueue.erase(it);
@@ -1052,7 +1066,7 @@ public:
   imgCacheExpirationTracker();
 
 protected:
-  void NotifyExpired(imgCacheEntry* entry);
+  void NotifyExpired(imgCacheEntry* entry) override;
 };
 
 imgCacheExpirationTracker::imgCacheExpirationTracker()
@@ -1217,6 +1231,12 @@ void imgLoader::GlobalInit()
     imgMemoryReporter::ImagesContentUsedUncompressedDistinguishedAmount);
 }
 
+void imgLoader::ShutdownMemoryReporter()
+{
+  UnregisterImagesContentUsedUncompressedDistinguishedAmount();
+  UnregisterStrongMemoryReporter(sMemReporter);
+}
+
 nsresult
 imgLoader::InitCache()
 {
@@ -1226,7 +1246,6 @@ imgLoader::InitCache()
   }
 
   os->AddObserver(this, "memory-pressure", false);
-  os->AddObserver(this, "app-theme-changed", false);
   os->AddObserver(this, "chrome-flush-skin-caches", false);
   os->AddObserver(this, "chrome-flush-caches", false);
   os->AddObserver(this, "last-pb-context-exited", false);
@@ -1269,9 +1288,6 @@ imgLoader::Observe(nsISupports* aSubject, const char* aTopic,
 
   } else if (strcmp(aTopic, "memory-pressure") == 0) {
     MinimizeCaches();
-  } else if (strcmp(aTopic, "app-theme-changed") == 0) {
-    ClearImageCache();
-    MinimizeCaches();
   } else if (strcmp(aTopic, "chrome-flush-skin-caches") == 0 ||
              strcmp(aTopic, "chrome-flush-caches") == 0) {
     MinimizeCaches();
@@ -1281,9 +1297,11 @@ imgLoader::Observe(nsISupports* aSubject, const char* aTopic,
       ClearImageCache();
       ClearChromeImageCache();
     }
-  } else if (strcmp(aTopic, "profile-before-change") == 0 ||
-             strcmp(aTopic, "xpcom-shutdown") == 0) {
+  } else if (strcmp(aTopic, "profile-before-change") == 0) {
     mCacheTracker = nullptr;
+  } else if (strcmp(aTopic, "xpcom-shutdown") == 0) {
+    mCacheTracker = nullptr;
+    ShutdownMemoryReporter();
 
   } else {
   // (Nothing else should bring us here)
@@ -1334,7 +1352,7 @@ imgLoader::FindEntryProperties(nsIURI* uri,
   if (doc) {
     nsCOMPtr<nsIPrincipal> principal = doc->NodePrincipal();
     if (principal) {
-      attrs = BasePrincipal::Cast(principal)->OriginAttributesRef();
+      attrs = principal->OriginAttributesRef();
     }
   }
 
@@ -2096,7 +2114,7 @@ imgLoader::LoadImage(nsIURI* aURI,
   // of post data.
   PrincipalOriginAttributes attrs;
   if (aLoadingPrincipal) {
-    attrs = BasePrincipal::Cast(aLoadingPrincipal)->OriginAttributesRef();
+    attrs = aLoadingPrincipal->OriginAttributesRef();
   }
   ImageCacheKey key(aURI, attrs, aLoadingDocument, rv);
   NS_ENSURE_SUCCESS(rv, rv);

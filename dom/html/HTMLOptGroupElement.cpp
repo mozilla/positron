@@ -48,7 +48,7 @@ NS_IMPL_STRING_ATTR(HTMLOptGroupElement, Label, label)
 
 
 nsresult
-HTMLOptGroupElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
+HTMLOptGroupElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   aVisitor.mCanHandle = false;
   // Do not process any DOM events if the element is disabled
@@ -60,13 +60,13 @@ HTMLOptGroupElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
   nsIFrame* frame = GetPrimaryFrame();
   if (frame) {
     const nsStyleUserInterface* uiStyle = frame->StyleUserInterface();
-    if (uiStyle->mUserInput == NS_STYLE_USER_INPUT_NONE ||
-        uiStyle->mUserInput == NS_STYLE_USER_INPUT_DISABLED) {
+    if (uiStyle->mUserInput == StyleUserInput::None ||
+        uiStyle->mUserInput == StyleUserInput::Disabled) {
       return NS_OK;
     }
   }
 
-  return nsGenericHTMLElement::PreHandleEvent(aVisitor);
+  return nsGenericHTMLElement::GetEventTargetParent(aVisitor);
 }
 
 Element*

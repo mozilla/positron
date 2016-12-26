@@ -7,6 +7,7 @@
 /* The "Components" xpcom objects for JavaScript. */
 
 #include "xpcprivate.h"
+#include "xpc_make_class.h"
 #include "xpcIJSModuleLoader.h"
 #include "XPCJSWeakReference.h"
 #include "WrapperFactory.h"
@@ -2343,11 +2344,11 @@ nsXPCComponents_Utils::ReportError(HandleValue error, JSContext* cx)
 
         uint32_t column = err->tokenOffset();
 
-        const char16_t* ucmessage = err->ucmessage;
         const char16_t* linebuf = err->linebuf();
 
         nsresult rv = scripterr->InitWithWindowID(
-                ucmessage ? nsDependentString(ucmessage) : EmptyString(),
+                err->message() ? NS_ConvertUTF8toUTF16(err->message().c_str())
+                : EmptyString(),
                 fileUni,
                 linebuf ? nsDependentString(linebuf, err->linebufLength()) : EmptyString(),
                 err->lineno,
@@ -2627,10 +2628,6 @@ class PreciseGCRunnable : public Runnable
 
     NS_IMETHOD Run() override
     {
-        JSContext* cx = dom::danger::GetJSContext();
-        if (JS_IsRunning(cx))
-            return NS_DispatchToMainThread(this);
-
         nsJSContext::GarbageCollectNow(gcreason::COMPONENT_UTILS,
                                        nsJSContext::NonIncrementalGC,
                                        mShrinking ?

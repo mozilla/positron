@@ -1,27 +1,36 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-"use strict";
 
 /* import-globals-from ../../framework/test/shared-head.js */
+
+"use strict";
 
 // shared-head.js handles imports, constants, and utility functions
 Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/devtools/client/framework/test/shared-head.js",
   this);
 
-var NetworkHelper = require("devtools/shared/webconsole/network-helper");
 var { Toolbox } = require("devtools/client/framework/toolbox");
+const {
+  decodeUnicodeUrl,
+  getUrlBaseName,
+  getUrlQuery,
+  getUrlHost,
+} = require("devtools/client/netmonitor/request-utils");
 
 const EXAMPLE_URL = "http://example.com/browser/devtools/client/netmonitor/test/";
+const HTTPS_EXAMPLE_URL = "https://example.com/browser/devtools/client/netmonitor/test/";
 
 const API_CALLS_URL = EXAMPLE_URL + "html_api-calls-test-page.html";
 const SIMPLE_URL = EXAMPLE_URL + "html_simple-test-page.html";
 const NAVIGATE_URL = EXAMPLE_URL + "html_navigate-test-page.html";
 const CONTENT_TYPE_URL = EXAMPLE_URL + "html_content-type-test-page.html";
 const CONTENT_TYPE_WITHOUT_CACHE_URL = EXAMPLE_URL + "html_content-type-without-cache-test-page.html";
+const CONTENT_TYPE_WITHOUT_CACHE_REQUESTS = 8;
 const CYRILLIC_URL = EXAMPLE_URL + "html_cyrillic-test-page.html";
 const STATUS_CODES_URL = EXAMPLE_URL + "html_status-codes-test-page.html";
 const POST_DATA_URL = EXAMPLE_URL + "html_post-data-test-page.html";
+const POST_JSON_URL = EXAMPLE_URL + "html_post-json-test-page.html";
 const POST_RAW_URL = EXAMPLE_URL + "html_post-raw-test-page.html";
 const POST_RAW_WITH_HEADERS_URL = EXAMPLE_URL + "html_post-raw-with-headers-test-page.html";
 const PARAMS_URL = EXAMPLE_URL + "html_params-test-page.html";
@@ -43,6 +52,7 @@ const CORS_URL = EXAMPLE_URL + "html_cors-test-page.html";
 
 const SIMPLE_SJS = EXAMPLE_URL + "sjs_simple-test-server.sjs";
 const CONTENT_TYPE_SJS = EXAMPLE_URL + "sjs_content-type-test-server.sjs";
+const HTTPS_CONTENT_TYPE_SJS = HTTPS_EXAMPLE_URL + "sjs_content-type-test-server.sjs";
 const STATUS_CODES_SJS = EXAMPLE_URL + "sjs_status-codes-test-server.sjs";
 const SORTING_SJS = EXAMPLE_URL + "sjs_sorting-test-server.sjs";
 const HTTPS_REDIRECT_SJS = EXAMPLE_URL + "sjs_https-redirect-test-server.sjs";
@@ -240,63 +250,70 @@ function waitForNetworkEvents(aMonitor, aGetRequests, aPostRequests = 0) {
   return deferred.promise;
 }
 
-function verifyRequestItemTarget(aRequestItem, aMethod, aUrl, aData = {}) {
+/**
+ * Convert a store record (model) to the rendered element. Tests that need to use
+ * this should be rewritten - test the rendered markup at unit level, integration
+ * mochitest should check only the store state.
+ */
+function getItemTarget(requestList, requestItem) {
+  const items = requestList.mountPoint.querySelectorAll(".request-list-item");
+  return [...items].find(el => el.dataset.id == requestItem.id);
+}
+
+function verifyRequestItemTarget(requestList, requestItem, aMethod, aUrl, aData = {}) {
   info("> Verifying: " + aMethod + " " + aUrl + " " + aData.toSource());
   // This bloats log sizes significantly in automation (bug 992485)
-  // info("> Request: " + aRequestItem.attachment.toSource());
+  // info("> Request: " + requestItem.toSource());
 
-  let requestsMenu = aRequestItem.ownerView;
-  let widgetIndex = requestsMenu.indexOfItem(aRequestItem);
-  let visibleIndex = requestsMenu.visibleItems.indexOf(aRequestItem);
+  let visibleIndex = requestList.visibleItems.indexOf(requestItem);
 
-  info("Widget index of item: " + widgetIndex);
   info("Visible index of item: " + visibleIndex);
 
   let { fuzzyUrl, status, statusText, cause, type, fullMimeType,
         transferred, size, time, displayedStatus } = aData;
-  let { attachment, target } = aRequestItem;
 
-  let uri = Services.io.newURI(aUrl, null, null).QueryInterface(Ci.nsIURL);
-  let unicodeUrl = NetworkHelper.convertToUnicode(unescape(aUrl));
-  let name = NetworkHelper.convertToUnicode(unescape(uri.fileName || uri.filePath || "/"));
-  let query = NetworkHelper.convertToUnicode(unescape(uri.query));
-  let hostPort = uri.hostPort;
-  let remoteAddress = attachment.remoteAddress;
+  let target = getItemTarget(requestList, requestItem);
+
+  let unicodeUrl = decodeUnicodeUrl(aUrl);
+  let name = getUrlBaseName(aUrl);
+  let query = getUrlQuery(aUrl);
+  let hostPort = getUrlHost(aUrl);
+  let remoteAddress = requestItem.remoteAddress;
 
   if (fuzzyUrl) {
-    ok(attachment.method.startsWith(aMethod), "The attached method is correct.");
-    ok(attachment.url.startsWith(aUrl), "The attached url is correct.");
+    ok(requestItem.method.startsWith(aMethod), "The attached method is correct.");
+    ok(requestItem.url.startsWith(aUrl), "The attached url is correct.");
   } else {
-    is(attachment.method, aMethod, "The attached method is correct.");
-    is(attachment.url, aUrl, "The attached url is correct.");
+    is(requestItem.method, aMethod, "The attached method is correct.");
+    is(requestItem.url, aUrl, "The attached url is correct.");
   }
 
-  is(target.querySelector(".requests-menu-method").getAttribute("value"),
+  is(target.querySelector(".requests-menu-method").textContent,
     aMethod, "The displayed method is correct.");
 
   if (fuzzyUrl) {
-    ok(target.querySelector(".requests-menu-file").getAttribute("value").startsWith(
+    ok(target.querySelector(".requests-menu-file").textContent.startsWith(
       name + (query ? "?" + query : "")), "The displayed file is correct.");
-    ok(target.querySelector(".requests-menu-file").getAttribute("tooltiptext").startsWith(unicodeUrl),
+    ok(target.querySelector(".requests-menu-file").getAttribute("title").startsWith(unicodeUrl),
       "The tooltip file is correct.");
   } else {
-    is(target.querySelector(".requests-menu-file").getAttribute("value"),
+    is(target.querySelector(".requests-menu-file").textContent,
       name + (query ? "?" + query : ""), "The displayed file is correct.");
-    is(target.querySelector(".requests-menu-file").getAttribute("tooltiptext"),
+    is(target.querySelector(".requests-menu-file").getAttribute("title"),
       unicodeUrl, "The tooltip file is correct.");
   }
 
-  is(target.querySelector(".requests-menu-domain").getAttribute("value"),
+  is(target.querySelector(".requests-menu-domain").textContent,
     hostPort, "The displayed domain is correct.");
 
   let domainTooltip = hostPort + (remoteAddress ? " (" + remoteAddress + ")" : "");
-  is(target.querySelector(".requests-menu-domain").getAttribute("tooltiptext"),
+  is(target.querySelector(".requests-menu-domain").getAttribute("title"),
     domainTooltip, "The tooltip domain is correct.");
 
   if (status !== undefined) {
-    let value = target.querySelector(".requests-menu-status-icon").getAttribute("code");
-    let codeValue = target.querySelector(".requests-menu-status-code").getAttribute("value");
-    let tooltip = target.querySelector(".requests-menu-status").getAttribute("tooltiptext");
+    let value = target.querySelector(".requests-menu-status-icon").getAttribute("data-code");
+    let codeValue = target.querySelector(".requests-menu-status-code").textContent;
+    let tooltip = target.querySelector(".requests-menu-status").getAttribute("title");
     info("Displayed status: " + value);
     info("Displayed code: " + codeValue);
     info("Tooltip status: " + tooltip);
@@ -305,41 +322,40 @@ function verifyRequestItemTarget(aRequestItem, aMethod, aUrl, aData = {}) {
     is(tooltip, status + " " + statusText, "The tooltip status is correct.");
   }
   if (cause !== undefined) {
-    let causeLabel = target.querySelector(".requests-menu-cause-label");
-    let value = causeLabel.getAttribute("value");
-    let tooltip = causeLabel.getAttribute("tooltiptext");
+    let value = target.querySelector(".requests-menu-cause > .subitem-label").textContent;
+    let tooltip = target.querySelector(".requests-menu-cause").getAttribute("title");
     info("Displayed cause: " + value);
     info("Tooltip cause: " + tooltip);
     is(value, cause.type, "The displayed cause is correct.");
     is(tooltip, cause.loadingDocumentUri, "The tooltip cause is correct.")
   }
   if (type !== undefined) {
-    let value = target.querySelector(".requests-menu-type").getAttribute("value");
-    let tooltip = target.querySelector(".requests-menu-type").getAttribute("tooltiptext");
+    let value = target.querySelector(".requests-menu-type").textContent;
+    let tooltip = target.querySelector(".requests-menu-type").getAttribute("title");
     info("Displayed type: " + value);
     info("Tooltip type: " + tooltip);
     is(value, type, "The displayed type is correct.");
     is(tooltip, fullMimeType, "The tooltip type is correct.");
   }
   if (transferred !== undefined) {
-    let value = target.querySelector(".requests-menu-transferred").getAttribute("value");
-    let tooltip = target.querySelector(".requests-menu-transferred").getAttribute("tooltiptext");
+    let value = target.querySelector(".requests-menu-transferred").textContent;
+    let tooltip = target.querySelector(".requests-menu-transferred").getAttribute("title");
     info("Displayed transferred size: " + value);
     info("Tooltip transferred size: " + tooltip);
     is(value, transferred, "The displayed transferred size is correct.");
     is(tooltip, transferred, "The tooltip transferred size is correct.");
   }
   if (size !== undefined) {
-    let value = target.querySelector(".requests-menu-size").getAttribute("value");
-    let tooltip = target.querySelector(".requests-menu-size").getAttribute("tooltiptext");
+    let value = target.querySelector(".requests-menu-size").textContent;
+    let tooltip = target.querySelector(".requests-menu-size").getAttribute("title");
     info("Displayed size: " + value);
     info("Tooltip size: " + tooltip);
     is(value, size, "The displayed size is correct.");
     is(tooltip, size, "The tooltip size is correct.");
   }
   if (time !== undefined) {
-    let value = target.querySelector(".requests-menu-timings-total").getAttribute("value");
-    let tooltip = target.querySelector(".requests-menu-timings-total").getAttribute("tooltiptext");
+    let value = target.querySelector(".requests-menu-timings-total").textContent;
+    let tooltip = target.querySelector(".requests-menu-timings-total").getAttribute("title");
     info("Displayed time: " + value);
     info("Tooltip time: " + tooltip);
     ok(~~(value.match(/[0-9]+/)) >= 0, "The displayed time is correct.");
@@ -348,15 +364,11 @@ function verifyRequestItemTarget(aRequestItem, aMethod, aUrl, aData = {}) {
 
   if (visibleIndex != -1) {
     if (visibleIndex % 2 == 0) {
-      ok(aRequestItem.target.hasAttribute("even"),
-        aRequestItem.value + " should have 'even' attribute.");
-      ok(!aRequestItem.target.hasAttribute("odd"),
-        aRequestItem.value + " shouldn't have 'odd' attribute.");
+      ok(target.classList.contains("even"), "Item should have 'even' class.");
+      ok(!target.classList.contains("odd"), "Item shouldn't have 'odd' class.");
     } else {
-      ok(!aRequestItem.target.hasAttribute("even"),
-        aRequestItem.value + " shouldn't have 'even' attribute.");
-      ok(aRequestItem.target.hasAttribute("odd"),
-        aRequestItem.value + " should have 'odd' attribute.");
+      ok(!target.classList.contains("even"), "Item shouldn't have 'even' class.");
+      ok(target.classList.contains("odd"), "Item should have 'odd' class.");
     }
   }
 }
@@ -381,17 +393,19 @@ function waitFor(subject, eventName) {
 /**
  * Tests if a button for a filter of given type is the only one checked.
  *
- * @param string aFilterType
+ * @param string filterType
  *        The type of the filter that should be the only one checked.
  */
-function testFilterButtons(aMonitor, aFilterType) {
-  let doc = aMonitor.panelWin.document;
-  let target = doc.querySelector("#requests-menu-filter-" + aFilterType + "-button");
-  let buttons = doc.querySelectorAll(".requests-menu-footer-button");
+function testFilterButtons(monitor, filterType) {
+  let doc = monitor.panelWin.document;
+  let target = doc.querySelector("#requests-menu-filter-" + filterType + "-button");
+  ok(target, `Filter button '${filterType}' was found`);
+  let buttons = [...doc.querySelectorAll(".menu-filter-button")];
+  ok(buttons.length > 0, "More than zero filter buttons were found");
 
   // Only target should be checked.
-  let checkStatus = [...buttons].map(button => button == target ? 1 : 0);
-  testFilterButtonsCustom(aMonitor, checkStatus);
+  let checkStatus = buttons.map(button => button == target ? 1 : 0);
+  testFilterButtonsCustom(monitor, checkStatus);
 }
 
 /**
@@ -404,15 +418,15 @@ function testFilterButtons(aMonitor, aFilterType) {
  */
 function testFilterButtonsCustom(aMonitor, aIsChecked) {
   let doc = aMonitor.panelWin.document;
-  let buttons = doc.querySelectorAll(".requests-menu-filter-button");
+  let buttons = doc.querySelectorAll(".menu-filter-button");
   for (let i = 0; i < aIsChecked.length; i++) {
     let button = buttons[i];
     if (aIsChecked[i]) {
-      is(button.hasAttribute("checked"), true,
-        "The " + button.id + " button should have a 'checked' attribute.");
+      is(button.classList.contains("checked"), true,
+        "The " + button.id + " button should have a 'checked' class.");
     } else {
-      is(button.hasAttribute("checked"), false,
-        "The " + button.id + " button should not have a 'checked' attribute.");
+      is(button.classList.contains("checked"), false,
+        "The " + button.id + " button should not have a 'checked' class.");
     }
   }
 }
@@ -489,4 +503,24 @@ function waitForContentMessage(name) {
     def.resolve(msg);
   });
   return def.promise;
+}
+
+/**
+ * Open the requestMenu menu and return all of it's items in a flat array
+ * @param {netmonitorPanel} netmonitor
+ * @param {Event} event mouse event with screenX and screenX coordinates
+ * @return An array of MenuItems
+ */
+function openContextMenuAndGetAllItems(netmonitor, event) {
+  let menu = netmonitor.RequestsMenu.contextMenu.open(event);
+
+  // Flatten all menu items into a single array to make searching through it easier
+  let allItems = [].concat.apply([], menu.items.map(function addItem(item) {
+    if (item.submenu) {
+      return addItem(item.submenu.items);
+    }
+    return item;
+  }));
+
+  return allItems;
 }

@@ -305,6 +305,12 @@ class ObjectElements
         flags &= ~FROZEN;
     }
 
+    uint8_t elementAttributes() const {
+        if (isFrozen())
+            return JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_READONLY;
+        return JSPROP_ENUMERATE;
+    }
+
     // This is enough slots to store an object of this class. See the static
     // assertion below.
     static const size_t VALUES_PER_HEADER = 2;
@@ -329,7 +335,7 @@ class NewObjectCache;
 
 #ifdef DEBUG
 static inline bool
-IsObjectValueInCompartment(Value v, JSCompartment* comp);
+IsObjectValueInCompartment(const Value& v, JSCompartment* comp);
 #endif
 
 // Operations which change an object's dense elements can either succeed, fail,
@@ -632,6 +638,7 @@ class NativeObject : public ShapedObject
         uint32_t nslots = lastProperty()->slotSpan(getClass());
         return Min(nslots, numFixedSlots());
     }
+    uint32_t numFixedSlotsForCompilation() const;
 
     uint32_t slotSpan() const {
         if (inDictionaryMode())
@@ -720,7 +727,7 @@ class NativeObject : public ShapedObject
      * logic across the object vs. shape module wall.
      */
     static bool allocSlot(ExclusiveContext* cx, HandleNativeObject obj, uint32_t* slotp);
-    void freeSlot(uint32_t slot);
+    void freeSlot(ExclusiveContext* cx, uint32_t slot);
 
   private:
     static Shape* getChildPropertyOnDictionary(ExclusiveContext* cx, HandleNativeObject obj,
@@ -775,7 +782,8 @@ class NativeObject : public ShapedObject
     static Shape*
     addPropertyInternal(ExclusiveContext* cx, HandleNativeObject obj, HandleId id,
                         JSGetterOp getter, JSSetterOp setter, uint32_t slot, unsigned attrs,
-                        unsigned flags, ShapeTable::Entry* entry, bool allowDictionary);
+                        unsigned flags, ShapeTable::Entry* entry, bool allowDictionary,
+                        const AutoKeepShapeTables& keep);
 
     bool fillInAfterSwap(JSContext* cx, const Vector<Value>& values, void* priv);
 
@@ -863,7 +871,14 @@ class NativeObject : public ShapedObject
   protected:
     inline bool updateSlotsForSpan(ExclusiveContext* cx, size_t oldSpan, size_t newSpan);
 
-  public:
+  private:
+    void prepareElementRangeForOverwrite(size_t start, size_t end) {
+        MOZ_ASSERT(end <= getDenseInitializedLength());
+        MOZ_ASSERT(!denseElementsAreCopyOnWrite());
+        for (size_t i = start; i < end; i++)
+            elements_[i].HeapSlot::~HeapSlot();
+    }
+
     /*
      * Trigger the write barrier on a range of slots that will no longer be
      * reachable.
@@ -873,13 +888,7 @@ class NativeObject : public ShapedObject
             getSlotAddressUnchecked(i)->HeapSlot::~HeapSlot();
     }
 
-    void prepareElementRangeForOverwrite(size_t start, size_t end) {
-        MOZ_ASSERT(end <= getDenseInitializedLength());
-        MOZ_ASSERT(!denseElementsAreCopyOnWrite());
-        for (size_t i = start; i < end; i++)
-            elements_[i].HeapSlot::~HeapSlot();
-    }
-
+  public:
     static bool rollbackProperties(ExclusiveContext* cx, HandleNativeObject obj,
                                    uint32_t slotSpan);
 
@@ -971,6 +980,7 @@ class NativeObject : public ShapedObject
     /* Accessors for elements. */
     bool ensureElements(ExclusiveContext* cx, uint32_t capacity) {
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
+        MOZ_ASSERT(!denseElementsAreFrozen());
         if (capacity > getDenseCapacity())
             return growElements(cx, capacity);
         return true;
@@ -1012,25 +1022,41 @@ class NativeObject : public ShapedObject
         }
     }
 
-  public:
-    void setDenseInitializedLength(uint32_t length) {
+    // See the comment over setDenseElementUnchecked, this applies in the same way.
+    void setDenseInitializedLengthUnchecked(uint32_t length) {
         MOZ_ASSERT(length <= getDenseCapacity());
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
         prepareElementRangeForOverwrite(length, getElementsHeader()->initializedLength);
         getElementsHeader()->initializedLength = length;
     }
 
-    inline void ensureDenseInitializedLength(ExclusiveContext* cx,
-                                             uint32_t index, uint32_t extra);
-    void setDenseElement(uint32_t index, const Value& val) {
+    // Use this function with care.  This is done to allow sparsifying frozen
+    // objects, but should only be called in a few places, and should be
+    // audited carefully!
+    void setDenseElementUnchecked(uint32_t index, const Value& val) {
         MOZ_ASSERT(index < getDenseInitializedLength());
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
         elements_[index].set(this, HeapSlot::Element, index, val);
     }
 
+  public:
+    void setDenseInitializedLength(uint32_t length) {
+        MOZ_ASSERT(!denseElementsAreFrozen());
+        setDenseInitializedLengthUnchecked(length);
+    }
+
+    inline void ensureDenseInitializedLength(ExclusiveContext* cx,
+                                             uint32_t index, uint32_t extra);
+
+    void setDenseElement(uint32_t index, const Value& val) {
+        MOZ_ASSERT(!denseElementsAreFrozen());
+        setDenseElementUnchecked(index, val);
+    }
+
     void initDenseElement(uint32_t index, const Value& val) {
         MOZ_ASSERT(index < getDenseInitializedLength());
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
+        MOZ_ASSERT(!denseElementsAreFrozen());
         elements_[index].init(this, HeapSlot::Element, index, val);
     }
 
@@ -1054,6 +1080,7 @@ class NativeObject : public ShapedObject
     void copyDenseElements(uint32_t dstStart, const Value* src, uint32_t count) {
         MOZ_ASSERT(dstStart + count <= getDenseCapacity());
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
+        MOZ_ASSERT(!denseElementsAreFrozen());
         if (JS::shadow::Zone::asShadowZone(zone())->needsIncrementalBarrier()) {
             for (uint32_t i = 0; i < count; ++i)
                 elements_[dstStart + i].set(this, HeapSlot::Element, dstStart + i, src[i]);
@@ -1066,6 +1093,7 @@ class NativeObject : public ShapedObject
     void initDenseElements(uint32_t dstStart, const Value* src, uint32_t count) {
         MOZ_ASSERT(dstStart + count <= getDenseCapacity());
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
+        MOZ_ASSERT(!denseElementsAreFrozen());
         memcpy(&elements_[dstStart], src, count * sizeof(HeapSlot));
         elementsRangeWriteBarrierPost(dstStart, count);
     }
@@ -1074,6 +1102,7 @@ class NativeObject : public ShapedObject
         MOZ_ASSERT(dstStart + count <= getDenseCapacity());
         MOZ_ASSERT(srcStart + count <= getDenseInitializedLength());
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
+        MOZ_ASSERT(!denseElementsAreFrozen());
 
         /*
          * Using memmove here would skip write barriers. Also, we need to consider
@@ -1111,6 +1140,7 @@ class NativeObject : public ShapedObject
         MOZ_ASSERT(dstStart + count <= getDenseCapacity());
         MOZ_ASSERT(srcStart + count <= getDenseCapacity());
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
+        MOZ_ASSERT(!denseElementsAreFrozen());
 
         memmove(elements_ + dstStart, elements_ + srcStart, count * sizeof(Value));
         elementsRangeWriteBarrierPost(dstStart, count);
@@ -1125,6 +1155,10 @@ class NativeObject : public ShapedObject
 
     bool denseElementsAreCopyOnWrite() {
         return getElementsHeader()->isCopyOnWrite();
+    }
+
+    bool denseElementsAreFrozen() {
+        return getElementsHeader()->isFrozen();
     }
 
     /* Packed information for this object's elements. */
@@ -1308,7 +1342,7 @@ NativeObject::privateWriteBarrierPre(void** oldval)
 
 #ifdef DEBUG
 static inline bool
-IsObjectValueInCompartment(Value v, JSCompartment* comp)
+IsObjectValueInCompartment(const Value& v, JSCompartment* comp)
 {
     if (!v.isObject())
         return true;
@@ -1330,7 +1364,7 @@ IsObjectValueInCompartment(Value v, JSCompartment* comp)
 
 extern bool
 NativeDefineProperty(ExclusiveContext* cx, HandleNativeObject obj, HandleId id,
-                     Handle<PropertyDescriptor> desc,
+                     Handle<JS::PropertyDescriptor> desc,
                      ObjectOpResult& result);
 
 extern bool
@@ -1363,7 +1397,7 @@ NativeHasProperty(JSContext* cx, HandleNativeObject obj, HandleId id, bool* foun
 
 extern bool
 NativeGetOwnPropertyDescriptor(JSContext* cx, HandleNativeObject obj, HandleId id,
-                               MutableHandle<PropertyDescriptor> desc);
+                               MutableHandle<JS::PropertyDescriptor> desc);
 
 extern bool
 NativeGetProperty(JSContext* cx, HandleNativeObject obj, HandleValue receiver, HandleId id,
@@ -1372,22 +1406,11 @@ NativeGetProperty(JSContext* cx, HandleNativeObject obj, HandleValue receiver, H
 extern bool
 NativeGetPropertyNoGC(JSContext* cx, NativeObject* obj, const Value& receiver, jsid id, Value* vp);
 
-extern bool
-NativeGetElement(JSContext* cx, HandleNativeObject obj, HandleValue receiver, uint32_t index,
-                 MutableHandleValue vp);
-
 inline bool
 NativeGetProperty(JSContext* cx, HandleNativeObject obj, HandleId id, MutableHandleValue vp)
 {
     RootedValue receiver(cx, ObjectValue(*obj));
     return NativeGetProperty(cx, obj, receiver, id, vp);
-}
-
-inline bool
-NativeGetElement(JSContext* cx, HandleNativeObject obj, uint32_t index, MutableHandleValue vp)
-{
-    RootedValue receiver(cx, ObjectValue(*obj));
-    return NativeGetElement(cx, obj, receiver, index, vp);
 }
 
 bool
@@ -1444,19 +1467,6 @@ NativeGetExistingProperty(JSContext* cx, HandleObject receiver, HandleNativeObje
 
 /* * */
 
-/*
- * If obj has an already-resolved data property for id, return true and
- * store the property value in *vp.
- */
-extern bool
-HasDataProperty(JSContext* cx, NativeObject* obj, jsid id, Value* vp);
-
-inline bool
-HasDataProperty(JSContext* cx, NativeObject* obj, PropertyName* name, Value* vp)
-{
-    return HasDataProperty(cx, obj, NameToId(name), vp);
-}
-
 extern bool
 GetPropertyForNameLookup(JSContext* cx, HandleObject obj, HandleId id, MutableHandleValue vp);
 
@@ -1474,6 +1484,9 @@ MaybeNativeObject(JSObject* obj)
 {
     return obj ? &obj->as<NativeObject>() : nullptr;
 }
+
+// Defined in NativeObject-inl.h.
+bool IsPackedArray(JSObject* obj);
 
 } // namespace js
 

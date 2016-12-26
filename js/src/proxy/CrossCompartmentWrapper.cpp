@@ -368,7 +368,7 @@ CrossCompartmentWrapper::nativeCall(JSContext* cx, IsAcceptableThis test, Native
     {
         AutoCompartment call(cx, wrapped);
         InvokeArgs dstArgs(cx);
-        if (!dstArgs.init(srcArgs.length()))
+        if (!dstArgs.init(cx, srcArgs.length()))
             return false;
 
         Value* src = srcArgs.base();
@@ -477,7 +477,7 @@ js::NukeCrossCompartmentWrapper(JSContext* cx, JSObject* wrapper)
 
     NotifyGCNukeWrapper(wrapper);
 
-    wrapper->as<ProxyObject>().nuke(&DeadObjectProxy::singleton);
+    wrapper->as<ProxyObject>().nuke();
 
     MOZ_ASSERT(IsDeadProxyObject(wrapper));
 }

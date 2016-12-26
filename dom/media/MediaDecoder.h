@@ -58,13 +58,6 @@ enum class MediaEventType : int8_t;
 class MediaDecoder : public AbstractMediaDecoder
 {
 public:
-  struct SeekResolveValue {
-    SeekResolveValue(bool aAtEnd, MediaDecoderEventVisibility aEventVisibility)
-      : mAtEnd(aAtEnd), mEventVisibility(aEventVisibility) {}
-    bool mAtEnd;
-    MediaDecoderEventVisibility mEventVisibility;
-  };
-
   // Used to register with MediaResource to receive notifications which will
   // be forwarded to MediaDecoder.
   class ResourceCallback : public MediaResourceCallback {
@@ -82,7 +75,6 @@ public:
     /* MediaResourceCallback functions */
     MediaDecoderOwner* GetMediaOwner() const override;
     void SetInfinite(bool aInfinite) override;
-    void SetMediaSeekable(bool aMediaSeekable) override;
     void NotifyNetworkError() override;
     void NotifyDecodeError() override;
     void NotifyDataArrived() override;
@@ -100,7 +92,7 @@ public:
     bool mTimerArmed = false;
   };
 
-  typedef MozPromise<SeekResolveValue, bool /* aIgnored */, /* IsExclusive = */ true> SeekPromise;
+  typedef MozPromise<bool /* aIgnored */, bool /* aIgnored */, /* IsExclusive = */ true> SeekPromise;
 
   NS_DECL_THREADSAFE_ISUPPORTS
 
@@ -184,13 +176,7 @@ public:
   virtual nsresult Play();
 
   // Notify activity of the decoder owner is changed.
-  // Based on the activity, dormant state is updated.
-  // Dormant state is a state to free all scarce media resources
-  //  (like hw video codec), did not decoding and stay dormant.
-  // It is used to share scarece media resources in system.
   virtual void NotifyOwnerActivityChanged(bool aIsVisible);
-
-  void UpdateDormantState(bool aDormantTimeout, bool aActivity);
 
   // Pause video playback.
   virtual void Pause();
@@ -258,17 +244,9 @@ protected:
   void UpdateEstimatedMediaDuration(int64_t aDuration) override;
 
 public:
-  // Set a flag indicating whether random seeking is supported
-  void SetMediaSeekable(bool aMediaSeekable);
-  // Set a flag indicating whether seeking is supported only in buffered ranges
-  void SetMediaSeekableOnlyInBufferedRanges(bool aMediaSeekableOnlyInBufferedRanges);
-
   // Returns true if this media supports random seeking. False for example with
   // chained ogg files.
   bool IsMediaSeekable();
-  // Returns true if this media supports seeking only in buffered ranges. True
-  // for example in WebMs with no cues
-  bool IsMediaSeekableOnlyInBufferedRanges();
   // Returns true if seeking is supported on a transport level (e.g. the server
   // supports range requests, we are playing a file, etc.).
   bool IsTransportSeekable();
@@ -404,7 +382,7 @@ private:
   void PlaybackEnded();
 
   void OnSeekRejected();
-  void OnSeekResolved(SeekResolveValue aVal);
+  void OnSeekResolved();
 
   void SeekingChanged()
   {
@@ -417,7 +395,7 @@ private:
   // Seeking has started. Inform the element on the main thread.
   void SeekingStarted();
 
-  void UpdateLogicalPositionInternal(MediaDecoderEventVisibility aEventVisibility);
+  void UpdateLogicalPositionInternal();
   void UpdateLogicalPosition()
   {
     MOZ_ASSERT(NS_IsMainThread());
@@ -426,7 +404,7 @@ private:
     if (mPlayState == PLAY_STATE_PAUSED || IsSeeking()) {
       return;
     }
-    UpdateLogicalPositionInternal(MediaDecoderEventVisibility::Observable);
+    UpdateLogicalPositionInternal();
   }
 
   // Find the end of the cached data starting at the current decoder
@@ -455,10 +433,6 @@ private:
   static bool IsOpusEnabled();
   static bool IsWaveEnabled();
   static bool IsWebMEnabled();
-
-#ifdef MOZ_OMX_DECODER
-  static bool IsOmxEnabled();
-#endif
 
 #ifdef MOZ_ANDROID_OMX
   static bool IsAndroidMediaPluginEnabled();
@@ -510,14 +484,6 @@ protected:
 
   void SetStateMachineParameters();
 
-  static void DormantTimerExpired(nsITimer *aTimer, void *aClosure);
-
-  // Start a timer for heuristic dormant.
-  void StartDormantTimer();
-
-  // Cancel a timer for heuristic dormant.
-  void CancelDormantTimer();
-
   bool IsShutdown() const;
 
   // Called by the state machine to notify the decoder that the duration
@@ -545,9 +511,6 @@ protected:
   /******
    * The following members should be accessed with the decoder lock held.
    ******/
-
-  // Whether the decoder implementation supports dormant mode.
-  bool mDormantSupported;
 
   // The logical playback position of the media resource in units of
   // seconds. This corresponds to the "official position" in HTML5. Note that
@@ -587,6 +550,9 @@ private:
   MediaEventSource<void>*
   DataArrivedEvent() override { return &mDataArrivedEvent; }
 
+  MediaEventSource<RefPtr<layers::KnowsCompositor>>*
+  CompositorUpdatedEvent() override { return &mCompositorUpdatedEvent; }
+
   void OnPlaybackEvent(MediaEventType aEvent);
   void OnPlaybackErrorEvent(const MediaResult& aError);
 
@@ -594,7 +560,7 @@ private:
 
   void OnMediaNotSeekable()
   {
-    SetMediaSeekable(false);
+    mMediaSeekable = false;
   }
 
   void FinishShutdown();
@@ -603,6 +569,7 @@ private:
   void DisconnectMirrors();
 
   MediaEventProducer<void> mDataArrivedEvent;
+  MediaEventProducer<RefPtr<layers::KnowsCompositor>> mCompositorUpdatedEvent;
 
   // The state machine object for handling the decoding. It is safe to
   // call methods of this object from other threads. Its internal data
@@ -631,9 +598,6 @@ protected:
   void AsyncRejectSeekDOMPromiseIfExists();
   void DiscardOngoingSeekIfExists();
   virtual void CallSeek(const SeekTarget& aTarget, dom::Promise* aPromise);
-
-  // Returns true if heuristic dormant is supported.
-  bool IsHeuristicDormantSupported() const;
 
   MozPromiseRequestHolder<SeekPromise> mSeekRequest;
   RefPtr<dom::Promise> mSeekDOMPromise;
@@ -676,9 +640,6 @@ protected:
   // while seeking.
   bool mPinnedForSeek;
 
-  // True if the playback is paused because the playback rate member is 0.0.
-  bool mPausedForPlaybackRateNull;
-
   // Be assigned from media element during the initialization and pass to
   // AudioStream Class.
   dom::AudioChannel mAudioChannel;
@@ -696,6 +657,13 @@ protected:
   // True if we've already fired metadataloaded.
   bool mFiredMetadataLoaded;
 
+  // True if the media is seekable (i.e. supports random access).
+  bool mMediaSeekable = true;
+
+  // True if the media is only seekable within its buffered ranges
+  // like WebMs with no cues.
+  bool mMediaSeekableOnlyInBufferedRanges = false;
+
   // Stores media info, including info of audio tracks and video tracks, should
   // only be accessed from main thread.
   nsAutoPtr<MediaInfo> mInfo;
@@ -705,21 +673,6 @@ protected:
 
   // If true, forces the decoder to be considered hidden.
   bool mForcedHidden;
-
-  // True if MediaDecoder is in dormant state.
-  bool mIsDormant;
-
-  // True if heuristic dormant is supported.
-  const bool mIsHeuristicDormantSupported;
-
-  // Timeout ms of heuristic dormant timer.
-  const int mHeuristicDormantTimeout;
-
-  // True if MediaDecoder is in dormant by heuristic.
-  bool mIsHeuristicDormant;
-
-  // Timer to schedule updating dormant state.
-  nsCOMPtr<nsITimer> mDormantTimer;
 
   // A listener to receive metadata updates from MDSM.
   MediaEventListener mTimedMetadataListener;
@@ -810,12 +763,6 @@ protected:
   // back again.
   Canonical<int64_t> mDecoderPosition;
 
-  // True if the media is seekable (i.e. supports random access).
-  Canonical<bool> mMediaSeekable;
-
-  // True if the media is only seekable within its buffered ranges.
-  Canonical<bool> mMediaSeekableOnlyInBufferedRanges;
-
   // True if the decoder is visible.
   Canonical<bool> mIsVisible;
 
@@ -856,12 +803,6 @@ public:
   }
   AbstractCanonical<int64_t>* CanonicalDecoderPosition() {
     return &mDecoderPosition;
-  }
-  AbstractCanonical<bool>* CanonicalMediaSeekable() {
-    return &mMediaSeekable;
-  }
-  AbstractCanonical<bool>* CanonicalMediaSeekableOnlyInBufferedRanges() {
-    return &mMediaSeekableOnlyInBufferedRanges;
   }
   AbstractCanonical<bool>* CanonicalIsVisible() {
     return &mIsVisible;

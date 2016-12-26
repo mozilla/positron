@@ -9,6 +9,8 @@
 
 #include "jit/MacroAssembler.h"
 
+#include "mozilla/MathAlgorithms.h"
+
 #if defined(JS_CODEGEN_X86)
 # include "jit/x86/MacroAssembler-x86-inl.h"
 #elif defined(JS_CODEGEN_X64)
@@ -90,6 +92,13 @@ MacroAssembler::call(const wasm::CallSiteDesc& desc, uint32_t funcDefIndex)
 {
     CodeOffset l = callWithPatch();
     append(desc, l, framePushed(), funcDefIndex);
+}
+
+void
+MacroAssembler::call(const wasm::CallSiteDesc& desc, wasm::Trap trap)
+{
+    CodeOffset l = callWithPatch();
+    append(desc, l, framePushed(), trap);
 }
 
 // ===============================================================
@@ -705,6 +714,12 @@ MacroAssembler::addStackPtrTo(T t)
     addPtr(getStackPointer(), t);
 }
 
+void
+MacroAssembler::reserveStack(uint32_t amount)
+{
+    subFromStackPtr(Imm32(amount));
+    adjustFrame(amount);
+}
 #endif // !JS_CODEGEN_ARM64
 
 template <typename T>
@@ -725,7 +740,7 @@ MacroAssembler::assertStackAlignment(uint32_t alignment, int32_t offset /* = 0 *
 {
 #ifdef DEBUG
     Label ok, bad;
-    MOZ_ASSERT(IsPowerOfTwo(alignment));
+    MOZ_ASSERT(mozilla::IsPowerOfTwo(alignment));
 
     // Wrap around the offset to be a non-negative number.
     offset %= alignment;
@@ -747,6 +762,16 @@ MacroAssembler::assertStackAlignment(uint32_t alignment, int32_t offset /* = 0 *
     breakpoint();
     bind(&ok);
 #endif
+}
+
+void
+MacroAssembler::storeCallBoolResult(Register reg)
+{
+    if (reg != ReturnReg)
+        mov(ReturnReg, reg);
+    // C++ compilers like to only use the bottom byte for bools, but we
+    // need to maintain the entire register.
+    and32(Imm32(0xFF), reg);
 }
 
 void

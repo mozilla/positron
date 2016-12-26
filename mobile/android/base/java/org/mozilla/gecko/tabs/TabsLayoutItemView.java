@@ -4,19 +4,19 @@
 
 package org.mozilla.gecko.tabs;
 
-import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Tab;
 import org.mozilla.gecko.Tabs;
-import org.mozilla.gecko.util.HardwareUtils;
 import org.mozilla.gecko.widget.TabThumbnailWrapper;
+import org.mozilla.gecko.widget.TouchDelegateWithReset;
+import org.mozilla.gecko.widget.themed.ThemedRelativeLayout;
 
 import android.content.Context;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.support.v4.widget.TextViewCompat;
 import android.util.AttributeSet;
 import android.util.TypedValue;
-import android.view.TouchDelegate;
 import android.view.View;
 import android.view.ViewTreeObserver;
 import android.widget.Checkable;
@@ -115,7 +115,7 @@ public class TabsLayoutItemView extends LinearLayout
                 hitRect.left = getWidth() - targetHitArea;
                 hitRect.bottom = targetHitArea;
 
-                setTouchDelegate(new TouchDelegate(hitRect, mCloseButton));
+                setTouchDelegate(new TouchDelegateWithReset(hitRect, mCloseButton));
 
                 return true;
             }
@@ -145,12 +145,12 @@ public class TabsLayoutItemView extends LinearLayout
         mCloseButton.setTag(this);
 
         if (tab.isAudioPlaying()) {
-            mTitle.setCompoundDrawablesWithIntrinsicBounds(R.drawable.tab_audio_playing, 0, 0, 0);
+            TextViewCompat.setCompoundDrawablesRelativeWithIntrinsicBounds(mTitle, R.drawable.tab_audio_playing, 0, 0, 0);
             final String tabTitleWithAudio =
                     getResources().getString(R.string.tab_title_prefix_is_playing_audio, tabTitle);
             mTitle.setContentDescription(tabTitleWithAudio);
         } else {
-            mTitle.setCompoundDrawables(null, null, null, null);
+            TextViewCompat.setCompoundDrawablesRelative(mTitle, null, null, null, null);
             mTitle.setContentDescription(tabTitle);
         }
     }
@@ -165,5 +165,9 @@ public class TabsLayoutItemView extends LinearLayout
 
     public void setCloseVisible(boolean visible) {
         mCloseButton.setVisibility(visible ? View.VISIBLE : View.INVISIBLE);
+    }
+
+    public void setPrivateMode(boolean isPrivate) {
+        ((ThemedRelativeLayout) findViewById(R.id.wrapper)).setPrivateMode(isPrivate);
     }
 }

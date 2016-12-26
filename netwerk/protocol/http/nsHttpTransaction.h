@@ -201,6 +201,14 @@ private:
     void DisableSpdy() override;
     void ReuseConnectionOnRestartOK(bool reuseOk) override { mReuseOnRestart = reuseOk; }
 
+    // Called right after we parsed the response head.  Checks for connection based
+    // authentication schemes in reponse headers for WWW and Proxy authentication.
+    // If such is found in any of them, NS_HTTP_STICKY_CONNECTION is set in mCaps.
+    // We need the sticky flag be set early to keep the connection from very start
+    // of the authentication process.
+    void CheckForStickyAuthScheme();
+    void CheckForStickyAuthSchemeAt(nsHttpAtom const& header);
+
 private:
     class UpdateSecurityCallbacks : public Runnable
     {
@@ -277,6 +285,8 @@ private:
 
     nsHttpVersion                   mHttpVersion;
     uint16_t                        mHttpResponseCode;
+
+    uint32_t                        mCurrentHttpResponseHeaderSize;
 
     // mCapsToClear holds flags that should be cleared in mCaps, e.g. unset
     // NS_HTTP_REFRESH_DNS when DNS refresh request has completed to avoid
@@ -415,27 +425,6 @@ private:
     bool mPassedRatePacing;
     bool mSynchronousRatePaceRequest;
     nsCOMPtr<nsICancelable> mTokenBucketCancel;
-
-// These members are used for network per-app metering (bug 746073)
-// Currently, they are only available on gonk.
-    uint64_t                           mCountRecv;
-    uint64_t                           mCountSent;
-    uint32_t                           mAppId;
-    bool                               mIsInIsolatedMozBrowser;
-#ifdef MOZ_WIDGET_GONK
-    nsMainThreadPtrHandle<nsINetworkInfo> mActiveNetworkInfo;
-#endif
-    nsresult                           SaveNetworkStats(bool);
-    void                               CountRecvBytes(uint64_t recvBytes)
-    {
-        mCountRecv += recvBytes;
-        SaveNetworkStats(false);
-    }
-    void                               CountSentBytes(uint64_t sentBytes)
-    {
-        mCountSent += sentBytes;
-        SaveNetworkStats(false);
-    }
 public:
     void     SetClassOfService(uint32_t cos) { mClassOfService = cos; }
     uint32_t ClassOfService() { return mClassOfService; }

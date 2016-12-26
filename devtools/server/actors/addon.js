@@ -9,7 +9,7 @@ var Services = require("Services");
 var { ActorPool } = require("devtools/server/actors/common");
 var { TabSources } = require("./utils/TabSources");
 var makeDebugger = require("./utils/make-debugger");
-var { ConsoleAPIListener } = require("devtools/server/actors/utils/webconsole-utils");
+var { ConsoleAPIListener } = require("devtools/server/actors/utils/webconsole-listeners");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 var { assert, update } = DevToolsUtils;
 
@@ -70,7 +70,6 @@ BrowserAddonActor.prototype = {
     return this._sources;
   },
 
-
   form: function BAA_form() {
     assert(this.actorID, "addon should have an actorID.");
     if (!this._consoleActor) {
@@ -95,7 +94,7 @@ BrowserAddonActor.prototype = {
     };
   },
 
-  disconnect: function BAA_disconnect() {
+  destroy() {
     this.conn.removeActorPool(this._contextPool);
     this._contextPool = null;
     this._consoleActor = null;
@@ -140,7 +139,7 @@ BrowserAddonActor.prototype = {
       this.conn.send({ from: this.actorID, type: "tabDetached" });
     }
 
-    this.disconnect();
+    this.destroy();
   },
 
   onAttach: function BAA_onAttach() {
@@ -309,9 +308,8 @@ update(AddonConsoleActor.prototype, {
   /**
    * Destroy the current AddonConsoleActor instance.
    */
-  disconnect: function ACA_disconnect()
-  {
-    WebConsoleActor.prototype.disconnect.call(this);
+  destroy() {
+    WebConsoleActor.prototype.destroy.call(this);
     this.addon = null;
   },
 

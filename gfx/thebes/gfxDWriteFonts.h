@@ -29,6 +29,8 @@ public:
                   AntialiasOption = kAntialiasDefault);
     ~gfxDWriteFont();
 
+    static void UpdateClearTypeUsage();
+
     virtual gfxFont*
     CopyWithAntialiasOption(AntialiasOption anAAOption) override;
 
@@ -88,8 +90,6 @@ protected:
     bool GetForceGDIClassic();
 
     RefPtr<IDWriteFontFace> mFontFace;
-    RefPtr<IDWriteFont> mFont;
-    RefPtr<IDWriteFontFamily> mFontFamily;
     cairo_font_face_t *mCairoFontFace;
 
     Metrics *mMetrics;
@@ -104,6 +104,7 @@ protected:
     bool mUseSubpixelPositions;
     bool mAllowManualShowGlyphs;
     bool mAzureScaledFontIsCairo;
+    static bool mUseClearType;
 };
 
 #endif

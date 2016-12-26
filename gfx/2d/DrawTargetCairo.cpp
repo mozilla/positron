@@ -931,16 +931,18 @@ DrawTargetCairo::DrawSurfaceWithShadow(SourceSurface *aSurface,
   if (cairo_surface_get_type(sourcesurf) == CAIRO_SURFACE_TYPE_TEE) {
     blursurf = cairo_tee_surface_index(sourcesurf, 0);
     surf = cairo_tee_surface_index(sourcesurf, 1);
+  } else {
+    blursurf = sourcesurf;
+    surf = sourcesurf;
+  }
 
+  if (aSigma != 0.0f) {
     MOZ_ASSERT(cairo_surface_get_type(blursurf) == CAIRO_SURFACE_TYPE_IMAGE);
     Rect extents(0, 0, width, height);
     AlphaBoxBlur blur(extents,
                       cairo_image_surface_get_stride(blursurf),
                       aSigma, aSigma);
     blur.Blur(cairo_image_surface_get_data(blursurf));
-  } else {
-    blursurf = sourcesurf;
-    surf = sourcesurf;
   }
 
   WillChange();
@@ -951,25 +953,24 @@ DrawTargetCairo::DrawSurfaceWithShadow(SourceSurface *aSurface,
   cairo_identity_matrix(mContext);
   cairo_translate(mContext, aDest.x, aDest.y);
 
-  if (IsOperatorBoundByMask(aOperator)){
-    cairo_set_source_rgba(mContext, aColor.r, aColor.g, aColor.b, aColor.a);
-    cairo_mask_surface(mContext, blursurf, aOffset.x, aOffset.y);
+  bool needsGroup = !IsOperatorBoundByMask(aOperator);
+  if (needsGroup) {
+    cairo_push_group(mContext);
+  }
 
+  cairo_set_source_rgba(mContext, aColor.r, aColor.g, aColor.b, aColor.a);
+  cairo_mask_surface(mContext, blursurf, aOffset.x, aOffset.y);
+
+  if (blursurf != surf ||
+      aSurface->GetFormat() != SurfaceFormat::A8) {
     // Now that the shadow has been drawn, we can draw the surface on top.
     cairo_set_source_surface(mContext, surf, 0, 0);
     cairo_new_path(mContext);
     cairo_rectangle(mContext, 0, 0, width, height);
     cairo_fill(mContext);
-  } else {
-    cairo_push_group(mContext);
-      cairo_set_source_rgba(mContext, aColor.r, aColor.g, aColor.b, aColor.a);
-      cairo_mask_surface(mContext, blursurf, aOffset.x, aOffset.y);
+  }
 
-      // Now that the shadow has been drawn, we can draw the surface on top.
-      cairo_set_source_surface(mContext, surf, 0, 0);
-      cairo_new_path(mContext);
-      cairo_rectangle(mContext, 0, 0, width, height);
-      cairo_fill(mContext);
+  if (needsGroup) {
     cairo_pop_group_to_source(mContext);
     cairo_paint(mContext);
   }
@@ -1844,16 +1845,24 @@ DrawTargetCairo::CreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFo
   }
 
   cairo_surface_t* similar;
+  switch (cairo_surface_get_type(mSurface)) {
 #ifdef CAIRO_HAS_WIN32_SURFACE
-  if (cairo_surface_get_type(mSurface) == CAIRO_SURFACE_TYPE_WIN32) {
-    similar = cairo_win32_surface_create_with_dib(GfxFormatToCairoFormat(aFormat),
-                                                  aSize.width, aSize.height);
-  } else
+    case CAIRO_SURFACE_TYPE_WIN32:
+      similar = cairo_win32_surface_create_with_dib(
+        GfxFormatToCairoFormat(aFormat), aSize.width, aSize.height);
+      break;
 #endif
-  {
-    similar = cairo_surface_create_similar(mSurface,
-                                           GfxFormatToCairoContent(aFormat),
-                                           aSize.width, aSize.height);
+#ifdef CAIRO_HAS_QUARTZ_SURFACE
+    case CAIRO_SURFACE_TYPE_QUARTZ:
+      similar = cairo_quartz_surface_create_cg_layer(
+        mSurface, GfxFormatToCairoContent(aFormat), aSize.width, aSize.height);
+      break;
+#endif
+    default:
+      similar = cairo_surface_create_similar(mSurface,
+                                             GfxFormatToCairoContent(aFormat),
+                                             aSize.width, aSize.height);
+      break;
   }
 
   if (!cairo_surface_status(similar)) {
@@ -1864,6 +1873,7 @@ DrawTargetCairo::CreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFo
   }
 
   gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(aSize))) << "Failed to create similar cairo surface! Size: " << aSize << " Status: " << cairo_surface_status(similar) << cairo_surface_status(cairo_get_group_target(mContext)) << " format " << (int)aFormat;
+  cairo_surface_destroy(similar);
 
   return nullptr;
 }
@@ -1915,7 +1925,7 @@ DrawTargetCairo::CreateShadowDrawTarget(const IntSize &aSize, SurfaceFormat aFor
 
   // If we don't have a blur then we can use the RGBA mask and keep all the
   // operations in graphics memory.
-  if (aSigma == 0.0F) {
+  if (aSigma == 0.0f || aFormat == SurfaceFormat::A8) {
     RefPtr<DrawTargetCairo> target = new DrawTargetCairo();
     if (target->InitAlreadyReferenced(similar, aSize)) {
       return target.forget();

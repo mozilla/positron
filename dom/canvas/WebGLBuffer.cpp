@@ -13,20 +13,17 @@
 namespace mozilla {
 
 WebGLBuffer::WebGLBuffer(WebGLContext* webgl, GLuint buf)
-    : WebGLContextBoundObject(webgl)
+    : WebGLRefCountedObject(webgl)
     , mGLName(buf)
     , mContent(Kind::Undefined)
     , mUsage(LOCAL_GL_STATIC_DRAW)
     , mByteLength(0)
-    , mNumActiveTFOs(0)
-    , mBoundForTF(false)
 {
     mContext->mBuffers.insertBack(this);
 }
 
 WebGLBuffer::~WebGLBuffer()
 {
-    MOZ_ASSERT(!mNumActiveTFOs);
     DeleteOnce();
 }
 
@@ -103,15 +100,13 @@ WebGLBuffer::BufferData(GLenum target, size_t size, const void* data, GLenum usa
 {
     const char funcName[] = "bufferData";
 
+    // Careful: data.Length() could conceivably be any uint32_t, but GLsizeiptr
+    // is like intptr_t.
+    if (!CheckedInt<GLsizeiptr>(size).isValid())
+        return mContext->ErrorOutOfMemory("%s: bad size", funcName);
+
     if (!ValidateBufferUsageEnum(mContext, funcName, usage))
         return;
-
-    if (mNumActiveTFOs) {
-        mContext->ErrorInvalidOperation("%s: Buffer is bound to an active transform"
-                                        " feedback object.",
-                                        funcName);
-        return;
-    }
 
     const auto& gl = mContext->gl;
     gl->MakeCurrent();
@@ -151,6 +146,25 @@ WebGLBuffer::BufferData(GLenum target, size_t size, const void* data, GLenum usa
         mByteLength = 0;
         mContext->ErrorOutOfMemory("%s: Failed update index buffer cache.", funcName);
     }
+}
+
+bool
+WebGLBuffer::ValidateRange(const char* funcName, size_t byteOffset, size_t byteLen) const
+{
+    auto availLength = mByteLength;
+    if (byteOffset > availLength) {
+        mContext->ErrorInvalidValue("%s: Offset passes the end of the buffer.", funcName);
+        return false;
+    }
+    availLength -= byteOffset;
+
+    if (byteLen > availLength) {
+        mContext->ErrorInvalidValue("%s: Offset+size passes the end of the buffer.",
+                                    funcName);
+        return false;
+    }
+
+    return true;
 }
 
 ////////////////////////////////////////
@@ -196,15 +210,6 @@ WebGLBuffer::IsElementArrayUsedWithMultipleTypes() const
 bool
 WebGLBuffer::ValidateCanBindToTarget(const char* funcName, GLenum target)
 {
-    const bool wouldBeTF = (target == LOCAL_GL_TRANSFORM_FEEDBACK_BUFFER);
-    if (mWebGLRefCnt && wouldBeTF != mBoundForTF) {
-        mContext->ErrorInvalidOperation("%s: Buffers cannot be simultaneously bound to "
-                                        " transform feedback and bound elsewhere.",
-                                        funcName);
-        return false;
-    }
-    mBoundForTF = wouldBeTF;
-
     /* https://www.khronos.org/registry/webgl/specs/latest/2.0/#5.1
      *
      * In the WebGL 2 API, buffers have their WebGL buffer type

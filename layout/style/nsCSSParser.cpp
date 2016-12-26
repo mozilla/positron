@@ -41,7 +41,7 @@
 #include "nsNameSpaceManager.h"
 #include "nsXMLNameSpaceMap.h"
 #include "nsError.h"
-#include "nsIMediaList.h"
+#include "nsMediaList.h"
 #include "nsStyleUtil.h"
 #include "nsIPrincipal.h"
 #include "nsICSSUnprefixingService.h"
@@ -202,15 +202,13 @@ public:
   void ParseMediaList(const nsSubstring& aBuffer,
                       nsIURI* aURL, // for error reporting
                       uint32_t aLineNumber, // for error reporting
-                      nsMediaList* aMediaList,
-                      bool aHTMLMode);
+                      nsMediaList* aMediaList);
 
   bool ParseSourceSizeList(const nsAString& aBuffer,
                            nsIURI* aURI, // for error reporting
                            uint32_t aLineNumber, // for error reporting
                            InfallibleTArray< nsAutoPtr<nsMediaQuery> >& aQueries,
-                           InfallibleTArray<nsCSSValue>& aValues,
-                           bool aHTMLMode);
+                           InfallibleTArray<nsCSSValue>& aValues);
 
   void ParseVariable(const nsAString& aVariableName,
                      const nsAString& aPropValue,
@@ -231,6 +229,12 @@ public:
                         uint32_t aLineNumber, // for error reporting
                         nsCSSValue& aValue,
                         bool aSuppressErrors /* false */);
+
+  bool ParseMarginString(const nsSubstring& aBuffer,
+                         nsIURI* aURL, // for error reporting
+                         uint32_t aLineNumber, // for error reporting
+                         nsCSSValue& aValue,
+                         bool aSuppressErrors /* false */);
 
   nsresult ParseSelectorString(const nsSubstring& aSelectorString,
                                nsIURI* aURL, // for error reporting
@@ -1022,6 +1026,9 @@ protected:
   bool ParseAlignJustifySelf(nsCSSPropertyID aPropID);
   // parsing 'align/justify-content' from the css-align spec
   bool ParseAlignJustifyContent(nsCSSPropertyID aPropID);
+  bool ParsePlaceContent();
+  bool ParsePlaceItems();
+  bool ParsePlaceSelf();
 
   // for 'clip' and '-moz-image-region'
   bool ParseRect(nsCSSPropertyID aPropID);
@@ -1047,6 +1054,7 @@ protected:
   bool ParseOneFamily(nsAString& aFamily, bool& aOneKeyword, bool& aQuoted);
   bool ParseFamily(nsCSSValue& aValue);
   bool ParseFontFeatureSettings(nsCSSValue& aValue);
+  bool ParseFontVariationSettings(nsCSSValue& aValue);
   bool ParseFontSrc(nsCSSValue& aValue);
   bool ParseFontSrcFormat(InfallibleTArray<nsCSSValue>& values);
   bool ParseFontRanges(nsCSSValue& aValue);
@@ -1158,26 +1166,63 @@ protected:
   void AppendValue(nsCSSPropertyID aPropID, const nsCSSValue& aValue);
   bool ParseBoxProperties(const nsCSSPropertyID aPropIDs[]);
   bool ParseGroupedBoxProperty(int32_t aVariantMask,
-                               nsCSSValue& aValue);
+                               nsCSSValue& aValue,
+                               uint32_t aRestrictions);
   bool ParseBoxCornerRadius(const nsCSSPropertyID aPropID);
   bool ParseBoxCornerRadiiInternals(nsCSSValue array[]);
   bool ParseBoxCornerRadii(const nsCSSPropertyID aPropIDs[]);
 
   int32_t ParseChoice(nsCSSValue aValues[],
                       const nsCSSPropertyID aPropIDs[], int32_t aNumIDs);
+
   CSSParseResult ParseColor(nsCSSValue& aValue);
-  bool ParseNumberColorComponent(uint8_t& aComponent, char aStop);
-  bool ParsePercentageColorComponent(float& aComponent, char aStop);
-  // ParseHSLColor parses everything starting with the opening '('
-  // up through and including the aStop char.
+
+  template<typename ComponentType>
+  bool ParseRGBColor(ComponentType& aR,
+                     ComponentType& aG,
+                     ComponentType& aB,
+                     ComponentType& aA);
   bool ParseHSLColor(float& aHue, float& aSaturation, float& aLightness,
-                     char aStop);
-  // ParseColorOpacity will enforce that the color ends with a ')'
-  // after the opacity
-  bool ParseColorOpacity(uint8_t& aOpacity);
-  bool ParseColorOpacity(float& aOpacity);
+                     float& aOpacity);
+
+  // The ParseColorOpacityAndCloseParen methods below attempt to parse an
+  // optional [ separator <alpha-value> ] expression, followed by a
+  // close-parenthesis, at the end of a css color function (e.g. "rgba()" or
+  // "hsla()"). If these functions simply encounter a close-parenthesis (without
+  // any [separator <alpha-value>]), they will still succeed (i.e. return true),
+  // with outparam 'aOpacity' set to a default opacity value (fully-opaque).
+  //
+  // The range of opacity component is [0, 255], and the default opacity value
+  // is 255 (fully-opaque) for this function.
+  bool ParseColorOpacityAndCloseParen(uint8_t& aOpacity,
+                                      char aSeparator);
+  // Similar to the previous one, but the range of opacity component is
+  // [0.0f, 1.0f] and the default opacity value is 1.0f (fully-opaque).
+  bool ParseColorOpacityAndCloseParen(float& aOpacity,
+                                      char aSeparator);
+
+  // Parse a <number> color component. The range of color component is [0, 255].
+  // If |aSeparator| is provided, this function will also attempt to parse that
+  // character after parsing the color component.
+  bool ParseColorComponent(uint8_t& aComponent, Maybe<char> aSeparator);
+  // Similar to the previous one, but parse a <percentage> color component.
+  // The range of color component is [0.0f, 1.0f].
+  bool ParseColorComponent(float& aComponent, Maybe<char> aSeparator);
+
+  // Parse a <hue> component.
+  //   <hue> = <number> | <angle>
+  // The unit of outparam 'aAngle' is degree. Assume the unit to be degree if an
+  // unitless <number> is parsed.
+  bool ParseHue(float& aAngle);
+
   bool ParseEnum(nsCSSValue& aValue,
                  const KTableEntry aKeywordTable[]);
+
+  // A special ParseEnum for the CSS Box Alignment properties that have
+  // 'baseline' values.  In addition to the keywords in aKeywordTable, it also
+  // parses 'first baseline' and 'last baseline' as a single value.
+  // (aKeywordTable must contain 'baseline')
+  bool ParseAlignEnum(nsCSSValue& aValue, const KTableEntry aKeywordTable[]);
 
   // Variant parsing methods
   CSSParseResult ParseVariant(nsCSSValue& aValue,
@@ -1441,10 +1486,6 @@ protected:
   // True if viewport units should be allowed.
   bool mViewportUnitsEnabled : 1;
 
-  // True for parsing media lists for HTML attributes, where we have to
-  // ignore CSS comments.
-  bool mHTMLMediaMode : 1;
-
   // This flag is set when parsing a non-box shorthand; it's used to not apply
   // some quirks during shorthand parsing
   bool          mParsingCompoundProperty : 1;
@@ -1566,7 +1607,6 @@ CSSParserImpl::CSSParserImpl()
     mParsingMode(css::eAuthorSheetFeatures),
     mIsChrome(false),
     mViewportUnitsEnabled(true),
-    mHTMLMediaMode(false),
     mParsingCompoundProperty(false),
     mInSupportsCondition(false),
     mInFailingSupportsRule(false),
@@ -1640,7 +1680,6 @@ CSSParserImpl::InitScanner(nsCSSScanner& aScanner,
                            nsIURI* aSheetURI, nsIURI* aBaseURI,
                            nsIPrincipal* aSheetPrincipal)
 {
-  NS_PRECONDITION(!mHTMLMediaMode, "Bad initial state");
   NS_PRECONDITION(!mParsingCompoundProperty, "Bad initial state");
   NS_PRECONDITION(!mScanner, "already have scanner");
 
@@ -2071,8 +2110,8 @@ CSSParserImpl::ParseVariable(const nsAString& aVariableName,
     OUTPUT_ERROR();
   } else {
     CLEAR_ERROR();
-    aDeclaration->AddVariableDeclaration(aVariableName, variableType,
-                                         variableValue, aIsImportant, true);
+    aDeclaration->AddVariable(aVariableName, variableType,
+                              variableValue, aIsImportant, true);
     *aChanged = true;
   }
 
@@ -2085,8 +2124,7 @@ void
 CSSParserImpl::ParseMediaList(const nsSubstring& aBuffer,
                               nsIURI* aURI, // for error reporting
                               uint32_t aLineNumber, // for error reporting
-                              nsMediaList* aMediaList,
-                              bool aHTMLMode)
+                              nsMediaList* aMediaList)
 {
   // XXX Are there cases where the caller wants to keep what it already
   // has in case of parser error?  If GatherMedia ever changes to return
@@ -2098,27 +2136,12 @@ CSSParserImpl::ParseMediaList(const nsSubstring& aBuffer,
   css::ErrorReporter reporter(scanner, mSheet, mChildLoader, aURI);
   InitScanner(scanner, reporter, aURI, aURI, nullptr);
 
-  mHTMLMediaMode = aHTMLMode;
-
-    // XXXldb We need to make the scanner not skip CSS comments!  (Or
-    // should we?)
-
-  // For aHTMLMode, we used to follow the parsing rules in
-  // http://www.w3.org/TR/1999/REC-html401-19991224/types.html#type-media-descriptors
-  // which wouldn't work for media queries since they remove all but the
-  // first word.  However, they're changed in
-  // http://www.whatwg.org/specs/web-apps/current-work/multipage/section-document.html#media2
-  // (as of 2008-05-29) which says that the media attribute just points
-  // to a media query.  (The main substative difference is the relative
-  // precedence of commas and paretheses.)
-
   DebugOnly<bool> parsedOK = GatherMedia(aMediaList, false);
   NS_ASSERTION(parsedOK, "GatherMedia returned false; we probably want to avoid "
                          "trashing aMediaList");
 
   CLEAR_ERROR();
   ReleaseScanner();
-  mHTMLMediaMode = false;
 }
 
 //  <source-size-list> = <source-size>#?
@@ -2128,8 +2151,7 @@ CSSParserImpl::ParseSourceSizeList(const nsAString& aBuffer,
                                    nsIURI* aURI, // for error reporting
                                    uint32_t aLineNumber, // for error reporting
                                    InfallibleTArray< nsAutoPtr<nsMediaQuery> >& aQueries,
-                                   InfallibleTArray<nsCSSValue>& aValues,
-                                   bool aHTMLMode)
+                                   InfallibleTArray<nsCSSValue>& aValues)
 {
   aQueries.Clear();
   aValues.Clear();
@@ -2138,9 +2160,6 @@ CSSParserImpl::ParseSourceSizeList(const nsAString& aBuffer,
   nsCSSScanner scanner(aBuffer, aLineNumber);
   css::ErrorReporter reporter(scanner, mSheet, mChildLoader, aURI);
   InitScanner(scanner, reporter, aURI, aURI, nullptr);
-
-  // See ParseMediaList comment about HTML mode
-  mHTMLMediaMode = aHTMLMode;
 
   // https://html.spec.whatwg.org/multipage/embedded-content.html#parse-a-sizes-attribute
   bool hitEnd = false;
@@ -2210,7 +2229,6 @@ CSSParserImpl::ParseSourceSizeList(const nsAString& aBuffer,
 
   CLEAR_ERROR();
   ReleaseScanner();
-  mHTMLMediaMode = false;
 
   return !aQueries.IsEmpty();
 }
@@ -2240,6 +2258,32 @@ CSSParserImpl::ParseColorString(const nsSubstring& aBuffer,
 
   ReleaseScanner();
   return colorParsed;
+}
+
+bool
+CSSParserImpl::ParseMarginString(const nsSubstring& aBuffer,
+                                 nsIURI* aURI, // for error reporting
+                                 uint32_t aLineNumber, // for error reporting
+                                 nsCSSValue& aValue,
+                                 bool aSuppressErrors /* false */)
+{
+  nsCSSScanner scanner(aBuffer, aLineNumber);
+  css::ErrorReporter reporter(scanner, mSheet, mChildLoader, aURI);
+  InitScanner(scanner, reporter, aURI, aURI, nullptr);
+
+  nsAutoSuppressErrors suppressErrors(this, aSuppressErrors);
+
+  // Parse a margin, and check that there's nothing else after it.
+  bool marginParsed = ParseGroupedBoxProperty(VARIANT_LP, aValue, 0) && !GetToken(true);
+
+  if (aSuppressErrors) {
+    CLEAR_ERROR();
+  } else {
+    OUTPUT_ERROR();
+  }
+
+  ReleaseScanner();
+  return marginParsed;
 }
 
 bool
@@ -4328,11 +4372,27 @@ CSSParserImpl::ParseKeyframesRule(RuleAppendFunc aAppendFunc, void* aData)
     return false;
   }
 
-  if (mToken.mType != eCSSToken_Ident) {
+  if (mToken.mType != eCSSToken_Ident && mToken.mType != eCSSToken_String) {
     REPORT_UNEXPECTED_TOKEN(PEKeyframeBadName);
     UngetToken();
     return false;
   }
+
+  if (mToken.mType == eCSSToken_Ident) {
+    // Check for keywords that are not allowed as custom-ident for the
+    // keyframes-name: standard CSS-wide keywords, plus 'none'.
+    static const nsCSSKeyword excludedKeywords[] = {
+      eCSSKeyword_none,
+      eCSSKeyword_UNKNOWN
+    };
+    nsCSSValue value;
+    if (!ParseCustomIdent(value, mToken.mIdent, excludedKeywords)) {
+      REPORT_UNEXPECTED_TOKEN(PEKeyframeBadName);
+      UngetToken();
+      return false;
+    }
+  }
+
   nsString name(mToken.mIdent);
 
   if (!ExpectSymbol('{', true)) {
@@ -6034,7 +6094,8 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
 
   if (aSelector.IsPseudoElement()) {
     CSSPseudoElementType type = aSelector.PseudoType();
-    if (!nsCSSPseudoElements::PseudoElementSupportsUserActionState(type)) {
+    if (type >= CSSPseudoElementType::Count ||
+        !nsCSSPseudoElements::PseudoElementSupportsUserActionState(type)) {
       // We only allow user action pseudo-classes on certain pseudo-elements.
       REPORT_UNEXPECTED_TOKEN(PEPseudoSelNoUserActionPC);
       UngetToken();
@@ -6266,7 +6327,6 @@ CSSParserImpl::ParsePseudoClassWithIdentArg(nsCSSSelector& aSelector,
   // only 'ltr' and 'rtl' (case-insensitively) will match anything, any
   // other identifier is still valid.
   if (aType == CSSPseudoClassType::mozLocaleDir ||
-      aType == CSSPseudoClassType::mozDir ||
       aType == CSSPseudoClassType::dir) {
     nsContentUtils::ASCIIToLower(mToken.mIdent); // case insensitive
   }
@@ -6682,86 +6742,60 @@ CSSParserImpl::ParseColor(nsCSSValue& aValue)
         }
       }
       break;
-    case eCSSToken_Function:
-      if (mToken.mIdent.LowerCaseEqualsLiteral("rgb")) {
-        // rgb ( component , component , component )
+    case eCSSToken_Function: {
+      bool isRGB;
+      bool isHSL;
+      if ((isRGB = mToken.mIdent.LowerCaseEqualsLiteral("rgb")) ||
+          mToken.mIdent.LowerCaseEqualsLiteral("rgba")) {
+        // rgb() = rgb( <percentage>{3} [ / <alpha-value> ]? ) |
+        //         rgb( <number>{3} [ / <alpha-value> ]? ) |
+        //         rgb( <percentage>#{3} , <alpha-value>? ) |
+        //         rgb( <number>#{3} , <alpha-value>? )
+        // <alpha-value> = <number> | <percentage>
+        // rgba is an alias of rgb.
+
         if (GetToken(true)) {
           UngetToken();
         }
-        if (mToken.mType == eCSSToken_Number) {
-          uint8_t r, g, b;
-          if (ParseNumberColorComponent(r, ',') &&
-              ParseNumberColorComponent(g, ',') &&
-              ParseNumberColorComponent(b, ')')) {
-            aValue.SetIntegerColorValue(NS_RGB(r, g, b), eCSSUnit_RGBColor);
-            return CSSParseResult::Ok;
-          }
-        } else {
-          float r, g, b;
-          if (ParsePercentageColorComponent(r, ',') &&
-              ParsePercentageColorComponent(g, ',') &&
-              ParsePercentageColorComponent(b, ')')) {
-            aValue.SetFloatColorValue(r, g, b, 1.0f,
-                                      eCSSUnit_PercentageRGBColor);
-            return CSSParseResult::Ok;
-          }
-        }
-        SkipUntil(')');
-        return CSSParseResult::Error;
-      }
-      else if (mToken.mIdent.LowerCaseEqualsLiteral("rgba")) {
-        // rgba ( component , component , component , opacity )
-        if (GetToken(true)) {
-          UngetToken();
-        }
-        if (mToken.mType == eCSSToken_Number) {
+        if (mToken.mType == eCSSToken_Number) { // <number>
           uint8_t r, g, b, a;
-          if (ParseNumberColorComponent(r, ',') &&
-              ParseNumberColorComponent(g, ',') &&
-              ParseNumberColorComponent(b, ',') &&
-              ParseColorOpacity(a)) {
+
+          if (ParseRGBColor(r, g, b, a)) {
             aValue.SetIntegerColorValue(NS_RGBA(r, g, b, a),
-                                        eCSSUnit_RGBAColor);
+                isRGB ? eCSSUnit_RGBColor : eCSSUnit_RGBAColor);
             return CSSParseResult::Ok;
           }
-        } else {
+        } else {  // <percentage>
           float r, g, b, a;
-          if (ParsePercentageColorComponent(r, ',') &&
-              ParsePercentageColorComponent(g, ',') &&
-              ParsePercentageColorComponent(b, ',') &&
-              ParseColorOpacity(a)) {
-            aValue.SetFloatColorValue(r, g, b, a, eCSSUnit_PercentageRGBAColor);
+
+          if (ParseRGBColor(r, g, b, a)) {
+            aValue.SetFloatColorValue(r, g, b, a,
+                isRGB ? eCSSUnit_PercentageRGBColor : eCSSUnit_PercentageRGBAColor);
             return CSSParseResult::Ok;
           }
         }
         SkipUntil(')');
         return CSSParseResult::Error;
       }
-      else if (mToken.mIdent.LowerCaseEqualsLiteral("hsl")) {
-        // hsl ( hue , saturation , lightness )
-        // "hue" is a number, "saturation" and "lightness" are percentages.
-        float h, s, l;
-        if (ParseHSLColor(h, s, l, ')')) {
-          aValue.SetFloatColorValue(h, s, l, 1.0f, eCSSUnit_HSLColor);
-          return CSSParseResult::Ok;
-        }
-        SkipUntil(')');
-        return CSSParseResult::Error;
-      }
-      else if (mToken.mIdent.LowerCaseEqualsLiteral("hsla")) {
-        // hsla ( hue , saturation , lightness , opacity )
-        // "hue" is a number, "saturation" and "lightness" are percentages,
-        // "opacity" is a number.
+      else if ((isHSL = mToken.mIdent.LowerCaseEqualsLiteral("hsl")) ||
+               mToken.mIdent.LowerCaseEqualsLiteral("hsla")) {
+        // hsl() = hsl( <hue> <percentage> <percentage> [ / <alpha-value> ]? ) ||
+        //         hsl( <hue>, <percentage>, <percentage>, <alpha-value>? )
+        // <hue> = <number> | <angle>
+        // hsla is an alias of hsl.
+
         float h, s, l, a;
-        if (ParseHSLColor(h, s, l, ',') &&
-            ParseColorOpacity(a)) {
-          aValue.SetFloatColorValue(h, s, l, a, eCSSUnit_HSLAColor);
+
+        if (ParseHSLColor(h, s, l, a)) {
+          aValue.SetFloatColorValue(h, s, l, a,
+              isHSL ? eCSSUnit_HSLColor : eCSSUnit_HSLAColor);
           return CSSParseResult::Ok;
         }
         SkipUntil(')');
         return CSSParseResult::Error;
       }
       break;
+    }
     default:
       break;
   }
@@ -6823,141 +6857,141 @@ CSSParserImpl::ParseColor(nsCSSValue& aValue)
 }
 
 bool
-CSSParserImpl::ParseNumberColorComponent(uint8_t& aComponent, char aStop)
+CSSParserImpl::ParseColorComponent(uint8_t& aComponent, Maybe<char> aSeparator)
 {
   if (!GetToken(true)) {
     REPORT_UNEXPECTED_EOF(PEColorComponentEOF);
     return false;
   }
 
-  if (mToken.mType != eCSSToken_Number || !mToken.mIntegerValid) {
-    REPORT_UNEXPECTED_TOKEN(PEExpectedInt);
-    UngetToken();
-    return false;
-  }
-
-  float value = mToken.mNumber;
-  if (value < 0.0f) value = 0.0f;
-  if (value > 255.0f) value = 255.0f;
-
-  if (ExpectSymbol(aStop, true)) {
-    aComponent = NSToIntRound(value);
-    return true;
-  }
-  REPORT_UNEXPECTED_TOKEN_CHAR(PEColorComponentBadTerm, aStop);
-  return false;
-}
-
-bool
-CSSParserImpl::ParsePercentageColorComponent(float& aComponent, char aStop)
-{
-  if (!GetToken(true)) {
-    REPORT_UNEXPECTED_EOF(PEColorComponentEOF);
-    return false;
-  }
-
-  if (mToken.mType != eCSSToken_Percentage) {
-    REPORT_UNEXPECTED_TOKEN(PEExpectedPercent);
-    UngetToken();
-    return false;
-  }
-
-  float value = mToken.mNumber;
-  if (value < 0.0f) value = 0.0f;
-  if (value > 1.0f) value = 1.0f;
-
-  if (ExpectSymbol(aStop, true)) {
-    aComponent = value;
-    return true;
-  }
-  REPORT_UNEXPECTED_TOKEN_CHAR(PEColorComponentBadTerm, aStop);
-  return false;
-}
-
-
-bool
-CSSParserImpl::ParseHSLColor(float& aHue, float& aSaturation, float& aLightness,
-                             char aStop)
-{
-  float h, s, l;
-
-  // Get the hue
-  if (!GetToken(true)) {
-    REPORT_UNEXPECTED_EOF(PEColorHueEOF);
-    return false;
-  }
   if (mToken.mType != eCSSToken_Number) {
     REPORT_UNEXPECTED_TOKEN(PEExpectedNumber);
     UngetToken();
     return false;
   }
-  h = mToken.mNumber;
-  h /= 360.0f;
-  // hue values are wraparound
-  h = h - floor(h);
 
-  if (!ExpectSymbol(',', true)) {
-    REPORT_UNEXPECTED_TOKEN(PEExpectedComma);
+  float value = mToken.mNumber;
+
+  if (aSeparator && !ExpectSymbol(*aSeparator, true)) {
+    REPORT_UNEXPECTED_TOKEN_CHAR(PEColorComponentBadTerm, *aSeparator);
     return false;
   }
 
-  // Get the saturation
+  if (value < 0.0f) value = 0.0f;
+  if (value > 255.0f) value = 255.0f;
+
+  aComponent = NSToIntRound(value);
+  return true;
+}
+
+bool
+CSSParserImpl::ParseColorComponent(float& aComponent, Maybe<char> aSeparator)
+{
   if (!GetToken(true)) {
-    REPORT_UNEXPECTED_EOF(PEColorSaturationEOF);
+    REPORT_UNEXPECTED_EOF(PEColorComponentEOF);
     return false;
   }
+
   if (mToken.mType != eCSSToken_Percentage) {
     REPORT_UNEXPECTED_TOKEN(PEExpectedPercent);
     UngetToken();
     return false;
   }
-  s = mToken.mNumber;
-  if (s < 0.0f) s = 0.0f;
-  if (s > 1.0f) s = 1.0f;
 
-  if (!ExpectSymbol(',', true)) {
-    REPORT_UNEXPECTED_TOKEN(PEExpectedComma);
+  float value = mToken.mNumber;
+
+  if (aSeparator && !ExpectSymbol(*aSeparator, true)) {
+    REPORT_UNEXPECTED_TOKEN_CHAR(PEColorComponentBadTerm, *aSeparator);
     return false;
   }
 
-  // Get the lightness
+  if (value < 0.0f) value = 0.0f;
+  if (value > 1.0f) value = 1.0f;
+
+  aComponent = value;
+  return true;
+}
+
+bool
+CSSParserImpl::ParseHue(float& aAngle)
+{
   if (!GetToken(true)) {
-    REPORT_UNEXPECTED_EOF(PEColorLightnessEOF);
+    REPORT_UNEXPECTED_EOF(PEColorHueEOF);
     return false;
   }
-  if (mToken.mType != eCSSToken_Percentage) {
-    REPORT_UNEXPECTED_TOKEN(PEExpectedPercent);
-    UngetToken();
-    return false;
-  }
-  l = mToken.mNumber;
-  if (l < 0.0f) l = 0.0f;
-  if (l > 1.0f) l = 1.0f;
 
-  if (ExpectSymbol(aStop, true)) {
-    aHue = h;
-    aSaturation = s;
-    aLightness = l;
+  // <number>
+  if (mToken.mType == eCSSToken_Number) {
+    aAngle = mToken.mNumber;
+    return true;
+  }
+  UngetToken();
+
+  // <angle>
+  nsCSSValue angleValue;
+  // The '0' value is handled by <number> parsing, so use VARIANT_ANGLE flag
+  // instead of VARIANT_ANGLE_OR_ZERO.
+  if (ParseSingleTokenVariant(angleValue, VARIANT_ANGLE, nullptr)) {
+    aAngle = angleValue.GetAngleValueInDegrees();
     return true;
   }
 
-  REPORT_UNEXPECTED_TOKEN_CHAR(PEColorComponentBadTerm, aStop);
+  REPORT_UNEXPECTED_TOKEN(PEExpectedNumberOrAngle);
+  return false;
+}
+
+bool
+CSSParserImpl::ParseHSLColor(float& aHue, float& aSaturation, float& aLightness,
+                             float& aOpacity)
+{
+  // comma-less expression:
+  // hsl() = hsl( <hue> <saturation> <lightness> [ / <alpha-value> ]? )
+  // the expression with comma:
+  // hsl() = hsl( <hue>, <saturation>, <lightness>, <alpha-value>? )
+
+  const char commaSeparator = ',';
+
+  // Parse hue.
+  // <hue> = <number> | <angle>
+  float degreeAngle;
+  if (!ParseHue(degreeAngle)) {
+    return false;
+  }
+  aHue = degreeAngle / 360.0f;
+  // hue values are wraparound
+  aHue = aHue - floor(aHue);
+  // Look for a comma separator after "hue" component to determine if the
+  // expression is comma-less or not.
+  bool hasComma = ExpectSymbol(commaSeparator, true);
+
+  // Parse saturation, lightness and opacity.
+  // The saturation and lightness are <percentage>, so reuse the float version
+  // of ParseColorComponent function for them. No need to check the separator
+  // after 'lightness'. It will be checked in opacity value parsing.
+  const char separatorBeforeAlpha = hasComma ? commaSeparator : '/';
+  if (ParseColorComponent(aSaturation, hasComma ? Some(commaSeparator) : Nothing()) &&
+      ParseColorComponent(aLightness, Nothing()) &&
+      ParseColorOpacityAndCloseParen(aOpacity, separatorBeforeAlpha)) {
+    return true;
+  }
+
   return false;
 }
 
 
 bool
-CSSParserImpl::ParseColorOpacity(uint8_t& aOpacity)
+CSSParserImpl::ParseColorOpacityAndCloseParen(uint8_t& aOpacity,
+                                              char aSeparator)
 {
   float floatOpacity;
-  if (!ParseColorOpacity(floatOpacity)) {
+  if (!ParseColorOpacityAndCloseParen(floatOpacity, aSeparator)) {
     return false;
   }
 
   uint8_t value = nsStyleUtil::FloatToColorComponent(floatOpacity);
   // Need to compare to something slightly larger
   // than 0.5 due to floating point inaccuracies.
-  NS_ASSERTION(fabs(255.0f*mToken.mNumber - value) <= 0.51f,
+  NS_ASSERTION(fabs(255.0f * floatOpacity - value) <= 0.51f,
                "FloatToColorComponent did something weird");
 
   aOpacity = value;
@@ -6965,15 +6999,29 @@ CSSParserImpl::ParseColorOpacity(uint8_t& aOpacity)
 }
 
 bool
-CSSParserImpl::ParseColorOpacity(float& aOpacity)
+CSSParserImpl::ParseColorOpacityAndCloseParen(float& aOpacity,
+                                              char aSeparator)
 {
+  if (ExpectSymbol(')', true)) {
+    // The optional [separator <alpha-value>] was omitted, so set the opacity
+    // to a fully-opaque value '1.0f' and return success.
+    aOpacity = 1.0f;
+    return true;
+  }
+
+  if (!ExpectSymbol(aSeparator, true)) {
+    REPORT_UNEXPECTED_TOKEN_CHAR(PEColorComponentBadTerm, aSeparator);
+    return false;
+  }
+
   if (!GetToken(true)) {
     REPORT_UNEXPECTED_EOF(PEColorOpacityEOF);
     return false;
   }
 
-  if (mToken.mType != eCSSToken_Number) {
-    REPORT_UNEXPECTED_TOKEN(PEExpectedNumber);
+  // eCSSToken_Number or eCSSToken_Percentage.
+  if (mToken.mType != eCSSToken_Number && mToken.mType != eCSSToken_Percentage) {
+    REPORT_UNEXPECTED_TOKEN(PEExpectedNumberOrPercent);
     UngetToken();
     return false;
   }
@@ -6991,6 +7039,41 @@ CSSParserImpl::ParseColorOpacity(float& aOpacity)
 
   aOpacity = mToken.mNumber;
   return true;
+}
+
+template<typename ComponentType>
+bool
+CSSParserImpl::ParseRGBColor(ComponentType& aR,
+                             ComponentType& aG,
+                             ComponentType& aB,
+                             ComponentType& aA)
+{
+  // comma-less expression:
+  // rgb() = rgb( component{3} [ / <alpha-value> ]? )
+  // the expression with comma:
+  // rgb() = rgb( component#{3} , <alpha-value>? )
+
+  const char commaSeparator = ',';
+
+  // Parse R.
+  if (!ParseColorComponent(aR, Nothing())) {
+    return false;
+  }
+  // Look for a comma separator after "r" component to determine if the
+  // expression is comma-less or not.
+  bool hasComma = ExpectSymbol(commaSeparator, true);
+
+  // Parse G, B and A.
+  // No need to check the separator after 'B'. It will be checked in 'A' value
+  // parsing.
+  const char separatorBeforeAlpha = hasComma ? commaSeparator : '/';
+  if (ParseColorComponent(aG, hasComma ? Some(commaSeparator) : Nothing()) &&
+      ParseColorComponent(aB, Nothing()) &&
+      ParseColorOpacityAndCloseParen(aA, separatorBeforeAlpha)) {
+    return true;
+  }
+
+  return false;
 }
 
 #ifdef MOZ_XUL
@@ -7406,8 +7489,8 @@ CSSParserImpl::ParseDeclaration(css::Declaration* aDeclaration,
                          CSS_CUSTOM_NAME_PREFIX_LENGTH).EqualsLiteral("--"));
     // remove '--'
     nsDependentString varName(propertyName, CSS_CUSTOM_NAME_PREFIX_LENGTH);
-    aDeclaration->AddVariableDeclaration(varName, variableType, variableValue,
-                                         status == ePriority_Important, false);
+    aDeclaration->AddVariable(varName, variableType, variableValue,
+                              status == ePriority_Important, false);
   } else {
     *aChanged |= mData.TransferFromBlock(mTempData, propID, EnabledState(),
                                          status == ePriority_Important,
@@ -7486,6 +7569,44 @@ CSSParserImpl::ParseEnum(nsCSSValue& aValue,
   return false;
 }
 
+bool
+CSSParserImpl::ParseAlignEnum(nsCSSValue& aValue,
+                              const KTableEntry aKeywordTable[])
+{
+  MOZ_ASSERT(nsCSSProps::ValueToKeywordEnum(NS_STYLE_ALIGN_BASELINE,
+                                            aKeywordTable) !=
+               eCSSKeyword_UNKNOWN,
+             "Please use ParseEnum instead");
+  nsSubstring* ident = NextIdent();
+  if (!ident) {
+    return false;
+  }
+  nsCSSKeyword baselinePrefix = eCSSKeyword_first;
+  nsCSSKeyword keyword = nsCSSKeywords::LookupKeyword(*ident);
+  if (keyword == eCSSKeyword_first || keyword == eCSSKeyword_last) {
+    baselinePrefix = keyword;
+    ident = NextIdent();
+    if (!ident) {
+      return false;
+    }
+    keyword = nsCSSKeywords::LookupKeyword(*ident);
+  }
+  if (eCSSKeyword_UNKNOWN < keyword) {
+    int32_t value;
+    if (nsCSSProps::FindKeyword(keyword, aKeywordTable, value)) {
+      if (baselinePrefix == eCSSKeyword_last &&
+          keyword == eCSSKeyword_baseline) {
+        value = NS_STYLE_ALIGN_LAST_BASELINE;
+      }
+      aValue.SetIntValue(value, eCSSUnit_Enumerated);
+      return true;
+    }
+  }
+
+  // Put the unknown identifier back and return
+  UngetToken();
+  return false;
+}
 
 struct UnitInfo {
   char name[6];  // needs to be long enough for the longest unit, with
@@ -8017,10 +8138,14 @@ CSSParserImpl::ParseVariant(nsCSSValue& aValue,
   }
   if ((aVariantMask & VARIANT_CALC) &&
       IsCSSTokenCalcFunction(*tk)) {
-    // calc() currently allows only lengths and percents and number inside it.
-    // And note that in current implementation, number cannot be mixed with
-    // length and percent.
-    if (!ParseCalc(aValue, aVariantMask & VARIANT_LPN)) {
+    // calc() currently allows only lengths, percents, numbers, and integers.
+    //
+    // Note that VARIANT_NUMBER can be mixed with VARIANT_LENGTH and
+    // VARIANT_PERCENTAGE in the list of allowed types (numbers can be used as
+    // coefficients).
+    // However, the the resulting type is not a mixed type with number.
+    // VARIANT_INTEGER can't be mixed with anything else.
+    if (!ParseCalc(aValue, aVariantMask & (VARIANT_LPN | VARIANT_INTEGER))) {
       return CSSParseResult::Error;
     }
     return CSSParseResult::Ok;
@@ -8760,8 +8885,18 @@ CSSParserImpl::ParseGridTrackSize(nsCSSValue& aValue,
       !aValue.IsLengthPercentCalcUnit()) {
     result = CSSParseResult::Error;
   }
-  if (result == CSSParseResult::Ok ||
-      result == CSSParseResult::Error) {
+  if (result == CSSParseResult::Error) {
+    return result;
+  }
+  if (result == CSSParseResult::Ok) {
+    if (aValue.GetUnit() == eCSSUnit_FlexFraction) {
+      // Single value <flex> is represented internally as minmax(auto, <flex>).
+      nsCSSValue minmax;
+      nsCSSValue::Array* func = minmax.InitFunction(eCSSKeyword_minmax, 2);
+      func->Item(1).SetAutoValue();
+      func->Item(2) = aValue;
+      aValue = minmax;
+    }
     return result;
   }
 
@@ -8797,7 +8932,7 @@ CSSParserImpl::ParseGridTrackSize(nsCSSValue& aValue,
         !func->Item(2).IsLengthPercentCalcUnit()) {
       return CSSParseResult::Error;
     }
-    // Reject 'fr' min-sizing.
+    // Reject <flex> min-sizing.
     if (func->Item(1).GetUnit() == eCSSUnit_FlexFraction) {
       return CSSParseResult::Error;
     }
@@ -9962,7 +10097,7 @@ CSSParserImpl::ParseJustifyItems()
       value.SetIntValue(value.GetIntValue() | legacy.GetIntValue(),
                         eCSSUnit_Enumerated);
     } else {
-      if (!ParseEnum(value, nsCSSProps::kAlignAutoNormalStretchBaseline)) {
+      if (!ParseAlignEnum(value, nsCSSProps::kAlignAutoNormalStretchBaseline)) {
         if (!ParseAlignJustifyPosition(value, nsCSSProps::kAlignSelfPosition) ||
             value.GetUnit() == eCSSUnit_Null) {
           return false;
@@ -9991,7 +10126,7 @@ CSSParserImpl::ParseAlignItems()
 {
   nsCSSValue value;
   if (!ParseSingleTokenVariant(value, VARIANT_INHERIT, nullptr)) {
-    if (!ParseEnum(value, nsCSSProps::kAlignNormalStretchBaseline)) {
+    if (!ParseAlignEnum(value, nsCSSProps::kAlignNormalStretchBaseline)) {
       if (!ParseAlignJustifyPosition(value, nsCSSProps::kAlignSelfPosition) ||
           value.GetUnit() == eCSSUnit_Null) {
         return false;
@@ -10009,7 +10144,7 @@ CSSParserImpl::ParseAlignJustifySelf(nsCSSPropertyID aPropID)
 {
   nsCSSValue value;
   if (!ParseSingleTokenVariant(value, VARIANT_INHERIT, nullptr)) {
-    if (!ParseEnum(value, nsCSSProps::kAlignAutoNormalStretchBaseline)) {
+    if (!ParseAlignEnum(value, nsCSSProps::kAlignAutoNormalStretchBaseline)) {
       if (!ParseAlignJustifyPosition(value, nsCSSProps::kAlignSelfPosition) ||
           value.GetUnit() == eCSSUnit_Null) {
         return false;
@@ -10028,7 +10163,7 @@ CSSParserImpl::ParseAlignJustifyContent(nsCSSPropertyID aPropID)
 {
   nsCSSValue value;
   if (!ParseSingleTokenVariant(value, VARIANT_INHERIT, nullptr)) {
-    if (!ParseEnum(value, nsCSSProps::kAlignNormalBaseline)) {
+    if (!ParseAlignEnum(value, nsCSSProps::kAlignNormalBaseline)) {
       nsCSSValue fallbackValue;
       if (!ParseEnum(value, nsCSSProps::kAlignContentDistribution)) {
         if (!ParseAlignJustifyPosition(fallbackValue,
@@ -10058,6 +10193,87 @@ CSSParserImpl::ParseAlignJustifyContent(nsCSSPropertyID aPropID)
     }
   }
   AppendValue(aPropID, value);
+  return true;
+}
+
+// place-content: [ normal | <baseline-position> | <content-distribution> |
+//                  <content-position> ]{1,2}
+bool
+CSSParserImpl::ParsePlaceContent()
+{
+  nsCSSValue first;
+  if (ParseSingleTokenVariant(first, VARIANT_INHERIT, nullptr)) {
+    AppendValue(eCSSProperty_align_content, first);
+    AppendValue(eCSSProperty_justify_content, first);
+    return true;
+  }
+  if (!ParseAlignEnum(first, nsCSSProps::kAlignNormalBaseline) &&
+      !ParseEnum(first, nsCSSProps::kAlignContentDistribution) &&
+      !ParseEnum(first, nsCSSProps::kAlignContentPosition)) {
+    return false;
+  }
+  AppendValue(eCSSProperty_align_content, first);
+  nsCSSValue second;
+  if (!ParseAlignEnum(second, nsCSSProps::kAlignNormalBaseline) &&
+      !ParseEnum(second, nsCSSProps::kAlignContentDistribution) &&
+      !ParseEnum(second, nsCSSProps::kAlignContentPosition)) {
+    AppendValue(eCSSProperty_justify_content, first);
+  } else {
+    AppendValue(eCSSProperty_justify_content, second);
+  }
+  return true;
+}
+
+// place-items:  <x> [ auto | <x> ]?
+// <x> = [ normal | stretch | <baseline-position> | <self-position> ]
+bool
+CSSParserImpl::ParsePlaceItems()
+{
+  nsCSSValue first;
+  if (ParseSingleTokenVariant(first, VARIANT_INHERIT, nullptr)) {
+    AppendValue(eCSSProperty_align_items, first);
+    AppendValue(eCSSProperty_justify_items, first);
+    return true;
+  }
+  if (!ParseAlignEnum(first, nsCSSProps::kAlignNormalStretchBaseline) &&
+      !ParseEnum(first, nsCSSProps::kAlignSelfPosition)) {
+    return false;
+  }
+  AppendValue(eCSSProperty_align_items, first);
+  nsCSSValue second;
+  // Note: 'auto' is valid for justify-items, but not align-items.
+  if (!ParseAlignEnum(second, nsCSSProps::kAlignAutoNormalStretchBaseline) &&
+      !ParseEnum(second, nsCSSProps::kAlignSelfPosition)) {
+    AppendValue(eCSSProperty_justify_items, first);
+  } else {
+    AppendValue(eCSSProperty_justify_items, second);
+  }
+  return true;
+}
+
+// place-self: [ auto | normal | stretch | <baseline-position> |
+//               <self-position> ]{1,2}
+bool
+CSSParserImpl::ParsePlaceSelf()
+{
+  nsCSSValue first;
+  if (ParseSingleTokenVariant(first, VARIANT_INHERIT, nullptr)) {
+    AppendValue(eCSSProperty_align_self, first);
+    AppendValue(eCSSProperty_justify_self, first);
+    return true;
+  }
+  if (!ParseAlignEnum(first, nsCSSProps::kAlignAutoNormalStretchBaseline) &&
+      !ParseEnum(first, nsCSSProps::kAlignSelfPosition)) {
+    return false;
+  }
+  AppendValue(eCSSProperty_align_self, first);
+  nsCSSValue second;
+  if (!ParseAlignEnum(second, nsCSSProps::kAlignAutoNormalStretchBaseline) &&
+      !ParseEnum(second, nsCSSProps::kAlignSelfPosition)) {
+    AppendValue(eCSSProperty_justify_self, first);
+  } else {
+    AppendValue(eCSSProperty_justify_self, second);
+  }
   return true;
 }
 
@@ -11131,10 +11347,11 @@ CSSParserImpl::ParseBoxProperties(const nsCSSPropertyID aPropIDs[])
 }
 
 // Similar to ParseBoxProperties, except there is only one property
-// with the result as its value, not four. Requires values be nonnegative.
+// with the result as its value, not four.
 bool
 CSSParserImpl::ParseGroupedBoxProperty(int32_t aVariantMask,
-                                       /** outparam */ nsCSSValue& aValue)
+                                       /** outparam */ nsCSSValue& aValue,
+                                       uint32_t aRestrictions)
 {
   nsCSSRect& result = aValue.SetRectValue();
 
@@ -11143,7 +11360,7 @@ CSSParserImpl::ParseGroupedBoxProperty(int32_t aVariantMask,
     CSSParseResult parseResult =
       ParseVariantWithRestrictions(result.*(nsCSSRect::sides[index]),
                                    aVariantMask, nullptr,
-                                   CSS_PROPERTY_VALUE_NONNEGATIVE);
+                                   aRestrictions);
     if (parseResult == CSSParseResult::NotFound) {
       break;
     }
@@ -11336,10 +11553,10 @@ static const nsCSSPropertyID kBorderRadiusIDs[] = {
   eCSSProperty_border_bottom_left_radius
 };
 static const nsCSSPropertyID kOutlineRadiusIDs[] = {
-  eCSSProperty__moz_outline_radius_topLeft,
-  eCSSProperty__moz_outline_radius_topRight,
-  eCSSProperty__moz_outline_radius_bottomRight,
-  eCSSProperty__moz_outline_radius_bottomLeft
+  eCSSProperty__moz_outline_radius_topleft,
+  eCSSProperty__moz_outline_radius_topright,
+  eCSSProperty__moz_outline_radius_bottomright,
+  eCSSProperty__moz_outline_radius_bottomleft
 };
 
 void
@@ -11576,6 +11793,12 @@ bool
 CSSParserImpl::ParsePropertyByFunction(nsCSSPropertyID aPropID)
 {
   switch (aPropID) {  // handle shorthand or multiple properties
+  case eCSSProperty_place_content:
+    return ParsePlaceContent();
+  case eCSSProperty_place_items:
+    return ParsePlaceItems();
+  case eCSSProperty_place_self:
+    return ParsePlaceSelf();
   case eCSSProperty_background:
     return ParseImageLayers(nsStyleImageLayers::kBackgroundLayerTable);
   case eCSSProperty_background_repeat:
@@ -11612,10 +11835,10 @@ CSSParserImpl::ParsePropertyByFunction(nsCSSPropertyID aPropID)
     return ParseBorderSide(kBorderRightIDs, false);
   case eCSSProperty_border_top:
     return ParseBorderSide(kBorderTopIDs, false);
-  case eCSSProperty_border_bottom_colors:
-  case eCSSProperty_border_left_colors:
-  case eCSSProperty_border_right_colors:
-  case eCSSProperty_border_top_colors:
+  case eCSSProperty__moz_border_bottom_colors:
+  case eCSSProperty__moz_border_left_colors:
+  case eCSSProperty__moz_border_right_colors:
+  case eCSSProperty__moz_border_top_colors:
     return ParseBorderColors(aPropID);
   case eCSSProperty_border_image_slice:
     return ParseBorderImageSlice(true, nullptr);
@@ -11638,10 +11861,10 @@ CSSParserImpl::ParsePropertyByFunction(nsCSSPropertyID aPropID)
   case eCSSProperty_border_top_right_radius:
   case eCSSProperty_border_bottom_right_radius:
   case eCSSProperty_border_bottom_left_radius:
-  case eCSSProperty__moz_outline_radius_topLeft:
-  case eCSSProperty__moz_outline_radius_topRight:
-  case eCSSProperty__moz_outline_radius_bottomRight:
-  case eCSSProperty__moz_outline_radius_bottomLeft:
+  case eCSSProperty__moz_outline_radius_topleft:
+  case eCSSProperty__moz_outline_radius_topright:
+  case eCSSProperty__moz_outline_radius_bottomright:
+  case eCSSProperty__moz_outline_radius_bottomleft:
     return ParseBoxCornerRadius(aPropID);
 
   case eCSSProperty_box_shadow:
@@ -11700,8 +11923,8 @@ CSSParserImpl::ParsePropertyByFunction(nsCSSPropertyID aPropID)
     return ParseGridArea();
   case eCSSProperty_grid_gap:
     return ParseGridGap();
-  case eCSSProperty_image_region:
-    return ParseRect(eCSSProperty_image_region);
+  case eCSSProperty__moz_image_region:
+    return ParseRect(eCSSProperty__moz_image_region);
   case eCSSProperty_align_content:
   case eCSSProperty_justify_content:
     return ParseAlignJustifyContent(aPropID);
@@ -11848,6 +12071,8 @@ CSSParserImpl::ParseSingleValuePropertyByFunction(nsCSSValue& aValue,
       return ParseFontVariantNumeric(aValue);
     case eCSSProperty_font_feature_settings:
       return ParseFontFeatureSettings(aValue);
+    case eCSSProperty_font_variation_settings:
+      return ParseFontVariationSettings(aValue);
     case eCSSProperty_font_weight:
       return ParseFontWeight(aValue);
     case eCSSProperty_image_orientation:
@@ -12178,7 +12403,7 @@ CSSParserImpl::ParseImageLayersItem(
   aState.mImage->mValue.SetNoneValue();
   aState.mAttachment->mValue.SetIntValue(NS_STYLE_IMAGELAYER_ATTACHMENT_SCROLL,
                                          eCSSUnit_Enumerated);
-  aState.mClip->mValue.SetIntValue(NS_STYLE_IMAGELAYER_CLIP_BORDER,
+  aState.mClip->mValue.SetIntValue(StyleGeometryBox::Border,
                                    eCSSUnit_Enumerated);
 
   aState.mRepeat->mXValue.SetIntValue(NS_STYLE_IMAGELAYER_REPEAT_REPEAT,
@@ -12191,22 +12416,14 @@ CSSParserImpl::ParseImageLayersItem(
   aState.mPositionY->mValue.SetArrayValue(positionYArr, eCSSUnit_Array);
 
   if (eCSSProperty_mask == aTable[nsStyleImageLayers::shorthand]) {
-    aState.mOrigin->mValue.SetIntValue(NS_STYLE_IMAGELAYER_ORIGIN_BORDER,
+    aState.mOrigin->mValue.SetIntValue(StyleGeometryBox::Border,
                                        eCSSUnit_Enumerated);
-    aState.mRepeat->mXValue.SetIntValue(NS_STYLE_IMAGELAYER_REPEAT_NO_REPEAT,
-                                        eCSSUnit_Enumerated);
-
-    positionXArr->Item(1).SetPercentValue(0.5f);
-    positionYArr->Item(1).SetPercentValue(0.5f);
   } else {
-    aState.mOrigin->mValue.SetIntValue(NS_STYLE_IMAGELAYER_ORIGIN_PADDING,
+    aState.mOrigin->mValue.SetIntValue(StyleGeometryBox::Padding,
                                        eCSSUnit_Enumerated);
-    aState.mRepeat->mXValue.SetIntValue(NS_STYLE_IMAGELAYER_REPEAT_REPEAT,
-                                        eCSSUnit_Enumerated);
-
-    positionXArr->Item(1).SetPercentValue(0.0f);
-    positionYArr->Item(1).SetPercentValue(0.0f);
   }
+  positionXArr->Item(1).SetPercentValue(0.0f);
+  positionYArr->Item(1).SetPercentValue(0.0f);
 
   aState.mSize->mXValue.SetAutoValue();
   aState.mSize->mYValue.SetAutoValue();
@@ -12224,6 +12441,7 @@ CSSParserImpl::ParseImageLayersItem(
        haveMode = false,
        haveSomething = false;
 
+  const KTableEntry* originTable = nsCSSProps::kKeywordTableTable[aTable[nsStyleImageLayers::origin]];
   while (GetToken(true)) {
     nsCSSTokenType tt = mToken.mType;
     UngetToken(); // ...but we'll still cheat and use mToken
@@ -12293,8 +12511,7 @@ CSSParserImpl::ParseImageLayersItem(
           aState.mSize->mXValue = scratch.mXValue;
           aState.mSize->mYValue = scratch.mYValue;
         }
-      } else if (nsCSSProps::FindKeyword(keyword,
-                   nsCSSProps::kImageLayerOriginKTable, dummy)) {
+      } else if (nsCSSProps::FindKeyword(keyword, originTable, dummy)) {
         if (haveOrigin)
           return false;
         haveOrigin = true;
@@ -12309,23 +12526,14 @@ CSSParserImpl::ParseImageLayersItem(
         // immediately following the first one (for background-origin).
 
 #ifdef DEBUG
-        for (size_t i = 0; nsCSSProps::kImageLayerOriginKTable[i].mValue != -1; i++) {
+        const KTableEntry* clipTable = nsCSSProps::kKeywordTableTable[aTable[nsStyleImageLayers::clip]];
+        for (size_t i = 0; originTable[i].mValue != -1; i++) {
           // For each keyword & value in kOriginKTable, ensure that
           // kBackgroundKTable has a matching entry at the same position.
-          MOZ_ASSERT(nsCSSProps::kImageLayerOriginKTable[i].mKeyword ==
-                     nsCSSProps::kBackgroundClipKTable[i].mKeyword);
-          MOZ_ASSERT(nsCSSProps::kImageLayerOriginKTable[i].mValue ==
-                     nsCSSProps::kBackgroundClipKTable[i].mValue);
+          MOZ_ASSERT(originTable[i].mKeyword == clipTable[i].mKeyword);
+          MOZ_ASSERT(originTable[i].mValue == clipTable[i].mValue);
         }
 #endif
-        static_assert(NS_STYLE_IMAGELAYER_CLIP_BORDER ==
-                      NS_STYLE_IMAGELAYER_ORIGIN_BORDER &&
-                      NS_STYLE_IMAGELAYER_CLIP_PADDING ==
-                      NS_STYLE_IMAGELAYER_ORIGIN_PADDING &&
-                      NS_STYLE_IMAGELAYER_CLIP_CONTENT ==
-                      NS_STYLE_IMAGELAYER_ORIGIN_CONTENT,
-                      "bg-clip and bg-origin style constants must agree");
-
         CSSParseResult result =
           ParseSingleValueProperty(aState.mClip->mValue,
                                    aTable[nsStyleImageLayers::clip]);
@@ -13157,7 +13365,8 @@ CSSParserImpl::ParseBorderImageSlice(bool aAcceptsInherit,
 
   // Parse the box dimensions.
   nsCSSValue imageSliceBoxValue;
-  if (!ParseGroupedBoxProperty(VARIANT_PN, imageSliceBoxValue)) {
+  if (!ParseGroupedBoxProperty(VARIANT_PN, imageSliceBoxValue,
+                               CSS_PROPERTY_VALUE_NONNEGATIVE)) {
     if (!hasFill && aConsumedTokens) {
       *aConsumedTokens = false;
     }
@@ -13201,7 +13410,7 @@ CSSParserImpl::ParseBorderImageWidth(bool aAcceptsInherit)
   }
 
   // Parse the box dimensions.
-  if (!ParseGroupedBoxProperty(VARIANT_ALPN, value)) {
+  if (!ParseGroupedBoxProperty(VARIANT_ALPN, value, CSS_PROPERTY_VALUE_NONNEGATIVE)) {
     return false;
   }
 
@@ -13224,7 +13433,7 @@ CSSParserImpl::ParseBorderImageOutset(bool aAcceptsInherit)
   }
 
   // Parse the box dimensions.
-  if (!ParseGroupedBoxProperty(VARIANT_LN, value)) {
+  if (!ParseGroupedBoxProperty(VARIANT_LN, value, CSS_PROPERTY_VALUE_NONNEGATIVE)) {
     return false;
   }
 
@@ -13406,7 +13615,7 @@ CSSParserImpl::ParseBorderSide(const nsCSSPropertyID aPropIDs[],
     values[1].SetIntValue(NS_STYLE_BORDER_STYLE_NONE, eCSSUnit_Enumerated);
   }
   if ((found & 4) == 0) { // text color will be used
-    values[2].SetIntValue(NS_STYLE_COLOR_MOZ_USE_TEXT_COLOR, eCSSUnit_Enumerated);
+    values[2].SetIntValue(NS_COLOR_CURRENTCOLOR, eCSSUnit_EnumColor);
   }
 
   if (aSetAllSides) {
@@ -13419,10 +13628,10 @@ CSSParserImpl::ParseBorderSide(const nsCSSPropertyID aPropIDs[],
     }
 
     static const nsCSSPropertyID kBorderColorsProps[] = {
-      eCSSProperty_border_top_colors,
-      eCSSProperty_border_right_colors,
-      eCSSProperty_border_bottom_colors,
-      eCSSProperty_border_left_colors
+      eCSSProperty__moz_border_top_colors,
+      eCSSProperty__moz_border_right_colors,
+      eCSSProperty__moz_border_bottom_colors,
+      eCSSProperty__moz_border_left_colors
     };
 
     // Set the other properties that the border shorthand sets to their
@@ -13479,8 +13688,8 @@ CSSParserImpl::ParseBorderColors(nsCSSPropertyID aProperty)
                                nullptr)) {
     nsCSSValueList *cur = value.SetListValue();
     for (;;) {
-      if (ParseVariant(cur->mValue, VARIANT_COLOR | VARIANT_KEYWORD,
-                       nsCSSProps::kBorderColorKTable) != CSSParseResult::Ok) {
+      if (ParseVariant(cur->mValue, VARIANT_COLOR, nullptr) !=
+          CSSParseResult::Ok) {
         return false;
       }
       if (CheckEndProperty()) {
@@ -13503,6 +13712,9 @@ CSSParserImpl::ParseCalc(nsCSSValue &aValue, uint32_t aVariantMask)
   // This can be done without lookahead when we assume that the property
   // values cannot themselves be numbers.
   MOZ_ASSERT(aVariantMask != 0, "unexpected variant mask");
+  MOZ_ASSERT(!(aVariantMask & VARIANT_LPN) != !(aVariantMask & VARIANT_INTEGER),
+             "variant mask must intersect with exactly one of VARIANT_LPN "
+             "or VARIANT_INTEGER");
 
   bool oldUnitlessLengthQuirk = mUnitlessLengthQuirk;
   mUnitlessLengthQuirk = false;
@@ -13573,21 +13785,6 @@ CSSParserImpl::ParseCalcAdditiveExpression(nsCSSValue& aValue,
   }
 }
 
-struct ReduceNumberCalcOps : public mozilla::css::BasicFloatCalcOps,
-                             public mozilla::css::CSSValueInputCalcOps
-{
-  result_type ComputeLeafValue(const nsCSSValue& aValue)
-  {
-    MOZ_ASSERT(aValue.GetUnit() == eCSSUnit_Number, "unexpected unit");
-    return aValue.GetFloatValue();
-  }
-
-  float ComputeNumber(const nsCSSValue& aValue)
-  {
-    return mozilla::css::ComputeCalc(aValue, *this);
-  }
-};
-
 //  * If aVariantMask is VARIANT_NUMBER, this function parses the
 //    <number-multiplicative-expression> production.
 //  * If aVariantMask does not contain VARIANT_NUMBER, this function
@@ -13613,9 +13810,18 @@ CSSParserImpl::ParseCalcMultiplicativeExpression(nsCSSValue& aValue,
   nsCSSValue *storage = &aValue;
   for (;;) {
     uint32_t variantMask;
-    if (afterDivision || gotValue) {
+    if (aVariantMask & VARIANT_INTEGER) {
+      MOZ_ASSERT(aVariantMask == VARIANT_INTEGER,
+                 "integers in calc expressions can't be mixed with anything "
+                 "else.");
+      variantMask = aVariantMask;
+    } else if (afterDivision || gotValue) {
+      // At this point in the calc expression, we expect a coefficient or a
+      // divisor, which must be a number. (Not a length/%/etc.)
       variantMask = VARIANT_NUMBER;
     } else {
+      // At this point in the calc expression, we'll accept a coefficient
+      // (a number) or a value of whatever type |aVariantMask| specifies.
       variantMask = aVariantMask | VARIANT_NUMBER;
     }
     if (!ParseCalcTerm(*storage, variantMask))
@@ -13629,7 +13835,7 @@ CSSParserImpl::ParseCalcMultiplicativeExpression(nsCSSValue& aValue,
     if (variantMask & VARIANT_NUMBER) {
       // Simplify the value immediately so we can check for division by
       // zero.
-      ReduceNumberCalcOps ops;
+      mozilla::css::ReduceNumberCalcOps ops;
       float number = mozilla::css::ComputeCalc(*storage, ops);
       if (number == 0.0 && afterDivision)
         return false;
@@ -13643,9 +13849,15 @@ CSSParserImpl::ParseCalcMultiplicativeExpression(nsCSSValue& aValue,
         MOZ_ASSERT(storage == &aValue.GetArrayValue()->Item(1),
                    "unexpected relationship to current storage");
         nsCSSValue &leftValue = aValue.GetArrayValue()->Item(0);
-        ReduceNumberCalcOps ops;
-        float number = mozilla::css::ComputeCalc(leftValue, ops);
-        leftValue.SetFloatValue(number, eCSSUnit_Number);
+        if (variantMask & VARIANT_INTEGER) {
+          mozilla::css::ReduceIntegerCalcOps ops;
+          int integer = mozilla::css::ComputeCalc(leftValue, ops);
+          leftValue.SetIntValue(integer, eCSSUnit_Integer);
+        } else {
+          mozilla::css::ReduceNumberCalcOps ops;
+          float number = mozilla::css::ComputeCalc(leftValue, ops);
+          leftValue.SetFloatValue(number, eCSSUnit_Number);
+        }
       }
     }
 
@@ -13659,6 +13871,19 @@ CSSParserImpl::ParseCalcMultiplicativeExpression(nsCSSValue& aValue,
       unit = gotValue ? eCSSUnit_Calc_Times_R : eCSSUnit_Calc_Times_L;
       afterDivision = false;
     } else if (mToken.IsSymbol('/')) {
+      if (variantMask & VARIANT_INTEGER) {
+        // Integers aren't mixed with anything else (see the assert at the top
+        // of CSSParserImpl::ParseCalc).
+        // We don't allow division at all in calc()s for expressions where an
+        // integer is expected, because calc() division can't be resolved to
+        // an integer, as implied by spec text about '/' here:
+        // https://drafts.csswg.org/css-values-3/#calc-type-checking
+        // We've consumed the '/' token, but it doesn't matter as we're in an
+        // error-handling situation where we've already consumed a lot of
+        // other tokens (e.g. the token before the '/'). ParseVariant will
+        // indicate this with CSSParseResult::Error.
+        return false;
+      }
       unit = eCSSUnit_Calc_Divided;
       afterDivision = true;
     } else {
@@ -13718,15 +13943,24 @@ CSSParserImpl::ParseCalcTerm(nsCSSValue& aValue, uint32_t& aVariantMask)
   }
   // ... or just a value
   UngetToken();
-  // Always pass VARIANT_NUMBER to ParseVariant so that unitless zero
-  // always gets picked up
-  if (ParseVariant(aValue, aVariantMask | VARIANT_NUMBER, nullptr) !=
-      CSSParseResult::Ok) {
-    return false;
-  }
-  // ...and do the VARIANT_NUMBER check ourselves.
-  if (!(aVariantMask & VARIANT_NUMBER) && aValue.GetUnit() == eCSSUnit_Number) {
-    return false;
+  if (aVariantMask & VARIANT_INTEGER) {
+    // Integers aren't mixed with anything else (see the assert at the
+    // top of CSSParserImpl::ParseCalc).
+    if (ParseVariant(aValue, aVariantMask, nullptr) != CSSParseResult::Ok) {
+      return false;
+    }
+  } else {
+    // Always pass VARIANT_NUMBER to ParseVariant so that unitless zero
+    // always gets picked up (we want to catch unitless zeroes using
+    // VARIANT_NUMBER and then error out)
+    if (ParseVariant(aValue, aVariantMask | VARIANT_NUMBER, nullptr) !=
+        CSSParseResult::Ok) {
+      return false;
+    }
+    // ...and do the VARIANT_NUMBER check ourselves.
+    if (!(aVariantMask & VARIANT_NUMBER) && aValue.GetUnit() == eCSSUnit_Number) {
+      return false;
+    }
   }
   // If we did the value parsing, we need to adjust aVariantMask to
   // reflect which option we took (see above).
@@ -15039,7 +15273,9 @@ CSSParserImpl::ParseFontFeatureSettings(nsCSSValue& aValue)
     return true;
   }
 
-  nsCSSValuePairList *cur = aValue.SetPairListValue();
+  auto resultHead = MakeUnique<nsCSSValuePairList>();
+  nsCSSValuePairList* cur = resultHead.get();
+
   for (;;) {
     // feature tag
     if (!GetToken(true)) {
@@ -15081,6 +15317,57 @@ CSSParserImpl::ParseFontFeatureSettings(nsCSSValue& aValue)
     cur->mNext = new nsCSSValuePairList;
     cur = cur->mNext;
   }
+
+  aValue.AdoptPairListValue(Move(resultHead));
+
+  return true;
+}
+
+bool
+CSSParserImpl::ParseFontVariationSettings(nsCSSValue& aValue)
+{
+  if (ParseSingleTokenVariant(aValue, VARIANT_INHERIT | VARIANT_NORMAL,
+                              nullptr)) {
+    return true;
+  }
+
+  auto resultHead = MakeUnique<nsCSSValuePairList>();
+  nsCSSValuePairList* cur = resultHead.get();
+
+  for (;;) {
+    // variation tag
+    if (!GetToken(true)) {
+      return false;
+    }
+
+    // variation tags are subject to the same validation as feature tags
+    if (mToken.mType != eCSSToken_String ||
+        !ValidFontFeatureTag(mToken.mIdent)) {
+      UngetToken();
+      return false;
+    }
+    cur->mXValue.SetStringValue(mToken.mIdent, eCSSUnit_String);
+
+    if (!GetToken(true)) {
+      return false;
+    }
+
+    if (mToken.mType == eCSSToken_Number) {
+      cur->mYValue.SetFloatValue(mToken.mNumber, eCSSUnit_Number);
+    } else {
+      UngetToken();
+      return false;
+    }
+
+    if (!ExpectSymbol(',', true)) {
+      break;
+    }
+
+    cur->mNext = new nsCSSValuePairList;
+    cur = cur->mNext;
+  }
+
+  aValue.AdoptPairListValue(Move(resultHead));
 
   return true;
 }
@@ -15201,7 +15488,7 @@ CSSParserImpl::ParseOutline()
 
   // Provide default values
   if ((found & 1) == 0) { // Provide default outline-color
-    values[0].SetIntValue(NS_STYLE_COLOR_MOZ_USE_TEXT_COLOR, eCSSUnit_Enumerated);
+    values[0].SetIntValue(NS_COLOR_CURRENTCOLOR, eCSSUnit_EnumColor);
   }
   if ((found & 2) == 0) { // Provide default outline-style
     values[1].SetIntValue(NS_STYLE_BORDER_STYLE_NONE, eCSSUnit_Enumerated);
@@ -15311,8 +15598,7 @@ CSSParserImpl::ParseTextDecoration()
                           eCSSUnit_Enumerated);
   }
   if ((found & 4) == 0) { // Provide default text-decoration-color
-    values[2].SetIntValue(NS_STYLE_COLOR_MOZ_USE_TEXT_COLOR,
-                          eCSSUnit_Enumerated);
+    values[2].SetIntValue(NS_COLOR_CURRENTCOLOR, eCSSUnit_EnumColor);
   }
 
   for (int32_t index = 0; index < numProps; index++) {
@@ -17901,11 +18187,10 @@ void
 nsCSSParser::ParseMediaList(const nsSubstring& aBuffer,
                             nsIURI*            aURI,
                             uint32_t           aLineNumber,
-                            nsMediaList*       aMediaList,
-                            bool               aHTMLMode)
+                            nsMediaList*       aMediaList)
 {
   static_cast<CSSParserImpl*>(mImpl)->
-    ParseMediaList(aBuffer, aURI, aLineNumber, aMediaList, aHTMLMode);
+    ParseMediaList(aBuffer, aURI, aLineNumber, aMediaList);
 }
 
 bool
@@ -17913,12 +18198,10 @@ nsCSSParser::ParseSourceSizeList(const nsAString& aBuffer,
                                  nsIURI* aURI,
                                  uint32_t aLineNumber,
                                  InfallibleTArray< nsAutoPtr<nsMediaQuery> >& aQueries,
-                                 InfallibleTArray<nsCSSValue>& aValues,
-                                 bool aHTMLMode)
+                                 InfallibleTArray<nsCSSValue>& aValues)
 {
   return static_cast<CSSParserImpl*>(mImpl)->
-    ParseSourceSizeList(aBuffer, aURI, aLineNumber, aQueries, aValues,
-                        aHTMLMode);
+    ParseSourceSizeList(aBuffer, aURI, aLineNumber, aQueries, aValues);
 }
 
 bool
@@ -17940,6 +18223,17 @@ nsCSSParser::ParseColorString(const nsSubstring& aBuffer,
 {
   return static_cast<CSSParserImpl*>(mImpl)->
     ParseColorString(aBuffer, aURI, aLineNumber, aValue, aSuppressErrors);
+}
+
+bool
+nsCSSParser::ParseMarginString(const nsSubstring& aBuffer,
+                               nsIURI*            aURI,
+                               uint32_t           aLineNumber,
+                               nsCSSValue&        aValue,
+                               bool               aSuppressErrors /* false */)
+{
+  return static_cast<CSSParserImpl*>(mImpl)->
+    ParseMarginString(aBuffer, aURI, aLineNumber, aValue, aSuppressErrors);
 }
 
 nsresult

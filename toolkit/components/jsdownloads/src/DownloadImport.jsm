@@ -10,8 +10,7 @@ this.EXPORTED_SYMBOLS = [
   "DownloadImport",
 ];
 
-////////////////////////////////////////////////////////////////////////////////
-//// Globals
+// Globals
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
@@ -42,8 +41,7 @@ const DOWNLOAD_DOWNLOADING = 0;
 const DOWNLOAD_PAUSED = 4;
 const DOWNLOAD_QUEUED = 5;
 
-////////////////////////////////////////////////////////////////////////////////
-//// DownloadImport
+// DownloadImport
 
 /**
  * Provides an object that has a method to import downloads
@@ -53,7 +51,7 @@ const DOWNLOAD_QUEUED = 5;
  *                imported download will be added.
  * @param aPath   The path to the database file.
  */
-this.DownloadImport = function (aList, aPath)
+this.DownloadImport = function(aList, aPath)
 {
   this.list = aList;
   this.path = aPath;
@@ -70,7 +68,7 @@ this.DownloadImport.prototype = {
    *           from the previous database has been read and added to
    *           the DownloadList)
    */
-  import: function () {
+  import: function() {
     return Task.spawn(function* task_DI_import() {
       let connection = yield Sqlite.openConnection({ path: this.path });
 

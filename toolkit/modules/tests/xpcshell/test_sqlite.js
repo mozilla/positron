@@ -26,7 +26,7 @@ function sleep(ms) {
                 .createInstance(Ci.nsITimer);
 
   timer.initWithCallback({
-    notify: function () {
+    notify: function() {
       deferred.resolve();
     },
   }, ms, timer.TYPE_ONE_SHOT);
@@ -40,7 +40,7 @@ function failTestsOnAutoClose(enabled)  {
   Cu.getGlobalForObject(Sqlite).Debugging.failTestsOnAutoClose = enabled;
 }
 
-function getConnection(dbName, extraOptions={}) {
+function getConnection(dbName, extraOptions = {}) {
   let path = dbName + ".sqlite";
   let options = {path: path};
   for (let [k, v] of Object.entries(extraOptions)) {
@@ -50,7 +50,7 @@ function getConnection(dbName, extraOptions={}) {
   return Sqlite.openConnection(options);
 }
 
-function* getDummyDatabase(name, extraOptions={}) {
+function* getDummyDatabase(name, extraOptions = {}) {
   const TABLES = {
     dirs: "id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT",
     files: "id INTEGER PRIMARY KEY AUTOINCREMENT, dir_id INTEGER, path TEXT",
@@ -67,7 +67,7 @@ function* getDummyDatabase(name, extraOptions={}) {
   return c;
 }
 
-function* getDummyTempDatabase(name, extraOptions={}) {
+function* getDummyTempDatabase(name, extraOptions = {}) {
   const TABLES = {
     dirs: "id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT",
     files: "id INTEGER PRIMARY KEY AUTOINCREMENT, dir_id INTEGER, path TEXT",
@@ -494,10 +494,9 @@ add_task(function* test_no_shrink_on_init() {
   let c = yield getConnection("no_shrink_on_init",
                               {shrinkMemoryOnConnectionIdleMS: 200});
 
-  let oldShrink = c._connectionData.shrinkMemory;
   let count = 0;
   Object.defineProperty(c._connectionData, "shrinkMemory", {
-    value: function () {
+    value: function() {
       count++;
     },
   });
@@ -523,7 +522,7 @@ add_task(function* test_idle_shrink_fires() {
 
   let count = 0;
   Object.defineProperty(c._connectionData, "shrinkMemory", {
-    value: function () {
+    value: function() {
       count++;
       let promise = oldShrink.call(c._connectionData);
       shrinkPromises.push(promise);
@@ -567,7 +566,7 @@ add_task(function* test_idle_shrink_reset_on_operation() {
   let count = 0;
 
   Object.defineProperty(c._connectionData, "shrinkMemory", {
-    value: function () {
+    value: function() {
       count++;
       let promise = oldShrink.call(c._connectionData);
       shrinkPromises.push(promise);
@@ -759,11 +758,11 @@ add_task(function* test_programmatic_binding_transaction_partial_rollback() {
   try {
     yield c.executeTransaction(function* transaction() {
       // Insert one row. This won't implicitly start a transaction.
-      let result = yield c.execute(sql, bindings[0]);
+      yield c.execute(sql, bindings[0]);
 
       // Insert multiple rows. mozStorage will want to start a transaction.
       // One of the inserts will fail, so the transaction should be rolled back.
-      result = yield c.execute(sql, bindings);
+      yield c.execute(sql, bindings);
       secondSucceeded = true;
     });
   } catch (ex) {
@@ -795,7 +794,7 @@ add_task(function* test_programmatic_binding_implicit_transaction() {
   let secondSucceeded = false;
   yield c.execute(sql, {id: 1, path: "works"});
   try {
-    let result = yield c.execute(sql, bindings);
+    yield c.execute(sql, bindings);
     secondSucceeded = true;
   } catch (ex) {
     print("Caught expected exception: " + ex);
@@ -838,7 +837,7 @@ add_task(function* test_direct() {
 
   let deferred = Promise.defer();
   begin.executeAsync({
-    handleCompletion: function (reason) {
+    handleCompletion: function(reason) {
       deferred.resolve();
     }
   });
@@ -849,10 +848,10 @@ add_task(function* test_direct() {
   deferred = Promise.defer();
   print("Executing async.");
   statement.executeAsync({
-    handleResult: function (resultSet) {
+    handleResult: function(resultSet) {
     },
 
-    handleError:  function (error) {
+    handleError:  function(error) {
       print("Error when executing SQL (" + error.result + "): " +
             error.message);
       print("Original error: " + error.error);
@@ -860,7 +859,7 @@ add_task(function* test_direct() {
       deferred.reject();
     },
 
-    handleCompletion: function (reason) {
+    handleCompletion: function(reason) {
       print("Completed.");
       deferred.resolve();
     }
@@ -870,7 +869,7 @@ add_task(function* test_direct() {
 
   deferred = Promise.defer();
   end.executeAsync({
-    handleCompletion: function (reason) {
+    handleCompletion: function(reason) {
       deferred.resolve();
     }
   });
@@ -881,7 +880,7 @@ add_task(function* test_direct() {
   end.finalize();
 
   deferred = Promise.defer();
-  db.asyncClose(function () {
+  db.asyncClose(function() {
     deferred.resolve()
   });
   yield deferred.promise;
@@ -918,7 +917,7 @@ add_task(function* test_cloneStorageConnection() {
 // Test Sqlite.cloneStorageConnection invalid argument.
 add_task(function* test_cloneStorageConnection() {
   try {
-    let clone = yield Sqlite.cloneStorageConnection({ connection: null });
+    yield Sqlite.cloneStorageConnection({ connection: null });
     do_throw(new Error("Should throw on invalid connection"));
   } catch (ex) {
     if (ex.name != "TypeError") {
@@ -1051,7 +1050,7 @@ add_task(function* test_forget_witness_on_close() {
   let forgetCalled = false;
   let oldWitness = c._witness;
   c._witness = {
-    forget: function () {
+    forget: function() {
       forgetCalled = true;
       oldWitness.forget();
     },

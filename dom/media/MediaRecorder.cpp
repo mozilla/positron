@@ -103,8 +103,22 @@ private:
 };
 NS_IMPL_ISUPPORTS(MediaRecorderReporter, nsIMemoryReporter);
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(MediaRecorder, DOMEventTargetHelper,
-                                   mDOMStream, mAudioNode)
+NS_IMPL_CYCLE_COLLECTION_CLASS(MediaRecorder)
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(MediaRecorder,
+                                                  DOMEventTargetHelper)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDOMStream)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAudioNode)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocument)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(MediaRecorder,
+                                                DOMEventTargetHelper)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDOMStream)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mAudioNode)
+  tmp->UnRegisterActivityObserver();
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocument)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(MediaRecorder)
   NS_INTERFACE_MAP_ENTRY(nsIDocumentActivity)
@@ -410,7 +424,6 @@ public:
     , mSelectedVideoTrackID(TRACK_NONE)
   {
     MOZ_ASSERT(NS_IsMainThread());
-    MOZ_COUNT_CTOR(MediaRecorder::Session);
 
     uint32_t maxMem = Preferences::GetUint("media.recorder.max_memory",
                                            MAX_ALLOW_MEMORY_BUFFER);
@@ -575,7 +588,6 @@ private:
   // Only DestroyRunnable is allowed to delete Session object.
   virtual ~Session()
   {
-    MOZ_COUNT_DTOR(MediaRecorder::Session);
     LOG(LogLevel::Debug, ("Session.~Session (%p)", this));
     CleanupStreams();
     if (mReadThread) {
@@ -700,35 +712,6 @@ private:
     return PrincipalSubsumes(principal);
   }
 
-  bool CheckPermission(const char* aType)
-  {
-    if (!mRecorder || !mRecorder->GetOwner()) {
-      return false;
-    }
-
-    nsCOMPtr<nsIDocument> doc = mRecorder->GetOwner()->GetExtantDoc();
-    if (!doc) {
-      return false;
-    }
-
-    // Certified applications can always assign AUDIO_3GPP
-    if (doc->NodePrincipal()->GetAppStatus() ==
-        nsIPrincipal::APP_STATUS_CERTIFIED) {
-      return true;
-    }
-
-    nsCOMPtr<nsIPermissionManager> pm =
-       do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
-
-    if (!pm) {
-      return false;
-    }
-
-    uint32_t perm = nsIPermissionManager::DENY_ACTION;
-    pm->TestExactPermissionFromPrincipal(doc->NodePrincipal(), aType, &perm);
-    return perm == nsIPermissionManager::ALLOW_ACTION;
-  }
-
   void InitEncoder(uint8_t aTrackTypes, TrackRate aTrackRate)
   {
     LOG(LogLevel::Debug, ("Session.InitEncoder %p", this));
@@ -741,26 +724,11 @@ private:
     // Allocate encoder and bind with union stream.
     // At this stage, the API doesn't allow UA to choose the output mimeType format.
 
-    // Make sure the application has permission to assign AUDIO_3GPP
-    if (mRecorder->mMimeType.EqualsLiteral(AUDIO_3GPP) && CheckPermission("audio-capture:3gpp")) {
-      mEncoder = MediaEncoder::CreateEncoder(NS_LITERAL_STRING(AUDIO_3GPP),
-                                             mRecorder->GetAudioBitrate(),
-                                             mRecorder->GetVideoBitrate(),
-                                             mRecorder->GetBitrate(),
-                                             aTrackTypes, aTrackRate);
-    } else if (mRecorder->mMimeType.EqualsLiteral(AUDIO_3GPP2) && CheckPermission("audio-capture:3gpp2")) {
-      mEncoder = MediaEncoder::CreateEncoder(NS_LITERAL_STRING(AUDIO_3GPP2),
-                                             mRecorder->GetAudioBitrate(),
-                                             mRecorder->GetVideoBitrate(),
-                                             mRecorder->GetBitrate(),
-                                             aTrackTypes, aTrackRate);
-    } else {
-      mEncoder = MediaEncoder::CreateEncoder(NS_LITERAL_STRING(""),
-                                             mRecorder->GetAudioBitrate(),
-                                             mRecorder->GetVideoBitrate(),
-                                             mRecorder->GetBitrate(),
-                                             aTrackTypes, aTrackRate);
-    }
+    mEncoder = MediaEncoder::CreateEncoder(NS_LITERAL_STRING(""),
+                                           mRecorder->GetAudioBitrate(),
+                                           mRecorder->GetVideoBitrate(),
+                                           mRecorder->GetBitrate(),
+                                           aTrackTypes, aTrackRate);
 
     if (!mEncoder) {
       LOG(LogLevel::Debug, ("Session.InitEncoder !mEncoder %p", this));
@@ -1024,9 +992,9 @@ void
 MediaRecorder::RegisterActivityObserver()
 {
   if (nsPIDOMWindowInner* window = GetOwner()) {
-    nsIDocument* doc = window->GetExtantDoc();
-    if (doc) {
-      doc->RegisterActivityObserver(
+    mDocument = window->GetExtantDoc();
+    if (mDocument) {
+      mDocument->RegisterActivityObserver(
         NS_ISUPPORTS_CAST(nsIDocumentActivity*, this));
     }
   }
@@ -1035,12 +1003,9 @@ MediaRecorder::RegisterActivityObserver()
 void
 MediaRecorder::UnRegisterActivityObserver()
 {
-  if (nsPIDOMWindowInner* window = GetOwner()) {
-    nsIDocument* doc = window->GetExtantDoc();
-    if (doc) {
-      doc->UnregisterActivityObserver(
-        NS_ISUPPORTS_CAST(nsIDocumentActivity*, this));
-    }
+  if (mDocument) {
+    mDocument->UnregisterActivityObserver(
+      NS_ISUPPORTS_CAST(nsIDocumentActivity*, this));
   }
 }
 
@@ -1326,17 +1291,6 @@ MediaRecorder::IsTypeSupported(const nsAString& aMIMEType)
   else if (mimeType.EqualsLiteral(VIDEO_WEBM) &&
            MediaEncoder::IsWebMEncoderEnabled()) {
     codeclist = gWebMVideoEncoderCodecs;
-  }
-#endif
-#ifdef MOZ_OMX_ENCODER
-    // We're working on MP4 encoder support for desktop
-  else if (mimeType.EqualsLiteral(VIDEO_MP4) ||
-           mimeType.EqualsLiteral(AUDIO_3GPP) ||
-           mimeType.EqualsLiteral(AUDIO_3GPP2)) {
-    if (MediaEncoder::IsOMXEncoderEnabled()) {
-      // XXX check codecs for MP4/3GPP
-      return true;
-    }
   }
 #endif
 

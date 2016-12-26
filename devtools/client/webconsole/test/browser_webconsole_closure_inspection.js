@@ -58,7 +58,7 @@ function consoleOpened(hud) {
   waitForMessages({
     webconsole: gWebConsole,
     messages: [{
-      text: "function _pfactory/<.getName()",
+      text: "getName()",
       category: CATEGORY_OUTPUT,
       objects: true,
     }],
@@ -96,5 +96,5 @@ function onExpandClosure(results) {
 
   gVariablesView.window.focus();
   gJSTerm.once("sidebar-closed", finishTest);
-  EventUtils.synthesizeKey("VK_ESCAPE", {});
+  EventUtils.synthesizeKey("VK_ESCAPE", {}, gVariablesView.window);
 }

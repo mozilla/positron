@@ -42,6 +42,7 @@ PrefsEngine.prototype = {
   version: 2,
 
   syncPriority: 1,
+  allowSkippedRecord: false,
 
   getChangedIDs: function () {
     // No need for a proper timestamp (no conflict resolution needed).
@@ -223,10 +224,6 @@ PrefTracker.prototype = {
   },
   set modified(value) {
     Svc.Prefs.set("engine.prefs.modified", value);
-  },
-
-  loadChangedIDs: function loadChangedIDs() {
-    // Don't read changed IDs from disk at start up.
   },
 
   clearChangedIDs: function clearChangedIDs() {

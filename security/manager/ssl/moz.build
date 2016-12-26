@@ -15,7 +15,6 @@ XPIDL_SOURCES += [
     'nsICertBlocklist.idl',
     'nsICertificateDialogs.idl',
     'nsICertOverrideService.idl',
-    'nsICertPickDialogs.idl',
     'nsIClientAuthDialogs.idl',
     'nsIContentSignatureVerifier.idl',
     'nsIDataSignatureVerifier.idl',
@@ -40,8 +39,6 @@ XPIDL_SOURCES += [
     'nsITokenDialogs.idl',
     'nsITokenPasswordDialogs.idl',
     'nsIU2FToken.idl',
-    'nsIUserCertPicker.idl',
-    'nsIWeakCryptoOverride.idl',
     'nsIX509Cert.idl',
     'nsIX509CertDB.idl',
     'nsIX509CertList.idl',
@@ -57,6 +54,7 @@ XPIDL_MODULE = 'pipnss'
 
 EXTRA_JS_MODULES.psm += [
     'DER.jsm',
+    'X509.jsm',
 ]
 
 EXPORTS += [
@@ -97,7 +95,6 @@ UNIFIED_SOURCES += [
     'DataStorage.cpp',
     'LocalCertService.cpp',
     'nsCertOverrideService.cpp',
-    'nsCertPicker.cpp',
     'nsClientAuthRemember.cpp',
     'nsCrypto.cpp',
     'nsCryptoHash.cpp',
@@ -142,7 +139,6 @@ UNIFIED_SOURCES += [
     'SharedSSLState.cpp',
     'SSLServerCertVerification.cpp',
     'TransportSecurityInfo.cpp',
-    'WeakCryptoOverride.cpp',
 ]
 
 IPDL_SOURCES += [
@@ -186,9 +182,10 @@ for var in ('DLL_PREFIX', 'DLL_SUFFIX'):
 
 DEFINES['CERT_AddTempCertToPerm'] = '__CERT_AddTempCertToPerm'
 
-USE_LIBS += [
-    'crmf',
-]
+if not CONFIG['MOZ_SYSTEM_NSS']:
+    USE_LIBS += [
+        'crmf',
+    ]
 
 include('/ipc/chromium/chromium-config.mozbuild')
 

@@ -10,11 +10,11 @@ var Cu = Components.utils;
 
 Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/FileUtils.jsm");
-Cu.import("resource://gre/modules/osfile.jsm");
+Cu.import("resource://gre/modules/osfile.jsm"); /* globals OS */
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource:///modules/MigrationUtils.jsm");
+Cu.import("resource:///modules/MigrationUtils.jsm"); /* globals MigratorPrototype */
 
 XPCOMUtils.defineLazyModuleGetter(this, "Downloads",
                                   "resource://gre/modules/Downloads.jsm");
@@ -131,11 +131,11 @@ Bookmarks.prototype = {
         // Reading list items are imported as regular bookmarks.
         // They are imported under their own folder, created either under the
         // bookmarks menu (in the case of startup migration).
-        folderGuid = (yield PlacesUtils.bookmarks.insert({
-            parentGuid: PlacesUtils.bookmarks.menuGuid,
-            type: PlacesUtils.bookmarks.TYPE_FOLDER,
-            title: MigrationUtils.getLocalizedString("importedSafariReadingList"),
-          })).guid;
+        folderGuid = (yield MigrationUtils.insertBookmarkWrapper({
+          parentGuid: PlacesUtils.bookmarks.menuGuid,
+          type: PlacesUtils.bookmarks.TYPE_FOLDER,
+          title: MigrationUtils.getLocalizedString("importedSafariReadingList"),
+        })).guid;
         break;
       }
       default:
@@ -154,7 +154,7 @@ Bookmarks.prototype = {
       let type = entry.get("WebBookmarkType");
       if (type == "WebBookmarkTypeList" && entry.has("Children")) {
         let title = entry.get("Title");
-        let newFolderGuid = (yield PlacesUtils.bookmarks.insert({
+        let newFolderGuid = (yield MigrationUtils.insertBookmarkWrapper({
           parentGuid, type: PlacesUtils.bookmarks.TYPE_FOLDER, title
         })).guid;
 
@@ -168,7 +168,7 @@ Bookmarks.prototype = {
           title = entry.get("URIDictionary").get("title");
 
         try {
-          yield PlacesUtils.bookmarks.insert({
+          yield MigrationUtils.insertBookmarkWrapper({
             parentGuid, url: entry.get("URLString"), title
           });
         } catch (ex) {
@@ -225,12 +225,12 @@ History.prototype = {
             catch (ex) {
               // Safari's History file may contain malformed URIs which
               // will be ignored.
-              Cu.reportError(ex)
+              Cu.reportError(ex);
             }
           }
         }
         if (places.length > 0) {
-          PlacesUtils.asyncHistory.updatePlaces(places, {
+          MigrationUtils.insertVisitsWrapper(places, {
             _success: false,
             handleResult: function() {
               // Importing any entry is considered a successful import.
@@ -313,194 +313,6 @@ MainPreferencesPropertyList.prototype = {
   }
 };
 
-function Preferences(aMainPreferencesPropertyListInstance) {
-  this._mainPreferencesPropertyList = aMainPreferencesPropertyListInstance;
-}
-Preferences.prototype = {
-  type: MigrationUtils.resourceTypes.SETTINGS,
-
-  migrate: function MPR_migrate(aCallback) {
-    this._mainPreferencesPropertyList.read(aDict => {
-      Task.spawn(function* () {
-        if (!aDict)
-          throw new Error("Could not read preferences file");
-
-        this._dict = aDict;
-
-        let invert = webkitVal => !webkitVal;
-        this._set("AutoFillPasswords", "signon.rememberSignons");
-        this._set("OpenNewTabsInFront", "browser.tabs.loadInBackground", invert);
-        this._set("WebKitJavaScriptCanOpenWindowsAutomatically",
-                   "dom.disable_open_during_load", invert);
-
-        // layout.spellcheckDefault is a boolean stored as a number.
-        this._set("WebContinuousSpellCheckingEnabled",
-                  "layout.spellcheckDefault", Number);
-
-        // Auto-load images
-        // Firefox has an elaborate set of Image preferences. The correlation is:
-        // Mode:                            Safari    Firefox
-        // Blocked                          FALSE     2
-        // Allowed                          TRUE      1
-        // Allowed, originating site only   --        3
-        this._set("WebKitDisplayImagesKey", "permissions.default.image",
-                  webkitVal => webkitVal ? 1 : 2);
-
-        this._migrateFontSettings();
-        yield this._migrateDownloadsFolder();
-
-      }.bind(this)).then(() => aCallback(true), ex => {
-        Cu.reportError(ex);
-        aCallback(false);
-      }).catch(Cu.reportError);
-    });
-  },
-
-  /**
-   * Attempts to migrates a preference from Safari.  Returns whether the preference
-   * has been migrated.
-   * @param aSafariKey
-   *        The dictionary key for the preference of Safari.
-   * @param aMozPref
-   *        The gecko/firefox preference to which aSafariKey should be migrated
-   * @param [optional] aConvertFunction(aSafariValue)
-   *        a function that converts the safari-preference value to the
-   *        appropriate value for aMozPref.  If it's not passed, then the
-   *        Safari value is set as is.
-   *        If aConvertFunction returns undefined, then aMozPref is not set
-   *        at all.
-   * @return whether or not aMozPref was set.
-   */
-  _set: function MPR_set(aSafariKey, aMozPref, aConvertFunction) {
-    if (this._dict.has(aSafariKey)) {
-      let safariVal = this._dict.get(aSafariKey);
-      let mozVal = aConvertFunction !== undefined ?
-                   aConvertFunction(safariVal) : safariVal;
-      switch (typeof(mozVal)) {
-        case "string":
-          Services.prefs.setCharPref(aMozPref, mozVal);
-          break;
-        case "number":
-          Services.prefs.setIntPref(aMozPref, mozVal);
-          break;
-        case "boolean":
-          Services.prefs.setBoolPref(aMozPref, mozVal);
-          break;
-        case "undefined":
-          return false;
-        default:
-          throw new Error("Unexpected value type: " + typeof(mozVal));
-      }
-    }
-    return true;
-  },
-
-  // Fonts settings are quite problematic for migration, for a couple of
-  // reasons:
-  // (a) Every font preference in Gecko is set for a particular language.
-  //     In Safari, each font preference applies to all languages.
-  // (b) The current underlying implementation of nsIFontEnumerator cannot
-  //     really tell you anything about a font: no matter what language or type
-  //     you try to enumerate with EnumerateFonts, you get an array of all
-  //     fonts in the systems (This also breaks our fonts dialog).
-  // (c) In Gecko, each langauge has a distinct serif and sans-serif font
-  //     preference.  Safari has only one default font setting.  It seems that
-  //     it checks if it's a serif or sans serif font, and when a site
-  //     explicitly asks to use serif/sans-serif font, it uses the default font
-  //     only if it applies to this type.
-  // (d) The solution of guessing the lang-group out of the default charset (as
-  //     done in the old Safari migrator) can only work when:
-  //     (1) The default charset preference is set.
-  //     (2) It's not a unicode charset.
-  // For now, we use the language implied by the system locale as the
-  // lang-group. The only exception is minimal font size, which is an
-  // accessibility preference in Safari (under the Advanced tab). If it is set,
-  // we set it for all languages.
-  // As for the font type of the default font (serif/sans-serif), the default
-  // type for the given language is used (set in font.default.LANGGROUP).
-  _migrateFontSettings: function MPR__migrateFontSettings() {
-    // If "Never use font sizes smaller than [ ] is set", migrate it for all
-    // languages.
-    if (this._dict.has("WebKitMinimumFontSize")) {
-      let minimumSize = this._dict.get("WebKitMinimumFontSize");
-      if (typeof(minimumSize) == "number") {
-        let prefs = Services.prefs.getChildList("font.minimum-size");
-        for (let pref of prefs) {
-          Services.prefs.setIntPref(pref, minimumSize);
-        }
-      }
-      else {
-        Cu.reportError("WebKitMinimumFontSize was set to an invalid value: " +
-                       minimumSize);
-      }
-    }
-
-    // In theory, the lang group could be "x-unicode". This will result
-    // in setting the fonts for "Other Languages".
-    let lang = this._getLocaleLangGroup();
-
-    let anySet = false;
-    let fontType = Services.prefs.getCharPref("font.default." + lang);
-    anySet |= this._set("WebKitFixedFont", "font.name.monospace." + lang);
-    anySet |= this._set("WebKitDefaultFixedFontSize", "font.size.fixed." + lang);
-    anySet |= this._set("WebKitStandardFont",
-                        "font.name." + fontType + "." + lang);
-    anySet |= this._set("WebKitDefaultFontSize", "font.size.variable." + lang);
-
-    // If we set font settings for a particular language, we'll also set the
-    // fonts dialog to open with the fonts settings for that langauge.
-    if (anySet)
-      Services.prefs.setCharPref("font.language.group", lang);
-  },
-
-  // Get the language group for the system locale.
-  _getLocaleLangGroup: function MPR__getLocaleLangGroup() {
-    let locale = Services.locale.getLocaleComponentForUserAgent();
-
-    // See nsLanguageAtomService::GetLanguageGroup
-    let localeLangGroup = "x-unicode";
-    let bundle = Services.strings.createBundle(
-      "resource://gre/res/langGroups.properties");
-    try {
-      localeLangGroup = bundle.GetStringFromName(locale);
-    }
-    catch (ex) {
-      let hyphenAt = locale.indexOf("-");
-      if (hyphenAt != -1) {
-        try {
-          localeLangGroup = bundle.GetStringFromName(locale.substr(0, hyphenAt));
-        }
-        catch (ex2) { }
-      }
-    }
-    return localeLangGroup;
-  },
-
-  _migrateDownloadsFolder: Task.async(function* () {
-    if (!this._dict.has("DownloadsPath"))
-      return;
-
-    let downloadsFolder = FileUtils.File(this._dict.get("DownloadsPath"));
-
-    // If the download folder is set to the Desktop or to ~/Downloads, set the
-    // folderList pref appropriately so that "Desktop"/Downloads is shown with
-    // pretty name in the preferences dialog.
-    let folderListVal = 2;
-    if (downloadsFolder.equals(FileUtils.getDir("Desk", []))) {
-      folderListVal = 0;
-    }
-    else {
-      let systemDownloadsPath = yield Downloads.getSystemDownloadsDirectory();
-      let systemDownloadsFolder = FileUtils.File(systemDownloadsPath);
-      if (downloadsFolder.equals(systemDownloadsFolder))
-        folderListVal = 1;
-    }
-    Services.prefs.setIntPref("browser.download.folderList", folderListVal);
-    Services.prefs.setComplexValue("browser.download.dir", Ci.nsILocalFile,
-                                   downloadsFolder);
-  }),
-};
-
 function SearchStrings(aMainPreferencesPropertyListInstance) {
   this._mainPreferencesPropertyList = aMainPreferencesPropertyListInstance;
 }
@@ -522,39 +334,6 @@ SearchStrings.prototype = {
                             value: searchString}));
             FormHistory.update(changes);
           }
-        }
-      }.bind(this), aCallback));
-  }
-};
-
-// On OS X, the cookie-accept policy preference is stored in a separate
-// property list.
-function WebFoundationCookieBehavior(aWebFoundationFile) {
-  this._file = aWebFoundationFile;
-}
-WebFoundationCookieBehavior.prototype = {
-  type: MigrationUtils.resourceTypes.SETTINGS,
-
-  migrate: function WFPL_migrate(aCallback) {
-    PropertyListUtils.read(this._file, MigrationUtils.wrapMigrateFunction(
-      function migrateCookieBehavior(aDict) {
-        if (!aDict)
-          throw new Error("Could not read com.apple.WebFoundation.plist");
-
-        if (aDict.has("NSHTTPAcceptCookies")) {
-          // Setting                    Safari          Firefox
-          // Always Accept              always          0
-          // Accept from Originating    current page    1
-          // Never Accept               never           2
-          let acceptCookies = aDict.get("NSHTTPAcceptCookies");
-          let cookieValue = 0;
-          if (acceptCookies == "never") {
-            cookieValue = 2;
-          } else if (acceptCookies == "current page") {
-            cookieValue = 1;
-          }
-          Services.prefs.setIntPref("network.cookie.cookieBehavior",
-                                    cookieValue);
         }
       }.bind(this), aCallback));
   }
@@ -588,17 +367,10 @@ SafariProfileMigrator.prototype.getResources = function SM_getResources() {
   // Apple may fix this at some point.
   pushProfileFileResource("ReadingList.plist", Bookmarks);
 
-  let prefsDir = FileUtils.getDir("UsrPrfs", [], false);
-
   let prefs = this.mainPreferencesPropertyList;
   if (prefs) {
-    resources.push(new Preferences(prefs));
     resources.push(new SearchStrings(prefs));
   }
-
-  let wfFile = FileUtils.getFile("UsrPrfs", ["com.apple.WebFoundation.plist"]);
-  if (wfFile.exists())
-    resources.push(new WebFoundationCookieBehavior(wfFile));
 
   return resources;
 };
@@ -607,7 +379,7 @@ SafariProfileMigrator.prototype.getLastUsedDate = function SM_getLastUsedDate() 
   let profileDir = FileUtils.getDir("ULibDir", ["Safari"], false);
   let datePromises = ["Bookmarks.plist", "History.plist"].map(file => {
     let path = OS.Path.join(profileDir.path, file);
-    return OS.File.stat(path).catch(_ => null).then(info => {
+    return OS.File.stat(path).catch(() => null).then(info => {
       return info ? info.lastModificationDate : 0;
     });
   });
@@ -623,11 +395,13 @@ Object.defineProperty(SafariProfileMigrator.prototype, "mainPreferencesPropertyL
       if (file.exists()) {
         file.append("com.apple.Safari.plist");
         if (file.exists()) {
-          return this._mainPreferencesPropertyList =
+          this._mainPreferencesPropertyList =
             new MainPreferencesPropertyList(file);
+          return this._mainPreferencesPropertyList;
         }
       }
-      return this._mainPreferencesPropertyList = null;
+      this._mainPreferencesPropertyList = null;
+      return this._mainPreferencesPropertyList;
     }
     return this._mainPreferencesPropertyList;
   }

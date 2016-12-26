@@ -7,6 +7,7 @@
 #include "jit/BaselineDebugModeOSR.h"
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/SizePrintfMacros.h"
 
 #include "jit/BaselineIC.h"
 #include "jit/JitcodeMap.h"
@@ -219,7 +220,7 @@ CollectJitStackScripts(JSContext* cx, const Debugger::ExecutionObservableSet& ob
             } else {
                 // The frame must be settled on a pc with an ICEntry.
                 uint8_t* retAddr = iter.returnAddressToFp();
-                ICEntry& icEntry = script->baselineScript()->icEntryFromReturnAddress(retAddr);
+                BaselineICEntry& icEntry = script->baselineScript()->icEntryFromReturnAddress(retAddr);
                 if (!entries.append(DebugModeOSREntry(script, icEntry)))
                     return false;
             }
@@ -322,7 +323,7 @@ SpewPatchBaselineFrame(uint8_t* oldReturnAddress, uint8_t* newReturnAddress,
                        JSScript* script, ICEntry::Kind frameKind, jsbytecode* pc)
 {
     JitSpew(JitSpew_BaselineDebugModeOSR,
-            "Patch return %p -> %p on BaselineJS frame (%s:%d) from %s at %s",
+            "Patch return %p -> %p on BaselineJS frame (%s:%" PRIuSIZE ") from %s at %s",
             oldReturnAddress, newReturnAddress, script->filename(), script->lineno(),
             ICEntryKindToString(frameKind), CodeName[(JSOp)*pc]);
 }
@@ -332,7 +333,7 @@ SpewPatchBaselineFrameFromExceptionHandler(uint8_t* oldReturnAddress, uint8_t* n
                                            JSScript* script, jsbytecode* pc)
 {
     JitSpew(JitSpew_BaselineDebugModeOSR,
-            "Patch return %p -> %p on BaselineJS frame (%s:%d) from exception handler at %s",
+            "Patch return %p -> %p on BaselineJS frame (%s:%" PRIuSIZE ") from exception handler at %s",
             oldReturnAddress, newReturnAddress, script->filename(), script->lineno(),
             CodeName[(JSOp)*pc]);
 }
@@ -493,7 +494,7 @@ PatchBaselineFramesForDebugMode(JSContext* cx, const Debugger::ExecutionObservab
                 // callVMs which can trigger debug mode OSR are the *only*
                 // callVMs generated for their respective pc locations in the
                 // baseline JIT code.
-                ICEntry& callVMEntry = bl->callVMEntryFromPCOffset(pcOffset);
+                BaselineICEntry& callVMEntry = bl->callVMEntryFromPCOffset(pcOffset);
                 recompInfo->resumeAddr = bl->returnAddressForIC(callVMEntry);
                 popFrameReg = false;
                 break;
@@ -505,7 +506,7 @@ PatchBaselineFramesForDebugMode(JSContext* cx, const Debugger::ExecutionObservab
                 // Patching mechanism is identical to a CallVM. This is
                 // handled especially only because the warmup counter VM call is
                 // part of the prologue, and not tied an opcode.
-                ICEntry& warmupCountEntry = bl->warmupCountICEntry();
+                BaselineICEntry& warmupCountEntry = bl->warmupCountICEntry();
                 recompInfo->resumeAddr = bl->returnAddressForIC(warmupCountEntry);
                 popFrameReg = false;
                 break;
@@ -519,7 +520,7 @@ PatchBaselineFramesForDebugMode(JSContext* cx, const Debugger::ExecutionObservab
                 // handled especially only because the stack check VM call is
                 // part of the prologue, and not tied an opcode.
                 bool earlyCheck = kind == ICEntry::Kind_EarlyStackCheck;
-                ICEntry& stackCheckEntry = bl->stackCheckICEntry(earlyCheck);
+                BaselineICEntry& stackCheckEntry = bl->stackCheckICEntry(earlyCheck);
                 recompInfo->resumeAddr = bl->returnAddressForIC(stackCheckEntry);
                 popFrameReg = false;
                 break;
@@ -667,7 +668,7 @@ RecompileBaselineScriptForDebugMode(JSContext* cx, JSScript* script,
     if (oldBaselineScript->hasDebugInstrumentation() == observing)
         return true;
 
-    JitSpew(JitSpew_BaselineDebugModeOSR, "Recompiling (%s:%d) for %s",
+    JitSpew(JitSpew_BaselineDebugModeOSR, "Recompiling (%s:%" PRIuSIZE ") for %s",
             script->filename(), script->lineno(), observing ? "DEBUGGING" : "NORMAL EXECUTION");
 
     script->setBaselineScript(cx->runtime(), nullptr);
@@ -689,6 +690,7 @@ RecompileBaselineScriptForDebugMode(JSContext* cx, JSScript* script,
 }
 
 #define PATCHABLE_ICSTUB_KIND_LIST(_)           \
+    _(CacheIR_Monitored)                        \
     _(Call_Scripted)                            \
     _(Call_AnyScripted)                         \
     _(Call_Native)                              \
@@ -696,16 +698,7 @@ RecompileBaselineScriptForDebugMode(JSContext* cx, JSScript* script,
     _(Call_ScriptedApplyArray)                  \
     _(Call_ScriptedApplyArguments)              \
     _(Call_ScriptedFunCall)                     \
-    _(GetElem_NativePrototypeCallNativeName)    \
-    _(GetElem_NativePrototypeCallNativeSymbol)  \
-    _(GetElem_NativePrototypeCallScriptedName)  \
-    _(GetElem_NativePrototypeCallScriptedSymbol) \
-    _(GetProp_CallScripted)                     \
-    _(GetProp_CallNative)                       \
     _(GetProp_CallNativeGlobal)                 \
-    _(GetProp_CallDOMProxyNative)               \
-    _(GetProp_CallDOMProxyWithGenerationNative) \
-    _(GetProp_DOMProxyShadowed)                 \
     _(GetProp_Generic)                          \
     _(SetProp_CallScripted)                     \
     _(SetProp_CallNative)
@@ -718,7 +711,7 @@ CloneOldBaselineStub(JSContext* cx, DebugModeOSREntryVector& entries, size_t ent
         return true;
 
     ICStub* oldStub = entry.oldStub;
-    MOZ_ASSERT(ICStub::CanMakeCalls(oldStub->kind()));
+    MOZ_ASSERT(oldStub->makesGCCalls());
 
     if (entry.frameKind == ICEntry::Kind_Invalid) {
         // The exception handler can modify the frame's override pc while
@@ -762,7 +755,7 @@ CloneOldBaselineStub(JSContext* cx, DebugModeOSREntryVector& entries, size_t ent
     } else {
         firstMonitorStub = nullptr;
     }
-    ICStubSpace* stubSpace = ICStubCompiler::StubSpaceForKind(oldStub->kind(), entry.script,
+    ICStubSpace* stubSpace = ICStubCompiler::StubSpaceForStub(oldStub->makesGCCalls(), entry.script,
                                                               ICStubCompiler::Engine::Baseline);
 
     // Clone the existing stub into the recompiled IC.

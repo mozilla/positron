@@ -298,6 +298,10 @@ MediaEngineWebRTCMicrophoneSource::UpdateSingleSource(
           LOG(("Audio engine is not initalized"));
           return NS_ERROR_FAILURE;
         }
+      } else {
+        // Until we fix (or wallpaper) support for multiple mic input
+        // (Bug 1238038) fail allocation for a second device
+        return NS_ERROR_FAILURE;
       }
       if (!AllocChannel()) {
         LOG(("Audio device is not initalized"));
@@ -810,10 +814,11 @@ MediaEngineWebRTCMicrophoneSource::Shutdown()
 
   while (mRegisteredHandles.Length()) {
     MOZ_ASSERT(mState == kAllocated || mState == kStopped);
-    Deallocate(nullptr); // XXX Extend concurrent constraints code to mics.
+    // on last Deallocate(), FreeChannel()s and DeInit()s if all channels are released
+    Deallocate(mRegisteredHandles[0].get());
   }
+  MOZ_ASSERT(mState == kReleased);
 
-  FreeChannel();
   mAudioInput = nullptr;
 }
 

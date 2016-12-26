@@ -4,7 +4,7 @@
 // Tests the breakpoints are hit in various situations.
 
 add_task(function* () {
-  const dbg = yield initDebugger("doc-scripts.html", "scripts.html");
+  const dbg = yield initDebugger("doc-scripts.html");
   const { selectors: { getSelectedSource }, getState } = dbg;
 
   // Make sure we can set a top-level breakpoint and it will be hit on
@@ -23,8 +23,7 @@ add_task(function* () {
   yield paused;
   yield resume(dbg);
   const source = getSelectedSource(getState()).toJS();
-  // TODO: The url of an eval source should be null.
-  ok(source.url.indexOf("SOURCE") === 0, "It is an eval source");
+  ok(!source.url, "It is an eval source");
 
   yield addBreakpoint(dbg, source, 5);
   invokeInTab("evaledFunc");

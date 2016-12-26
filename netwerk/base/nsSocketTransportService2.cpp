@@ -32,6 +32,10 @@
 #include "mozilla/WindowsVersion.h"
 #endif
 
+#ifdef MOZ_TASK_TRACER
+#include "GeckoTaskTracer.h"
+#endif
+
 namespace mozilla {
 namespace net {
 
@@ -179,7 +183,7 @@ nsSocketTransportService::NotifyWhenCanAttachSocket(nsIRunnable *event)
         return Dispatch(event, NS_DISPATCH_NORMAL);
     }
 
-    LinkedRunnableEvent *runnable = new LinkedRunnableEvent(event);
+    auto *runnable = new LinkedRunnableEvent(event);
     mPendingSocketQueue.insertBack(runnable);
     return NS_OK;
 }
@@ -236,8 +240,13 @@ nsSocketTransportService::DetachSocket(SocketContext *listHead, SocketContext *s
     MOZ_ASSERT((listHead == mActiveList) || (listHead == mIdleList),
                "DetachSocket invalid head");
 
-    // inform the handler that this socket is going away
-    sock->mHandler->OnSocketDetached(sock->mFD);
+    {
+#ifdef MOZ_TASK_TRACER
+	tasktracer::AutoSourceEvent taskTracerEvent(tasktracer::SourceEventType::SocketIO);
+#endif
+        // inform the handler that this socket is going away
+        sock->mHandler->OnSocketDetached(sock->mFD);
+    }
     mSentBytesCount += sock->mHandler->ByteCountSent();
     mReceivedBytesCount += sock->mHandler->ByteCountReceived();
 
@@ -553,6 +562,7 @@ nsSocketTransportService::Init()
         obsSvc->AddObserver(this, "last-pb-context-exited", false);
         obsSvc->AddObserver(this, NS_WIDGET_SLEEP_OBSERVER_TOPIC, true);
         obsSvc->AddObserver(this, NS_WIDGET_WAKE_OBSERVER_TOPIC, true);
+        obsSvc->AddObserver(this, "xpcom-shutdown-threads", false);
     }
 
     mInitialized = true;
@@ -561,7 +571,7 @@ nsSocketTransportService::Init()
 
 // called from main thread only
 NS_IMETHODIMP
-nsSocketTransportService::Shutdown()
+nsSocketTransportService::Shutdown(bool aXpcomShutdown)
 {
     SOCKET_LOG(("nsSocketTransportService::Shutdown\n"));
 
@@ -584,6 +594,23 @@ nsSocketTransportService::Shutdown()
         }
     }
 
+    if (!aXpcomShutdown) {
+        return ShutdownThread();
+    }
+
+    return NS_OK;
+}
+
+nsresult
+nsSocketTransportService::ShutdownThread()
+{
+    SOCKET_LOG(("nsSocketTransportService::ShutdownThread\n"));
+
+    NS_ENSURE_STATE(NS_IsMainThread());
+
+    if (!mInitialized || !mShuttingDown)
+        return NS_OK;
+
     // join with thread
     mThread->Shutdown();
     {
@@ -603,6 +630,7 @@ nsSocketTransportService::Shutdown()
         obsSvc->RemoveObserver(this, "last-pb-context-exited");
         obsSvc->RemoveObserver(this, NS_WIDGET_SLEEP_OBSERVER_TOPIC);
         obsSvc->RemoveObserver(this, NS_WIDGET_WAKE_OBSERVER_TOPIC);
+        obsSvc->RemoveObserver(this, "xpcom-shutdown-threads");
     }
 
     if (mAfterWakeUpTimer) {
@@ -805,6 +833,11 @@ nsSocketTransportService::MarkTheLastElementOfPendingQueue()
 NS_IMETHODIMP
 nsSocketTransportService::Run()
 {
+#ifdef MOZ_ENABLE_PROFILER_SPS
+    char stackBaseGuess; // Need to be the first variable of main loop function.
+    profiler_register_thread(PR_GetThreadName(PR_GetCurrentThread()), &stackBaseGuess);
+#endif // MOZ_ENABLE_PROFILER_SPS
+
     SOCKET_LOG(("STS thread init %d sockets\n", gMaxCount));
 
     psm::InitializeSSLServerCertVerificationThreads();
@@ -985,6 +1018,11 @@ nsSocketTransportService::Run()
     psm::StopSSLServerCertVerificationThreads();
 
     SOCKET_LOG(("STS thread exit\n"));
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+    profiler_unregister_thread();
+#endif // MOZ_ENABLE_PROFILER_SPS
+
     return NS_OK;
 }
 
@@ -1102,6 +1140,9 @@ nsSocketTransportService::DoPollIteration(TimeDuration *pollDuration)
             PRPollDesc &desc = mPollList[i+1];
             SocketContext &s = mActiveList[i];
             if (n > 0 && desc.out_flags != 0) {
+#ifdef MOZ_TASK_TRACER
+		tasktracer::AutoSourceEvent taskTracerEvent(tasktracer::SourceEventType::SocketIO);
+#endif
                 s.mElapsedTime = 0;
                 s.mHandler->OnSocketReady(desc.fd, desc.out_flags);
                 numberOfOnSocketReadyCalls++;
@@ -1121,6 +1162,9 @@ nsSocketTransportService::DoPollIteration(TimeDuration *pollDuration)
                     s.mElapsedTime += uint16_t(pollInterval);
                 // check for timeout expiration 
                 if (s.mElapsedTime >= s.mHandler->mPollTimeout) {
+#ifdef MOZ_TASK_TRACER
+		    tasktracer::AutoSourceEvent taskTracerEvent(tasktracer::SourceEventType::SocketIO);
+#endif
                     s.mElapsedTime = 0;
                     s.mHandler->OnSocketReady(desc.fd, -1);
                     numberOfOnSocketReadyCalls++;
@@ -1291,6 +1335,9 @@ nsSocketTransportService::NotifyKeepaliveEnabledPrefChange(SocketContext *sock)
         return;
     }
 
+#ifdef MOZ_TASK_TRACER
+    tasktracer::AutoSourceEvent taskTracerEvent(tasktracer::SourceEventType::SocketIO);
+#endif
     sock->mHandler->OnKeepaliveEnabledPrefChange(mKeepaliveEnabledPref);
 }
 
@@ -1347,6 +1394,8 @@ nsSocketTransportService::Observe(nsISupports *subject,
                 mAfterWakeUpTimer->Init(this, 2000, nsITimer::TYPE_ONE_SHOT);
             }
         }
+    } else if (!strcmp(topic, "xpcom-shutdown-threads")) {
+        ShutdownThread();
     }
 
     return NS_OK;

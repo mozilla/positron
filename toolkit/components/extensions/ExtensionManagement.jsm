@@ -25,6 +25,8 @@ XPCOMUtils.defineLazyGetter(this, "UUIDMap", () => {
   return UUIDMap;
 });
 
+var ExtensionManagement;
+
 /*
  * This file should be kept short and simple since it's loaded even
  * when no extensions are running.
@@ -156,16 +158,6 @@ var Service = {
     }
 
     // Create the moz-extension://uuid mapping.
-    // On b2g, in content processes we can't load jar:file:/// content, so we
-    // switch to jar:remoteopenfile:/// instead
-    // This is mostly exercised by generated extensions in tests. Installed
-    // extensions in b2g get an app: uri that also maps to the right jar: uri.
-    if (AppConstants.MOZ_B2G &&
-        Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT &&
-        uri.spec.startsWith("jar:file://")) {
-      uri = Services.io.newURI("jar:remoteopen" + uri.spec.substr("jar:".length), null, null);
-    }
-
     let handler = Services.io.getProtocolHandler("moz-extension");
     handler.QueryInterface(Ci.nsISubstitutingProtocolHandler);
     handler.setSubstitution(uuid, uri);
@@ -218,17 +210,20 @@ var Service = {
   },
 
   generateBackgroundPageUrl(extension) {
-    let background_scripts = extension.manifest.background &&
-      extension.manifest.background.scripts;
+    let background_scripts = (extension.manifest.background &&
+                              extension.manifest.background.scripts);
+
     if (!background_scripts) {
       return;
     }
-    let html = "<!DOCTYPE html>\n<body>\n";
+
+    let html = "<!DOCTYPE html>\n<html>\n<body>\n";
     for (let script of background_scripts) {
       script = script.replace(/"/g, "&quot;");
       html += `<script src="${script}"></script>\n`;
     }
     html += "</body>\n</html>\n";
+
     return "data:text/html;charset=utf-8," + encodeURIComponent(html);
   },
 
@@ -249,8 +244,7 @@ var Service = {
 // extensionURIToAddonID, which ensures that we don't inject our
 // API into webAccessibleResources or remote web pages.
 function getAddonIdForWindow(window) {
-  let principal = window.document.nodePrincipal;
-  return principal.originAttributes.addonId;
+  return Cu.getObjectPrincipal(window).originAttributes.addonId;
 }
 
 const API_LEVELS = Object.freeze({
@@ -270,9 +264,7 @@ function getAPILevelForWindow(window, addonId) {
     return NO_PRIVILEGES;
   }
 
-  // Extension pages running in the content process always defaults to
-  // "content script API level privileges".
-  if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {
+  if (!ExtensionManagement.isExtensionProcess) {
     return CONTENTSCRIPT_PRIVILEGES;
   }
 
@@ -311,7 +303,12 @@ function getAPILevelForWindow(window, addonId) {
   return FULL_PRIVILEGES;
 }
 
-this.ExtensionManagement = {
+ExtensionManagement = {
+  get isExtensionProcess() {
+    return (this.useRemoteWebExtensions ||
+            Services.appinfo.processType === Services.appinfo.PROCESS_TYPE_DEFAULT);
+  },
+
   startupExtension: Service.startupExtension.bind(Service),
   shutdownExtension: Service.shutdownExtension.bind(Service),
 
@@ -330,3 +327,6 @@ this.ExtensionManagement = {
 
   APIs,
 };
+
+XPCOMUtils.defineLazyPreferenceGetter(ExtensionManagement, "useRemoteWebExtensions",
+                                      "extensions.webextensions.remote", false);

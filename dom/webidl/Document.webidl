@@ -24,9 +24,9 @@ dictionary ElementCreationOptions {
 interface Document : Node {
   [Throws]
   readonly attribute DOMImplementation implementation;
-  [Pure, Throws]
+  [Pure, Throws, BinaryName="documentURIFromJS", NeedsCallerType]
   readonly attribute DOMString URL;
-  [Pure, Throws]
+  [Pure, Throws, BinaryName="documentURIFromJS", NeedsCallerType]
   readonly attribute DOMString documentURI;
   [Pure]
   readonly attribute DOMString compatMode;
@@ -232,9 +232,9 @@ partial interface Document {
   readonly attribute boolean fullscreen;
   [BinaryName="fullscreen"]
   readonly attribute boolean mozFullScreen;
-  [LenientSetter, Func="nsDocument::IsUnprefixedFullscreenEnabled"]
+  [LenientSetter, Func="nsDocument::IsUnprefixedFullscreenEnabled", NeedsCallerType]
   readonly attribute boolean fullscreenEnabled;
-  [BinaryName="fullscreenEnabled"]
+  [BinaryName="fullscreenEnabled", NeedsCallerType]
   readonly attribute boolean mozFullScreenEnabled;
   [LenientSetter, Func="nsDocument::IsUnprefixedFullscreenEnabled"]
   readonly attribute Element? fullscreenElement;
@@ -271,7 +271,7 @@ partial interface Document {
 //http://dvcs.w3.org/hg/webcomponents/raw-file/tip/spec/custom/index.html#dfn-document-register
 partial interface Document {
     // this is deprecated from CustomElements v0
-    [Throws, Func="CustomElementsRegistry::IsCustomElementsEnabled"]
+    [Throws, Func="CustomElementRegistry::IsCustomElementEnabled"]
     object registerElement(DOMString name, optional ElementRegistrationOptions options);
 };
 
@@ -300,12 +300,6 @@ partial interface Document {
     CaretPosition? caretPositionFromPoint (float x, float y);
 
     readonly attribute Element? scrollingElement;
-};
-
-// http://dvcs.w3.org/hg/undomanager/raw-file/tip/undomanager.html
-partial interface Document {
-    [Pref="dom.undo_manager.enabled"]
-    readonly attribute UndoManager? undoManager;
 };
 
 // http://dev.w3.org/2006/webapi/selectors-api2/#interface-definitions
@@ -344,7 +338,7 @@ partial interface Document {
                                           DOMString attrValue);
   [Func="IsChromeOrXBL"]
   Element? getBindingParent(Node node);
-  [Throws, Func="IsChromeOrXBL"]
+  [Throws, Func="IsChromeOrXBL", NeedsSubjectPrincipal]
   void loadBindingDocument(DOMString documentURL);
 
   // nsIDOMDocumentTouch
@@ -442,9 +436,11 @@ partial interface Document {
 };
 
 // Extension to give chrome and XBL JS the ability to determine whether
-// the document is sandboxed without permission to run scripts.
+// the document is sandboxed without permission to run scripts
+// and whether inline scripts are blocked by the document's CSP.
 partial interface Document {
   [Func="IsChromeOrXBL"] readonly attribute boolean hasScriptsBlockedBySandbox;
+  [Func="IsChromeOrXBL"] readonly attribute boolean inlineScriptAllowedByCSP;
 };
 
 Document implements XPathEvaluator;

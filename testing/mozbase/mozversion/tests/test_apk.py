@@ -7,14 +7,17 @@
 import mozfile
 import unittest
 import zipfile
+
+import mozunit
+
 from mozversion import get_version
 
 
 class ApkTest(unittest.TestCase):
     """test getting version information from an android .apk"""
 
-    application_changeset = 'a'*40
-    platform_changeset = 'b'*40
+    application_changeset = 'a' * 40
+    platform_changeset = 'b' * 40
 
     def create_apk_zipfiles(self, zfile):
         zfile.writestr('application.ini',
@@ -40,4 +43,4 @@ class ApkTest(unittest.TestCase):
             self.assertEqual(v.get('package_name'), "org.mozilla.fennec")
 
 if __name__ == '__main__':
-    unittest.main()
+    mozunit.main()

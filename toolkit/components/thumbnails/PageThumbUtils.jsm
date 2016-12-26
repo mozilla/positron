@@ -35,7 +35,7 @@ this.PageThumbUtils = {
    * @param aHeight (optional) height of the canvas to create
    * @return The newly created canvas.
    */
-  createCanvas: function (aWindow, aWidth = 0, aHeight = 0) {
+  createCanvas: function(aWindow, aWidth = 0, aHeight = 0) {
     let doc = (aWindow || Services.appShell.hiddenDOMWindow).document;
     let canvas = doc.createElementNS(this.HTML_NAMESPACE, "canvas");
     canvas.mozOpaque = true;
@@ -54,14 +54,14 @@ this.PageThumbUtils = {
    * @param aWindow (optional) aWindow that is used to calculate the scaling size.
    * @return The calculated thumbnail size or a default if unable to calculate.
    */
-  getThumbnailSize: function (aWindow = null) {
+  getThumbnailSize: function(aWindow = null) {
     if (!this._thumbnailWidth || !this._thumbnailHeight) {
       let screenManager = Cc["@mozilla.org/gfx/screenmanager;1"]
                             .getService(Ci.nsIScreenManager);
       let left = {}, top = {}, screenWidth = {}, screenHeight = {};
       screenManager.primaryScreen.GetRectDisplayPix(left, top, screenWidth, screenHeight);
 
-      /***
+      /** *
        * The system default scale might be different than
        * what is reported by the window. For example,
        * retina displays have 1:1 system scales, but 2:1 window
@@ -72,7 +72,7 @@ this.PageThumbUtils = {
       let windowScale = aWindow ? aWindow.devicePixelRatio : systemScale;
       let scale = Math.max(systemScale, windowScale);
 
-      /***
+      /** *
        * On retina displays, we can sometimes go down this path
        * without a window object. In those cases, force 2x scaling
        * as the system scale doesn't represent the 2x scaling
@@ -82,7 +82,7 @@ this.PageThumbUtils = {
         scale = 2;
       }
 
-      /***
+      /** *
        * THESE VALUES ARE DEFINED IN newtab.css and hard coded.
        * If you change these values from the prefs,
        * ALSO CHANGE THEM IN newtab.css
@@ -101,7 +101,7 @@ this.PageThumbUtils = {
     return [this._thumbnailWidth, this._thumbnailHeight];
   },
 
-  /***
+  /** *
    * Given a browser window, return the size of the content
    * minus the scroll bars.
    */
@@ -127,7 +127,7 @@ this.PageThumbUtils = {
     return [width, height];
   },
 
-  /***
+  /** *
    * Given a browser window, this creates a snapshot of the content
    * and returns a canvas with the resulting snapshot of the content
    * at the thumbnail size. It has to do this through a two step process:
@@ -229,7 +229,7 @@ this.PageThumbUtils = {
    * @param aCanvas The target canvas.
    * @return An array containing width, height and scale.
    */
-  determineCropSize: function (aWindow, aCanvas) {
+  determineCropSize: function(aWindow, aCanvas) {
     if (Cu.isCrossProcessWrapper(aWindow)) {
       throw new Error('Do not pass cpows here.');
     }
@@ -265,7 +265,7 @@ this.PageThumbUtils = {
     return [width, height, scale];
   },
 
-  shouldStoreContentThumbnail: function (aDocument, aDocShell) {
+  shouldStoreContentThumbnail: function(aDocument, aDocShell) {
     if (BrowserUtils.isToolbarVisible(aDocShell, "findbar")) {
       return false;
     }

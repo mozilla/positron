@@ -4,7 +4,6 @@
 browser.jar:
 %  content browser %content/browser/ contentaccessible=yes
 #ifdef XP_MACOSX
-%  overlay chrome://mozapps/content/downloads/downloads.xul chrome://browser/content/downloadManagerOverlay.xul
 %  overlay chrome://mozapps/content/update/updates.xul chrome://browser/content/softwareUpdateOverlay.xul
 #endif
 #ifdef XP_WIN
@@ -68,8 +67,6 @@ browser.jar:
         content/browser/aboutTabCrashed.css           (content/aboutTabCrashed.css)
         content/browser/aboutTabCrashed.js            (content/aboutTabCrashed.js)
         content/browser/aboutTabCrashed.xhtml         (content/aboutTabCrashed.xhtml)
-*       content/browser/aboutTabGroupsMigration.xhtml (content/aboutTabGroupsMigration.xhtml)
-        content/browser/aboutTabGroupsMigration.js    (content/aboutTabGroupsMigration.js)
 *       content/browser/browser.css                   (content/browser.css)
         content/browser/browser.js                    (content/browser.js)
 *       content/browser/browser.xul                   (content/browser.xul)
@@ -167,6 +164,7 @@ browser.jar:
         content/browser/tabbrowser.xml                (content/tabbrowser.xml)
         content/browser/urlbarBindings.xml            (content/urlbarBindings.xml)
         content/browser/utilityOverlay.js             (content/utilityOverlay.js)
+        content/browser/usercontext.svg               (content/usercontext.svg)
         content/browser/web-panels.js                 (content/web-panels.js)
 *       content/browser/web-panels.xul                (content/web-panels.xul)
 *       content/browser/baseMenuOverlay.xul           (content/baseMenuOverlay.xul)
@@ -175,7 +173,6 @@ browser.jar:
 *       content/browser/hiddenWindow.xul              (content/hiddenWindow.xul)
 #ifdef XP_MACOSX
 *       content/browser/macBrowserOverlay.xul         (content/macBrowserOverlay.xul)
-*       content/browser/downloadManagerOverlay.xul    (content/downloadManagerOverlay.xul)
 *       content/browser/softwareUpdateOverlay.xul  (content/softwareUpdateOverlay.xul)
 #endif
 *       content/browser/viewSourceOverlay.xul         (content/viewSourceOverlay.xul)

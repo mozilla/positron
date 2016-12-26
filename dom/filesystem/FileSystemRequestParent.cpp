@@ -11,7 +11,6 @@
 #include "GetFileOrDirectoryTask.h"
 #include "RemoveTask.h"
 
-#include "mozilla/AppProcessChecker.h"
 #include "mozilla/dom/FileSystemBase.h"
 
 namespace mozilla {
@@ -58,7 +57,7 @@ FileSystemRequestParent::Initialize(const FileSystemParams& aParams)
     FILESYSTEM_REQUEST_PARENT_DISPATCH_ENTRY(Remove)
 
     default: {
-      NS_RUNTIMEABORT("not reached");
+      MOZ_CRASH("not reached");
       break;
     }
   }

@@ -51,7 +51,7 @@ const PING_FORMAT_VERSION = 1;
 
 // The set of engines we record telemetry for - any other engines are ignored.
 const ENGINES = new Set(["addons", "bookmarks", "clients", "forms", "history",
-                         "passwords", "prefs", "tabs"]);
+                         "passwords", "prefs", "tabs", "extension-storage"]);
 
 // A regex we can use to replace the profile dir in error messages. We use a
 // regexp so we can simply replace all case-insensitive occurences.
@@ -83,6 +83,10 @@ function transformError(error, engineName) {
 
   if (error instanceof AuthenticationError) {
     return { name: "autherror", from: error.source };
+  }
+
+  if (error instanceof Ci.mozIStorageError) {
+    return { name: "sqlerror", code: error.result };
   }
 
   let httpCode = error.status ||
@@ -173,8 +177,9 @@ class EngineRecord {
       log.error(`Multiple validations occurred for engine ${this.name}!`);
       return;
     }
-    let { problems, duration, recordCount } = validationResult;
+    let { problems, version, duration, recordCount } = validationResult;
     let validation = {
+      version: version || 0,
       checked: recordCount || 0,
     };
     if (duration > 0) {
@@ -237,6 +242,7 @@ class TelemetryRecord {
       failureReason: this.failureReason,
       status: this.status,
       deviceID: this.deviceID,
+      devices: this.devices,
     };
     let engines = [];
     for (let engine of this.engines) {
@@ -259,18 +265,31 @@ class TelemetryRecord {
       this.failureReason = transformError(error);
     }
 
+    // We don't bother including the "devices" field if we can't come up with a
+    // UID or device ID for *this* device -- If that's the case, any data we'd
+    // put there would be likely to be full of garbage anyway.
+    // Note that we currently use the "sync device GUID" rather than the "FxA
+    // device ID" as the latter isn't stable enough for our purposes - see bug
+    // 1316535.
+    let includeDeviceInfo = false;
     try {
       this.uid = Weave.Service.identity.hashedUID();
-      let deviceID = Weave.Service.identity.deviceID();
-      if (deviceID) {
-        // Combine the raw device id with the metrics uid to create a stable
-        // unique identifier that can't be mapped back to the user's FxA
-        // identity without knowing the metrics HMAC key.
-        this.deviceID = Utils.sha256(deviceID + this.uid);
-      }
+      this.deviceID = Weave.Service.identity.hashedDeviceID(Weave.Service.clientsEngine.localID);
+      includeDeviceInfo = true;
     } catch (e) {
       this.uid = "0".repeat(32);
       this.deviceID = undefined;
+    }
+
+    if (includeDeviceInfo) {
+      let remoteDevices = Weave.Service.clientsEngine.remoteClients;
+      this.devices = remoteDevices.map(device => {
+        return {
+          os: device.os,
+          version: device.version,
+          id: Weave.Service.identity.hashedDeviceID(device.id),
+        };
+      });
     }
 
     // Check for engine statuses. -- We do this now, and not in engine.finished
@@ -310,13 +329,18 @@ class TelemetryRecord {
   }
 
   onEngineStop(engineName, error) {
-    if (error && !this.currentEngine) {
-      log.error(`Error triggered on ${engineName} when no current engine exists: ${error}`);
+    // We only care if it's the current engine if we have a current engine.
+    if (this._shouldIgnoreEngine(engineName, !!this.currentEngine)) {
+      return;
+    }
+    if (!this.currentEngine) {
       // It's possible for us to get an error before the start message of an engine
       // (somehow), in which case we still want to record that error.
+      if (!error) {
+        return;
+      }
+      log.error(`Error triggered on ${engineName} when no current engine exists: ${error}`);
       this.currentEngine = new EngineRecord(engineName);
-    } else if (!this.currentEngine || (engineName && this._shouldIgnoreEngine(engineName, true))) {
-      return;
     }
     this.currentEngine.finished(error);
     this.engines.push(this.currentEngine);

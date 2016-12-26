@@ -6,12 +6,10 @@ add_task(function* () {
   let originalEngine = Services.search.currentEngine;
   Services.search.currentEngine = engine;
 
-  let tab = gBrowser.selectedTab = gBrowser.addTab("about:mozilla", {animate: false});
-  yield promiseTabLoaded(gBrowser.selectedTab);
+  let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, "about:mozilla");
 
   registerCleanupFunction(() => {
     Services.search.currentEngine = originalEngine;
-    let engine = Services.search.getEngineByName("MozSearch");
     Services.search.removeEngine(engine);
 
     try {
@@ -28,8 +26,9 @@ add_task(function* () {
   ok(result.getAttribute("image") === engine.iconURI.spec,
      "Image attribute should have the search engine's icon");
 
+  let tabPromise = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
   EventUtils.synthesizeKey("VK_RETURN", { });
-  yield promiseTabLoaded(gBrowser.selectedTab);
+  yield tabPromise;
 
   is(gBrowser.selectedBrowser.currentURI.spec, "http://example.com/?q=open+a+search");
 });

@@ -9,16 +9,10 @@
 #define _DEFAULT_SOURCE
 #define _BSD_SOURCE
 #define _POSIX_SOURCE
-#include <algorithm>
 #include <dlfcn.h>
-#include <limits>
 #include <stdio.h>
-#include <sys/time.h>
-#include <assert.h>
 #include <string.h>
 #include <limits.h>
-#include <poll.h>
-#include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <math.h>
@@ -993,9 +987,9 @@ cbjack_enumerate_devices(cubeb * context, cubeb_device_type type,
   const char * j_out = "JACK playback";
 
   if (type & CUBEB_DEVICE_TYPE_OUTPUT) {
-    context->devinfo[i] = (cubeb_device_info *)malloc(sizeof(cubeb_device_info));
+    context->devinfo[i] = (cubeb_device_info *) malloc(sizeof(cubeb_device_info));
     context->devinfo[i]->device_id = strdup(j_out);
-    context->devinfo[i]->devid = context->devinfo[i]->device_id;
+    context->devinfo[i]->devid = (cubeb_devid) context->devinfo[i]->device_id;
     context->devinfo[i]->friendly_name = strdup(j_out);
     context->devinfo[i]->group_id = strdup(j_out);
     context->devinfo[i]->vendor_name = strdup(j_out);
@@ -1014,9 +1008,9 @@ cbjack_enumerate_devices(cubeb * context, cubeb_device_type type,
   }
 
   if (type & CUBEB_DEVICE_TYPE_INPUT) {
-    context->devinfo[i] = (cubeb_device_info *)malloc(sizeof(cubeb_device_info));
+    context->devinfo[i] = (cubeb_device_info *) malloc(sizeof(cubeb_device_info));
     context->devinfo[i]->device_id = strdup(j_in);
-    context->devinfo[i]->devid = context->devinfo[i]->device_id;
+    context->devinfo[i]->devid = (cubeb_devid) context->devinfo[i]->device_id;
     context->devinfo[i]->friendly_name = strdup(j_in);
     context->devinfo[i]->group_id = strdup(j_in);
     context->devinfo[i]->vendor_name = strdup(j_in);

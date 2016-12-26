@@ -130,7 +130,7 @@ interface OnlyForUseInConstructor {
  Constructor(DOMString str),
  Constructor(unsigned long num, boolean? boolArg),
  Constructor(TestInterface? iface),
- Constructor(long arg1, IndirectlyImplementedInterface iface),
+ Constructor(unsigned long arg1, IndirectlyImplementedInterface iface),
  Constructor(Date arg1),
  Constructor(ArrayBuffer arrayBuf),
  Constructor(Uint8Array typedArr),
@@ -731,12 +731,8 @@ interface TestInterface {
 
   // Promise types
   void passPromise(Promise<any> arg);
-  void passNullablePromise(Promise<any>? arg);
   void passOptionalPromise(optional Promise<any> arg);
-  void passOptionalNullablePromise(optional Promise<any>? arg);
-  void passOptionalNullablePromiseWithDefaultValue(optional Promise<any>? arg = null);
   void passPromiseSequence(sequence<Promise<any>> arg);
-  void passNullablePromiseSequence(sequence<Promise<any>?> arg);
   Promise<any> receivePromise();
   Promise<any> receiveAddrefedPromise();
 
@@ -943,6 +939,10 @@ interface TestInterface {
   [Throws] attribute boolean throwingAttr;
   [GetterThrows] attribute boolean throwingGetterAttr;
   [SetterThrows] attribute boolean throwingSetterAttr;
+  [NeedsSubjectPrincipal] void needsSubjectPrincipalMethod();
+  [NeedsSubjectPrincipal] attribute boolean needsSubjectPrincipalAttr;
+  [NeedsCallerType] void needsCallerTypeMethod();
+  [NeedsCallerType] attribute boolean needsCallerTypeAttr;
   legacycaller short(unsigned long arg1, TestInterface arg2);
   void passArgsWithDefaults(optional long arg1,
                             optional TestInterface? arg2 = null,
@@ -1203,16 +1203,6 @@ interface TestIndexedAndNamedGetterAndSetterInterface : TestIndexedSetterInterfa
   readonly attribute unsigned long length;
 };
 
-interface TestIndexedDeleterInterface {
-  deleter void delItem(unsigned long idx);
-  getter long (unsigned long index);
-};
-
-interface TestIndexedDeleterWithRetvalInterface {
-  deleter boolean delItem(unsigned long index);
-  getter long (unsigned long index);
-};
-
 interface TestNamedDeleterInterface {
   deleter void (DOMString name);
   getter long (DOMString name);
@@ -1220,13 +1210,6 @@ interface TestNamedDeleterInterface {
 
 interface TestNamedDeleterWithRetvalInterface {
   deleter boolean delNamedItem(DOMString name);
-  getter long (DOMString name);
-};
-
-interface TestIndexedAndNamedDeleterInterface {
-  deleter void (unsigned long index);
-  getter long (unsigned long index);
-  deleter void delNamedItem(DOMString name);
   getter long (DOMString name);
 };
 
@@ -1266,4 +1249,16 @@ namespace TestProtoObjectHackedNamespace {
 [SecureContext]
 interface TestSecureContextInterface {
   static void alsoSecureContext();
+};
+
+[Exposed=(Window,Worker)]
+interface TestWorkerExposedInterface {
+  [NeedsSubjectPrincipal] void needsSubjectPrincipalMethod();
+  [NeedsSubjectPrincipal] attribute boolean needsSubjectPrincipalAttr;
+  [NeedsCallerType] void needsCallerTypeMethod();
+  [NeedsCallerType] attribute boolean needsCallerTypeAttr;
+};
+
+[HTMLConstructor]
+interface TestHTMLConstructorInterface {
 };

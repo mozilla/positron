@@ -8,11 +8,13 @@ Cu.import("resource://gre/modules/Timer.jsm");
 const { FileUtils } = Cu.import("resource://gre/modules/FileUtils.jsm");
 const { OS } = Cu.import("resource://gre/modules/osfile.jsm");
 
-const { loadKinto } = Cu.import("resource://services-common/kinto-offline-client.js");
+const { Kinto } = Cu.import("resource://services-common/kinto-offline-client.js");
+const { FirefoxAdapter } = Cu.import("resource://services-common/kinto-storage-adapter.js");
 const BlocklistClients = Cu.import("resource://services-common/blocklist-clients.js");
 
 const BinaryInputStream = CC("@mozilla.org/binaryinputstream;1",
   "nsIBinaryInputStream", "setInputStream");
+const kintoFilename = "kinto.sqlite";
 
 const gBlocklistClients = [
   {client: BlocklistClients.AddonBlocklistClient, filename: BlocklistClients.FILENAME_ADDONS_JSON, testData: ["i808","i720", "i539"]},
@@ -22,22 +24,17 @@ const gBlocklistClients = [
 
 
 let server;
-let kintoClient;
 
-function kintoCollection(collectionName) {
-  if (!kintoClient) {
-    const Kinto = loadKinto();
-    const FirefoxAdapter = Kinto.adapters.FirefoxAdapter;
-    const config = {
-      // Set the remote to be some server that will cause test failure when
-      // hit since we should never hit the server directly, only via maybeSync()
-      remote: "https://firefox.settings.services.mozilla.com/v1/",
-      adapter: FirefoxAdapter,
-      bucket: "blocklists"
-    };
-    kintoClient = new Kinto(config);
-  }
-  return kintoClient.collection(collectionName);
+function kintoCollection(collectionName, sqliteHandle) {
+  const config = {
+    // Set the remote to be some server that will cause test failure when
+    // hit since we should never hit the server directly, only via maybeSync()
+    remote: "https://firefox.settings.services.mozilla.com/v1/",
+    adapter: FirefoxAdapter,
+    adapterOptions: {sqliteHandle},
+    bucket: "blocklists"
+  };
+  return new Kinto(config).collection(collectionName);
 }
 
 function* readJSON(filepath) {
@@ -52,12 +49,13 @@ function* clear_state() {
     Services.prefs.clearUserPref(client.lastCheckTimePref);
 
     // Clear local DB.
-    const collection = kintoCollection(client.collectionName);
+    let sqliteHandle;
     try {
-      yield collection.db.open();
+      sqliteHandle = yield FirefoxAdapter.openConnection({path: kintoFilename});
+      const collection = kintoCollection(client.collectionName, sqliteHandle);
       yield collection.clear();
     } finally {
-      yield collection.db.close();
+      yield sqliteHandle.close();
     }
   }
 
@@ -127,11 +125,11 @@ add_task(function* test_records_obtained_from_server_are_stored_in_db(){
 
     // Open the collection, verify it's been populated:
     // Our test data has a single record; it should be in the local collection
-    let collection = kintoCollection(client.collectionName);
-    yield collection.db.open();
+    const sqliteHandle = yield FirefoxAdapter.openConnection({path: kintoFilename});
+    let collection = kintoCollection(client.collectionName, sqliteHandle);
     let list = yield collection.list();
     equal(list.data.length, 1);
-    yield collection.db.close();
+    yield sqliteHandle.close();
   }
 });
 add_task(clear_state);

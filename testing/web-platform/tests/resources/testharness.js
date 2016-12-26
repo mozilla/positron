@@ -523,13 +523,15 @@ policies and contribution forms [3].
     function promise_test(func, name, properties) {
         var test = async_test(name, properties);
         // If there is no promise tests queue make one.
-        test.step(function() {
-            if (!tests.promise_tests) {
-                tests.promise_tests = Promise.resolve();
-            }
-        });
+        if (!tests.promise_tests) {
+            tests.promise_tests = Promise.resolve();
+        }
         tests.promise_tests = tests.promise_tests.then(function() {
-            return Promise.resolve(test.step(func, test, test))
+            var promise = test.step(func, test, test);
+            test.step(function() {
+                assert_not_equals(promise, undefined);
+            });
+            return Promise.resolve(promise)
                 .then(
                     function() {
                         test.done();
@@ -1249,6 +1251,7 @@ policies and contribution forms [3].
                 ReadOnlyError: 0,
                 VersionError: 0,
                 OperationError: 0,
+                NotAllowedError: 0
             };
 
             if (!(name in name_code_map)) {
@@ -2463,6 +2466,11 @@ policies and contribution forms [3].
             } catch (e) {
                 stack = e.stack;
             }
+        }
+
+        // 'Error.stack' is not supported in all browsers/versions
+        if (!stack) {
+            return "(Stack trace unavailable)";
         }
 
         var lines = stack.split("\n");

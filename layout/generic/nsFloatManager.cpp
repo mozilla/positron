@@ -116,22 +116,23 @@ void nsFloatManager::Shutdown()
   sCachedFloatManagerCount = -1;
 }
 
-#define CHECK_BLOCK_DIR(aWM) \
-  NS_ASSERTION((aWM).GetBlockDir() == mWritingMode.GetBlockDir(), \
-  "incompatible writing modes")
+#define CHECK_BLOCK_AND_LINE_DIR(aWM) \
+  NS_ASSERTION((aWM).GetBlockDir() == mWritingMode.GetBlockDir() &&     \
+               (aWM).IsLineInverted() == mWritingMode.IsLineInverted(), \
+               "incompatible writing modes")
 
 nsFlowAreaRect
-nsFloatManager::GetFlowArea(WritingMode aWM, nscoord aBOffset,
-                            BandInfoType aInfoType, nscoord aBSize,
+nsFloatManager::GetFlowArea(WritingMode aWM, nscoord aBCoord, nscoord aBSize,
+                            BandInfoType aBandInfoType, ShapeType aShapeType,
                             LogicalRect aContentArea, SavedState* aState,
                             const nsSize& aContainerSize) const
 {
-  CHECK_BLOCK_DIR(aWM);
+  CHECK_BLOCK_AND_LINE_DIR(aWM);
   NS_ASSERTION(aBSize >= 0, "unexpected max block size");
   NS_ASSERTION(aContentArea.ISize(aWM) >= 0,
                "unexpected content area inline size");
 
-  nscoord blockStart = aBOffset + mBlockStart;
+  nscoord blockStart = aBCoord + mBlockStart;
   if (blockStart < nscoord_MIN) {
     NS_WARNING("bad value");
     blockStart = nscoord_MIN;
@@ -153,7 +154,7 @@ nsFloatManager::GetFlowArea(WritingMode aWM, nscoord aBOffset,
   if (floatCount == 0 ||
       (mFloats[floatCount-1].mLeftBEnd <= blockStart &&
        mFloats[floatCount-1].mRightBEnd <= blockStart)) {
-    return nsFlowAreaRect(aWM, aContentArea.IStart(aWM), aBOffset,
+    return nsFlowAreaRect(aWM, aContentArea.IStart(aWM), aBCoord,
                           aContentArea.ISize(aWM), aBSize, false);
   }
 
@@ -161,7 +162,7 @@ nsFloatManager::GetFlowArea(WritingMode aWM, nscoord aBOffset,
   if (aBSize == nscoord_MAX) {
     // This warning (and the two below) are possible to hit on pages
     // with really large objects.
-    NS_WARNING_ASSERTION(aInfoType == BAND_FROM_POINT, "bad height");
+    NS_WARNING_ASSERTION(aBandInfoType == BandInfoType::BandFromPoint, "bad height");
     blockEnd = nscoord_MAX;
   } else {
     blockEnd = blockStart + aBSize;
@@ -193,34 +194,35 @@ nsFloatManager::GetFlowArea(WritingMode aWM, nscoord aBOffset,
       continue;
     }
 
-    nscoord floatBStart = fi.BStart();
-    nscoord floatBEnd = fi.BEnd();
-    if (blockStart < floatBStart && aInfoType == BAND_FROM_POINT) {
+    nscoord floatBStart = fi.BStart(aShapeType);
+    nscoord floatBEnd = fi.BEnd(aShapeType);
+    if (blockStart < floatBStart && aBandInfoType == BandInfoType::BandFromPoint) {
       // This float is below our band.  Shrink our band's height if needed.
       if (floatBStart < blockEnd) {
         blockEnd = floatBStart;
       }
     }
-    // If blockStart == blockEnd (which happens only with WIDTH_WITHIN_HEIGHT),
+    // If blockStart == blockEnd (which happens only with WidthWithinHeight),
     // we include floats that begin at our 0-height vertical area.  We
-    // need to to this to satisfy the invariant that a
-    // WIDTH_WITHIN_HEIGHT call is at least as narrow on both sides as a
-    // BAND_WITHIN_POINT call beginning at its blockStart.
+    // need to do this to satisfy the invariant that a
+    // WidthWithinHeight call is at least as narrow on both sides as a
+    // BandFromPoint call beginning at its blockStart.
     else if (blockStart < floatBEnd &&
              (floatBStart < blockEnd ||
               (floatBStart == blockEnd && blockStart == blockEnd))) {
       // This float is in our band.
 
-      // Shrink our band's height if needed.
-      if (floatBEnd < blockEnd && aInfoType == BAND_FROM_POINT) {
-        blockEnd = floatBEnd;
-      }
-
       // Shrink our band's width if needed.
       StyleFloat floatStyle = fi.mFrame->StyleDisplay()->PhysicalFloats(aWM);
+
+      // When aBandInfoType is BandFromPoint, we're only intended to
+      // consider a point along the y axis rather than a band.
+      const nscoord bandBlockEnd =
+        aBandInfoType == BandInfoType::BandFromPoint ? blockStart : blockEnd;
       if (floatStyle == StyleFloat::Left) {
         // A left float
-        nscoord lineRightEdge = fi.LineRight();
+        nscoord lineRightEdge =
+          fi.LineRight(aWM, aShapeType, blockStart, bandBlockEnd);
         if (lineRightEdge > lineLeft) {
           lineLeft = lineRightEdge;
           // Only set haveFloats to true if the float is inside our
@@ -231,12 +233,18 @@ nsFloatManager::GetFlowArea(WritingMode aWM, nscoord aBOffset,
         }
       } else {
         // A right float
-        nscoord lineLeftEdge = fi.LineLeft();
+        nscoord lineLeftEdge =
+          fi.LineLeft(aWM, aShapeType, blockStart, bandBlockEnd);
         if (lineLeftEdge < lineRight) {
           lineRight = lineLeftEdge;
           // See above.
           haveFloats = true;
         }
+      }
+
+      // Shrink our band's height if needed.
+      if (floatBEnd < blockEnd && aBandInfoType == BandInfoType::BandFromPoint) {
+        blockEnd = floatBEnd;
       }
     }
   }
@@ -257,15 +265,12 @@ nsresult
 nsFloatManager::AddFloat(nsIFrame* aFloatFrame, const LogicalRect& aMarginRect,
                          WritingMode aWM, const nsSize& aContainerSize)
 {
-  CHECK_BLOCK_DIR(aWM);
+  CHECK_BLOCK_AND_LINE_DIR(aWM);
   NS_ASSERTION(aMarginRect.ISize(aWM) >= 0, "negative inline size!");
   NS_ASSERTION(aMarginRect.BSize(aWM) >= 0, "negative block size!");
 
-  FloatInfo info(aFloatFrame,
-                 aMarginRect.LineLeft(aWM, aContainerSize) + mLineLeft,
-                 aMarginRect.BStart(aWM) + mBlockStart,
-                 aMarginRect.ISize(aWM),
-                 aMarginRect.BSize(aWM));
+  FloatInfo info(aFloatFrame, mLineLeft, mBlockStart, aMarginRect, aWM,
+                 aContainerSize);
 
   // Set mLeftBEnd and mRightBEnd.
   if (HasAnyFloats()) {
@@ -529,20 +534,55 @@ nsFloatManager::ClearContinues(StyleClear aBreakType) const
 // FloatInfo
 
 nsFloatManager::FloatInfo::FloatInfo(nsIFrame* aFrame,
-                                     nscoord aLineLeft, nscoord aBStart,
-                                     nscoord aISize, nscoord aBSize)
+                                     nscoord aLineLeft, nscoord aBlockStart,
+                                     const LogicalRect& aMarginRect,
+                                     WritingMode aWM,
+                                     const nsSize& aContainerSize)
   : mFrame(aFrame)
-  , mRect(aLineLeft, aBStart, aISize, aBSize)
+  , mRect(aMarginRect.LineLeft(aWM, aContainerSize) + aLineLeft,
+          aMarginRect.BStart(aWM) + aBlockStart,
+          aMarginRect.ISize(aWM),
+          aMarginRect.BSize(aWM))
 {
   MOZ_COUNT_CTOR(nsFloatManager::FloatInfo);
+
+  const StyleShapeOutside& shapeOutside = mFrame->StyleDisplay()->mShapeOutside;
+
+  if (shapeOutside.GetType() == StyleShapeSourceType::Box) {
+    // Initialize shape-box reference rect.
+    LogicalRect rect = aMarginRect;
+
+    switch (shapeOutside.GetReferenceBox()) {
+      case StyleShapeOutsideShapeBox::Content:
+        rect.Deflate(aWM, mFrame->GetLogicalUsedPadding(aWM));
+        MOZ_FALLTHROUGH;
+      case StyleShapeOutsideShapeBox::Padding:
+        rect.Deflate(aWM, mFrame->GetLogicalUsedBorder(aWM));
+        MOZ_FALLTHROUGH;
+      case StyleShapeOutsideShapeBox::Border:
+        rect.Deflate(aWM, mFrame->GetLogicalUsedMargin(aWM));
+        break;
+      case StyleShapeOutsideShapeBox::Margin:
+        // Do nothing. rect is already a margin rect.
+        break;
+      case StyleShapeOutsideShapeBox::NoBox:
+        MOZ_ASSERT_UNREACHABLE("Why don't we have a shape-box?");
+        break;
+    }
+
+    mShapeBoxRect.emplace(rect.LineLeft(aWM, aContainerSize) + aLineLeft,
+                          rect.BStart(aWM) + aBlockStart,
+                          rect.ISize(aWM), rect.BSize(aWM));
+  }
 }
 
 #ifdef NS_BUILD_REFCNT_LOGGING
 nsFloatManager::FloatInfo::FloatInfo(const FloatInfo& aOther)
-  : mFrame(aOther.mFrame),
-    mLeftBEnd(aOther.mLeftBEnd),
-    mRightBEnd(aOther.mRightBEnd),
-    mRect(aOther.mRect)
+  : mFrame(aOther.mFrame)
+  , mLeftBEnd(aOther.mLeftBEnd)
+  , mRightBEnd(aOther.mRightBEnd)
+  , mRect(aOther.mRect)
+  , mShapeBoxRect(aOther.mShapeBoxRect)
 {
   MOZ_COUNT_CTOR(nsFloatManager::FloatInfo);
 }
@@ -552,6 +592,202 @@ nsFloatManager::FloatInfo::~FloatInfo()
   MOZ_COUNT_DTOR(nsFloatManager::FloatInfo);
 }
 #endif
+
+nscoord
+nsFloatManager::FloatInfo::LineLeft(WritingMode aWM,
+                                    ShapeType aShapeType,
+                                    const nscoord aBStart,
+                                    const nscoord aBEnd) const
+{
+  if (aShapeType == ShapeType::Margin) {
+    return LineLeft();
+  }
+
+  MOZ_ASSERT(aShapeType == ShapeType::ShapeOutside);
+  const StyleShapeOutside& shapeOutside = mFrame->StyleDisplay()->mShapeOutside;
+  if (shapeOutside.GetType() == StyleShapeSourceType::None) {
+    return LineLeft();
+  }
+
+  if (shapeOutside.GetType() == StyleShapeSourceType::Box) {
+    nscoord radii[8];
+    bool hasRadii = mFrame->GetShapeBoxBorderRadii(radii);
+
+    if (!hasRadii) {
+      return ShapeBoxRect().x;
+    }
+
+    // Get the physical side for line-left since border-radii are in
+    // the physical axis.
+    mozilla::Side lineLeftSide =
+      aWM.PhysicalSide(aWM.LogicalSideForLineRelativeDir(eLineRelativeDirLeft));
+    nscoord blockStartCornerRadiusL =
+      radii[NS_SIDE_TO_HALF_CORNER(lineLeftSide, true, false)];
+    nscoord blockStartCornerRadiusB =
+      radii[NS_SIDE_TO_HALF_CORNER(lineLeftSide, true, true)];
+    nscoord blockEndCornerRadiusL =
+      radii[NS_SIDE_TO_HALF_CORNER(lineLeftSide, false, false)];
+    nscoord blockEndCornerRadiusB =
+      radii[NS_SIDE_TO_HALF_CORNER(lineLeftSide, false, true)];
+
+    if (aWM.IsLineInverted()) {
+      // This happens only when aWM is vertical-lr. Need to swap blockStart
+      // and blockEnd corners.
+      std::swap(blockStartCornerRadiusL, blockEndCornerRadiusL);
+      std::swap(blockStartCornerRadiusB, blockEndCornerRadiusB);
+    }
+
+    nscoord lineLeftDiff =
+      ComputeEllipseLineInterceptDiff(
+        ShapeBoxRect().y, ShapeBoxRect().YMost(),
+        blockStartCornerRadiusL, blockStartCornerRadiusB,
+        blockEndCornerRadiusL, blockEndCornerRadiusB,
+        aBStart, aBEnd);
+    return ShapeBoxRect().x + lineLeftDiff;
+  }
+
+  // XXX: Other shape source types are not implemented yet.
+
+  return LineLeft();
+}
+
+nscoord
+nsFloatManager::FloatInfo::LineRight(WritingMode aWM,
+                                     ShapeType aShapeType,
+                                     const nscoord aBStart,
+                                     const nscoord aBEnd) const
+{
+  if (aShapeType == ShapeType::Margin) {
+    return LineRight();
+  }
+
+  MOZ_ASSERT(aShapeType == ShapeType::ShapeOutside);
+  const StyleShapeOutside& shapeOutside = mFrame->StyleDisplay()->mShapeOutside;
+  if (shapeOutside.GetType() == StyleShapeSourceType::None) {
+    return LineRight();
+  }
+
+  if (shapeOutside.GetType() == StyleShapeSourceType::Box) {
+    nscoord radii[8];
+    bool hasRadii = mFrame->GetShapeBoxBorderRadii(radii);
+
+    if (!hasRadii) {
+      return ShapeBoxRect().XMost();
+    }
+
+    // Get the physical side for line-right since border-radii are in
+    // the physical axis.
+    mozilla::Side lineRightSide =
+      aWM.PhysicalSide(aWM.LogicalSideForLineRelativeDir(eLineRelativeDirRight));
+    nscoord blockStartCornerRadiusL =
+      radii[NS_SIDE_TO_HALF_CORNER(lineRightSide, false, false)];
+    nscoord blockStartCornerRadiusB =
+      radii[NS_SIDE_TO_HALF_CORNER(lineRightSide, false, true)];
+    nscoord blockEndCornerRadiusL =
+      radii[NS_SIDE_TO_HALF_CORNER(lineRightSide, true, false)];
+    nscoord blockEndCornerRadiusB =
+      radii[NS_SIDE_TO_HALF_CORNER(lineRightSide, true, true)];
+
+    if (aWM.IsLineInverted()) {
+      // This happens only when aWM is vertical-lr. Need to swap blockStart
+      // and blockEnd corners.
+      std::swap(blockStartCornerRadiusL, blockEndCornerRadiusL);
+      std::swap(blockStartCornerRadiusB, blockEndCornerRadiusB);
+    }
+
+    nscoord lineRightDiff =
+      ComputeEllipseLineInterceptDiff(
+        ShapeBoxRect().y, ShapeBoxRect().YMost(),
+        blockStartCornerRadiusL, blockStartCornerRadiusB,
+        blockEndCornerRadiusL, blockEndCornerRadiusB,
+        aBStart, aBEnd);
+    return ShapeBoxRect().XMost() - lineRightDiff;
+  }
+
+  // XXX: Other shape source types are not implemented yet.
+
+  return LineRight();
+}
+
+/* static */ nscoord
+nsFloatManager::FloatInfo::ComputeEllipseLineInterceptDiff(
+  const nscoord aShapeBoxBStart, const nscoord aShapeBoxBEnd,
+  const nscoord aBStartCornerRadiusL, const nscoord aBStartCornerRadiusB,
+  const nscoord aBEndCornerRadiusL, const nscoord aBEndCornerRadiusB,
+  const nscoord aBandBStart, const nscoord aBandBEnd)
+{
+  // An example for the band intersecting with the top right corner of an
+  // ellipse with writing-mode horizontal-tb.
+  //
+  //                             lineIntercept lineDiff
+  //                                    |       |
+  //  +---------------------------------|-------|-+---- aShapeBoxBStart
+  //  |                ##########^      |       | |
+  //  |            ##############|####  |       | |
+  //  +---------#################|######|-------|-+---- aBandBStart
+  //  |       ###################|######|##     | |
+  //  |     aBStartCornerRadiusB |######|###    | |
+  //  |    ######################|######|#####  | |
+  //  +---#######################|<-----------><->^---- aBandBEnd
+  //  |  ########################|##############  |
+  //  |  ########################|##############  |---- b
+  //  | #########################|############### |
+  //  | ######################## v<-------------->v
+  //  |###################### aBStartCornerRadiusL|
+  //  |###########################################|
+  //  |###########################################|
+  //  |###########################################|
+  //  |###########################################|
+  //  | ######################################### |
+  //  | ######################################### |
+  //  |  #######################################  |
+  //  |  #######################################  |
+  //  |   #####################################   |
+  //  |    ###################################    |
+  //  |      ###############################      |
+  //  |       #############################       |
+  //  |         #########################         |
+  //  |            ###################            |
+  //  |                ###########                |
+  //  +-------------------------------------------+----- aShapeBoxBEnd
+
+  NS_ASSERTION(aShapeBoxBStart <= aShapeBoxBEnd, "Bad shape box coordinates!");
+  NS_ASSERTION(aBandBStart <= aBandBEnd, "Bad band coordinates!");
+
+  nscoord lineDiff = 0;
+
+  // If the band intersects both the block-start and block-end corners, we
+  // don't need to enter either branch because the correct lineDiff is 0.
+  if (aBStartCornerRadiusB > 0 &&
+      aBandBEnd >= aShapeBoxBStart &&
+      aBandBEnd <= aShapeBoxBStart + aBStartCornerRadiusB) {
+    // The band intersects only the block-start corner.
+    nscoord b = aBStartCornerRadiusB - (aBandBEnd - aShapeBoxBStart);
+    nscoord lineIntercept =
+      XInterceptAtY(b, aBStartCornerRadiusL, aBStartCornerRadiusB);
+    lineDiff = aBStartCornerRadiusL - lineIntercept;
+  } else if (aBEndCornerRadiusB > 0 &&
+             aBandBStart >= aShapeBoxBEnd - aBEndCornerRadiusB &&
+             aBandBStart <= aShapeBoxBEnd) {
+    // The band intersects only the block-end corner.
+    nscoord b = aBEndCornerRadiusB - (aShapeBoxBEnd - aBandBStart);
+    nscoord lineIntercept =
+      XInterceptAtY(b, aBEndCornerRadiusL, aBEndCornerRadiusB);
+    lineDiff = aBEndCornerRadiusL - lineIntercept;
+  }
+
+  return lineDiff;
+}
+
+/* static */ nscoord
+nsFloatManager::FloatInfo::XInterceptAtY(const nscoord aY,
+                                         const nscoord aRadiusX,
+                                         const nscoord aRadiusY)
+{
+  // Solve for x in the ellipse equation (x/radiusX)^2 + (y/radiusY)^2 = 1.
+  MOZ_ASSERT(aRadiusY > 0);
+  return aRadiusX * std::sqrt(1 - (aY * aY) / double(aRadiusY * aRadiusY));
+}
 
 //----------------------------------------------------------------------
 

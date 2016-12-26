@@ -94,7 +94,7 @@ BEGIN_WORKERS_NAMESPACE
 
 #define PURGE_DOMAIN_DATA "browser:purge-domain-data"
 #define PURGE_SESSION_HISTORY "browser:purge-session-history"
-#define CLEAR_ORIGIN_DATA "clear-origin-data"
+#define CLEAR_ORIGIN_DATA "clear-origin-attributes-data"
 
 static_assert(nsIHttpChannelInternal::CORS_MODE_SAME_ORIGIN == static_cast<uint32_t>(RequestMode::Same_origin),
               "RequestMode enumeration value should match Necko CORS mode value.");
@@ -184,6 +184,7 @@ PopulateRegistrationData(nsIPrincipal* aPrincipal,
   if (aRegistration->GetActive()) {
     aData.currentWorkerURL() = aRegistration->GetActive()->ScriptSpec();
     aData.cacheName() = aRegistration->GetActive()->CacheName();
+    aData.currentWorkerHandlesFetch() = aRegistration->GetActive()->HandlesFetch();
   }
 
   return NS_OK;
@@ -1697,6 +1698,8 @@ ServiceWorkerManager::LoadRegistration(
     registration->SetActive(
       new ServiceWorkerInfo(registration->mPrincipal, registration->mScope,
                             currentWorkerURL, aRegistration.cacheName()));
+
+    registration->GetActive()->SetHandlesFetch(aRegistration.currentWorkerHandlesFetch());
     registration->GetActive()->SetActivateStateUncheckedWithoutEvent(ServiceWorkerState::Activated);
   }
 }
@@ -2527,6 +2530,26 @@ ServiceWorkerManager::GetActive(nsPIDOMWindowInner* aWindow,
 }
 
 void
+ServiceWorkerManager::TransitionServiceWorkerRegistrationWorker(ServiceWorkerRegistrationInfo* aRegistration,
+                                                                WhichServiceWorker aWhichOne)
+{
+  AssertIsOnMainThread();
+  nsTObserverArray<ServiceWorkerRegistrationListener*>::ForwardIterator it(mServiceWorkerRegistrationListeners);
+  while (it.HasMore()) {
+    RefPtr<ServiceWorkerRegistrationListener> target = it.GetNext();
+    nsAutoString regScope;
+    target->GetScope(regScope);
+    MOZ_ASSERT(!regScope.IsEmpty());
+
+    NS_ConvertUTF16toUTF8 utf8Scope(regScope);
+
+    if (utf8Scope.Equals(aRegistration->mScope)) {
+      target->TransitionWorker(aWhichOne);
+    }
+  }
+}
+
+void
 ServiceWorkerManager::InvalidateServiceWorkerRegistrationWorker(ServiceWorkerRegistrationInfo* aRegistration,
                                                                 WhichServiceWorker aWhichOnes)
 {
@@ -3110,7 +3133,7 @@ ServiceWorkerManager::RemoveRegistration(ServiceWorkerRegistrationInfo* aRegistr
 
 namespace {
 /**
- * See browser/components/sessionstore/Utils.jsm function hasRootDomain().
+ * See toolkit/modules/sessionstore/Utils.jsm function hasRootDomain().
  *
  * Returns true if the |url| passed in is part of the given root |domain|.
  * For example, if |url| is "www.mozilla.org", and we pass in |domain| as
@@ -3305,7 +3328,7 @@ ServiceWorkerManager::RemoveAllRegistrations(OriginAttributesPattern* aPattern)
       MOZ_ASSERT(reg->mPrincipal);
 
       bool matches =
-        aPattern->Matches(BasePrincipal::Cast(reg->mPrincipal)->OriginAttributesRef());
+        aPattern->Matches(reg->mPrincipal->OriginAttributesRef());
       if (!matches) {
         continue;
       }
@@ -3753,6 +3776,31 @@ public:
 
 NS_IMPL_ISUPPORTS(UpdateTimerCallback, nsITimerCallback)
 
+bool
+ServiceWorkerManager::MayHaveActiveServiceWorkerInstance(ContentParent* aContent,
+                                                         nsIPrincipal* aPrincipal)
+{
+  AssertIsOnMainThread();
+  MOZ_ASSERT(aPrincipal);
+
+  if (mShuttingDown) {
+    return false;
+  }
+
+  nsAutoCString scopeKey;
+  nsresult rv = PrincipalToScopeKey(aPrincipal, scopeKey);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return false;
+  }
+
+  RegistrationDataPerPrincipal* data;
+  if (!mRegistrationInfos.Get(scopeKey, &data)) {
+    return false;
+  }
+
+  return true;
+}
+
 void
 ServiceWorkerManager::ScheduleUpdateTimer(nsIPrincipal* aPrincipal,
                                           const nsACString& aScope)
@@ -3844,8 +3892,7 @@ ServiceWorkerManager::UpdateTimerFired(nsIPrincipal* aPrincipal,
     return;
   }
 
-  PrincipalOriginAttributes attrs =
-    BasePrincipal::Cast(aPrincipal)->OriginAttributesRef();
+  PrincipalOriginAttributes attrs = aPrincipal->OriginAttributesRef();
 
   SoftUpdate(attrs, aScope);
 }

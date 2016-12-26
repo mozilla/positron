@@ -39,7 +39,7 @@
             windowsOpen : 0,
             windowsRegistered : 0,
 
-            QueryInterface : function (iid) {
+            QueryInterface : function(iid) {
                 const interfaces = [Ci.nsIObserver, Ci.nsISupports];
 
                 if (!interfaces.some( function(v) { return iid.equals(v); } ))
@@ -130,7 +130,7 @@
         }
 
 	var resolveCallback = SpecialPowers.wrapCallbackObject({
-	QueryInterface : function (iid) {
+	QueryInterface : function(iid) {
 	const interfaces = [Ci.nsIProtocolProxyCallback, Ci.nsISupports];
 
         if (!interfaces.some( function(v) { return iid.equals(v); } ))
@@ -138,14 +138,14 @@
 	  return this;
 	},
 
-	onProxyAvailable : function (req, uri, pi, status) {
+	onProxyAvailable : function(req, uri, pi, status) {
           initLogins(pi);
           doTest(testNum);
 	}
 	});
 
 	function startup() {
-            //need to allow for arbitrary network servers defined in PAC instead of a hardcoded moz-proxy.
+            // Need to allow for arbitrary network servers defined in PAC instead of a hardcoded moz-proxy.
             var channel = NetUtil.newChannel({
                 uri: "http://example.com",
                 loadUsingSystemPrincipal: true
@@ -162,7 +162,7 @@
         var iframe1;
         var iframe2a;
         var iframe2b;
-        window.onload = function () {
+        window.onload = function() {
             iframe1 = document.getElementById("iframe1");
             iframe2a = document.getElementById("iframe2a");
             iframe2b = document.getElementById("iframe2b");
@@ -189,7 +189,7 @@
             }
         }
 
-        function doTest(testNum)
+        function doTest(testNumber)
         {
             /*
              * These contentDocument variables are located here,
@@ -203,7 +203,7 @@
             var exampleCom = "http://example.com/tests/toolkit/components/passwordmgr/test/";
             var exampleOrg = "http://example.org/tests/toolkit/components/passwordmgr/test/";
 
-            switch (testNum)
+            switch (testNumber)
             {
             case 1:
                 // Load through a single proxy with authentication required 3 different
@@ -356,11 +356,11 @@
             startCallbackTimer();
         }
 
-        function handleDialog(doc, testNum)
+        function handleDialog(doc, testNumber)
         {
             var dialog        = doc.getElementById("commonDialog");
 
-            switch (testNum)
+            switch (testNumber)
             {
                 case 1:
                 case 2:
@@ -403,14 +403,14 @@
                     break;
 
                 default:
-                    ok(false, "Unhandled testNum " + testNum + " in handleDialog");
+                    ok(false, "Unhandled testNum " + testNumber + " in handleDialog");
             }
 
             if (--expectedDialogs > 0)
                 startCallbackTimer();
         }
 
-        function doCheck(testNum)
+        function doCheck(testNumber)
         {
             var iframe1Doc = SpecialPowers.wrap(iframe1).contentDocument;
             var iframe2aDoc = SpecialPowers.wrap(iframe2a).contentDocument;
@@ -418,7 +418,7 @@
             var authok1;
             var proxyok1;
             var footnote;
-            switch (testNum)
+            switch (testNumber)
             {
                 case 1:
                     ok(true, "doCheck testNum 1");
@@ -526,7 +526,7 @@
                     break;
 
                 default:
-                    ok(false, "Unhandled testNum " + testNum + " in doCheck");
+                    ok(false, "Unhandled testNum " + testNumber + " in doCheck");
             }
         }
 

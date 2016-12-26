@@ -19,11 +19,6 @@ Cu.import("resource://gre/modules/NetUtil.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/BrowserElementPromptService.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "DOMApplicationRegistry", function () {
-  Cu.import("resource://gre/modules/Webapps.jsm");
-  return DOMApplicationRegistry;
-});
-
 function debug(msg) {
   //dump("BrowserElementParent - " + msg + "\n");
 }
@@ -65,192 +60,18 @@ function defineDOMRequestMethod(msgName) {
   };
 }
 
-function BrowserElementParentProxyCallHandler() {
-}
-
-BrowserElementParentProxyCallHandler.prototype = {
-  _frameElement: null,
-  _mm: null,
-
-  MOZBROWSER_EVENT_NAMES: Object.freeze([
-    "loadstart", "loadend", "close", "error", "firstpaint",
-    "documentfirstpaint", "audioplaybackchange",
-    "contextmenu", "securitychange", "locationchange",
-    "iconchange", "scrollareachanged", "titlechange",
-    "opensearch", "manifestchange", "metachange",
-    "resize", "scrollviewchange",
-    "caretstatechanged", "activitydone", "scroll", "opentab"]),
-
-  init: function(frameElement, mm) {
-    this._frameElement = frameElement;
-    this._mm = mm;
-    this.innerWindowIDSet = new Set();
-
-    mm.addMessageListener("browser-element-api:proxy-call", this);
-  },
-
-  // Message manager callback receives messages from BrowserElementProxy.js
-  receiveMessage: function(mmMsg) {
-    let data = mmMsg.json;
-
-    let mm;
-    try {
-      mm = mmMsg.target.QueryInterface(Ci.nsIFrameLoaderOwner)
-                     .frameLoader.messageManager;
-    } catch(e) {
-      mm = mmMsg.target;
-    }
-    if (!mm.assertPermission("browser:embedded-system-app")) {
-      dump("BrowserElementParent.js: Method call " + data.methodName +
-        " from a content process with no 'browser:embedded-system-app'" +
-        " privileges.\n");
-      return;
-    }
-
-    switch (data.methodName) {
-      case '_proxyInstanceInit':
-        if (!this.innerWindowIDSet.size) {
-          this._attachEventListeners();
-        }
-        this.innerWindowIDSet.add(data.innerWindowID);
-
-        break;
-
-      case '_proxyInstanceUninit':
-        this.innerWindowIDSet.delete(data.innerWindowID);
-        if (!this.innerWindowIDSet.size) {
-          this._detachEventListeners();
-        }
-
-        break;
-
-      // void methods
-      case 'setVisible':
-      case 'setActive':
-      case 'sendMouseEvent':
-      case 'sendTouchEvent':
-      case 'goBack':
-      case 'goForward':
-      case 'reload':
-      case 'stop':
-      case 'zoom':
-      case 'setNFCFocus':
-      case 'findAll':
-      case 'findNext':
-      case 'clearMatch':
-      case 'mute':
-      case 'unmute':
-      case 'setVolume':
-        this._frameElement[data.methodName]
-          .apply(this._frameElement, data.args);
-
-        break;
-
-      // DOMRequest methods
-      case 'getVisible':
-      case 'download':
-      case 'purgeHistory':
-      case 'getCanGoBack':
-      case 'getCanGoForward':
-      case 'getContentDimensions':
-      case 'setInputMethodActive':
-      case 'executeScript':
-      case 'getMuted':
-      case 'getVolume':
-        let req = this._frameElement[data.methodName]
-          .apply(this._frameElement, data.args);
-        req.onsuccess = () => {
-          this._sendToProxy({
-            domRequestId: data.domRequestId,
-            innerWindowID: data.innerWindowID,
-            result: req.result
-          });
-        };
-        req.onerror = () => {
-          this._sendToProxy({
-            domRequestId: data.domRequestId,
-            innerWindowID: data.innerWindowID,
-            err: req.error
-          });
-        };
-
-        break;
-
-      // Not implemented
-      case 'getActive': // Sync ???
-      case 'addNextPaintListener': // Takes a callback
-      case 'removeNextPaintListener': // Takes a callback
-      case 'getScreenshot': // Need to pass a blob back
-        dump("BrowserElementParentProxyCallHandler Error:" +
-          "Attempt to call unimplemented method " + data.methodName + ".\n");
-        break;
-
-      default:
-        dump("BrowserElementParentProxyCallHandler Error:" +
-          "Attempt to call non-exist method " + data.methodName + ".\n");
-        break;
-    }
-  },
-
-  // Receving events from the frame element and forward it.
-  handleEvent: function(evt) {
-    // Ignore the events from nested mozbrowser iframes
-    if (evt.target !== this._frameElement) {
-      return;
-    }
-
-    let detailString;
-    try {
-      detailString = JSON.stringify(evt.detail);
-    } catch (e) {
-      dump("BrowserElementParentProxyCallHandler Error:" +
-        "Event detail of " + evt.type + " can't be stingified.\n");
-      return;
-    }
-
-    this.innerWindowIDSet.forEach((innerWindowID) => {
-      this._sendToProxy({
-        eventName: evt.type,
-        innerWindowID: innerWindowID,
-        eventDetailString: detailString
-      });
-    });
-  },
-
-  _sendToProxy: function(data) {
-    this._mm.sendAsyncMessage("browser-element-api:proxy", data);
-  },
-
-  _attachEventListeners: function() {
-    this.MOZBROWSER_EVENT_NAMES.forEach(function(eventName) {
-      this._frameElement.addEventListener(
-        "mozbrowser" + eventName, this, true);
-    }, this);
-  },
-
-  _detachEventListeners: function() {
-    this.MOZBROWSER_EVENT_NAMES.forEach(function(eventName) {
-      this._frameElement.removeEventListener(
-        "mozbrowser" + eventName, this, true);
-    }, this);
-  }
-};
-
 function BrowserElementParent() {
   debug("Creating new BrowserElementParent object");
   this._domRequestCounter = 0;
   this._domRequestReady = false;
   this._pendingAPICalls = [];
   this._pendingDOMRequests = {};
-  this._pendingSetInputMethodActive = [];
   this._nextPaintListeners = [];
   this._pendingDOMFullscreen = false;
 
   Services.obs.addObserver(this, 'oop-frameloader-crashed', /* ownsWeak = */ true);
   Services.obs.addObserver(this, 'ask-children-to-execute-copypaste-command', /* ownsWeak = */ true);
   Services.obs.addObserver(this, 'back-docommand', /* ownsWeak = */ true);
-
-  this.proxyCallHandler = new BrowserElementParentProxyCallHandler();
 }
 
 BrowserElementParent.prototype = {
@@ -297,10 +118,6 @@ BrowserElementParent.prototype = {
     // Insert ourself into the prompt service.
     BrowserElementPromptService.mapFrameToBrowserElementParent(this._frameElement, this);
     this._setupMessageListener();
-    this._registerAppManifest();
-
-    this.proxyCallHandler.init(
-      this._frameElement, this._frameLoader.messageManager);
   },
 
   destroyFrameScripts() {
@@ -323,32 +140,9 @@ BrowserElementParent.prototype = {
     delete this._pendingAPICalls;
   },
 
-  _registerAppManifest: function() {
-    // If this browser represents an app then let the Webapps module register for
-    // any messages that it needs.
-    let appManifestURL =
-          this._frameElement.QueryInterface(Ci.nsIMozBrowserFrame).appManifestURL;
-    if (appManifestURL) {
-      let inParent = Cc["@mozilla.org/xre/app-info;1"]
-                       .getService(Ci.nsIXULRuntime)
-                       .processType == Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
-      if (inParent) {
-        DOMApplicationRegistry.registerBrowserElementParentForApp(
-          { manifestURL: appManifestURL }, this._mm);
-      } else {
-        this._mm.sendAsyncMessage("Webapps:RegisterBEP",
-                                  { manifestURL: appManifestURL });
-      }
-    }
-  },
-
   _setupMessageListener: function() {
     this._mm = this._frameLoader.messageManager;
-    this._isWidget = this._frameLoader
-                         .QueryInterface(Ci.nsIFrameLoader)
-                         .ownerIsWidget;
     this._mm.addMessageListener('browser-element-api:call', this);
-    this._mm.loadFrameScript("chrome://global/content/extensions.js", true);
   },
 
   receiveMessage: function(aMsg) {
@@ -414,7 +208,7 @@ BrowserElementParent.prototype = {
 
     if (aMsg.data.msg_name in mmCalls) {
       return mmCalls[aMsg.data.msg_name].apply(this, arguments);
-    } else if (!this._isWidget && aMsg.data.msg_name in mmSecuritySensitiveCalls) {
+    } else if (aMsg.data.msg_name in mmSecuritySensitiveCalls) {
       return mmSecuritySensitiveCalls[aMsg.data.msg_name].apply(this, arguments);
     }
   },
@@ -453,10 +247,8 @@ BrowserElementParent.prototype = {
       }
     };
 
-    // 1. We don't handle password-only prompts.
-    // 2. We don't handle for widget case because of security concern.
-    if (authDetail.isOnlyPassword ||
-        this._frameLoader.QueryInterface(Ci.nsIFrameLoader).ownerIsWidget) {
+    // We don't handle password-only prompts.
+    if (authDetail.isOnlyPassword) {
       cancelCallback();
       return;
     }
@@ -1101,50 +893,6 @@ BrowserElementParent.prototype = {
       this._pendingAPICalls.push(run);
     } else {
       run();
-    }
-  },
-
-  setInputMethodActive: function(isActive) {
-    if (!this._isAlive()) {
-      throw Components.Exception("Dead content process",
-                                 Cr.NS_ERROR_DOM_INVALID_STATE_ERR);
-    }
-
-    if (typeof isActive !== 'boolean') {
-      throw Components.Exception("Invalid argument",
-                                 Cr.NS_ERROR_INVALID_ARG);
-    }
-
-    return this._sendDOMRequest('set-input-method-active',
-                                {isActive: isActive});
-  },
-
-  setNFCFocus: function(isFocus) {
-    if (!this._isAlive()) {
-      throw Components.Exception("Dead content process",
-                                 Cr.NS_ERROR_DOM_INVALID_STATE_ERR);
-    }
-
-    // For now, we use tab id as an identifier to let NFC module know
-    // which app is in foreground. But this approach will not work in
-    // in-process mode because tab id doesn't exist. Fix bug 1116449
-    // if we are going to support in-process mode.
-    try {
-      var tabId = this._frameLoader.QueryInterface(Ci.nsIFrameLoader)
-                                   .tabParent
-                                   .tabId;
-    } catch(e) {
-      debug("SetNFCFocus for in-process mode is not yet supported");
-      throw Components.Exception("SetNFCFocus for in-process mode is not yet supported",
-                                 Cr.NS_ERROR_NOT_IMPLEMENTED);
-    }
-
-    try {
-      let nfcContentHelper =
-        Cc["@mozilla.org/nfc/content-helper;1"].getService(Ci.nsINfcBrowserAPI);
-      nfcContentHelper.setFocusTab(tabId, isFocus);
-    } catch(e) {
-      // Not all platforms support NFC
     }
   },
 

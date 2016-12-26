@@ -34,7 +34,7 @@ struct ClassInfo;
 
 namespace js {
 
-using PropertyDescriptorVector = JS::GCVector<PropertyDescriptor>;
+using PropertyDescriptorVector = JS::GCVector<JS::PropertyDescriptor>;
 class GCMarker;
 class Nursery;
 
@@ -182,11 +182,9 @@ class JSObject : public js::gc::Cell
      * Make a non-array object with the specified initial state. This method
      * takes ownership of any extantSlots it is passed.
      */
-    static inline JSObject* create(js::ExclusiveContext* cx,
-                                   js::gc::AllocKind kind,
-                                   js::gc::InitialHeap heap,
-                                   js::HandleShape shape,
-                                   js::HandleObjectGroup group);
+    static inline JS::Result<JSObject*, JS::OOM&>
+    create(js::ExclusiveContext* cx, js::gc::AllocKind kind, js::gc::InitialHeap heap,
+           js::HandleShape shape, js::HandleObjectGroup group);
 
     // Set the initial slots and elements of an object. These pointers are only
     // valid for native objects, but during initialization are set for all
@@ -772,12 +770,12 @@ PreventExtensions(JSContext* cx, HandleObject obj, IntegrityLevel level = Integr
  */
 extern bool
 GetOwnPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id,
-                         MutableHandle<PropertyDescriptor> desc);
+                         MutableHandle<JS::PropertyDescriptor> desc);
 
 /* ES6 [[DefineOwnProperty]]. Define a property on obj. */
 extern bool
 DefineProperty(JSContext* cx, HandleObject obj, HandleId id,
-               Handle<PropertyDescriptor> desc, ObjectOpResult& result);
+               Handle<JS::PropertyDescriptor> desc, ObjectOpResult& result);
 
 extern bool
 DefineProperty(ExclusiveContext* cx, HandleObject obj, HandleId id, HandleValue value,
@@ -796,7 +794,7 @@ DefineElement(ExclusiveContext* cx, HandleObject obj, uint32_t index, HandleValu
  * that any failure results in a TypeError.
  */
 extern bool
-DefineProperty(JSContext* cx, HandleObject obj, HandleId id, Handle<PropertyDescriptor> desc);
+DefineProperty(JSContext* cx, HandleObject obj, HandleId id, Handle<JS::PropertyDescriptor> desc);
 
 extern bool
 DefineProperty(ExclusiveContext* cx, HandleObject obj, HandleId id, HandleValue value,
@@ -993,7 +991,7 @@ SetImmutablePrototype(js::ExclusiveContext* cx, JS::HandleObject obj, bool* succ
 
 extern bool
 GetPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id,
-                      MutableHandle<PropertyDescriptor> desc);
+                      MutableHandle<JS::PropertyDescriptor> desc);
 
 /*
  * Deprecated. A version of HasProperty that also returns the object on which
@@ -1174,9 +1172,6 @@ CloneObject(JSContext* cx, HandleObject obj, Handle<js::TaggedProto> proto);
 extern JSObject*
 DeepCloneObjectLiteral(JSContext* cx, HandleObject obj, NewObjectKind newKind = GenericObject);
 
-extern bool
-DefineProperties(JSContext* cx, HandleObject obj, HandleObject props);
-
 inline JSGetterOp
 CastAsGetterOp(JSObject* object)
 {
@@ -1192,18 +1187,18 @@ CastAsSetterOp(JSObject* object)
 /* ES6 draft rev 32 (2015 Feb 2) 6.2.4.5 ToPropertyDescriptor(Obj) */
 bool
 ToPropertyDescriptor(JSContext* cx, HandleValue descval, bool checkAccessors,
-                     MutableHandle<PropertyDescriptor> desc);
+                     MutableHandle<JS::PropertyDescriptor> desc);
 
 /*
  * Throw a TypeError if desc.getterObject() or setterObject() is not
  * callable. This performs exactly the checks omitted by ToPropertyDescriptor
  * when checkAccessors is false.
  */
-bool
-CheckPropertyDescriptorAccessors(JSContext* cx, Handle<PropertyDescriptor> desc);
+Result<>
+CheckPropertyDescriptorAccessors(JSContext* cx, Handle<JS::PropertyDescriptor> desc);
 
 void
-CompletePropertyDescriptor(MutableHandle<PropertyDescriptor> desc);
+CompletePropertyDescriptor(MutableHandle<JS::PropertyDescriptor> desc);
 
 /*
  * Read property descriptors from props, as for Object.defineProperties. See
@@ -1267,6 +1262,9 @@ bool
 GetGetterPure(ExclusiveContext* cx, JSObject* obj, jsid id, JSFunction** fp);
 
 bool
+GetOwnGetterPure(ExclusiveContext* cx, JSObject* obj, jsid id, JSFunction** fp);
+
+bool
 GetOwnNativeGetterPure(JSContext* cx, JSObject* obj, jsid id, JSNative* native);
 
 bool
@@ -1274,7 +1272,7 @@ HasOwnDataPropertyPure(JSContext* cx, JSObject* obj, jsid id, bool* result);
 
 bool
 GetOwnPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id,
-                         MutableHandle<PropertyDescriptor> desc);
+                         MutableHandle<JS::PropertyDescriptor> desc);
 
 bool
 GetOwnPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id, MutableHandleValue vp);
@@ -1288,7 +1286,7 @@ GetOwnPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id, MutableHa
  * defineProperty: it would be senseless to define a "missing" property.
  */
 extern bool
-FromPropertyDescriptorToObject(JSContext* cx, Handle<PropertyDescriptor> desc,
+FromPropertyDescriptorToObject(JSContext* cx, Handle<JS::PropertyDescriptor> desc,
                                MutableHandleValue vp);
 
 extern bool
@@ -1339,8 +1337,6 @@ NonNullObject(JSContext* cx, const Value& v)
     return nullptr;
 }
 
-extern const char*
-InformalValueTypeName(const Value& v);
 
 extern bool
 GetFirstArgumentAsObject(JSContext* cx, const CallArgs& args, const char* method,
@@ -1377,6 +1373,12 @@ TestIntegrityLevel(JSContext* cx, HandleObject obj, IntegrityLevel level, bool* 
 
 extern bool
 SpeciesConstructor(JSContext* cx, HandleObject obj, HandleValue defaultCtor, MutableHandleValue pctor);
+
+extern bool
+SpeciesConstructor(JSContext* cx, HandleObject obj, JSProtoKey ctorKey, MutableHandleValue pctor);
+
+extern bool
+GetObjectFromIncumbentGlobal(JSContext* cx, MutableHandleObject obj);
 
 }  /* namespace js */
 

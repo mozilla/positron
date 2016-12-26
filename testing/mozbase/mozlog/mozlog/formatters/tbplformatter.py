@@ -8,6 +8,7 @@ from collections import deque
 from .base import BaseFormatter
 from .process import strstatus
 
+
 def output_subtests(func):
     @functools.wraps(func)
     def inner(self, data):
@@ -138,6 +139,25 @@ class TbplFormatter(BaseFormatter):
         else:
             return self._format_status(data)
 
+    def assertion_count(self, data):
+        if data["min_expected"] != data["max_expected"]:
+            expected = "%i to %i" % (data["min_expected"],
+                                     data["max_expected"])
+        else:
+            expected = "%i" % data["min_expected"]
+
+        if data["count"] < data["min_expected"]:
+            status, comparison = "TEST-UNEXPECTED-PASS", "is less than"
+        elif data["count"] > data["max_expected"]:
+            status, comparison = "TEST-UNEXPECTED-FAIL", "is more than"
+        elif data["count"] > 0:
+            status, comparison = "TEST-KNOWN-FAIL", "matches"
+        else:
+            return
+
+        return ("%s | %s | assertion count %i %s expected %s assertions\n" %
+                (status, data["test"], data["count"], comparison, expected))
+
     def _format_status(self, data):
         message = "- " + data["message"] if "message" in data else ""
         if "stack" in data:
@@ -191,14 +211,16 @@ class TbplFormatter(BaseFormatter):
             if "reftest_screenshots" in extra:
                 screenshots = extra["reftest_screenshots"]
                 if len(screenshots) == 3:
-                     message += ("\nREFTEST   IMAGE 1 (TEST): %s\n"
-                                 "REFTEST   IMAGE 2 (REFERENCE): %s") % (screenshots[0]["screenshot"],
-                                                                         screenshots[2]["screenshot"])
+                    message += ("\nREFTEST   IMAGE 1 (TEST): data:image/png;base64,%s\n"
+                                "REFTEST   IMAGE 2 (REFERENCE): data:image/png;base64,%s") % (
+                                    screenshots[0]["screenshot"],
+                                    screenshots[2]["screenshot"])
                 elif len(screenshots) == 1:
-                    message += "\nREFTEST   IMAGE: %(image1)s" % screenshots[0]["screenshot"]
+                    message += "\nREFTEST   IMAGE: data:image/png;base64,%(image1)s" \
+                               % screenshots[0]["screenshot"]
 
             failure_line = "TEST-UNEXPECTED-%s | %s | %s\n" % (
-            data["status"], test_id, message)
+                data["status"], test_id, message)
 
             if data["expected"] not in ("PASS", "OK"):
                 expected_msg = "expected %s | " % data["expected"]
@@ -238,4 +260,4 @@ class TbplFormatter(BaseFormatter):
         fmt = "TEST-UNEXPECTED-{level} | {path}:{lineno}{column} | {message} ({rule})"
         data["column"] = ":%s" % data["column"] if data["column"] else ""
         data['rule'] = data['rule'] or data['linter'] or ""
-        message.append(fmt.format(**data))
+        return fmt.append(fmt.format(**data))

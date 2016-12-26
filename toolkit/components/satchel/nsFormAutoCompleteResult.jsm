@@ -45,7 +45,7 @@ FormAutoCompleteResult.prototype = {
   // The default item that should be entered if none is selected
   _defaultIndex: 0,
 
-  //The reason the search failed
+  // The reason the search failed
   _errorDescription: "",
 
   /**
@@ -92,7 +92,7 @@ FormAutoCompleteResult.prototype = {
     return this._values.length;
   },
 
-  _checkIndexBounds : function (index) {
+  _checkIndexBounds : function(index) {
     if (index < 0 || index >= this._values.length) {
       throw Components.Exception("Index out of range.", Cr.NS_ERROR_ILLEGAL_VALUE);
     }
@@ -135,15 +135,13 @@ FormAutoCompleteResult.prototype = {
       return "fromhistory";
     }
 
-    if (!this._comments[index]) {
-      return null;  // not a category label, so no special styling
+    if (this._formHistResult &&
+        this._formHistResult.matchCount > 0 &&
+        index == this._formHistResult.matchCount) {
+      return "datalist-first";
     }
 
-    if (index == 0) {
-      return "suggestfirst";  // category label on first line of results
-    }
-
-    return "suggesthint";   // category label on any other line of results
+    return null;
   },
 
   /**

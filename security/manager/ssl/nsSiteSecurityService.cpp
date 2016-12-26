@@ -61,7 +61,8 @@ SiteHSTSState::SiteHSTSState(nsCString& aStateString)
                 (hstsIncludeSubdomains == 0 || hstsIncludeSubdomains == 1) &&
                 ((SecurityPropertyState)hstsState == SecurityPropertyUnset ||
                  (SecurityPropertyState)hstsState == SecurityPropertySet ||
-                 (SecurityPropertyState)hstsState == SecurityPropertyKnockout));
+                 (SecurityPropertyState)hstsState == SecurityPropertyKnockout ||
+                 (SecurityPropertyState)hstsState == SecurityPropertyNegative));
   if (valid) {
     mHSTSState = (SecurityPropertyState)hstsState;
     mHSTSIncludeSubdomains = (hstsIncludeSubdomains == 1);
@@ -248,15 +249,22 @@ nsSiteSecurityService::Init()
     "test.currentTimeOffsetSeconds");
   mSiteStateStorage =
     mozilla::DataStorage::Get(NS_LITERAL_STRING("SiteSecurityServiceState.txt"));
+  mPreloadStateStorage =
+    mozilla::DataStorage::Get(NS_LITERAL_STRING("SecurityPreloadState.txt"));
   bool storageWillPersist = false;
+  bool preloadStorageWillPersist = false;
   nsresult rv = mSiteStateStorage->Init(storageWillPersist);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  rv = mPreloadStateStorage->Init(preloadStorageWillPersist);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
   // This is not fatal. There are some cases where there won't be a
   // profile directory (e.g. running xpcshell). There isn't the
   // expectation that site information will be presisted in those cases.
-  if (!storageWillPersist) {
+  if (!storageWillPersist || !preloadStorageWillPersist) {
     NS_WARNING("site security information will not be persisted");
   }
 
@@ -286,7 +294,7 @@ nsSiteSecurityService::GetHost(nsIURI* aURI, nsACString& aResult)
 }
 
 static void
-SetStorageKey(nsAutoCString& storageKey, nsCString& hostname, uint32_t aType)
+SetStorageKey(nsAutoCString& storageKey, const nsACString& hostname, uint32_t aType)
 {
   storageKey = hostname;
   switch (aType) {
@@ -311,16 +319,18 @@ ExpireTimeFromMaxAge(uint64_t maxAge)
 
 nsresult
 nsSiteSecurityService::SetHSTSState(uint32_t aType,
-                                    nsIURI* aSourceURI,
+                                    const char* aHost,
                                     int64_t maxage,
                                     bool includeSubdomains,
                                     uint32_t flags,
-                                    SecurityPropertyState aHSTSState)
+                                    SecurityPropertyState aHSTSState,
+                                    bool aIsPreload)
 {
+  nsAutoCString hostname(aHost);
   // If max-age is zero, that's an indication to immediately remove the
   // security state, so here's a shortcut.
   if (!maxage) {
-    return RemoveState(aType, aSourceURI, flags);
+    return RemoveStateInternal(aType, hostname, flags, aIsPreload);
   }
 
   MOZ_ASSERT((aHSTSState == SecurityPropertySet ||
@@ -331,9 +341,6 @@ nsSiteSecurityService::SetHSTSState(uint32_t aType,
   SiteHSTSState siteState(expiretime, aHSTSState, includeSubdomains);
   nsAutoCString stateString;
   siteState.ToString(stateString);
-  nsAutoCString hostname;
-  nsresult rv = GetHost(aSourceURI, hostname);
-  NS_ENSURE_SUCCESS(rv, rv);
   SSSLOG(("SSS: setting state for %s", hostname.get()));
   bool isPrivate = flags & nsISocketProvider::NO_PERMANENT_STORAGE;
   mozilla::DataStorageType storageType = isPrivate
@@ -341,7 +348,15 @@ nsSiteSecurityService::SetHSTSState(uint32_t aType,
                                          : mozilla::DataStorage_Persistent;
   nsAutoCString storageKey;
   SetStorageKey(storageKey, hostname, aType);
-  rv = mSiteStateStorage->Put(storageKey, stateString, storageType);
+  nsresult rv;
+  if (aIsPreload) {
+    SSSLOG(("SSS: storing entry for %s in dynamic preloads", hostname.get()));
+    rv = mPreloadStateStorage->Put(storageKey, stateString,
+                                   mozilla::DataStorage_Persistent);
+  } else {
+    SSSLOG(("SSS: storing HSTS site entry for %s", hostname.get()));
+    rv = mSiteStateStorage->Put(storageKey, stateString, storageType);
+  }
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
@@ -351,17 +366,21 @@ NS_IMETHODIMP
 nsSiteSecurityService::CacheNegativeHSTSResult(nsIURI* aSourceURI,
                                                uint64_t aMaxAge)
 {
-  return SetHSTSState(nsISiteSecurityService::HEADER_HSTS, aSourceURI,
-                      aMaxAge, false, 0, SecurityPropertyNegative);
+  nsAutoCString hostname;
+  nsresult rv = GetHost(aSourceURI, hostname);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return SetHSTSState(nsISiteSecurityService::HEADER_HSTS, hostname.get(),
+                      aMaxAge, false, 0, SecurityPropertyNegative, false);
 }
 
-NS_IMETHODIMP
-nsSiteSecurityService::RemoveState(uint32_t aType, nsIURI* aURI,
-                                   uint32_t aFlags)
+nsresult
+nsSiteSecurityService::RemoveStateInternal(uint32_t aType,
+                                           const nsAutoCString& aHost,
+                                           uint32_t aFlags, bool aIsPreload)
 {
    // Child processes are not allowed direct access to this.
    if (!XRE_IsParentProcess()) {
-     MOZ_CRASH("Child process: no direct access to nsISiteSecurityService::RemoveState");
+     MOZ_CRASH("Child process: no direct access to nsISiteSecurityService::RemoveStateInternal");
    }
 
   // Only HSTS is supported at the moment.
@@ -369,32 +388,50 @@ nsSiteSecurityService::RemoveState(uint32_t aType, nsIURI* aURI,
                  aType == nsISiteSecurityService::HEADER_HPKP,
                  NS_ERROR_NOT_IMPLEMENTED);
 
-  nsAutoCString hostname;
-  nsresult rv = GetHost(aURI, hostname);
-  NS_ENSURE_SUCCESS(rv, rv);
-
   bool isPrivate = aFlags & nsISocketProvider::NO_PERMANENT_STORAGE;
   mozilla::DataStorageType storageType = isPrivate
                                          ? mozilla::DataStorage_Private
                                          : mozilla::DataStorage_Persistent;
   // If this host is in the preload list, we have to store a knockout entry.
-  if (GetPreloadListEntry(hostname.get())) {
-    SSSLOG(("SSS: storing knockout entry for %s", hostname.get()));
+  nsAutoCString storageKey;
+  SetStorageKey(storageKey, aHost, aType);
+
+  nsCString value = mPreloadStateStorage->Get(storageKey,
+                                              mozilla::DataStorage_Persistent);
+  SiteHSTSState dynamicState(value);
+  if (GetPreloadListEntry(aHost.get()) ||
+      dynamicState.mHSTSState != SecurityPropertyUnset) {
+    SSSLOG(("SSS: storing knockout entry for %s", aHost.get()));
     SiteHSTSState siteState(0, SecurityPropertyKnockout, false);
     nsAutoCString stateString;
     siteState.ToString(stateString);
-    nsAutoCString storageKey;
-    SetStorageKey(storageKey, hostname, aType);
-    rv = mSiteStateStorage->Put(storageKey, stateString, storageType);
+    nsresult rv;
+    if (aIsPreload) {
+      rv = mPreloadStateStorage->Put(storageKey, stateString,
+                                     mozilla::DataStorage_Persistent);
+    } else {
+      rv = mSiteStateStorage->Put(storageKey, stateString, storageType);
+    }
     NS_ENSURE_SUCCESS(rv, rv);
   } else {
-    SSSLOG(("SSS: removing entry for %s", hostname.get()));
-    nsAutoCString storageKey;
-    SetStorageKey(storageKey, hostname, aType);
-    mSiteStateStorage->Remove(storageKey, storageType);
+    SSSLOG(("SSS: removing entry for %s", aHost.get()));
+    if (aIsPreload) {
+      mPreloadStateStorage->Remove(storageKey, mozilla::DataStorage_Persistent);
+    } else {
+      mSiteStateStorage->Remove(storageKey, storageType);
+    }
   }
 
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSiteSecurityService::RemoveState(uint32_t aType, nsIURI* aURI,
+                                   uint32_t aFlags)
+{
+  nsAutoCString hostname;
+  GetHost(aURI, hostname);
+  return RemoveStateInternal(aType, hostname, aFlags, false);
 }
 
 static bool
@@ -738,7 +775,7 @@ nsSiteSecurityService::ProcessPKPHeader(nsIURI* aSourceURI,
                                         certList,
                                         false, // don't store intermediates
                                         flags)
-      != SECSuccess) {
+        != mozilla::pkix::Success) {
     return NS_ERROR_FAILURE;
   }
 
@@ -815,7 +852,7 @@ nsSiteSecurityService::ProcessPKPHeader(nsIURI* aSourceURI,
   SSSLOG(("SSS: about to set pins for  %s, expires=%ld now=%ld maxAge=%lu\n",
            host.get(), expireTime, PR_Now() / PR_USEC_PER_MSEC, maxAge));
 
-  rv = SetHPKPState(host.get(), dynamicEntry, aFlags);
+  rv = SetHPKPState(host.get(), dynamicEntry, aFlags, false);
   if (NS_FAILED(rv)) {
     SSSLOG(("SSS: failed to set pins for %s\n", host.get()));
     if (aFailureResult) {
@@ -877,9 +914,13 @@ nsSiteSecurityService::ProcessSTSHeader(nsIURI* aSourceURI,
     return NS_ERROR_FAILURE;
   }
 
+  nsAutoCString hostname;
+  nsresult rv = GetHost(aSourceURI, hostname);
+  NS_ENSURE_SUCCESS(rv, rv);
+
   // record the successfully parsed header data.
-  nsresult rv = SetHSTSState(aType, aSourceURI, maxAge, foundIncludeSubdomains,
-                             aFlags, SecurityPropertySet);
+  rv = SetHSTSState(aType, hostname.get(), maxAge, foundIncludeSubdomains,
+                    aFlags, SecurityPropertySet, false);
   if (NS_FAILED(rv)) {
     SSSLOG(("SSS: failed to set STS state"));
     if (aFailureResult) {
@@ -956,6 +997,116 @@ nsSiteSecurityService::GetPreloadListEntry(const char *aHost)
   return nullptr;
 }
 
+// Allows us to determine if we have an HSTS entry for a given host (and, if
+// so, what that state is). The return value says whether or not we know
+// anything about this host (true if the host has an HSTS entry). aHost is
+// the host which we wish to deteming HSTS information on,
+// aRequireIncludeSubdomains specifies whether we require includeSubdomains
+// to be set on the entry (with the other parameters being as per IsSecureHost).
+bool
+nsSiteSecurityService::HostHasHSTSEntry(const nsAutoCString& aHost,
+                                        bool aRequireIncludeSubdomains,
+                                        uint32_t aFlags, bool* aResult,
+                                        bool* aCached)
+{
+  // First we check for an entry in site security storage. If that entry exists,
+  // we don't want to check in the preload lists. We only want to use the
+  // stored value if it is not a knockout entry, however.
+  // Additionally, if it is a knockout entry, we want to stop looking for data
+  // on the host, because the knockout entry indicates "we have no information
+  // regarding the security status of this host".
+  bool isPrivate = aFlags & nsISocketProvider::NO_PERMANENT_STORAGE;
+  mozilla::DataStorageType storageType = isPrivate
+                                         ? mozilla::DataStorage_Private
+                                         : mozilla::DataStorage_Persistent;
+  nsAutoCString storageKey;
+  SSSLOG(("Seeking HSTS entry for %s", aHost.get()));
+  SetStorageKey(storageKey, aHost, nsISiteSecurityService::HEADER_HSTS);
+  nsCString value = mSiteStateStorage->Get(storageKey, storageType);
+  SiteHSTSState siteState(value);
+  if (siteState.mHSTSState != SecurityPropertyUnset) {
+    SSSLOG(("Found HSTS entry for %s", aHost.get()));
+    bool expired = siteState.IsExpired(nsISiteSecurityService::HEADER_HSTS);
+    if (!expired) {
+      SSSLOG(("Entry for %s is not expired", aHost.get()));
+      if (aCached) {
+        *aCached = true;
+      }
+      if (siteState.mHSTSState == SecurityPropertySet) {
+        *aResult = aRequireIncludeSubdomains ? siteState.mHSTSIncludeSubdomains
+                                             : true;
+        return true;
+      } else if (siteState.mHSTSState == SecurityPropertyNegative) {
+        *aResult = false;
+        return true;
+      }
+    }
+
+    if (expired) {
+      SSSLOG(("Entry %s is expired - checking for preload state", aHost.get()));
+      // If the entry is expired and is not in either the static or dynamic
+      // preload lists, we can remove it.
+      // First, check the dynamic preload list.
+      value = mPreloadStateStorage->Get(storageKey,
+                                        mozilla::DataStorage_Persistent);
+      SiteHSTSState dynamicState(value);
+      if (dynamicState.mHSTSState == SecurityPropertyUnset) {
+        SSSLOG(("No dynamic preload - checking for static preload"));
+        // Now check the static preload list.
+        if (!GetPreloadListEntry(aHost.get())) {
+          SSSLOG(("No static preload - removing expired entry"));
+          mSiteStateStorage->Remove(storageKey, storageType);
+        }
+      }
+    }
+    return false;
+  }
+
+  // Next, look in the dynamic preload list.
+  value = mPreloadStateStorage->Get(storageKey,
+                                    mozilla::DataStorage_Persistent);
+  SiteHSTSState dynamicState(value);
+  if (dynamicState.mHSTSState != SecurityPropertyUnset) {
+    SSSLOG(("Found dynamic preload entry for %s", aHost.get()));
+    bool expired = dynamicState.IsExpired(nsISiteSecurityService::HEADER_HSTS);
+    if (!expired) {
+      if (dynamicState.mHSTSState == SecurityPropertySet) {
+        *aResult = aRequireIncludeSubdomains ? dynamicState.mHSTSIncludeSubdomains
+                                             : true;
+        return true;
+      } else if (dynamicState.mHSTSState == SecurityPropertyNegative) {
+        *aResult = false;
+        return true;
+      }
+    } else {
+      // if a dynamic preload has expired and is not in the static preload
+      // list, we can remove it.
+      if (!GetPreloadListEntry(aHost.get())) {
+        mPreloadStateStorage->Remove(storageKey,
+                                     mozilla::DataStorage_Persistent);
+      }
+    }
+    return false;
+  }
+
+  const nsSTSPreload* preload = nullptr;
+
+  // Finally look in the static preload list.
+  if (siteState.mHSTSState == SecurityPropertyUnset &&
+      dynamicState.mHSTSState == SecurityPropertyUnset &&
+      (preload = GetPreloadListEntry(aHost.get())) != nullptr) {
+    SSSLOG(("%s is a preloaded HSTS host", aHost.get()));
+    *aResult = aRequireIncludeSubdomains ? preload->mIncludeSubdomains
+                                         : true;
+    if (aCached) {
+      *aCached = true;
+    }
+    return true;
+  }
+
+  return false;
+}
+
 NS_IMETHODIMP
 nsSiteSecurityService::IsSecureHost(uint32_t aType, const char* aHost,
                                     uint32_t aFlags, bool* aCached,
@@ -1010,54 +1161,11 @@ nsSiteSecurityService::IsSecureHost(uint32_t aType, const char* aHost,
     return NS_OK;
   }
 
-  const nsSTSPreload *preload = nullptr;
-
-  // First check the exact host. This involves first checking for an entry in
-  // site security storage. If that entry exists, we don't want to check
-  // in the preload list. We only want to use the stored value if it is not a
-  // knockout entry, however.
-  // Additionally, if it is a knockout entry, we want to stop looking for data
-  // on the host, because the knockout entry indicates "we have no information
-  // regarding the security status of this host".
-  bool isPrivate = aFlags & nsISocketProvider::NO_PERMANENT_STORAGE;
-  mozilla::DataStorageType storageType = isPrivate
-                                         ? mozilla::DataStorage_Private
-                                         : mozilla::DataStorage_Persistent;
-  nsAutoCString storageKey;
-  SetStorageKey(storageKey, host, aType);
-  nsCString value = mSiteStateStorage->Get(storageKey, storageType);
-  SiteHSTSState siteState(value);
-  if (siteState.mHSTSState != SecurityPropertyUnset) {
-    SSSLOG(("Found entry for %s", host.get()));
-    bool expired = siteState.IsExpired(aType);
-    if (!expired) {
-      if (aCached) {
-        *aCached = true;
-      }
-      if (siteState.mHSTSState == SecurityPropertySet) {
-        *aResult = true;
-        return NS_OK;
-      } else if (siteState.mHSTSState == SecurityPropertyNegative) {
-        *aResult = false;
-        return NS_OK;
-      }
-    }
-
-    // If the entry is expired and not in the preload list, we can remove it.
-    if (expired && !GetPreloadListEntry(host.get())) {
-      mSiteStateStorage->Remove(storageKey, storageType);
-    }
-  }
-  // Finally look in the preloaded list. This is the exact host,
-  // so if an entry exists at all, this host is HSTS.
-  else if (GetPreloadListEntry(host.get())) {
-    SSSLOG(("%s is a preloaded STS host", host.get()));
-    *aResult = true;
-    if (aCached) {
-      *aCached = true;
-    }
+  // First check the exact host.
+  if (HostHasHSTSEntry(host, false, aFlags, aResult, aCached)) {
     return NS_OK;
   }
+
 
   SSSLOG(("no HSTS data for %s found, walking up domain", host.get()));
   const char *subdomain;
@@ -1074,49 +1182,13 @@ nsSiteSecurityService::IsSecureHost(uint32_t aType, const char* aHost,
       break;
     }
 
-    // Do the same thing as with the exact host, except now we're looking at
-    // ancestor domains of the original host. So, we have to look at the
-    // include subdomains flag (although we still have to check for a
-    // SecurityPropertySet flag first to check that this is a secure host and
-    // not a knockout entry - and again, if it is a knockout entry, we stop
-    // looking for data on it and skip to the next higher up ancestor domain).
-    nsCString subdomainString(subdomain);
-    nsAutoCString storageKey;
-    SetStorageKey(storageKey, subdomainString, aType);
-    value = mSiteStateStorage->Get(storageKey, storageType);
-    SiteHSTSState siteState(value);
-    if (siteState.mHSTSState != SecurityPropertyUnset) {
-      SSSLOG(("Found entry for %s", subdomain));
-      bool expired = siteState.IsExpired(aType);
-      if (!expired) {
-        if (aCached) {
-          *aCached = true;
-        }
-        if (siteState.mHSTSState == SecurityPropertySet) {
-          *aResult = siteState.mHSTSIncludeSubdomains;
-          break;
-        } else if (siteState.mHSTSState == SecurityPropertyNegative) {
-          *aResult = false;
-          break;
-        }
-      }
+    // Do the same thing as with the exact host except now we're looking at
+    // ancestor domains of the original host and, therefore, we have to require
+    // that the entry includes subdomains.
+    nsAutoCString subdomainString(subdomain);
 
-      // If the entry is expired and not in the preload list, we can remove it.
-      if (expired && !GetPreloadListEntry(subdomain)) {
-        mSiteStateStorage->Remove(storageKey, storageType);
-      }
-    }
-    // This is an ancestor, so if we get a match, we have to check if the
-    // preloaded entry includes subdomains.
-    else if ((preload = GetPreloadListEntry(subdomain)) != nullptr) {
-      if (preload->mIncludeSubdomains) {
-        SSSLOG(("%s is a preloaded STS host", subdomain));
-        *aResult = true;
-        if (aCached) {
-          *aCached = true;
-        }
-        break;
-      }
+    if (HostHasHSTSEntry(subdomainString, true, aFlags, aResult, aCached)) {
+      break;
     }
 
     SSSLOG(("no HSTS data for %s found, walking up domain", subdomain));
@@ -1138,6 +1210,22 @@ nsSiteSecurityService::ClearAll()
 }
 
 NS_IMETHODIMP
+nsSiteSecurityService::ClearPreloads()
+{
+  // Child processes are not allowed direct access to this.
+  if (!XRE_IsParentProcess()) {
+    MOZ_CRASH("Child process: no direct access to nsISiteSecurityService::ClearPreloads");
+  }
+
+  return mPreloadStateStorage->Clear();
+}
+
+bool entryStateNotOK(SiteHPKPState& state, mozilla::pkix::Time& aEvalTime) {
+  return state.mState != SecurityPropertySet || state.IsExpired(aEvalTime) ||
+         state.mSHA256keys.Length() < 1;
+}
+
+NS_IMETHODIMP
 nsSiteSecurityService::GetKeyPinsForHostname(const char* aHostname,
                                              mozilla::pkix::Time& aEvalTime,
                                              /*out*/ nsTArray<nsCString>& pinArray,
@@ -1151,7 +1239,7 @@ nsSiteSecurityService::GetKeyPinsForHostname(const char* aHostname,
   NS_ENSURE_ARG(afound);
   NS_ENSURE_ARG(aHostname);
 
-  SSSLOG(("Top of GetKeyPinsForHostname"));
+  SSSLOG(("Top of GetKeyPinsForHostname for %s", aHostname));
   *afound = false;
   *aIncludeSubdomains = false;
   pinArray.Clear();
@@ -1163,20 +1251,25 @@ nsSiteSecurityService::GetKeyPinsForHostname(const char* aHostname,
   SSSLOG(("storagekey '%s'\n", storageKey.get()));
   mozilla::DataStorageType storageType = mozilla::DataStorage_Persistent;
   nsCString value = mSiteStateStorage->Get(storageKey, storageType);
+
   // decode now
   SiteHPKPState foundEntry(value);
-  if (foundEntry.mState != SecurityPropertySet ||
-      foundEntry.IsExpired(aEvalTime) ||
-      foundEntry.mSHA256keys.Length() < 1 ) {
+  if (entryStateNotOK(foundEntry, aEvalTime)) {
     // not in permanent storage, try now private
     value = mSiteStateStorage->Get(storageKey, mozilla::DataStorage_Private);
     SiteHPKPState privateEntry(value);
-    if (privateEntry.mState != SecurityPropertySet ||
-        privateEntry.IsExpired(aEvalTime) ||
-        privateEntry.mSHA256keys.Length() < 1 ) {
-      return NS_OK;
+    if (entryStateNotOK(privateEntry, aEvalTime)) {
+      // not in private storage, try dynamic preload
+      value = mPreloadStateStorage->Get(storageKey,
+                                        mozilla::DataStorage_Persistent);
+      SiteHPKPState preloadEntry(value);
+      if (entryStateNotOK(preloadEntry, aEvalTime)) {
+        return NS_OK;
+      }
+      foundEntry = preloadEntry;
+    } else {
+      foundEntry = privateEntry;
     }
-    foundEntry = privateEntry;
   }
   pinArray = foundEntry.mSHA256keys;
   *aIncludeSubdomains = foundEntry.mIncludeSubdomains;
@@ -1186,8 +1279,9 @@ nsSiteSecurityService::GetKeyPinsForHostname(const char* aHostname,
 
 NS_IMETHODIMP
 nsSiteSecurityService::SetKeyPins(const char* aHost, bool aIncludeSubdomains,
-                                  uint32_t aMaxAge, uint32_t aPinCount,
+                                  int64_t aExpires, uint32_t aPinCount,
                                   const char** aSha256Pins,
+                                  bool aIsPreload,
                                   /*out*/ bool* aResult)
 {
    // Child processes are not allowed direct access to this.
@@ -1199,9 +1293,8 @@ nsSiteSecurityService::SetKeyPins(const char* aHost, bool aIncludeSubdomains,
   NS_ENSURE_ARG_POINTER(aResult);
   NS_ENSURE_ARG_POINTER(aSha256Pins);
 
-  SSSLOG(("Top of SetPins"));
+  SSSLOG(("Top of SetKeyPins"));
 
-  int64_t expireTime = ExpireTimeFromMaxAge(aMaxAge);
   nsTArray<nsCString> sha256keys;
   for (unsigned int i = 0; i < aPinCount; i++) {
     nsAutoCString pin(aSha256Pins[i]);
@@ -1211,16 +1304,37 @@ nsSiteSecurityService::SetKeyPins(const char* aHost, bool aIncludeSubdomains,
     }
     sha256keys.AppendElement(pin);
   }
-  SiteHPKPState dynamicEntry(expireTime, SecurityPropertySet,
+  SiteHPKPState dynamicEntry(aExpires, SecurityPropertySet,
                              aIncludeSubdomains, sha256keys);
   // we always store data in permanent storage (ie no flags)
   nsAutoCString host(PublicKeyPinningService::CanonicalizeHostname(aHost));
-  return SetHPKPState(host.get(), dynamicEntry, 0);
+  return SetHPKPState(host.get(), dynamicEntry, 0, aIsPreload);
+}
+
+NS_IMETHODIMP
+nsSiteSecurityService::SetHSTSPreload(const char* aHost,
+                                      bool aIncludeSubdomains,
+                                      int64_t aExpires,
+                              /*out*/ bool* aResult)
+{
+   // Child processes are not allowed direct access to this.
+   if (!XRE_IsParentProcess()) {
+     MOZ_CRASH("Child process: no direct access to nsISiteSecurityService::SetHSTSPreload");
+   }
+
+  NS_ENSURE_ARG_POINTER(aHost);
+  NS_ENSURE_ARG_POINTER(aResult);
+
+  SSSLOG(("Top of SetHSTSPreload"));
+
+  nsAutoCString host(PublicKeyPinningService::CanonicalizeHostname(aHost));
+  return SetHSTSState(nsISiteSecurityService::HEADER_HSTS, host.get(), aExpires,
+                      aIncludeSubdomains, 0, SecurityPropertySet, true);
 }
 
 nsresult
 nsSiteSecurityService::SetHPKPState(const char* aHost, SiteHPKPState& entry,
-                                    uint32_t aFlags)
+                                    uint32_t aFlags, bool aIsPreload)
 {
   SSSLOG(("Top of SetPKPState"));
   nsAutoCString host(aHost);
@@ -1232,7 +1346,14 @@ nsSiteSecurityService::SetHPKPState(const char* aHost, SiteHPKPState& entry,
                                          : mozilla::DataStorage_Persistent;
   nsAutoCString stateString;
   entry.ToString(stateString);
-  nsresult rv = mSiteStateStorage->Put(storageKey, stateString, storageType);
+
+  nsresult rv;
+  if (aIsPreload) {
+    rv = mPreloadStateStorage->Put(storageKey, stateString,
+                                   mozilla::DataStorage_Persistent);
+  } else {
+    rv = mSiteStateStorage->Put(storageKey, stateString, storageType);
+  }
   NS_ENSURE_SUCCESS(rv, rv);
   return NS_OK;
 }

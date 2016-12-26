@@ -29,6 +29,8 @@
 #include "nsILoadContext.h"
 #include "nsIURL.h"
 #include "mozilla/Telemetry.h"
+#include "nsIProxiedChannel.h"
+#include "nsIProxyInfo.h"
 
 namespace mozilla {
 namespace net {
@@ -66,6 +68,9 @@ GetOriginAttributesSuffix(nsIChannel* aChan, nsACString &aSuffix)
 
 nsHttpChannelAuthProvider::nsHttpChannelAuthProvider()
     : mAuthChannel(nullptr)
+    , mPort(-1)
+    , mUsingSSL(false)
+    , mProxyUsingSSL(false)
     , mIsPrivate(false)
     , mProxyAuthContinuationState(nullptr)
     , mAuthContinuationState(nullptr)
@@ -74,6 +79,7 @@ nsHttpChannelAuthProvider::nsHttpChannelAuthProvider()
     , mTriedHostAuth(false)
     , mSuppressDefensiveAuth(false)
     , mCrossOrigin(false)
+    , mConnectionBased(false)
     , mHttpHandler(gHttpHandler)
 {
 }
@@ -107,6 +113,21 @@ nsHttpChannelAuthProvider::Init(nsIHttpAuthenticableChannel *channel)
 
     mAuthChannel->GetIsSSL(&mUsingSSL);
     if (NS_FAILED(rv)) return rv;
+
+    nsCOMPtr<nsIProxiedChannel> proxied(do_QueryInterface(channel));
+    if (proxied) {
+        nsCOMPtr<nsIProxyInfo> pi;
+        rv = proxied->GetProxyInfo(getter_AddRefs(pi));
+        if (NS_FAILED(rv)) return rv;
+
+        if (pi) {
+            nsAutoCString proxyType;
+            rv = pi->GetType(proxyType);
+            if (NS_FAILED(rv)) return rv;
+
+            mProxyUsingSSL = proxyType.EqualsLiteral("https");
+        }
+    }
 
     rv = mURI->GetAsciiHost(mHost);
     if (NS_FAILED(rv)) return rv;
@@ -772,6 +793,31 @@ nsHttpChannelAuthProvider::GetCredentialsForChallenge(const char *challenge,
 
     LOG(("  identity invalid = %d\n", identityInvalid));
 
+    if (mConnectionBased && identityInvalid) {
+        // If the flag is set and identity is invalid, it means we received the first
+        // challange for a new negotiation round after negotiating a connection based
+        // auth failed (invalid password).
+        // The mConnectionBased flag is set later for the newly received challenge,
+        // so here it reflects the previous 401/7 response schema.
+        mAuthChannel->CloseStickyConnection();
+        if (!proxyAuth) {
+          // We must clear proxy ident in the following scenario + explanation:
+          // - we are authenticating to an NTLM proxy and an NTLM server
+          // - we successfully authenticated to the proxy, mProxyIdent keeps
+          //   the user name/domain and password, the identity has also been cached
+          // - we just threw away the connection because we are now asking for
+          //   creds for the server (WWW auth)
+          // - hence, we will have to auth to the proxy again as well
+          // - if we didn't clear the proxy identity, it would be considered
+          //   as non-valid and we would ask the user again ; clearing it forces
+          //   use of the cached identity and not asking the user again
+          mProxyIdent.Clear();
+        }
+        mConnectionBased = false;
+    }
+
+    mConnectionBased = !!(authFlags & nsIHttpAuthenticator::CONNECTION_BASED);
+
     if (identityInvalid) {
         if (entry) {
             if (ident->Equals(entry->Identity())) {
@@ -816,7 +862,7 @@ nsHttpChannelAuthProvider::GetCredentialsForChallenge(const char *challenge,
 
         if (!entry && ident->IsEmpty()) {
             uint32_t level = nsIAuthPrompt2::LEVEL_NONE;
-            if (mUsingSSL)
+            if ((!proxyAuth && mUsingSSL) || (proxyAuth && mProxyUsingSSL))
                 level = nsIAuthPrompt2::LEVEL_SECURE;
             else if (authFlags & nsIHttpAuthenticator::IDENTITY_ENCRYPTED)
                 level = nsIAuthPrompt2::LEVEL_PW_ENCRYPTED;
@@ -1202,6 +1248,16 @@ nsHttpChannelAuthProvider::PromptForIdentity(uint32_t            level,
     if (!proxyAuth)
         mSuppressDefensiveAuth = true;
 
+    if (mConnectionBased) {
+        // Connection can be reset by the server in the meantime user is entering
+        // the credentials.  Result would be just a "Connection was reset" error.
+        // Hence, we drop the current regardless if the user would make it on time
+        // to provide credentials.
+        // It's OK to send the NTLM type 1 message (response to the plain "NTLM"
+        // challenge) on a new connection.
+        mAuthChannel->CloseStickyConnection();
+    }
+
     return rv;
 }
 
@@ -1284,6 +1340,14 @@ NS_IMETHODIMP nsHttpChannelAuthProvider::OnAuthCancelled(nsISupports *aContext,
     mAsyncPromptAuthCancelable = nullptr;
     if (!mAuthChannel)
         return NS_OK;
+
+    // When user cancels or auth fails we want to close the connection for
+    // connection based schemes like NTLM.  Some servers don't like re-negotiation
+    // on the same connection.
+    if (mConnectionBased) {
+        mAuthChannel->CloseStickyConnection();
+        mConnectionBased = false;
+    }
 
     if (userCancel) {
         if (!mRemainingChallenges.IsEmpty()) {

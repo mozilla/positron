@@ -12,14 +12,13 @@
 #include "mozilla/RefPtr.h"
 #include "WMFMediaDataDecoder.h"
 
-extern const GUID CLSID_WebmMfVp8Dec;
-extern const GUID CLSID_WebmMfVp9Dec;
+extern const GUID CLSID_WebmMfVpxDec;
 
 namespace mozilla {
 
 class WMFAudioMFTManager : public MFTManager {
 public:
-  WMFAudioMFTManager(const AudioInfo& aConfig);
+  explicit WMFAudioMFTManager(const AudioInfo& aConfig);
   ~WMFAudioMFTManager();
 
   bool Init();

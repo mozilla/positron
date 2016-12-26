@@ -9,9 +9,6 @@
 #include "nsIPageSequenceFrame.h"
 #include "nsContainerFrame.h"
 #include "nsIPrintSettings.h"
-#include "nsIPrintOptions.h"
-
-class nsIDateTimeFormat;
 
 namespace mozilla {
 namespace dom {
@@ -46,7 +43,6 @@ public:
   nsMargin    mEdgePaperMargin;
 
   nsCOMPtr<nsIPrintSettings> mPrintSettings;
-  nsCOMPtr<nsIPrintOptions> mPrintOptions;
 
   // The scaling ratio we need to apply to make all pages fit horizontally.  It's
   // the minimum "ComputedWidth / OverflowWidth" ratio of all page content frames
@@ -140,9 +136,6 @@ protected:
   nsIFrame* GetCurrentPageFrame();
 
   nsMargin mMargin;
-
-  // I18N date formatter service which we'll want to cache locally.
-  nsCOMPtr<nsIDateTimeFormat> mDateFormatter;
 
   nsSize       mSize;
   nsSharedPageData* mPageData; // data shared by all the nsPageFrames

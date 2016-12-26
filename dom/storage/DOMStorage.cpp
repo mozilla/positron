@@ -13,7 +13,6 @@
 #include "nsIPermissionManager.h"
 #include "nsIPrincipal.h"
 #include "nsICookiePermission.h"
-#include "nsPIDOMWindow.h"
 
 #include "mozilla/dom/StorageBinding.h"
 #include "mozilla/dom/StorageEvent.h"
@@ -67,9 +66,10 @@ DOMStorage::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 }
 
 uint32_t
-DOMStorage::GetLength(ErrorResult& aRv)
+DOMStorage::GetLength(nsIPrincipal& aSubjectPrincipal,
+                      ErrorResult& aRv)
 {
-  if (!CanUseStorage(nullptr, this)) {
+  if (!CanUseStorage(aSubjectPrincipal)) {
     aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return 0;
   }
@@ -80,9 +80,11 @@ DOMStorage::GetLength(ErrorResult& aRv)
 }
 
 void
-DOMStorage::Key(uint32_t aIndex, nsAString& aResult, ErrorResult& aRv)
+DOMStorage::Key(uint32_t aIndex, nsAString& aResult,
+                nsIPrincipal& aSubjectPrincipal,
+                ErrorResult& aRv)
 {
-  if (!CanUseStorage(nullptr, this)) {
+  if (!CanUseStorage(aSubjectPrincipal)) {
     aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return;
   }
@@ -91,9 +93,11 @@ DOMStorage::Key(uint32_t aIndex, nsAString& aResult, ErrorResult& aRv)
 }
 
 void
-DOMStorage::GetItem(const nsAString& aKey, nsAString& aResult, ErrorResult& aRv)
+DOMStorage::GetItem(const nsAString& aKey, nsAString& aResult,
+                    nsIPrincipal& aSubjectPrincipal,
+                    ErrorResult& aRv)
 {
-  if (!CanUseStorage(nullptr, this)) {
+  if (!CanUseStorage(aSubjectPrincipal)) {
     aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return;
   }
@@ -103,9 +107,10 @@ DOMStorage::GetItem(const nsAString& aKey, nsAString& aResult, ErrorResult& aRv)
 
 void
 DOMStorage::SetItem(const nsAString& aKey, const nsAString& aData,
+                    nsIPrincipal& aSubjectPrincipal,
                     ErrorResult& aRv)
 {
-  if (!CanUseStorage(nullptr, this)) {
+  if (!CanUseStorage(aSubjectPrincipal)) {
     aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return;
   }
@@ -129,9 +134,11 @@ DOMStorage::SetItem(const nsAString& aKey, const nsAString& aData,
 }
 
 void
-DOMStorage::RemoveItem(const nsAString& aKey, ErrorResult& aRv)
+DOMStorage::RemoveItem(const nsAString& aKey,
+                       nsIPrincipal& aSubjectPrincipal,
+                       ErrorResult& aRv)
 {
-  if (!CanUseStorage(nullptr, this)) {
+  if (!CanUseStorage(aSubjectPrincipal)) {
     aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return;
   }
@@ -148,9 +155,10 @@ DOMStorage::RemoveItem(const nsAString& aKey, ErrorResult& aRv)
 }
 
 void
-DOMStorage::Clear(ErrorResult& aRv)
+DOMStorage::Clear(nsIPrincipal& aSubjectPrincipal,
+                  ErrorResult& aRv)
 {
-  if (!CanUseStorage(nullptr, this)) {
+  if (!CanUseStorage(aSubjectPrincipal)) {
     aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return;
   }
@@ -170,8 +178,9 @@ namespace {
 class StorageNotifierRunnable : public Runnable
 {
 public:
-  StorageNotifierRunnable(nsISupports* aSubject, const char16_t* aType)
-    : mSubject(aSubject), mType(aType)
+  StorageNotifierRunnable(nsISupports* aSubject, const char16_t* aType,
+                          bool aPrivateBrowsing)
+    : mSubject(aSubject), mType(aType), mPrivateBrowsing(aPrivateBrowsing)
   { }
 
   NS_DECL_NSIRUNNABLE
@@ -179,6 +188,7 @@ public:
 private:
   nsCOMPtr<nsISupports> mSubject;
   const char16_t* mType;
+  const bool mPrivateBrowsing;
 };
 
 NS_IMETHODIMP
@@ -187,7 +197,11 @@ StorageNotifierRunnable::Run()
   nsCOMPtr<nsIObserverService> observerService =
     mozilla::services::GetObserverService();
   if (observerService) {
-    observerService->NotifyObservers(mSubject, "dom-storage2-changed", mType);
+    observerService->NotifyObservers(mSubject,
+                                     mPrivateBrowsing
+                                       ? "dom-private-storage2-changed"
+                                       : "dom-storage2-changed",
+                                     mType);
   }
   return NS_OK;
 }
@@ -217,16 +231,16 @@ DOMStorage::BroadcastChangeNotification(const nsSubstring& aKey,
     new StorageNotifierRunnable(event,
                                 GetType() == LocalStorage
                                   ? u"localStorage"
-                                  : u"sessionStorage");
+                                  : u"sessionStorage",
+                                IsPrivate());
   NS_DispatchToMainThread(r);
 }
 
 static const char kPermissionType[] = "cookie";
 static const char kStorageEnabled[] = "dom.storage.enabled";
 
-// static, public
 bool
-DOMStorage::CanUseStorage(nsPIDOMWindowInner* aWindow, DOMStorage* aStorage)
+DOMStorage::CanUseStorage(nsIPrincipal& aSubjectPrincipal)
 {
   // This method is responsible for correct setting of mIsSessionOnly.
 
@@ -234,26 +248,15 @@ DOMStorage::CanUseStorage(nsPIDOMWindowInner* aWindow, DOMStorage* aStorage)
     return false;
   }
 
-  nsContentUtils::StorageAccess access = nsContentUtils::StorageAccess::eDeny;
-  if (aWindow) {
-    access = nsContentUtils::StorageAllowedForWindow(aWindow);
-  } else if (aStorage) {
-    access = nsContentUtils::StorageAllowedForPrincipal(aStorage->mPrincipal);
-  }
+  nsContentUtils::StorageAccess access =
+    nsContentUtils::StorageAllowedForPrincipal(mPrincipal);
 
   if (access == nsContentUtils::StorageAccess::eDeny) {
     return false;
   }
 
-  if (aStorage) {
-    aStorage->mIsSessionOnly = access <= nsContentUtils::StorageAccess::eSessionScoped;
-
-    nsCOMPtr<nsIPrincipal> subjectPrincipal =
-      nsContentUtils::SubjectPrincipal();
-    return aStorage->CanAccess(subjectPrincipal);
-  }
-
-  return true;
+  mIsSessionOnly = access <= nsContentUtils::StorageAccess::eSessionScoped;
+  return CanAccess(&aSubjectPrincipal);
 }
 
 DOMStorage::StorageType
@@ -298,7 +301,7 @@ DOMStorage::CanAccess(nsIPrincipal* aPrincipal)
 void
 DOMStorage::GetSupportedNames(nsTArray<nsString>& aKeys)
 {
-  if (!CanUseStorage(nullptr, this)) {
+  if (!CanUseStorage(*nsContentUtils::SubjectPrincipal())) {
     // return just an empty array
     aKeys.Clear();
     return;

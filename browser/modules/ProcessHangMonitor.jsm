@@ -95,7 +95,7 @@ var ProcessHangMonitor = {
    * Dismiss the browser notification and invoke an appropriate action based on
    * the hang type.
    */
-  stopIt: function (win) {
+  stopIt: function(win) {
     let report = this.findActiveReport(win.gBrowser.selectedBrowser);
     if (!report) {
       return;
@@ -213,7 +213,7 @@ var ProcessHangMonitor = {
    */
   findPausedReport: function(browser) {
     let frameLoader = browser.QueryInterface(Ci.nsIFrameLoaderOwner).frameLoader;
-    for (let [report, timer] of this._pausedReports) {
+    for (let [report, ] of this._pausedReports) {
       if (report.isReportForBrowser(frameLoader)) {
         return report;
       }
@@ -288,7 +288,6 @@ var ProcessHangMonitor = {
     }
 
     let bundle = win.gNavigatorBundle;
-    let brandBundle = win.document.getElementById("bundle_brand");
 
     let buttons = [{
         label: bundle.getString("processHang.button_stop.label"),

@@ -19,7 +19,7 @@ try {
   // process. We're used in the child process (for now), so guard against
   // this.
   Components.utils.import("resource://gre/modules/AddonManager.jsm");
-  /*globals AddonManagerPrivate*/
+  /* globals AddonManagerPrivate*/
 } catch (e) {
 }
 
@@ -29,10 +29,10 @@ XPCOMUtils.defineLazyModuleGetter(this, "UpdateUtils",
                                   "resource://gre/modules/UpdateUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "OS",
                                   "resource://gre/modules/osfile.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "ServiceRequest",
+                                  "resource://gre/modules/ServiceRequest.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "DOMApplicationRegistry",
-                                  "resource://gre/modules/Webapps.jsm");
 
 const TOOLKIT_ID                      = "toolkit@mozilla.org";
 const KEY_PROFILEDIR                  = "ProfD";
@@ -42,7 +42,6 @@ const PREF_BLOCKLIST_LASTUPDATETIME   = "app.update.lastUpdateTime.blocklist-bac
 const PREF_BLOCKLIST_URL              = "extensions.blocklist.url";
 const PREF_BLOCKLIST_ITEM_URL         = "extensions.blocklist.itemURL";
 const PREF_BLOCKLIST_ENABLED          = "extensions.blocklist.enabled";
-const PREF_BLOCKLIST_INTERVAL         = "extensions.blocklist.interval";
 const PREF_BLOCKLIST_LEVEL            = "extensions.blocklist.level";
 const PREF_BLOCKLIST_PINGCOUNTTOTAL   = "extensions.blocklist.pingCountTotal";
 const PREF_BLOCKLIST_PINGCOUNTVERSION = "extensions.blocklist.pingCountVersion";
@@ -55,7 +54,6 @@ const PREF_APP_DISTRIBUTION_VERSION   = "distribution.version";
 const PREF_EM_LOGGING_ENABLED         = "extensions.logging.enabled";
 const XMLURI_BLOCKLIST                = "http://www.mozilla.org/2006/addons-blocklist";
 const XMLURI_PARSE_ERROR              = "http://www.mozilla.org/newlayout/xml/parsererror.xml"
-const UNKNOWN_XPCOM_ABI               = "unknownABI";
 const URI_BLOCKLIST_DIALOG            = "chrome://mozapps/content/extensions/blocklist.xul"
 const DEFAULT_SEVERITY                = 3;
 const DEFAULT_LEVEL                   = 2;
@@ -612,8 +610,7 @@ Blocklist.prototype = {
     }
 
     LOG("Blocklist::notify: Requesting " + uri.spec);
-    var request = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"].
-                  createInstance(Ci.nsIXMLHttpRequest);
+    let request = new ServiceRequest();
     request.open("GET", uri.spec, true);
     request.channel.notificationCallbacks = new gCertUtils.BadCertHandler();
     request.overrideMimeType("text/xml");
@@ -915,13 +912,6 @@ Blocklist.prototype = {
           continue;
         switch (element.localName) {
         case "emItems":
-          // Special case for b2g, since we don't use the addon manager.
-          if (AppConstants.MOZ_B2G) {
-            let extensions = this._processItemNodes(element.childNodes, "emItem",
-                                                    this._handleEmItemNode);
-            DOMApplicationRegistry.blockExtensions(extensions);
-            return;
-          }
           this._addonEntries = this._processItemNodes(element.childNodes, "emItem",
                                                       this._handleEmItemNode);
           break;
@@ -1118,7 +1108,7 @@ Blocklist.prototype = {
   //   <manufacturer>foo</manufacturer>
   //   <hardware>foo</hardware>
   // </gfxBlacklistEntry>
-  _handleGfxBlacklistNode: function (blocklistElement, result) {
+  _handleGfxBlacklistNode: function(blocklistElement, result) {
     const blockEntry = {};
 
     // The blockID attribute is always present in the actual data produced on server
@@ -1260,7 +1250,7 @@ Blocklist.prototype = {
       return Ci.nsIBlocklistService.STATE_NOT_BLOCKED;
     }
 
-    let {entry: blockEntry, version: blockEntryVersion} = r;
+    let {version: blockEntryVersion} = r;
 
     if (blockEntryVersion.severity >= gBlocklistLevel)
       return Ci.nsIBlocklistService.STATE_BLOCKED;
@@ -1284,7 +1274,7 @@ Blocklist.prototype = {
     if (!r) {
       return null;
     }
-    let {entry: blockEntry, version: blockEntryVersion} = r;
+    let {entry: blockEntry} = r;
     if (!blockEntry.blockID) {
       return null;
     }
@@ -1301,7 +1291,7 @@ Blocklist.prototype = {
     if (!r) {
       return null;
     }
-    let {entry: blockEntry, version: blockEntryVersion} = r;
+    let {entry: blockEntry} = r;
     if (!blockEntry.blockID) {
       return null;
     }
@@ -1309,7 +1299,7 @@ Blocklist.prototype = {
     return blockEntry.infoURL;
   },
 
-  _notifyObserversBlocklistGFX: function () {
+  _notifyObserversBlocklistGFX: function() {
     // Notify `GfxInfoBase`, by passing a string serialization.
     // This way we avoid spreading XML structure logics there.
     const payload = this._gfxEntries.map((r) => {

@@ -26,7 +26,7 @@ function parentDocShell(docshell) {
 function isTopBrowserElement(docShell) {
   while (docShell) {
     docShell = parentDocShell(docShell);
-    if (docShell && docShell.isMozBrowserOrApp) {
+    if (docShell && docShell.isMozBrowser) {
       return false;
     }
   }
@@ -39,15 +39,6 @@ debug(`Might load BE scripts: BEIR: ${BrowserElementIsReady}`);
 if (!BrowserElementIsReady) {
   debug("Loading BE scripts")
   if (!("BrowserElementIsPreloaded" in this)) {
-    if (isTopBrowserElement(docShell)) {
-      if (Services.prefs.getBoolPref("dom.mozInputMethod.enabled")) {
-        try {
-          Services.scriptloader.loadSubScript("chrome://global/content/forms.js");
-        } catch (e) {
-        }
-      }
-    }
-
     if(Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {
       // general content apps
       if (isTopBrowserElement(docShell)) {
@@ -58,24 +49,7 @@ if (!BrowserElementIsReady) {
       Services.scriptloader.loadSubScript("chrome://global/content/BrowserElementCopyPaste.js");
     }
 
-    if (Services.prefs.getIntPref("dom.w3c_touch_events.enabled") != 0) {
-      if (docShell.asyncPanZoomEnabled === false) {
-        Services.scriptloader.loadSubScript("chrome://global/content/BrowserElementPanningAPZDisabled.js");
-        ContentPanningAPZDisabled.init();
-      }
-
-      Services.scriptloader.loadSubScript("chrome://global/content/BrowserElementPanning.js");
-      ContentPanning.init();
-    }
-
     Services.scriptloader.loadSubScript("chrome://global/content/BrowserElementChildPreload.js");
-  } else {
-    if (Services.prefs.getIntPref("dom.w3c_touch_events.enabled") != 0) {
-      if (docShell.asyncPanZoomEnabled === false) {
-        ContentPanningAPZDisabled.init();
-      }
-      ContentPanning.init();
-    }
   }
 
   function onDestroy() {
@@ -83,12 +57,6 @@ if (!BrowserElementIsReady) {
 
     if (api) {
       api.destroy();
-    }
-    if ("ContentPanning" in this) {
-      ContentPanning.destroy();
-    }
-    if ("ContentPanningAPZDisabled" in this) {
-      ContentPanningAPZDisabled.destroy();
     }
     if ("CopyPasteAssistent" in this) {
       CopyPasteAssistent.destroy();

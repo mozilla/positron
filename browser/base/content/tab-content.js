@@ -52,7 +52,7 @@ addEventListener("MozDOMPointerLock:Exited", function(aEvent) {
 });
 
 
-addMessageListener("Browser:HideSessionRestoreButton", function (message) {
+addMessageListener("Browser:HideSessionRestoreButton", function(message) {
   // Hide session restore button on about:home
   let doc = content.document;
   let container;
@@ -272,7 +272,6 @@ var AboutReaderListener = {
   receiveMessage: function(message) {
     switch (message.name) {
       case "Reader:ToggleReaderMode":
-        let url = content.document.location.href;
         if (!this.isAboutReader) {
           this._articlePromise = ReaderMode.parseDocument(content.document).catch(Cu.reportError);
           ReaderMode.enterReaderMode(docShell, content);
@@ -402,18 +401,18 @@ var ContentSearchMediator = {
     "about:newtab",
   ]),
 
-  init: function (chromeGlobal) {
+  init: function(chromeGlobal) {
     chromeGlobal.addEventListener("ContentSearchClient", this, true, true);
     addMessageListener("ContentSearch", this);
   },
 
-  handleEvent: function (event) {
+  handleEvent: function(event) {
     if (this._contentWhitelisted) {
       this._sendMsg(event.detail.type, event.detail.data);
     }
   },
 
-  receiveMessage: function (msg) {
+  receiveMessage: function(msg) {
     if (msg.data.type == "AddToWhitelist") {
       for (let uri of msg.data.data) {
         this.whitelist.add(uri);
@@ -430,14 +429,14 @@ var ContentSearchMediator = {
     return this.whitelist.has(content.document.documentURI);
   },
 
-  _sendMsg: function (type, data=null) {
+  _sendMsg: function(type, data = null) {
     sendAsyncMessage("ContentSearch", {
       type: type,
       data: data,
     });
   },
 
-  _fireEvent: function (type, data=null) {
+  _fireEvent: function(type, data = null) {
     let event = Cu.cloneInto({
       detail: {
         type: type,
@@ -492,7 +491,7 @@ var PageStyleHandler = {
     this.sendStyleSheetInfo();
   },
 
-  _stylesheetSwitchAll: function (frameset, title) {
+  _stylesheetSwitchAll: function(frameset, title) {
     if (!title || this._stylesheetInFrame(frameset, title)) {
       this._stylesheetSwitchFrame(frameset, title);
     }
@@ -503,7 +502,7 @@ var PageStyleHandler = {
     }
   },
 
-  _stylesheetSwitchFrame: function (frame, title) {
+  _stylesheetSwitchFrame: function(frame, title) {
     var docStyleSheets = frame.document.styleSheets;
 
     for (let i = 0; i < docStyleSheets.length; ++i) {
@@ -516,7 +515,7 @@ var PageStyleHandler = {
     }
   },
 
-  _stylesheetInFrame: function (frame, title) {
+  _stylesheetInFrame: function(frame, title) {
     return Array.some(frame.document.styleSheets, (styleSheet) => styleSheet.title == title);
   },
 
@@ -608,6 +607,97 @@ addMessageListener("Browser:AppTab", function(message) {
   }
 });
 
+let PrerenderContentHandler = {
+  init() {
+    this._pending = [];
+    this._idMonotonic = 0;
+    this._initialized = true;
+    addMessageListener("Prerender:Canceled", this);
+    addMessageListener("Prerender:Swapped", this);
+  },
+
+  get initialized() {
+    return !!this._initialized;
+  },
+
+  receiveMessage(aMessage) {
+    switch (aMessage.name) {
+      case "Prerender:Canceled": {
+        for (let i = 0; i < this._pending.length; ++i) {
+          if (this._pending[i].id === aMessage.data.id) {
+            if (this._pending[i].failure) {
+              this._pending[i].failure.run();
+            }
+            // Remove the item from the array
+            this._pending.splice(i, 1);
+            break;
+          }
+        }
+        break;
+      }
+      case "Prerender:Swapped": {
+        for (let i = 0; i < this._pending.length; ++i) {
+          if (this._pending[i].id === aMessage.data.id) {
+            if (this._pending[i].success) {
+              this._pending[i].success.run();
+            }
+            // Remove the item from the array
+            this._pending.splice(i, 1);
+            break;
+          }
+        }
+        break;
+      }
+    }
+  },
+
+  startPrerenderingDocument(aHref, aReferrer) {
+    // XXX: Make this constant a pref
+    if (this._pending.length >= 2) {
+      return;
+    }
+
+    let id = ++this._idMonotonic;
+    sendAsyncMessage("Prerender:Request", {
+      href: aHref.spec,
+      referrer: aReferrer ? aReferrer.spec : null,
+      id: id,
+    });
+
+    this._pending.push({
+      href: aHref,
+      referrer: aReferrer,
+      id: id,
+      success: null,
+      failure: null,
+    });
+  },
+
+  shouldSwitchToPrerenderedDocument(aHref, aReferrer, aSuccess, aFailure) {
+    // Check if we think there is a prerendering document pending for the given
+    // href and referrer. If we think there is one, we will send a message to
+    // the parent process asking it to do a swap, and hook up the success and
+    // failure listeners.
+    for (let i = 0; i < this._pending.length; ++i) {
+      let p = this._pending[i];
+      if (p.href.equals(aHref) && p.referrer.equals(aReferrer)) {
+        p.success = aSuccess;
+        p.failure = aFailure;
+        sendAsyncMessage("Prerender:Swap", {id: p.id});
+        return true;
+      }
+    }
+
+    return false;
+  }
+};
+
+if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {
+  // We only want to initialize the PrerenderContentHandler in the content
+  // process. Outside of the content process, this should be unused.
+  PrerenderContentHandler.init();
+}
+
 var WebBrowserChrome = {
   onBeforeLinkTraversal: function(originalTarget, linkURI, linkNode, isAppTab) {
     return BrowserUtils.onBeforeLinkTraversal(originalTarget, linkURI, linkNode, isAppTab);
@@ -622,6 +712,30 @@ var WebBrowserChrome = {
 
     return true;
   },
+
+  shouldLoadURIInThisProcess: function(aURI) {
+    return E10SUtils.shouldLoadURIInThisProcess(aURI);
+  },
+
+  // Try to reload the currently active or currently loading page in a new process.
+  reloadInFreshProcess: function(aDocShell, aURI, aReferrer) {
+    E10SUtils.redirectLoad(aDocShell, aURI, aReferrer, true);
+    return true;
+  },
+
+  startPrerenderingDocument: function(aHref, aReferrer) {
+    if (PrerenderContentHandler.initialized) {
+      PrerenderContentHandler.startPrerenderingDocument(aHref, aReferrer);
+    }
+  },
+
+  shouldSwitchToPrerenderedDocument: function(aHref, aReferrer, aSuccess, aFailure) {
+    if (PrerenderContentHandler.initialized) {
+      return PrerenderContentHandler.shouldSwitchToPrerenderedDocument(
+        aHref, aReferrer, aSuccess, aFailure);
+    }
+    return false;
+  }
 };
 
 if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {
@@ -928,6 +1042,12 @@ ExtensionContent.init(this);
 addEventListener("unload", () => {
   ExtensionContent.uninit(this);
   RefreshBlocker.uninit();
+});
+
+addMessageListener("AllowScriptsToClose", () => {
+  content.QueryInterface(Ci.nsIInterfaceRequestor)
+         .getInterface(Ci.nsIDOMWindowUtils)
+         .allowScriptsToClose();
 });
 
 addEventListener("MozAfterPaint", function onFirstPaint() {

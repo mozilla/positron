@@ -41,6 +41,8 @@
 // TODO : [needs clarificaiton from Fx] Move prefs within pktApi.s to sqlite or a local file so it's not editable (and is safer)
 // TODO : [nice to have] - Immediately save, buffer the actions in a local queue and send (so it works offline, works like our native extensions)
 
+/* eslint-disable no-shadow */
+
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
   "resource://gre/modules/PrivateBrowsingUtils.jsm");
@@ -52,18 +54,13 @@ XPCOMUtils.defineLazyModuleGetter(this, "pktApi",
 var pktUI = (function() {
 
     // -- Initialization (on startup and new windows) -- //
-    var inited = false;
     var _currentPanelDidShow;
     var _currentPanelDidHide;
-    var _isHidden = false;
-    var _notificationTimeout;
 
     // Init panel id at 0. The first actual panel id will have the number 1 so
     // in case at some point any panel has the id 0 we know there is something
     // wrong
     var _panelId = 0;
-
-    var prefBranch = Services.prefs.getBranch("extensions.pocket.settings.");
 
     var overflowMenuWidth = 230;
     var overflowMenuHeight = 475;
@@ -92,13 +89,6 @@ var pktUI = (function() {
         getPanelFrame().setAttribute('src', 'about:blank');
     }
 
-
-    /**
-     * Event handler when Pocket bookmark bar entry is pressed
-     */
-     function pocketBookmarkBarOpenPocketCommand(event) {
-        openTabWithUrl('https://getpocket.com/a/', true);
-     }
 
     // -- Communication to API -- //
 
@@ -129,7 +119,7 @@ var pktUI = (function() {
      */
     function showSignUp() {
         // AB test: Direct logged-out users to tab vs panel
-        if (pktApi.getSignupPanelTabTestVariant() == 'tab')
+        if (pktApi.getSignupPanelTabTestVariant() == 'v2')
         {
             let site = Services.prefs.getCharPref("extensions.pocket.site");
             openTabWithUrl('https://' + site + '/firefox_learnmore?s=ffi&t=autoredirect&tv=page_learnmore&src=ff_ext', true);
@@ -173,7 +163,7 @@ var pktUI = (function() {
                 variant = 'storyboard_lm';
             }
 
-            var panelId = showPanel("about:pocket-signup?pockethost="
+            showPanel("about:pocket-signup?pockethost="
                 + Services.prefs.getCharPref("extensions.pocket.site")
                 + "&fxasignedin="
                 + fxasignedin
@@ -212,7 +202,7 @@ var pktUI = (function() {
             startheight = overflowMenuHeight;
         }
 
-        var panelId = showPanel("about:pocket-saved?pockethost=" + Services.prefs.getCharPref("extensions.pocket.site") + "&premiumStatus=" + (pktApi.isPremiumUser() ? '1' : '0') + '&inoverflowmenu='+inOverflowMenu + "&locale=" + getUILocale(), {
+        var panelId = showPanel("about:pocket-saved?pockethost=" + Services.prefs.getCharPref("extensions.pocket.site") + "&premiumStatus=" + (pktApi.isPremiumUser() ? '1' : '0') + '&inoverflowmenu=' + inOverflowMenu + "&locale=" + getUILocale(), {
             onShow: function() {
                 var saveLinkMessageId = 'saveLink';
 
@@ -366,14 +356,19 @@ var pktUI = (function() {
         // send our own "show" event to the panel's script, so the
         // script can prepare the panel for display.
         var _showMessageId = "show";
-        pktUIMessaging.addMessageListener(_showMessageId, function(panelId, data) {
+        pktUIMessaging.addMessageListener(iframe, _showMessageId, function(panelId, data) {
             // Let panel know that it is ready
             pktUIMessaging.sendMessageToPanel(panelId, _showMessageId);
         });
 
         // Open a new tab with a given url and activate if
         var _openTabWithUrlMessageId = "openTabWithUrl";
-        pktUIMessaging.addMessageListener(_openTabWithUrlMessageId, function(panelId, data) {
+        pktUIMessaging.addMessageListener(iframe, _openTabWithUrlMessageId, function(panelId, data, contentPrincipal) {
+            try {
+              urlSecurityCheck(data.url, contentPrincipal, Services.scriptSecurityManager.DISALLOW_INHERIT_PRINCIPAL);
+            } catch (ex) {
+              return;
+            }
 
             // Check if the tab should become active after opening
             var activate = true;
@@ -388,39 +383,39 @@ var pktUI = (function() {
 
         // Close the panel
         var _closeMessageId = "close";
-        pktUIMessaging.addMessageListener(_closeMessageId, function(panelId, data) {
+        pktUIMessaging.addMessageListener(iframe, _closeMessageId, function(panelId, data) {
             getPanel().hidePopup();
         });
 
         // Send the current url to the panel
         var _getCurrentURLMessageId = "getCurrentURL";
-        pktUIMessaging.addMessageListener(_getCurrentURLMessageId, function(panelId, data) {
+        pktUIMessaging.addMessageListener(iframe, _getCurrentURLMessageId, function(panelId, data) {
             pktUIMessaging.sendResponseMessageToPanel(panelId, _getCurrentURLMessageId, getCurrentUrl());
         });
 
         var _resizePanelMessageId = "resizePanel";
-        pktUIMessaging.addMessageListener(_resizePanelMessageId, function(panelId, data) {
+        pktUIMessaging.addMessageListener(iframe, _resizePanelMessageId, function(panelId, data) {
             resizePanel(data);
         });
 
         // Callback post initialization to tell background script that panel is "ready" for communication.
-        pktUIMessaging.addMessageListener("listenerReady", function(panelId, data) {
+        pktUIMessaging.addMessageListener(iframe, "listenerReady", function(panelId, data) {
 
         });
 
-        pktUIMessaging.addMessageListener("collapseSavePanel", function(panelId, data) {
+        pktUIMessaging.addMessageListener(iframe, "collapseSavePanel", function(panelId, data) {
             if (!pktApi.isPremiumUser() && !isInOverflowMenu())
                 resizePanel({width:savePanelWidth, height:savePanelHeights.collapsed});
         });
 
-        pktUIMessaging.addMessageListener("expandSavePanel", function(panelId, data) {
+        pktUIMessaging.addMessageListener(iframe, "expandSavePanel", function(panelId, data) {
             if (!isInOverflowMenu())
                 resizePanel({width:savePanelWidth, height:savePanelHeights.expanded});
         });
 
         // Ask for recently accessed/used tags for auto complete
         var _getTagsMessageId = "getTags";
-        pktUIMessaging.addMessageListener(_getTagsMessageId, function(panelId, data) {
+        pktUIMessaging.addMessageListener(iframe, _getTagsMessageId, function(panelId, data) {
             pktApi.getTags(function(tags, usedTags) {
                 pktUIMessaging.sendResponseMessageToPanel(panelId, _getTagsMessageId, {
                     tags: tags,
@@ -431,7 +426,7 @@ var pktUI = (function() {
 
         // Ask for suggested tags based on passed url
         var _getSuggestedTagsMessageId = "getSuggestedTags";
-        pktUIMessaging.addMessageListener(_getSuggestedTagsMessageId, function(panelId, data) {
+        pktUIMessaging.addMessageListener(iframe, _getSuggestedTagsMessageId, function(panelId, data) {
             pktApi.getSuggestedTagsForURL(data.url, {
                 success: function(data, response) {
                     var suggestedTags = data.suggested_tags;
@@ -451,7 +446,7 @@ var pktUI = (function() {
 
         // Pass url and array list of tags, add to existing save item accordingly
         var _addTagsMessageId = "addTags";
-        pktUIMessaging.addMessageListener(_addTagsMessageId, function(panelId, data) {
+        pktUIMessaging.addMessageListener(iframe, _addTagsMessageId, function(panelId, data) {
             pktApi.addTagsToURL(data.url, data.tags, {
                 success: function(data, response) {
                     var successResponse = {status: "success"};
@@ -465,7 +460,7 @@ var pktUI = (function() {
 
         // Based on clicking "remove page" CTA, and passed unique item id, remove the item
         var _deleteItemMessageId = "deleteItem";
-        pktUIMessaging.addMessageListener(_deleteItemMessageId, function(panelId, data) {
+        pktUIMessaging.addMessageListener(iframe, _deleteItemMessageId, function(panelId, data) {
             pktApi.deleteItem(data.itemId, {
                 success: function(data, response) {
                     var successResponse = {status: "success"};
@@ -478,7 +473,7 @@ var pktUI = (function() {
         });
 
         var _initL10NMessageId = "initL10N";
-        pktUIMessaging.addMessageListener(_initL10NMessageId, function(panelId, data) {
+        pktUIMessaging.addMessageListener(iframe, _initL10NMessageId, function(panelId, data) {
             var strings = {};
             var bundle = Services.strings.createBundle("chrome://pocket/locale/pocket.properties");
             var e = bundle.getSimpleEnumeration();
@@ -574,14 +569,6 @@ var pktUI = (function() {
         return !!subview;
     }
 
-    function hasLegacyExtension() {
-        return !!document.getElementById('RIL_urlbar_add');
-    }
-
-    function isHidden() {
-        return _isHidden;
-    }
-
     function getFirefoxAccountSignedInUser(callback) {
         fxAccounts.getSignedInUser().then(userData => {
             callback(userData);
@@ -627,10 +614,11 @@ var pktUIMessaging = (function() {
     /**
      * Register a listener and callback for a specific messageId
      */
-    function addMessageListener(messageId, callback) {
-        document.addEventListener(prefixedMessageId(messageId), function(e) {
+    function addMessageListener(iframe, messageId, callback) {
+        iframe.addEventListener(prefixedMessageId(messageId), function(e) {
+            var nodePrincipal = e.target.nodePrincipal;
             // ignore to ensure we do not pick up other events in the browser
-            if (e.target.tagName !== 'PKTMESSAGEFROMPANELELEMENT') {
+            if (!nodePrincipal || !nodePrincipal.URI || !nodePrincipal.URI.spec.startsWith("about:pocket")) {
                 return;
             }
 
@@ -638,21 +626,13 @@ var pktUIMessaging = (function() {
             var payload = JSON.parse(e.target.getAttribute("payload"))[0];
             var panelId = payload.panelId;
             var data = payload.data;
-            callback(panelId, data);
+            callback(panelId, data, nodePrincipal);
 
             // Cleanup the element
             e.target.parentNode.removeChild(e.target);
 
         }, false, true);
     }
-
-    /**
-     * Remove a message listener
-     */
-    function removeMessageListener(messageId, callback) {
-        document.removeEventListener(prefixedMessageId(messageId), callback);
-    }
-
 
     /**
      * Send a message to the panel's iframe
@@ -751,7 +731,6 @@ var pktUIMessaging = (function() {
      */
     return {
         addMessageListener: addMessageListener,
-        removeMessageListener: removeMessageListener,
         sendMessageToPanel: sendMessageToPanel,
         sendResponseMessageToPanel: sendResponseMessageToPanel,
         sendErrorMessageToPanel: sendErrorMessageToPanel,

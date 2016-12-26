@@ -1,3 +1,6 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 <!DOCTYPE HTML>
 <html>
 <!--
@@ -27,24 +30,29 @@ window.onload = Task.async(function* () {
     let numberOfCollapses = 0;
     let lastCollapsedItem = null;
 
-    const tree = ReactDOM.render(Tree(Object.assign({}, TEST_TREE_INTERFACE, {
-      autoExpandDepth: 0,
-      onExpand: item => {
-        lastExpandedItem = item;
-        numberOfExpands++;
-        TEST_TREE.expanded.add(item);
-      },
-      onCollapse: item => {
-        lastCollapsedItem = item;
-        numberOfCollapses++;
-        TEST_TREE.expanded.delete(item);
-      },
-      onFocus: item => setProps(tree, { focused: item }),
-    })), window.document.body);
+    function renderTree(props) {
+      const treeProps = Object.assign({},
+        TEST_TREE_INTERFACE,
+        {
+          autoExpandDepth: 0,
+          onExpand: item => {
+            lastExpandedItem = item;
+            numberOfExpands++;
+            TEST_TREE.expanded.add(item);
+          },
+          onCollapse: item => {
+            lastCollapsedItem = item;
+            numberOfCollapses++;
+            TEST_TREE.expanded.delete(item);
+          },
+          onFocus: item => renderTree({ focused: item })
+        },
+        props
+      );
+      return ReactDOM.render(Tree(treeProps), window.document.body);
+    }
 
-    yield setProps(tree, {
-      focused: "A"
-    });
+    const tree = renderTree({ focused: "A" });
 
     is(lastExpandedItem, null);
     is(lastCollapsedItem, null);

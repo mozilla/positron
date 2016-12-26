@@ -83,8 +83,7 @@ this.EXPORTED_SYMBOLS = [
  *   function lists where some items have been converted to tasks and some not.
  */
 
-////////////////////////////////////////////////////////////////////////////////
-//// Globals
+// Globals
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
@@ -137,8 +136,7 @@ function isGenerator(aValue) {
   return Object.prototype.toString.call(aValue) == "[object Generator]";
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//// Task
+// Task
 
 /**
  * This object provides the public module functions.
@@ -227,7 +225,7 @@ this.Task = {
 };
 
 function createAsyncFunction(aTask) {
-  let asyncFunction = function () {
+  let asyncFunction = function() {
     let result = aTask;
     if (aTask && typeof(aTask) == "function") {
       if (aTask.isAsyncFunction) {
@@ -263,8 +261,7 @@ function createAsyncFunction(aTask) {
   return asyncFunction;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//// TaskImpl
+// TaskImpl
 
 /**
  * Executes the specified iterator as a task, and gives access to the promise
@@ -426,7 +423,6 @@ TaskImpl.prototype = {
         // Rewrite the stack for more readability.
 
         let bottomStack = this._stack;
-        let topStack = stack;
 
         stack = Task.Debugging.generateReadableStack(stack);
 

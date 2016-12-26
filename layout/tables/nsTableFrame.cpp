@@ -1277,20 +1277,46 @@ nsTableFrame::DisplayGenericTablePart(nsDisplayListBuilder* aBuilder,
   aFrame->DisplayOutline(aBuilder, aLists);
 }
 
+static inline bool FrameHasBorderOrBackground(nsTableFrame* tableFrame, nsIFrame* f)
+{
+  if (!f->StyleVisibility()->IsVisible()) {
+    return false;
+  }
+  if (f->StyleBorder()->HasBorder()) {
+    return true;
+  }
+  if (!f->StyleBackground()->IsTransparent() ||
+      f->StyleDisplay()->mAppearance) {
+    
+    nsTableCellFrame *cellFrame = do_QueryFrame(f);
+    // We could also return false here if the current frame is the root
+    // of a pseudo stacking context
+    if (cellFrame && !tableFrame->IsBorderCollapse()) {
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
+
 static bool
-AnyTablePartHasBorderOrBackground(nsIFrame* aStart, nsIFrame* aEnd)
+AnyTablePartHasBorderOrBackground(nsTableFrame* aTableFrame,
+                                  nsIFrame* aStart,
+                                  nsIFrame* aEnd)
 {
   for (nsIFrame* f = aStart; f != aEnd; f = f->GetNextSibling()) {
     NS_ASSERTION(IsFrameAllowedInTable(f->GetType()), "unexpected frame type");
 
-    if (FrameHasBorderOrBackground(f))
+    if (FrameHasBorderOrBackground(aTableFrame, f))
       return true;
 
     nsTableCellFrame *cellFrame = do_QueryFrame(f);
     if (cellFrame)
       continue;
 
-    if (AnyTablePartHasBorderOrBackground(f->PrincipalChildList().FirstChild(), nullptr))
+    if (AnyTablePartHasBorderOrBackground(aTableFrame,
+                                          f->PrincipalChildList().FirstChild(),
+                                          nullptr))
       return true;
   }
 
@@ -1337,8 +1363,8 @@ nsTableFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     // Specific visibility decisions are delegated to the table background
     // painter, which handles borders and backgrounds for the table.
     if (aBuilder->IsForEventDelivery() ||
-        AnyTablePartHasBorderOrBackground(this, GetNextSibling()) ||
-        AnyTablePartHasBorderOrBackground(mColGroups.FirstChild(), nullptr)) {
+        AnyTablePartHasBorderOrBackground(this, this, GetNextSibling()) ||
+        AnyTablePartHasBorderOrBackground(this, mColGroups.FirstChild(), nullptr)) {
       item = new (aBuilder) nsDisplayTableBorderBackground(aBuilder, this,
           deflate != nsMargin(0, 0, 0, 0));
       aLists.BorderBackground()->AppendNewToTop(item);
@@ -1587,14 +1613,14 @@ nsTableFrame::IntrinsicISizeOffsets()
 
 /* virtual */
 LogicalSize
-nsTableFrame::ComputeSize(nsRenderingContext *aRenderingContext,
-                          WritingMode aWM,
-                          const LogicalSize& aCBSize,
-                          nscoord aAvailableISize,
-                          const LogicalSize& aMargin,
-                          const LogicalSize& aBorder,
-                          const LogicalSize& aPadding,
-                          ComputeSizeFlags aFlags)
+nsTableFrame::ComputeSize(nsRenderingContext* aRenderingContext,
+                          WritingMode         aWM,
+                          const LogicalSize&  aCBSize,
+                          nscoord             aAvailableISize,
+                          const LogicalSize&  aMargin,
+                          const LogicalSize&  aBorder,
+                          const LogicalSize&  aPadding,
+                          ComputeSizeFlags    aFlags)
 {
   LogicalSize result =
     nsContainerFrame::ComputeSize(aRenderingContext, aWM,
@@ -1654,14 +1680,14 @@ nsTableFrame::TableShrinkISizeToFit(nsRenderingContext *aRenderingContext,
 
 /* virtual */
 LogicalSize
-nsTableFrame::ComputeAutoSize(nsRenderingContext *aRenderingContext,
-                              WritingMode aWM,
-                              const LogicalSize& aCBSize,
-                              nscoord aAvailableISize,
-                              const LogicalSize& aMargin,
-                              const LogicalSize& aBorder,
-                              const LogicalSize& aPadding,
-                              bool aShrinkWrap)
+nsTableFrame::ComputeAutoSize(nsRenderingContext* aRenderingContext,
+                              WritingMode         aWM,
+                              const LogicalSize&  aCBSize,
+                              nscoord             aAvailableISize,
+                              const LogicalSize&  aMargin,
+                              const LogicalSize&  aBorder,
+                              const LogicalSize&  aPadding,
+                              ComputeSizeFlags    aFlags)
 {
   // Tables always shrink-wrap.
   nscoord cbBased = aAvailableISize - aMargin.ISize(aWM) - aBorder.ISize(aWM) -
@@ -2431,7 +2457,7 @@ nsTableFrame::HomogenousInsertFrames(ChildListID     aListID,
       // over...  Oh, well.
       nsIFrame* pseudoFrame = aFrameList.FirstChild();
       nsIContent* parentContent = GetContent();
-      nsIContent* content;
+      nsIContent* content = nullptr;
       aPrevFrame = nullptr;
       while (pseudoFrame  && (parentContent ==
                               (content = pseudoFrame->GetContent()))) {
@@ -2441,7 +2467,7 @@ nsTableFrame::HomogenousInsertFrames(ChildListID     aListID,
       if (MOZ_LIKELY(container)) { // XXX need this null-check, see bug 411823.
         int32_t newIndex = container->IndexOf(content);
         nsIFrame* kidFrame;
-        nsTableColGroupFrame* lastColGroup;
+        nsTableColGroupFrame* lastColGroup = nullptr;
         if (isColGroup) {
           kidFrame = mColGroups.FirstChild();
           lastColGroup = nsTableColGroupFrame::GetLastRealColGroup(this);
@@ -3779,35 +3805,54 @@ nsTableFrame::GetRowSpacing(int32_t aStartRowIndex,
 }
 
 /* virtual */ nscoord
-nsTableFrame::GetLogicalBaseline(WritingMode aWritingMode) const
+nsTableFrame::GetLogicalBaseline(WritingMode aWM) const
 {
-  nscoord ascent = 0;
+  nscoord baseline;
+  if (!GetNaturalBaselineBOffset(aWM, BaselineSharingGroup::eFirst, &baseline)) {
+    baseline = BSize(aWM);
+  }
+  return baseline;
+}
+
+/* virtual */ bool
+nsTableFrame::GetNaturalBaselineBOffset(WritingMode aWM,
+                                        BaselineSharingGroup aBaselineGroup,
+                                        nscoord*             aBaseline) const
+{
   RowGroupArray orderedRowGroups;
   OrderRowGroups(orderedRowGroups);
-  nsTableRowFrame* firstRow = nullptr;
   // XXX not sure if this should be the size of the containing block instead.
   nsSize containerSize = mRect.Size();
-  for (uint32_t rgIndex = 0; rgIndex < orderedRowGroups.Length(); rgIndex++) {
-    nsTableRowGroupFrame* rgFrame = orderedRowGroups[rgIndex];
-    if (rgFrame->GetRowCount()) {
-      firstRow = rgFrame->GetFirstRow();
-
-      nscoord rgNormalBStart =
-        LogicalRect(aWritingMode, rgFrame->GetNormalRect(), containerSize)
-        .Origin(aWritingMode).B(aWritingMode);
-      nscoord firstRowNormalBStart =
-        LogicalRect(aWritingMode, firstRow->GetNormalRect(), containerSize)
-        .Origin(aWritingMode).B(aWritingMode);
-
-      ascent = rgNormalBStart + firstRowNormalBStart +
-               firstRow->GetRowBaseline(aWritingMode);
-      break;
+  auto TableBaseline = [aWM, containerSize] (nsTableRowGroupFrame* aRowGroup,
+                                             nsTableRowFrame* aRow) {
+    nscoord rgBStart = LogicalRect(aWM, aRowGroup->GetNormalRect(),
+                                   containerSize).BStart(aWM);
+    nscoord rowBStart = LogicalRect(aWM, aRow->GetNormalRect(),
+                                    containerSize).BStart(aWM);
+    return rgBStart + rowBStart + aRow->GetRowBaseline(aWM);
+  };
+  if (aBaselineGroup == BaselineSharingGroup::eFirst) {
+    for (uint32_t rgIndex = 0; rgIndex < orderedRowGroups.Length(); rgIndex++) {
+      nsTableRowGroupFrame* rgFrame = orderedRowGroups[rgIndex];
+      nsTableRowFrame* row = rgFrame->GetFirstRow();
+      if (row) {
+        *aBaseline = TableBaseline(rgFrame, row);
+        return true;
+      }
+    }
+  } else {
+    for (uint32_t rgIndex = orderedRowGroups.Length(); rgIndex-- > 0;) {
+      nsTableRowGroupFrame* rgFrame = orderedRowGroups[rgIndex];
+      nsTableRowFrame* row = rgFrame->GetLastRow();
+      if (row) {
+        *aBaseline = BSize(aWM) - TableBaseline(rgFrame, row);
+        return true;
+      }
     }
   }
-  if (!firstRow)
-    ascent = BSize(aWritingMode);
-  return ascent;
+  return false;
 }
+
 /* ----- global methods ----- */
 
 nsTableFrame*
@@ -3827,7 +3872,7 @@ nsTableFrame::GetTableFrame(nsIFrame* aFrame)
       return static_cast<nsTableFrame*>(ancestor);
     }
   }
-  NS_RUNTIMEABORT("unable to find table parent");
+  MOZ_CRASH("unable to find table parent");
   return nullptr;
 }
 

@@ -12,6 +12,7 @@ define(function (require, exports, module) {
   const React = require("devtools/client/shared/vendor/react");
   const { createFactories, isGrip } = require("./rep-utils");
   const { Caption } = createFactories(require("./caption"));
+  const { MODE } = require("./constants");
 
   // Shortcuts
   const { span } = React.DOM;
@@ -25,17 +26,22 @@ define(function (require, exports, module) {
 
     propTypes: {
       object: React.PropTypes.object.isRequired,
-      mode: React.PropTypes.string,
+      // @TODO Change this to Object.values once it's supported in Node's version of V8
+      mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
       provider: React.PropTypes.object,
     },
 
     getLength: function (grip) {
-      return grip.preview ? grip.preview.length : 0;
+      if (!grip.preview) {
+        return 0;
+      }
+
+      return grip.preview.length || grip.preview.childNodesLength || 0;
     },
 
     getTitle: function (object, context) {
       let objectLink = this.props.objectLink || span;
-      if (this.props.mode != "tiny") {
+      if (this.props.mode !== MODE.TINY) {
         return objectLink({
           object: object
         }, object.class + " ");
@@ -43,51 +49,57 @@ define(function (require, exports, module) {
       return "";
     },
 
+    getPreviewItems: function (grip) {
+      if (!grip.preview) {
+        return null;
+      }
+
+      return grip.preview.items || grip.preview.childNodes || null;
+    },
+
     arrayIterator: function (grip, max) {
       let items = [];
+      const gripLength = this.getLength(grip);
 
-      if (!grip.preview || !grip.preview.length) {
+      if (!gripLength) {
         return items;
       }
 
-      let array = grip.preview.items;
-      if (!array) {
+      const previewItems = this.getPreviewItems(grip);
+      if (!previewItems) {
         return items;
       }
 
       let delim;
-      // number of grip.preview.items is limited to 10, but we may have more
-      // items in grip-array
-      let delimMax = grip.preview.length > array.length ?
-        array.length : array.length - 1;
+      // number of grip preview items is limited to 10, but we may have more
+      // items in grip-array.
+      let delimMax = gripLength > previewItems.length ?
+        previewItems.length : previewItems.length - 1;
       let provider = this.props.provider;
 
-      for (let i = 0; i < array.length && i < max; i++) {
+      for (let i = 0; i < previewItems.length && i < max; i++) {
         try {
-          let itemGrip = array[i];
+          let itemGrip = previewItems[i];
           let value = provider ? provider.getValue(itemGrip) : itemGrip;
 
           delim = (i == delimMax ? "" : ", ");
 
           items.push(GripArrayItem(Object.assign({}, this.props, {
-            key: i,
             object: value,
-            delim: delim}
-          )));
+            delim: delim
+          })));
         } catch (exc) {
           items.push(GripArrayItem(Object.assign({}, this.props, {
             object: exc,
-            delim: delim,
-            key: i}
-          )));
+            delim: delim
+          })));
         }
       }
-      if (array.length > max || grip.preview.length > array.length) {
+      if (previewItems.length > max || gripLength > previewItems.length) {
         let objectLink = this.props.objectLink || span;
-        let leftItemNum = grip.preview.length - max > 0 ?
-          grip.preview.length - max : grip.preview.length - array.length;
+        let leftItemNum = gripLength - max > 0 ?
+          gripLength - max : gripLength - previewItems.length;
         items.push(Caption({
-          key: "more",
           object: objectLink({
             object: this.props.object
           }, leftItemNum + " more…")
@@ -98,8 +110,10 @@ define(function (require, exports, module) {
     },
 
     render: function () {
-      let mode = this.props.mode || "short";
-      let object = this.props.object;
+      let {
+        object,
+        mode = MODE.SHORT
+      } = this.props;
 
       let items;
       let brackets;
@@ -107,13 +121,13 @@ define(function (require, exports, module) {
         return space ? { left: "[ ", right: " ]"} : { left: "[", right: "]"};
       };
 
-      if (mode == "tiny") {
+      if (mode === MODE.TINY) {
         let objectLength = this.getLength(object);
         let isEmpty = objectLength === 0;
-        items = span({className: "length"}, isEmpty ? "" : objectLength);
+        items = [span({className: "length"}, isEmpty ? "" : objectLength)];
         brackets = needSpace(false);
       } else {
-        let max = (mode == "short") ? 3 : 300;
+        let max = (mode === MODE.SHORT) ? 3 : 10;
         items = this.arrayIterator(object, max);
         brackets = needSpace(items.length > 0);
       }
@@ -129,7 +143,7 @@ define(function (require, exports, module) {
             className: "arrayLeftBracket",
             object: object
           }, brackets.left),
-          items,
+          ...items,
           objectLink({
             className: "arrayRightBracket",
             object: object
@@ -160,7 +174,7 @@ define(function (require, exports, module) {
       return (
         span({},
           Rep(Object.assign({}, this.props, {
-            mode: "tiny"
+            mode: MODE.TINY
           })),
           this.props.delim
         )
@@ -173,7 +187,11 @@ define(function (require, exports, module) {
       return false;
     }
 
-    return (grip.preview && grip.preview.kind == "ArrayLike");
+    return (grip.preview && (
+        grip.preview.kind == "ArrayLike" ||
+        type === "DocumentFragment"
+      )
+    );
   }
 
   // Exports from this module

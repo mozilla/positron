@@ -50,10 +50,12 @@ JSCompartment::JSCompartment(Zone* zone, const JS::CompartmentOptions& options =
     runtime_(zone->runtimeFromMainThread()),
     principals_(nullptr),
     isSystem_(false),
+    isAtomsCompartment_(false),
     isSelfHosting(false),
     marked(true),
     warnedAboutExprClosure(false),
     warnedAboutForEach(false),
+    warnedAboutStringGenericsMethods(0),
 #ifdef DEBUG
     firedOnNewGlobalObject(false),
 #endif
@@ -276,8 +278,8 @@ CopyStringPure(JSContext* cx, JSString* str)
             return nullptr;
 
         return chars.isLatin1()
-               ? NewStringCopyN<CanGC>(cx, chars.latin1Range().start().get(), len)
-               : NewStringCopyNDontDeflate<CanGC>(cx, chars.twoByteRange().start().get(), len);
+               ? NewStringCopyN<CanGC>(cx, chars.latin1Range().begin().get(), len)
+               : NewStringCopyNDontDeflate<CanGC>(cx, chars.twoByteRange().begin().get(), len);
     }
 
     if (str->hasLatin1Chars()) {
@@ -604,7 +606,7 @@ JSCompartment::traceIncomingCrossCompartmentEdgesForZoneGC(JSTracer* trc)
         if (!c->zone()->isCollecting())
             c->traceOutgoingCrossCompartmentWrappers(trc);
     }
-    Debugger::markIncomingCrossCompartmentEdges(trc);
+    Debugger::traceIncomingCrossCompartmentEdges(trc);
 }
 
 void
@@ -631,7 +633,7 @@ JSCompartment::traceRoots(JSTracer* trc, js::gc::GCRuntime::TraceOrMarkRuntime t
         // to trace them when not doing a minor collection.
 
         if (jitCompartment_)
-            jitCompartment_->mark(trc, this);
+            jitCompartment_->trace(trc, this);
 
         // If a compartment is on-stack, we mark its global so that
         // JSContext::global() remains valid.
@@ -647,12 +649,12 @@ JSCompartment::traceRoots(JSTracer* trc, js::gc::GCRuntime::TraceOrMarkRuntime t
     // During a GC, these are treated as weak pointers.
     if (traceOrMark == js::gc::GCRuntime::TraceRuntime) {
         if (watchpointMap)
-            watchpointMap->markAll(trc);
+            watchpointMap->trace(trc);
     }
 
     /* Mark debug scopes, if present */
     if (debugEnvs)
-        debugEnvs->mark(trc);
+        debugEnvs->trace(trc);
 
     if (lazyArrayBuffers)
         lazyArrayBuffers->trace(trc);
@@ -1023,6 +1025,15 @@ AddLazyFunctionsForCompartment(JSContext* cx, AutoObjectVector& lazyFunctions, A
             continue;
         }
 
+        // This creates a new reference to an object that an ongoing incremental
+        // GC may find to be unreachable. Treat as if we're reading a weak
+        // reference and trigger the read barrier.
+        if (cx->zone()->needsIncrementalBarrier())
+            fun->readBarrier(fun);
+
+        // TODO: The above checks should be rolled into the cell iterator (see
+        // bug 1322971).
+
         if (fun->isInterpretedLazy()) {
             LazyScript* lazy = fun->lazyScriptOrNull();
             if (lazy && lazy->sourceObject() && !lazy->hasUncompiledEnclosingScript()) {
@@ -1051,18 +1062,18 @@ CreateLazyScriptsForCompartment(JSContext* cx)
     // Create scripts for each lazy function, updating the list of functions to
     // process with any newly exposed inner functions in created scripts.
     // A function cannot be delazified until its outer script exists.
+    RootedFunction fun(cx);
     for (size_t i = 0; i < lazyFunctions.length(); i++) {
-        JSFunction* fun = &lazyFunctions[i]->as<JSFunction>();
+        fun = &lazyFunctions[i]->as<JSFunction>();
 
         // lazyFunctions may have been populated with multiple functions for
         // a lazy script.
         if (!fun->isInterpretedLazy())
             continue;
 
-        LazyScript* lazy = fun->lazyScript();
-        bool lazyScriptHadNoScript = !lazy->maybeScript();
+        bool lazyScriptHadNoScript = !fun->lazyScript()->maybeScript();
 
-        JSScript* script = fun->getOrCreateScript(cx);
+        JSScript* script = JSFunction::getOrCreateScript(cx, fun);
         if (!script)
             return false;
         if (lazyScriptHadNoScript && !AddInnerLazyFunctionsFromScript(script, lazyFunctions))

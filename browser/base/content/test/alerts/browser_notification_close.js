@@ -3,7 +3,6 @@
 const {PlacesTestUtils} =
   Cu.import("resource://testing-common/PlacesTestUtils.jsm", {});
 
-let tab;
 let notificationURL = "http://example.org/browser/browser/base/content/test/alerts/file_dom_notifications.html";
 let oldShowFavicons;
 
@@ -17,10 +16,11 @@ add_task(function* test_notificationClose() {
 
   yield PlacesTestUtils.addVisits(notificationURI);
   let faviconURI = yield new Promise(resolve => {
-    let faviconURI = makeURI("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC");
-    PlacesUtils.favicons.setAndFetchFaviconForPage(notificationURI, faviconURI,
+    let uri =
+      makeURI("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC");
+    PlacesUtils.favicons.setAndFetchFaviconForPage(notificationURI, uri,
       true, PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE,
-      (faviconURI, iconSize, iconData, mimeType) => resolve(faviconURI),
+      (uriResult) => resolve(uriResult),
       Services.scriptSecurityManager.getSystemPrincipal());
   });
 
@@ -53,7 +53,7 @@ add_task(function* test_notificationClose() {
     let closedTime = alertWindow.Date.now();
     alertCloseButton.click();
     info("Clicked on close button");
-    let beforeUnloadEvent = yield promiseBeforeUnloadEvent;
+    yield promiseBeforeUnloadEvent;
 
     ok(true, "Alert should close when the close button is clicked");
     let currentTime = alertWindow.Date.now();

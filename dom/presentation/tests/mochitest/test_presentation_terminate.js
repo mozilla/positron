@@ -146,10 +146,21 @@ function testConnectionTerminate() {
       gScript.removeMessageListener('sender-terminate',
                                     senderTerminateHandler);
 
-      receiverIframe.addEventListener('mozbrowserclose', function() {
-        ok(true, 'observe receiver page closing');
-        aResolve();
-      });
+      Promise.all([
+        new Promise((resolve) => {
+          gScript.addMessageListener('device-disconnected', function deviceDisconnectedHandler() {
+            gScript.removeMessageListener('device-disconnected', deviceDisconnectedHandler);
+            ok(true, 'observe device disconnect');
+            resolve();
+          });
+        }),
+        new Promise((resolve) => {
+          receiverIframe.addEventListener('mozbrowserclose', function() {
+            ok(true, 'observe receiver page closing');
+            resolve();
+          });
+        }),
+      ]).then(aResolve);
 
       gScript.sendAsyncMessage('trigger-on-terminate-request');
     });
@@ -225,6 +236,7 @@ SpecialPowers.pushPermissions([
                                       ["dom.presentation.receiver.enabled", true],
                                       ['dom.presentation.test.enabled', true],
                                       ['dom.mozBrowserFramesEnabled', true],
+                                      ["network.disable.ipc.security", true],
                                       ['dom.ipc.tabs.disabled', false],
                                       ['dom.presentation.test.stage', 0]]},
                             runTests);

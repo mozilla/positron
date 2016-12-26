@@ -17,7 +17,7 @@ loader.lazyServiceGetter(this, "clipboardHelper",
                          "@mozilla.org/widget/clipboardhelper;1",
                          "nsIClipboardHelper");
 loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
-loader.lazyRequireGetter(this, "AutocompletePopup", "devtools/client/shared/autocomplete-popup", true);
+loader.lazyRequireGetter(this, "AutocompletePopup", "devtools/client/shared/autocomplete-popup");
 loader.lazyRequireGetter(this, "ToolSidebar", "devtools/client/framework/sidebar", true);
 loader.lazyRequireGetter(this, "Messages", "devtools/client/webconsole/console-output", true);
 loader.lazyRequireGetter(this, "asyncStorage", "devtools/shared/async-storage");
@@ -27,7 +27,7 @@ loader.lazyImporter(this, "VariablesView", "resource://devtools/client/shared/wi
 loader.lazyImporter(this, "VariablesViewController", "resource://devtools/client/shared/widgets/VariablesViewController.jsm");
 loader.lazyRequireGetter(this, "gDevTools", "devtools/client/framework/devtools", true);
 
-const STRINGS_URI = "devtools/locale/webconsole.properties";
+const STRINGS_URI = "devtools/client/locales/webconsole.properties";
 var l10n = new WebConsoleUtils.L10n(STRINGS_URI);
 
 // Constants used for defining the direction of JSTerm input history navigation.
@@ -252,13 +252,11 @@ JSTerm.prototype = {
     };
 
     let doc = this.hud.document;
-
     let toolbox = gDevTools.getToolbox(this.hud.owner.target);
-    if (!toolbox) {
-      // In some cases (e.g. Browser Console), there is no toolbox.
-      toolbox = { doc };
-    }
-    this.autocompletePopup = new AutocompletePopup(toolbox, autocompleteOptions);
+    let tooltipDoc = toolbox ? toolbox.doc : doc;
+    // The popup will be attached to the toolbox document or HUD document in the case
+    // such as the browser console which doesn't have a toolbox.
+    this.autocompletePopup = new AutocompletePopup(tooltipDoc, autocompleteOptions);
 
     let inputContainer = doc.querySelector(".jsterm-input-container");
     this.completeNode = doc.querySelector(".jsterm-complete-node");
@@ -376,8 +374,7 @@ JSTerm.prototype = {
     }
 
     if (this.hud.NEW_CONSOLE_OUTPUT_ENABLED) {
-      this.hud.newConsoleOutput.dispatchMessageAdd(response);
-      callback && callback(this.hud.newConsoleOutput.getLastMessage());
+      this.hud.newConsoleOutput.dispatchMessageAdd(response, true).then(callback);
       return;
     }
     let msg = new Messages.JavaScriptEvalOutput(response,
@@ -1187,10 +1184,10 @@ JSTerm.prototype = {
             this._autocompletePopupNavigated = true;
           }
         } else {
-          this.hud.outputWrapper.scrollTop =
+          this.hud.outputScroller.scrollTop =
             Math.max(0,
-              this.hud.outputWrapper.scrollTop -
-              this.hud.outputWrapper.clientHeight
+              this.hud.outputScroller.scrollTop -
+              this.hud.outputScroller.clientHeight
             );
         }
         event.preventDefault();
@@ -1203,10 +1200,10 @@ JSTerm.prototype = {
             this._autocompletePopupNavigated = true;
           }
         } else {
-          this.hud.outputWrapper.scrollTop =
-            Math.min(this.hud.outputWrapper.scrollHeight,
-              this.hud.outputWrapper.scrollTop +
-              this.hud.outputWrapper.clientHeight
+          this.hud.outputScroller.scrollTop =
+            Math.min(this.hud.outputScroller.scrollHeight,
+              this.hud.outputScroller.scrollTop +
+              this.hud.outputScroller.clientHeight
             );
         }
         event.preventDefault();
@@ -1217,7 +1214,7 @@ JSTerm.prototype = {
           this.autocompletePopup.selectedIndex = 0;
           event.preventDefault();
         } else if (inputValue.length <= 0) {
-          this.hud.outputWrapper.scrollTop = 0;
+          this.hud.outputScroller.scrollTop = 0;
           event.preventDefault();
         }
         break;
@@ -1228,8 +1225,8 @@ JSTerm.prototype = {
             this.autocompletePopup.itemCount - 1;
           event.preventDefault();
         } else if (inputValue.length <= 0) {
-          this.hud.outputWrapper.scrollTop =
-            this.hud.outputWrapper.scrollHeight;
+          this.hud.outputScroller.scrollTop =
+            this.hud.outputScroller.scrollHeight;
           event.preventDefault();
         }
         break;

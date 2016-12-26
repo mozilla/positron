@@ -7,6 +7,7 @@
 #include "nsLayoutStatics.h"
 #include "nscore.h"
 
+#include "DateTimeFormat.h"
 #include "nsAttrValue.h"
 #include "nsAutoCopyListener.h"
 #include "nsColorNames.h"
@@ -67,7 +68,6 @@
 #include "FrameLayerBuilder.h"
 #include "AnimationCommon.h"
 #include "LayerAnimationInfo.h"
-#include "mozilla/dom/VideoDecoderManagerChild.h"
 
 #include "AudioChannelService.h"
 #include "mozilla/dom/PromiseDebugging.h"
@@ -117,12 +117,11 @@ using namespace mozilla::system;
 #include "nsPermissionManager.h"
 #include "nsCookieService.h"
 #include "nsApplicationCacheService.h"
-#include "mozilla/dom/CustomElementsRegistry.h"
+#include "mozilla/dom/CustomElementRegistry.h"
 #include "mozilla/dom/time/DateCacheCleaner.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/dom/HTMLVideoElement.h"
-#include "CameraPreferences.h"
 #include "TouchManager.h"
 #include "MediaDecoder.h"
 #include "MediaPrefs.h"
@@ -130,10 +129,6 @@ using namespace mozilla::system;
 #include "mozilla/ServoBindings.h"
 #include "mozilla/StaticPresData.h"
 #include "mozilla/dom/WebIDLGlobalNameHash.h"
-
-#ifdef MOZ_B2G_BT
-#include "mozilla/dom/BluetoothUUID.h"
-#endif
 
 using namespace mozilla;
 using namespace mozilla::net;
@@ -295,8 +290,6 @@ nsLayoutStatics::Initialize()
 
   CounterStyleManager::InitializeBuiltinCounterStyles();
 
-  CameraPreferences::Initialize();
-
   IMEStateManager::Init();
 
   ServiceWorkerRegistrar::Initialize();
@@ -307,8 +300,6 @@ nsLayoutStatics::Initialize()
 #endif
 
   MediaDecoder::InitStatics();
-
-  VideoDecoderManagerChild::Initialize();
 
   PromiseDebugging::Init();
 
@@ -393,7 +384,6 @@ nsLayoutStatics::Shutdown()
   nsAutoCopyListener::Shutdown();
   FrameLayerBuilder::Shutdown();
 
-  VideoDecoderManagerChild::Shutdown();
 
 #ifdef MOZ_ANDROID_OMX
   AndroidMediaPluginHost::Shutdown();
@@ -434,19 +424,15 @@ nsLayoutStatics::Shutdown()
   nsHyphenationManager::Shutdown();
   nsDOMMutationObserver::Shutdown();
 
+  DateTimeFormat::Shutdown();
+
   ContentParent::ShutDown();
 
   DisplayItemClip::Shutdown();
 
-  CustomElementsRegistry::XPCOMShutdown();
+  CustomElementRegistry::XPCOMShutdown();
 
   CacheObserver::Shutdown();
 
-  CameraPreferences::Shutdown();
-
   PromiseDebugging::Shutdown();
-
-#ifdef MOZ_B2G_BT
-  BluetoothUUID::HandleShutdown();
-#endif
 }

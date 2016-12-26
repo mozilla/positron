@@ -24,8 +24,9 @@ var gTests = [
     is(PopupNotifications.getNotification("webRTC-shareDevices").anchorID,
        "webRTC-shareDevices-notification-icon", "anchored to device icon");
     checkDeviceSelectors(true, true);
-    is(PopupNotifications.panel.firstChild.getAttribute("popupid"),
-       "webRTC-shareDevices", "panel using devices icon");
+    let iconclass =
+      PopupNotifications.panel.firstChild.getAttribute("iconclass");
+    ok(iconclass.includes("camera-icon"), "panel using devices icon");
 
     let indicator = promiseIndicatorWindow();
     yield promiseMessage("ok", () => {
@@ -33,8 +34,8 @@ var gTests = [
     });
     yield expectObserverCalled("getUserMedia:response:allow");
     yield expectObserverCalled("recording-device-events");
-    is((yield getMediaCaptureState()), "CameraAndMicrophone",
-       "expected camera and microphone to be shared");
+    Assert.deepEqual((yield getMediaCaptureState()), {audio: true, video: true},
+                     "expected camera and microphone to be shared");
 
     yield indicator;
     yield checkSharingUI({audio: true, video: true});
@@ -53,8 +54,9 @@ var gTests = [
     is(PopupNotifications.getNotification("webRTC-shareDevices").anchorID,
        "webRTC-shareMicrophone-notification-icon", "anchored to mic icon");
     checkDeviceSelectors(true);
-    is(PopupNotifications.panel.firstChild.getAttribute("popupid"),
-       "webRTC-shareMicrophone", "panel using microphone icon");
+    let iconclass =
+      PopupNotifications.panel.firstChild.getAttribute("iconclass");
+    ok(iconclass.includes("microphone-icon"), "panel using microphone icon");
 
     let indicator = promiseIndicatorWindow();
     yield promiseMessage("ok", () => {
@@ -62,8 +64,8 @@ var gTests = [
     });
     yield expectObserverCalled("getUserMedia:response:allow");
     yield expectObserverCalled("recording-device-events");
-    is((yield getMediaCaptureState()), "Microphone",
-       "expected microphone to be shared");
+    Assert.deepEqual((yield getMediaCaptureState()), {audio: true},
+                     "expected microphone to be shared");
 
     yield indicator;
     yield checkSharingUI({audio: true});
@@ -82,8 +84,9 @@ var gTests = [
     is(PopupNotifications.getNotification("webRTC-shareDevices").anchorID,
        "webRTC-shareDevices-notification-icon", "anchored to device icon");
     checkDeviceSelectors(false, true);
-    is(PopupNotifications.panel.firstChild.getAttribute("popupid"),
-       "webRTC-shareDevices", "panel using devices icon");
+    let iconclass =
+      PopupNotifications.panel.firstChild.getAttribute("iconclass");
+    ok(iconclass.includes("camera-icon"), "panel using devices icon");
 
     let indicator = promiseIndicatorWindow();
     yield promiseMessage("ok", () => {
@@ -91,7 +94,8 @@ var gTests = [
     });
     yield expectObserverCalled("getUserMedia:response:allow");
     yield expectObserverCalled("recording-device-events");
-    is((yield getMediaCaptureState()), "Camera", "expected camera to be shared");
+    Assert.deepEqual((yield getMediaCaptureState()), {video: true},
+                     "expected camera to be shared");
 
     yield indicator;
     yield checkSharingUI({video: true});
@@ -133,8 +137,8 @@ var gTests = [
     });
     yield expectObserverCalled("getUserMedia:response:allow");
     yield expectObserverCalled("recording-device-events");
-    is((yield getMediaCaptureState()), "CameraAndMicrophone",
-       "expected camera and microphone to be shared");
+    Assert.deepEqual((yield getMediaCaptureState()), {audio: true, video: true},
+                     "expected camera and microphone to be shared");
 
     yield indicator;
     yield checkSharingUI({video: true, audio: true});
@@ -161,24 +165,13 @@ var gTests = [
     });
     yield expectObserverCalled("getUserMedia:response:allow");
     yield expectObserverCalled("recording-device-events");
-    is((yield getMediaCaptureState()), "CameraAndMicrophone",
-       "expected camera and microphone to be shared");
+    Assert.deepEqual((yield getMediaCaptureState()), {audio: true, video: true},
+                     "expected camera and microphone to be shared");
 
     yield indicator;
     yield checkSharingUI({video: true, audio: true});
 
-    info("reloading the web page");
-    promise = promiseObserverCalled("recording-device-events");
-    content.location.reload();
-    yield promise;
-
-    if ((yield promiseTodoObserverNotCalled("recording-device-events")) == 1) {
-      todo(false, "Got the 'recording-device-events' notification twice, likely because of bug 962719");
-    }
-
-    yield expectObserverCalled("recording-window-ended");
-    yield expectNoObserverCalled();
-    yield checkNotSharing();
+    yield reloadAndAssertClosedStreams();
   }
 },
 
@@ -204,23 +197,22 @@ var gTests = [
       yield promiseMessage(expectedMessage, () => {
         activateSecondaryAction(aNever ? kActionNever : kActionAlways);
       });
-      let expected = [];
+      let expected = {};
       if (expectedMessage == "ok") {
         yield expectObserverCalled("getUserMedia:response:allow");
         yield expectObserverCalled("recording-device-events");
         if (aRequestVideo)
-          expected.push("Camera");
+          expected.video = true;
         if (aRequestAudio)
-          expected.push("Microphone");
-        expected = expected.join("And");
+          expected.audio = true;
       }
       else {
         yield expectObserverCalled("getUserMedia:response:deny");
         yield expectObserverCalled("recording-window-ended");
-        expected = "none";
       }
-      is((yield getMediaCaptureState()), expected,
-         "expected " + expected + " to be shared");
+      Assert.deepEqual((yield getMediaCaptureState()), expected,
+                       "expected " + Object.keys(expected).join(" and ") +
+                       " to be shared");
 
       function checkDevicePermissions(aDevice, aExpected) {
         let Perms = Services.perms;
@@ -303,14 +295,14 @@ var gTests = [
           yield expectObserverCalled("recording-device-events");
 
           // Check what's actually shared.
-          let expected = [];
+          let expected = {};
           if (aAllowVideo && aRequestVideo)
-            expected.push("Camera");
+            expected.video = true;
           if (aAllowAudio && aRequestAudio)
-            expected.push("Microphone");
-          expected = expected.join("And");
-          is((yield getMediaCaptureState()), expected,
-             "expected " + expected + " to be shared");
+            expected.audio = true;
+          Assert.deepEqual((yield getMediaCaptureState()), expected,
+                           "expected " + Object.keys(expected).join(" and ") +
+                           " to be shared");
 
           yield closeStream();
         }
@@ -448,7 +440,8 @@ var gTests = [
     });
     yield expectObserverCalled("getUserMedia:response:allow");
     yield expectObserverCalled("recording-device-events");
-    is((yield getMediaCaptureState()), "Camera", "expected camera to be shared");
+    Assert.deepEqual((yield getMediaCaptureState()), {video: true},
+                     "expected camera to be shared");
 
     yield indicator;
     yield checkSharingUI({video: true});
@@ -456,7 +449,7 @@ var gTests = [
     ok(gIdentityHandler._identityPopup.hidden, "control center should be hidden");
     if ("nsISystemStatusBar" in Ci) {
       let activeStreams = webrtcUI.getActiveStreams(true, false, false);
-      webrtcUI.showSharingDoorhanger(activeStreams[0], "Devices");
+      webrtcUI.showSharingDoorhanger(activeStreams[0]);
     }
     else {
       let win =
@@ -475,7 +468,7 @@ var gTests = [
 },
 
 {
-  desc: "'Always Allow' ignored and not shown on http pages",
+  desc: "'Always Allow' disabled on http pages",
   run: function* checkNoAlwaysOnHttp() {
     // Load an http page instead of the https version.
     let browser = gBrowser.selectedBrowser;
@@ -495,16 +488,16 @@ var gTests = [
     yield promise;
     yield expectObserverCalled("getUserMedia:request");
 
-    // Ensure that the 'Always Allow' action isn't shown.
-    let alwaysLabel = gNavigatorBundle.getString("getUserMedia.always.label");
-    ok(!!alwaysLabel, "found the 'Always Allow' localized label");
-    let labels = [];
+    // Ensure that checking the 'Remember this decision' checkbox disables
+    // 'Allow'.
     let notification = PopupNotifications.panel.firstChild;
-    for (let node of notification.childNodes) {
-      if (node.localName == "menuitem")
-        labels.push(node.getAttribute("label"));
-    }
-    is(labels.indexOf(alwaysLabel), -1, "The 'Always Allow' item isn't shown");
+    let checkbox = notification.checkbox;
+    ok(!!checkbox, "checkbox is present");
+    ok(!checkbox.checked, "checkbox is not checked");
+    checkbox.click();
+    ok(checkbox.checked, "checkbox now checked");
+    ok(notification.button.disabled, "Allow button is disabled");
+    ok(!notification.hasAttribute("warninghidden"), "warning message is shown");
 
     // Cleanup.
     yield closeStream(true);
@@ -535,9 +528,9 @@ function test() {
     Task.spawn(function* () {
       yield SpecialPowers.pushPrefEnv({"set": [[PREF_PERMISSION_FAKE, true]]});
 
-      for (let test of gTests) {
-        info(test.desc);
-        yield test.run();
+      for (let testCase of gTests) {
+        info(testCase.desc);
+        yield testCase.run();
 
         // Cleanup before the next test
         yield expectNoObserverCalled();

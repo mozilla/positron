@@ -2,7 +2,6 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-///////////////////
 //
 // Whitelisting this test.
 // As part of bug 1077403, the leaking uncaught rejection should be fixed.
@@ -129,7 +128,7 @@ var gTests = [
   {
     const signinUrl = "https://redirproxy.example.com/test";
     setPref("identity.fxaccounts.remote.signin.uri", signinUrl);
-    let [tab, url] = yield promiseNewTabWithIframeLoadEvent("about:accounts?action=signin");
+    let [tab, ] = yield promiseNewTabWithIframeLoadEvent("about:accounts?action=signin");
     yield checkVisibilities(tab, {
       stage: true, // parent of 'manage' and 'intro'
       manage: false,
@@ -152,7 +151,7 @@ var gTests = [
 
     const signinUrl = "https://unknowndomain.cow";
     setPref("identity.fxaccounts.remote.signin.uri", signinUrl);
-    let [tab, url] = yield promiseNewTabWithIframeLoadEvent("about:accounts?action=signin");
+    let [tab, ] = yield promiseNewTabWithIframeLoadEvent("about:accounts?action=signin");
     yield checkVisibilities(tab, {
       stage: true, // parent of 'manage' and 'intro'
       manage: false,
@@ -211,18 +210,9 @@ var gTests = [
   {
     const expected_url = "https://example.com/?is_force_auth";
     setPref("identity.fxaccounts.remote.force_auth.uri", expected_url);
-    let userData = {
-      email: "foo@example.com",
-      uid: "1234@lcip.org",
-      assertion: "foobar",
-      sessionToken: "dead",
-      kA: "beef",
-      kB: "cafe",
-      verified: true
-    };
 
     yield setSignedInUser();
-    let [tab, url] = yield promiseNewTabWithIframeLoadEvent("about:accounts?action=reauth");
+    let [, url] = yield promiseNewTabWithIframeLoadEvent("about:accounts?action=reauth");
     // The current user will be appended to the url
     let expected = expected_url + "&email=foo%40example.com";
     is(url, expected, "action=reauth got the expected URL");
@@ -339,9 +329,10 @@ var gTests = [
     yield setSignedInUser();
     let tab = yield promiseNewTabLoadEvent("about:accounts");
     // sign the user out - the tab should have action=signin
+    let loadPromise = promiseOneMessage(tab, "test:document:load");
     yield signOut();
     // wait for the new load.
-    yield promiseOneMessage(tab, "test:document:load");
+    yield loadPromise;
     is(tab.linkedBrowser.contentDocument.location.href, "about:accounts?action=signin");
   }
 },
@@ -351,7 +342,7 @@ var gTests = [
   run: function* () {
     // When this loads with no user logged-in, we expect the "normal" URL
     setPref("identity.fxaccounts.remote.signup.uri", "https://example.com/");
-    let [tab, url] = yield promiseNewTabWithIframeLoadEvent("about:accounts?entrypoint=abouthome");
+    let [, url] = yield promiseNewTabWithIframeLoadEvent("about:accounts?entrypoint=abouthome");
     is(url, "https://example.com/?entrypoint=abouthome", "entrypoint=abouthome got the expected URL");
   },
 },
@@ -362,7 +353,7 @@ var gTests = [
     // When this loads with no user logged-in, we expect the "normal" URL
     const expected_url = "https://example.com/?is_sign_in";
     setPref("identity.fxaccounts.remote.signin.uri", expected_url);
-    let [tab, url] = yield promiseNewTabWithIframeLoadEvent("about:accounts?action=signin&entrypoint=abouthome");
+    let [, url] = yield promiseNewTabWithIframeLoadEvent("about:accounts?action=signin&entrypoint=abouthome");
     is(url, expected_url + "&entrypoint=abouthome", "entrypoint=abouthome got the expected URL");
   },
 },
@@ -373,7 +364,7 @@ var gTests = [
     // When this loads with no user logged-in, we expect the "normal" URL
     const sign_up_url = "https://example.com/?is_sign_up";
     setPref("identity.fxaccounts.remote.signup.uri", sign_up_url);
-    let [tab, url] = yield promiseNewTabWithIframeLoadEvent("about:accounts?entrypoint=abouthome&action=signup");
+    let [, url] = yield promiseNewTabWithIframeLoadEvent("about:accounts?entrypoint=abouthome&action=signup");
     is(url, sign_up_url + "&entrypoint=abouthome", "entrypoint=abouthome got the expected URL");
   },
 },
@@ -387,7 +378,7 @@ var gTests = [
     let signupURL = "https://example.com/";
     setPref("identity.fxaccounts.remote.signup.uri", signupURL);
     let queryStr = "email=foo%40example.com&foo=bar&baz=quux";
-    let [tab, url] =
+    let [, url] =
       yield promiseNewTabWithIframeLoadEvent("about:accounts?" + queryStr +
                                              "&action=action");
     is(url, signupURL + "?" + queryStr, "URL params are copied to signup URL");
@@ -403,7 +394,7 @@ var gTests = [
     let signupURL = "https://example.com/?param";
     setPref("identity.fxaccounts.remote.signup.uri", signupURL);
     let queryStr = "email=foo%40example.com&foo=bar&baz=quux";
-    let [tab, url] =
+    let [, url] =
       yield promiseNewTabWithIframeLoadEvent("about:accounts?" + queryStr +
                                              "&action=action");
     is(url, signupURL + "&" + queryStr, "URL params are copied to signup URL");
@@ -416,12 +407,12 @@ function test()
   waitForExplicitFinish();
 
   Task.spawn(function* () {
-    for (let test of gTests) {
-      info(test.desc);
+    for (let testCase of gTests) {
+      info(testCase.desc);
       try {
-        yield test.run();
+        yield testCase.run();
       } finally {
-        yield test.teardown();
+        yield testCase.teardown();
       }
     }
 
@@ -445,12 +436,11 @@ function promiseNewTabLoadEvent(aUrl)
   let browser = tab.linkedBrowser;
   let mm = browser.messageManager;
 
-  // give it an e10s-friendly content script to help with our tests.
-  mm.loadFrameScript(CHROME_BASE + "content_aboutAccounts.js", true);
+  // give it an e10s-friendly content script to help with our tests,
   // and wait for it to tell us about the load.
-  return promiseOneMessage(tab, "test:document:load").then(
-    () => tab
-  );
+  let promise = promiseOneMessage(tab, "test:document:load");
+  mm.loadFrameScript(CHROME_BASE + "content_aboutAccounts.js", true);
+  return promise.then(() => tab);
 }
 
 // Returns a promise which is resolved with the iframe's URL after a new
@@ -461,13 +451,13 @@ function promiseNewTabWithIframeLoadEvent(aUrl) {
   let browser = tab.linkedBrowser;
   let mm = browser.messageManager;
 
-  // give it an e10s-friendly content script to help with our tests.
-  mm.loadFrameScript(CHROME_BASE + "content_aboutAccounts.js", true);
+  // give it an e10s-friendly content script to help with our tests,
   // and wait for it to tell us about the iframe load.
   mm.addMessageListener("test:iframe:load", function onFrameLoad(message) {
     mm.removeMessageListener("test:iframe:load", onFrameLoad);
     deferred.resolve([tab, message.data.url]);
   });
+  mm.loadFrameScript(CHROME_BASE + "content_aboutAccounts.js", true);
   return deferred.promise;
 }
 

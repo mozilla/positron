@@ -27,9 +27,6 @@ function frameScript() {
     const { utils: Cu, classes: Cc, interfaces: Ci } = Components;
     Cu.import("resource://gre/modules/PerformanceStats.jsm");
     Cu.import("resource://gre/modules/Services.jsm");
-    let performanceStatsService =
-      Cc["@mozilla.org/toolkit/performance-stats-service;1"].
-      getService(Ci.nsIPerformanceStatsService);
 
     // Make sure that the stopwatch is now active.
     let monitor = PerformanceStats.getMonitor(["jank", "cpow", "ticks", "compartments"]);
@@ -177,7 +174,7 @@ function monotinicity_tester(source, testName) {
       let key = item.groupId;
       if (map.has(key)) {
         let old = map.get(key);
-        Assert.ok(false, `Component ${key} has already been seen. Latest: ${item.addonId||item.name}, previous: ${old.addonId||old.name}`);
+        Assert.ok(false, `Component ${key} has already been seen. Latest: ${item.addonId || item.name}, previous: ${old.addonId || old.name}`);
       }
       map.set(key, item);
     }

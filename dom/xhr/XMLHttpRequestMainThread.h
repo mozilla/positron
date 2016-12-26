@@ -164,6 +164,7 @@ class XMLHttpRequestMainThread final : public XMLHttpRequest,
                                        public nsSupportsWeakReference,
                                        public nsITimerCallback,
                                        public nsISizeOfEventTarget,
+                                       public nsINamed,
                                        public MutableBlobStorageCallback
 {
   friend class nsXHRParseEndListener;
@@ -229,6 +230,9 @@ public:
 
   // nsITimerCallback
   NS_DECL_NSITIMERCALLBACK
+
+  // nsINamed
+  NS_DECL_NSINAMED
 
   // nsISizeOfEventTarget
   virtual size_t
@@ -394,6 +398,11 @@ public:
     RequestBody<nsIInputStream> body(aStream);
     aRv = SendInternal(&body);
   }
+
+  void
+  RequestErrorSteps(const ProgressEventType aEventType,
+                    const nsresult aOptionalException,
+                    ErrorResult& aRv);
 
   void
   Abort() {
@@ -588,6 +597,8 @@ protected:
 
   nsresult OnRedirectVerifyCallback(nsresult result);
 
+  void SetTimerEventTarget(nsITimer* aTimer);
+
   already_AddRefed<nsXMLHttpRequestXPCOMifier> EnsureXPCOMifier();
 
   nsCOMPtr<nsISupports> mContext;
@@ -710,6 +721,18 @@ protected:
   void StartTimeoutTimer();
   void HandleTimeoutCallback();
 
+  nsCOMPtr<nsITimer> mSyncTimeoutTimer;
+
+  enum SyncTimeoutType {
+    eErrorOrExpired,
+    eTimerStarted,
+    eNoTimerNeeded
+  };
+
+  SyncTimeoutType MaybeStartSyncTimeoutTimer();
+  void HandleSyncTimeoutTimer();
+  void CancelSyncTimeoutTimer();
+
   bool mErrorLoad;
   bool mErrorParsingXML;
   bool mWaitingForOnStopRequest;
@@ -717,7 +740,7 @@ protected:
   bool mIsHtml;
   bool mWarnAboutMultipartHtml;
   bool mWarnAboutSyncHtml;
-  int64_t mLoadTotal; // 0 if not known.
+  int64_t mLoadTotal; // -1 if not known.
   // Amount of script-exposed (i.e. after undoing gzip compresion) data
   // received.
   uint64_t mDataAvailable;

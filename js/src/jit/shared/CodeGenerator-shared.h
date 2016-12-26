@@ -28,6 +28,7 @@ class OutOfLineCode;
 class CodeGenerator;
 class MacroAssembler;
 class IonCache;
+class IonIC;
 
 template <class ArgSeq, class StoreOutputTo>
 class OutOfLineCallVM;
@@ -103,6 +104,16 @@ class CodeGeneratorShared : public LElementVisitor
 
     // Vector of information about generated polymorphic inline caches.
     js::Vector<uint32_t, 0, SystemAllocPolicy> cacheList_;
+
+    // Vector mapping each IC index to its offset in runtimeData_.
+    js::Vector<uint32_t, 0, SystemAllocPolicy> icList_;
+
+    // IC data we need at compile-time. Discarded after creating the IonScript.
+    struct CompileTimeICInfo {
+        CodeOffset icOffsetForJump;
+        CodeOffset icOffsetForPush;
+    };
+    js::Vector<CompileTimeICInfo, 0, SystemAllocPolicy> icInfo_;
 
     // Patchable backedges generated for loops.
     Vector<PatchableBackedgeInfo, 0, SystemAllocPolicy> patchableBackedges_;
@@ -296,6 +307,21 @@ class CodeGeneratorShared : public LElementVisitor
         return index;
     }
 
+    template <typename T>
+    inline size_t allocateIC(const T& cache) {
+        static_assert(mozilla::IsBaseOf<IonIC, T>::value, "T must inherit from IonIC");
+        size_t index;
+        masm.propagateOOM(allocateData(sizeof(mozilla::AlignedStorage2<T>), &index));
+        masm.propagateOOM(icList_.append(index));
+        masm.propagateOOM(icInfo_.append(CompileTimeICInfo()));
+        if (masm.oom())
+            return SIZE_MAX;
+        // Use the copy constructor on the allocated space.
+        MOZ_ASSERT(index == icList_.back());
+        new (&runtimeData_[index]) T(cache);
+        return index;
+    }
+
   protected:
     // Encodes an LSnapshot into the compressed snapshot buffer.
     void encode(LRecoverInfo* recover);
@@ -437,8 +463,16 @@ class CodeGeneratorShared : public LElementVisitor
 #endif
     }
 
+    template <typename T>
+    CodeOffset pushArgWithPatch(const T& t) {
+#ifdef DEBUG
+        pushedArgs_++;
+#endif
+        return masm.PushWithPatch(t);
+    }
+
     void storeResultTo(Register reg) {
-        masm.storeCallResult(reg);
+        masm.storeCallWordResult(reg);
     }
 
     void storeFloatResultTo(FloatRegister reg) {
@@ -457,6 +491,8 @@ class CodeGeneratorShared : public LElementVisitor
                                     const StoreOutputTo& out);
 
     void addCache(LInstruction* lir, size_t cacheIndex);
+    void addIC(LInstruction* lir, size_t cacheIndex);
+
     bool addCacheLocations(const CacheLocationList& locs, size_t* numLocs, size_t* offset);
     ReciprocalMulConstants computeDivisionConstants(uint32_t d, int maxLog);
 
@@ -484,6 +520,11 @@ class CodeGeneratorShared : public LElementVisitor
 #if !defined(JS_CODEGEN_MIPS32) && !defined(JS_CODEGEN_MIPS64)
     void jumpToBlock(MBasicBlock* mir, Assembler::Condition cond);
 #endif
+
+    template <class T>
+    wasm::TrapDesc trap(T* mir, wasm::Trap trap) {
+        return wasm::TrapDesc(mir->trapOffset(), trap, masm.framePushed());
+    }
 
   private:
     void generateInvalidateEpilogue();
@@ -649,12 +690,14 @@ template <typename HeadType, typename... TailTypes>
 class ArgSeq<HeadType, TailTypes...> : public ArgSeq<TailTypes...>
 {
   private:
-    HeadType head_;
+    using RawHeadType = typename mozilla::RemoveReference<HeadType>::Type;
+    RawHeadType head_;
 
   public:
-    explicit ArgSeq(HeadType&& head, TailTypes&&... tail)
-      : ArgSeq<TailTypes...>(mozilla::Move(tail)...),
-        head_(mozilla::Move(head))
+    template <typename ProvidedHead, typename... ProvidedTail>
+    explicit ArgSeq(ProvidedHead&& head, ProvidedTail&&... tail)
+      : ArgSeq<TailTypes...>(mozilla::Forward<ProvidedTail>(tail)...),
+        head_(mozilla::Forward<ProvidedHead>(head))
     { }
 
     // Arguments are pushed in reverse order, from last argument to first
@@ -667,9 +710,9 @@ class ArgSeq<HeadType, TailTypes...> : public ArgSeq<TailTypes...>
 
 template <typename... ArgTypes>
 inline ArgSeq<ArgTypes...>
-ArgList(ArgTypes... args)
+ArgList(ArgTypes&&... args)
 {
-    return ArgSeq<ArgTypes...>(mozilla::Move(args)...);
+    return ArgSeq<ArgTypes...>(mozilla::Forward<ArgTypes>(args)...);
 }
 
 // Store wrappers, to generate the right move of data after the VM call.
@@ -811,16 +854,17 @@ class OutOfLineWasmTruncateCheck : public OutOfLineCodeBase<CodeGeneratorShared>
     MIRType toType_;
     FloatRegister input_;
     bool isUnsigned_;
+    wasm::TrapOffset trapOffset_;
 
   public:
     OutOfLineWasmTruncateCheck(MWasmTruncateToInt32* mir, FloatRegister input)
       : fromType_(mir->input()->type()), toType_(MIRType::Int32), input_(input),
-        isUnsigned_(mir->isUnsigned())
+        isUnsigned_(mir->isUnsigned()), trapOffset_(mir->trapOffset())
     { }
 
     OutOfLineWasmTruncateCheck(MWasmTruncateToInt64* mir, FloatRegister input)
       : fromType_(mir->input()->type()), toType_(MIRType::Int64), input_(input),
-        isUnsigned_(mir->isUnsigned())
+        isUnsigned_(mir->isUnsigned()), trapOffset_(mir->trapOffset())
     { }
 
     void accept(CodeGeneratorShared* codegen) {
@@ -831,6 +875,7 @@ class OutOfLineWasmTruncateCheck : public OutOfLineCodeBase<CodeGeneratorShared>
     MIRType toType() const { return toType_; }
     MIRType fromType() const { return fromType_; }
     bool isUnsigned() const { return isUnsigned_; }
+    wasm::TrapOffset trapOffset() const { return trapOffset_; }
 };
 
 } // namespace jit

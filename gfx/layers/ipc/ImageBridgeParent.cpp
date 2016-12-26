@@ -20,7 +20,6 @@
 #include "mozilla/layers/CompositableTransactionParent.h"
 #include "mozilla/layers/LayerManagerComposite.h"
 #include "mozilla/layers/LayersMessages.h"  // for EditReply
-#include "mozilla/layers/LayersSurfaces.h"  // for PGrallocBufferParent
 #include "mozilla/layers/PCompositableParent.h"
 #include "mozilla/layers/PImageBridgeParent.h"
 #include "mozilla/layers/TextureHostOGL.h"  // for TextureHostOGL
@@ -124,18 +123,15 @@ ImageBridgeParent::ActorDestroy(ActorDestroyReason aWhy)
   // for the compositor thread to terminate.
 }
 
-bool
+mozilla::ipc::IPCResult
 ImageBridgeParent::RecvImageBridgeThreadId(const PlatformThreadId& aThreadId)
 {
   MOZ_ASSERT(!mSetChildThreadPriority);
   if (mSetChildThreadPriority) {
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
   mSetChildThreadPriority = true;
-#ifdef MOZ_WIDGET_GONK
-  hal::SetThreadPriority(aThreadId, hal::THREAD_PRIORITY_COMPOSITOR);
-#endif
-  return true;
+  return IPC_OK();
 }
 
 class MOZ_STACK_CLASS AutoImageBridgeParentAsyncMessageSender
@@ -163,7 +159,7 @@ private:
   InfallibleTArray<OpDestroy>* mToDestroy;
 };
 
-bool
+mozilla::ipc::IPCResult
 ImageBridgeParent::RecvUpdate(EditArray&& aEdits, OpDestroyArray&& aToDestroy,
                               const uint64_t& aFwdTransactionId,
                               EditReplyArray* aReply)
@@ -176,7 +172,7 @@ ImageBridgeParent::RecvUpdate(EditArray&& aEdits, OpDestroyArray&& aToDestroy,
   EditReplyVector replyv;
   for (EditArray::index_type i = 0; i < aEdits.Length(); ++i) {
     if (!ReceiveCompositableUpdate(aEdits[i], replyv)) {
-      return false;
+      return IPC_FAIL_NO_REASON(this);
     }
   }
 
@@ -192,17 +188,20 @@ ImageBridgeParent::RecvUpdate(EditArray&& aEdits, OpDestroyArray&& aToDestroy,
     LayerManagerComposite::PlatformSyncBeforeReplyUpdate();
   }
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 ImageBridgeParent::RecvUpdateNoSwap(EditArray&& aEdits, OpDestroyArray&& aToDestroy,
                                     const uint64_t& aFwdTransactionId)
 {
   InfallibleTArray<EditReply> noReplies;
   bool success = RecvUpdate(Move(aEdits), Move(aToDestroy), aFwdTransactionId, &noReplies);
   MOZ_ASSERT(noReplies.Length() == 0, "RecvUpdateNoSwap requires a sync Update to carry Edits");
-  return success;
+  if (!success) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+  return IPC_OK();
 }
 
 /* static */ bool
@@ -225,7 +224,7 @@ ImageBridgeParent::Bind(Endpoint<PImageBridgeParent>&& aEndpoint)
   mSelfRef = this;
 }
 
-bool ImageBridgeParent::RecvWillClose()
+mozilla::ipc::IPCResult ImageBridgeParent::RecvWillClose()
 {
   // If there is any texture still alive we have to force it to deallocate the
   // device data (GL textures, etc.) now because shortly after SenStop() returns
@@ -237,7 +236,7 @@ bool ImageBridgeParent::RecvWillClose()
     RefPtr<TextureHost> tex = TextureHost::AsTextureHost(textures[i]);
     tex->DeallocateDeviceData();
   }
-  return true;
+  return IPC_OK();
 }
 
 static  uint64_t GenImageContainerID() {
@@ -410,74 +409,6 @@ bool ImageBridgeParent::IsSameProcess() const
   return OtherPid() == base::GetCurrentProcId();
 }
 
-void
-ImageBridgeParent::ReplyRemoveTexture(const OpReplyRemoveTexture& aReply)
-{
-  mPendingAsyncMessage.push_back(aReply);
-}
-
-void
-ImageBridgeParent::SendFenceHandleToNonRecycle(PTextureParent* aTexture)
-{
-  RefPtr<TextureHost> texture = TextureHost::AsTextureHost(aTexture);
-  if (!texture) {
-    return;
-  }
-
-  if (!(texture->GetFlags() & TextureFlags::RECYCLE) &&
-     !texture->NeedsFenceHandle()) {
-    return;
-  }
-
-  uint64_t textureId = TextureHost::GetTextureSerial(aTexture);
-
-  // Send a ReleaseFence of CompositorOGL.
-  FenceHandle fence = texture->GetCompositorReleaseFence();
-  if (fence.IsValid()) {
-    mPendingAsyncMessage.push_back(OpDeliverFenceToNonRecycle(textureId, fence));
-  }
-
-  // Send a ReleaseFence that is set to TextureHost by HwcComposer2D.
-  fence = texture->GetAndResetReleaseFenceHandle();
-  if (fence.IsValid()) {
-    mPendingAsyncMessage.push_back(OpDeliverFenceToNonRecycle(textureId, fence));
-  }
-}
-
-void
-ImageBridgeParent::NotifyNotUsedToNonRecycle(PTextureParent* aTexture,
-                                             uint64_t aTransactionId)
-{
-  RefPtr<TextureHost> texture = TextureHost::AsTextureHost(aTexture);
-  if (!texture) {
-    return;
-  }
-
-  if (!(texture->GetFlags() & TextureFlags::RECYCLE) &&
-     !texture->NeedsFenceHandle()) {
-    return;
-  }
-
-  SendFenceHandleToNonRecycle(aTexture);
-
-  uint64_t textureId = TextureHost::GetTextureSerial(aTexture);
-  mPendingAsyncMessage.push_back(
-    OpNotifyNotUsedToNonRecycle(textureId, aTransactionId));
-
-}
-
-/*static*/ void
-ImageBridgeParent::NotifyNotUsedToNonRecycle(base::ProcessId aChildProcessId,
-                                             PTextureParent* aTexture,
-                                             uint64_t aTransactionId)
-{
-  ImageBridgeParent* imageBridge = ImageBridgeParent::GetInstance(aChildProcessId);
-  if (!imageBridge) {
-    return;
-  }
-  imageBridge->NotifyNotUsedToNonRecycle(aTexture, aTransactionId);
-}
-
 /*static*/ void
 ImageBridgeParent::SetAboutToSendAsyncMessages(base::ProcessId aChildProcessId)
 {
@@ -506,12 +437,10 @@ ImageBridgeParent::NotifyNotUsed(PTextureParent* aTexture, uint64_t aTransaction
     return;
   }
 
-  if (!(texture->GetFlags() & TextureFlags::RECYCLE) &&
-     !texture->NeedsFenceHandle()) {
+  if (!(texture->GetFlags() & TextureFlags::RECYCLE)) {
     return;
   }
 
-  SendFenceHandleIfPresent(aTexture);
   uint64_t textureId = TextureHost::GetTextureSerial(aTexture);
   mPendingAsyncMessage.push_back(
     OpNotifyNotUsed(textureId, aTransactionId));

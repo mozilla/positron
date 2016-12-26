@@ -2,6 +2,18 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this file,
    - You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// Import globals from the files imported by the .xul files.
+/* import-globals-from subdialogs.js */
+/* import-globals-from advanced.js */
+/* import-globals-from main.js */
+/* import-globals-from search.js */
+/* import-globals-from content.js */
+/* import-globals-from privacy.js */
+/* import-globals-from applications.js */
+/* import-globals-from security.js */
+/* import-globals-from sync.js */
+/* import-globals-from ../../../base/content/utilityOverlay.js */
+
 "use strict";
 
 var Cc = Components.classes;
@@ -49,6 +61,7 @@ function init_all() {
   register_module("paneGeneral", gMainPane);
   register_module("paneSearch", gSearchPane);
   register_module("panePrivacy", gPrivacyPane);
+  register_module("paneContainers", gContainersPane);
   register_module("paneAdvanced", gAdvancedPane);
   register_module("paneApplications", gApplicationsPane);
   register_module("paneContent", gContentPane);
@@ -110,6 +123,36 @@ function init_dynamic_padding() {
   document.documentElement.appendChild(mediaStyle);
 }
 
+function telemetryBucketForCategory(category) {
+  switch (category) {
+    case "general":
+    case "search":
+    case "content":
+    case "applications":
+    case "privacy":
+    case "security":
+    case "sync":
+      return category;
+    case "advanced":
+      let advancedPaneTabs = document.getElementById("advancedPrefs");
+      switch (advancedPaneTabs.selectedTab.id) {
+        case "generalTab":
+          return "advancedGeneral";
+        case "dataChoicesTab":
+          return "advancedDataChoices";
+        case "networkTab":
+          return "advancedNetwork";
+        case "updateTab":
+          return "advancedUpdates";
+        case "encryptionTab":
+          return "advancedCerts";
+      }
+      // fall-through for unknown.
+    default:
+      return "unknown";
+  }
+}
+
 function onHashChange() {
   gotoPref();
 }
@@ -138,9 +181,9 @@ function gotoPref(aCategory) {
     throw ex;
   }
 
-  let newHash = internalPrefCategoryNameToFriendlyName(category);
+  let friendlyName = internalPrefCategoryNameToFriendlyName(category);
   if (gLastHash || category != kDefaultCategoryInternalName) {
-    document.location.hash = newHash;
+    document.location.hash = friendlyName;
   }
   // Need to set the gLastHash before setting categories.selectedItem since
   // the categories 'select' event will re-enter the gotoPref codepath.
@@ -150,6 +193,10 @@ function gotoPref(aCategory) {
   search(category, "data-category");
   let mainContent = document.querySelector(".main-content");
   mainContent.scrollTop = 0;
+
+  Services.telemetry
+          .getHistogramById("FX_PREFERENCES_CATEGORY_OPENED")
+          .add(telemetryBucketForCategory(friendlyName));
 }
 
 function search(aQuery, aAttribute) {

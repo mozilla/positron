@@ -69,7 +69,7 @@ setBitAndCheck(CounterAndBit* counterAndBit)
 
 BEGIN_TEST(testExclusiveData)
 {
-    js::ExclusiveData<uint64_t> counter(0);
+    js::ExclusiveData<uint64_t> counter(js::mutexid::TestMutex, 0);
 
     js::Vector<js::Thread> threads(cx);
     CHECK(threads.reserve(NumThreads));
@@ -77,7 +77,8 @@ BEGIN_TEST(testExclusiveData)
     for (auto i : mozilla::MakeRange(NumThreads)) {
         auto counterAndBit = js_new<CounterAndBit>(i, counter);
         CHECK(counterAndBit);
-        CHECK(threads.emplaceBack(setBitAndCheck, counterAndBit));
+        CHECK(threads.emplaceBack());
+        CHECK(threads.back().init(setBitAndCheck, counterAndBit));
     }
 
     for (auto& thread : threads)

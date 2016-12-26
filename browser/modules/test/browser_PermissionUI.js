@@ -63,21 +63,18 @@ function clickMainAction() {
 }
 
 /**
- * For an opened PopupNotification, clicks on a secondary action,
+ * For an opened PopupNotification, clicks on the secondary action,
  * and waits for the panel to fully close.
  *
- * @param {int} index
- *        The 0-indexed index of the secondary menuitem to choose.
  * @return {Promise}
  *         Resolves once the panel has fired the "popuphidden"
  *         event.
  */
-function clickSecondaryAction(index) {
+function clickSecondaryAction() {
   let removePromise =
     BrowserTestUtils.waitForEvent(PopupNotifications.panel, "popuphidden");
   let popupNotification = getPopupNotificationNode();
-  let menuitems = popupNotification.children;
-  menuitems[index].click();
+  popupNotification.secondaryButton.click();
   return removePromise;
 }
 
@@ -158,6 +155,55 @@ add_task(function* test_permission_prompt_for_request() {
 });
 
 /**
+ * Tests that if the PermissionPrompt sets displayURI to false in popupOptions,
+ * then there is no URI shown on the popupnotification.
+ */
+add_task(function* test_permission_prompt_for_popupOptions() {
+  yield BrowserTestUtils.withNewTab({
+    gBrowser,
+    url: "http://example.com/",
+  }, function*(browser) {
+    const kTestNotificationID = "test-notification";
+    const kTestMessage = "Test message";
+    let mainAction = {
+      label: "Main",
+      accessKey: "M",
+    };
+    let secondaryAction = {
+      label: "Secondary",
+      accessKey: "S",
+    };
+
+    let mockRequest = makeMockPermissionRequest(browser);
+    let TestPrompt = {
+      __proto__: PermissionUI.PermissionPromptForRequestPrototype,
+      request: mockRequest,
+      notificationID: kTestNotificationID,
+      message: kTestMessage,
+      promptActions: [mainAction, secondaryAction],
+      popupOptions: {
+        displayURI: false,
+      },
+    };
+
+    let shownPromise =
+      BrowserTestUtils.waitForEvent(PopupNotifications.panel, "popupshown");
+    TestPrompt.prompt();
+    yield shownPromise;
+    let notification =
+      PopupNotifications.getNotification(kTestNotificationID, browser);
+
+    Assert.ok(!notification.options.displayURI,
+              "Should not show the URI of the requesting page");
+
+    let removePromise =
+      BrowserTestUtils.waitForEvent(PopupNotifications.panel, "popuphidden");
+    notification.remove();
+    yield removePromise;
+  });
+});
+
+/**
  * Tests that if the PermissionPrompt has the permissionKey
  * set that permissions can be set properly by the user. Also
  * ensures that callbacks for promptActions are properly fired.
@@ -206,6 +252,13 @@ add_task(function* test_with_permission_key() {
       permissionKey: kTestPermissionKey,
       message: kTestMessage,
       promptActions: [mainAction, secondaryAction],
+      popupOptions: {
+        checkbox: {
+          label: "Remember this decision",
+          show: true,
+          checked: true
+        }
+      }
     };
 
     let shownPromise =
@@ -225,7 +278,7 @@ add_task(function* test_with_permission_key() {
     // First test denying the permission request.
     Assert.equal(notification.secondaryActions.length, 1,
                  "There should only be 1 secondary action");
-    yield clickSecondaryAction(0);
+    yield clickSecondaryAction();
     curPerm = Services.perms.testPermissionFromPrincipal(principal,
                                                          kTestPermissionKey);
     Assert.equal(curPerm, Ci.nsIPermissionManager.DENY_ACTION,
@@ -380,7 +433,7 @@ add_task(function* test_no_request() {
     // First test denying the permission request.
     Assert.equal(notification.secondaryActions.length, 1,
                  "There should only be 1 secondary action");
-    yield clickSecondaryAction(0);
+    yield clickSecondaryAction();
     Assert.ok(denied, "The secondaryAction callback should have fired");
     Assert.ok(!allowed, "The mainAction callback should not have fired");
 

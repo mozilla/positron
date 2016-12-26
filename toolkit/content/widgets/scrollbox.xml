@@ -147,6 +147,33 @@
                  this._scrollbox.scrollWidth;
         ]]></getter>
       </property>
+
+      <property name="lineScrollAmount" readonly="true">
+        <getter><![CDATA[
+          // line scroll amout should be the width (at horizontal scrollbox) or
+          // the height (at vertical scrollbox) of the scrolled elements.
+          // However, the elements may have different width or height.  So,
+          // for consistent speed, let's use avalage with of the elements.
+          var elements = this._getScrollableElements();
+          if (!elements.length) {
+            // Returning 0 shouldn't be problem because if there is no
+            // scrollable elements, it's impossible to scroll anyway.
+            return 0;
+          }
+
+          if (this._isRTLScrollbox)
+            elements.reverse();
+
+          var [start, end] = this._startEndProps;
+          var low = 0;
+          var high = elements.length - 1;
+          // XXX If the total width is 0, do we need something more?
+          var totalWidth =
+            elements[high].getBoundingClientRect()[end] - elements[low].getBoundingClientRect()[start];
+          return totalWidth / elements.length;
+        ]]></getter>
+      </property>
+
       <property name="scrollPaddingRect" readonly="true">
         <getter><![CDATA[
           // This assumes that this._scrollbox doesn't have any border.
@@ -273,36 +300,92 @@
         <parameter name="amountToScroll"/>
         <parameter name="element"/><!-- optional -->
         <body><![CDATA[
-          this._stopSmoothScroll();
           if (amountToScroll == 0)
             return;
 
-          this._scrollTarget = element;
-          // Positive amountToScroll makes us scroll right (elements fly left), negative scrolls left.
-          this._isScrolling = amountToScroll < 0 ? -1 : 1;
+          // Shouldn't forget pending scroll amount if the scroll direction
+          // isn't changed because this may be called high frequency with very
+          // small pixel values.
+          var scrollDirection = 0;
+          if (amountToScroll) {
+            // Positive amountToScroll makes us scroll right (elements fly left),
+            // negative scrolls left.
+            scrollDirection = amountToScroll < 0 ? -1 : 1;
+          }
 
-          this._scrollAnim.start(amountToScroll);
+          // However, if the scroll direction is changed, let's cancel the
+          // pending scroll because user must want to scroll from current
+          // position.
+          if (this._isScrolling && this._isScrolling != scrollDirection)
+            this._stopSmoothScroll();
+
+          this._scrollTarget = element;
+          this._isScrolling = scrollDirection;
+
+          this._scrollAnim.start(amountToScroll, !this._scrollTarget);
         ]]></body>
       </method>
 
       <field name="_scrollAnim"><![CDATA[({
         scrollbox: this,
+        distance: 0.0,
         requestHandle: 0, /* 0 indicates there is no pending request */
-        start: function scrollAnim_start(distance) {
-          this.distance = distance;
-          this.startPos = this.scrollbox.scrollPosition;
+
+        // Be aware, |distance| may be dounble. I.e., the absolute value of it can
+        // be less than 1.  Set |isContinuousScroll| to true when the scroll may be
+        // a part of continous scroll, for example, it's caused by turning mosue wheel.
+        start: function scrollAnim_start(distance, isContinuousScroll) {
+          // When it's a continous scroll and the scroll was started, this needs to
+          // respect preceding scroll requests.  For example, 1.5px scroll occurs 2 times,
+          // 3px should be scrolled.  So, fractional values shouldn't be discarded.
+          if (isContinuousScroll && this.distance) {
+            // |this.startPos| is integer due to cache of |.scrollPosition|.  Therefore,
+            // we need to manage actual destination with |this.destination|.
+            this.destination += distance;
+
+            // If the integer part of the destination isn't changed, we need to do
+            // nothing now, wait next event.
+            if (Math.trunc(this.destination) == Math.trunc(this.destination - distance))
+              return;
+
+            // Let's restart animation from current position to the new destination.
+            if (this.requestHandle) {
+              this.stop();
+              this.startPos = this.scrollbox.scrollPosition;
+              // The call of |.stop()| causes clearing |this.distance| but let's recover it
+              // for keeping continuous scroll.
+              this.distance = this.destination - this.startPos;
+            }
+          } else {
+            this.startPos = this.scrollbox.scrollPosition;
+            this.destination = this.startPos + distance;
+            this.distance = this.destination - this.startPos;
+
+            // If absolute value of |this.distance| is less than 1px and this call is
+            // start of a continous scroll, should wait to scroll until accumulated
+            // scroll amount becomes 1px or greater.
+            if (isContinuousScroll && Math.abs(this.distance) < 1)
+              return;
+          }
           this.duration = Math.min(1000, Math.round(50 * Math.sqrt(Math.abs(distance))));
           this.startTime = window.performance.now();
 
           if (!this.requestHandle)
             this.requestHandle = window.requestAnimationFrame(this.sample.bind(this));
         },
+
         stop: function scrollAnim_stop() {
           window.cancelAnimationFrame(this.requestHandle);
           this.requestHandle = 0;
+          // Reset continouos scroll transaction at stopping the scroll animation.
+          this.distance = 0;
         },
+
         sample: function scrollAnim_handleEvent(timeStamp) {
-          const timePassed = timeStamp - this.startTime;
+          // Note that timeStamp sometimes older than start time.  If we use
+          // native value below, it causes scrolling revese direction.
+          // So, if the timeStamp is older, let's treat it as same as the start time.
+          const timePassed = Math.max(0, timeStamp - this.startTime);
           const pos = timePassed >= this.duration ? 1 :
                       1 - Math.pow(1 - timePassed / this.duration, 4);
 
@@ -501,6 +584,8 @@
       <field name="_isScrolling">0</field>
       <field name="_prevMouseScrolls">[null, null]</field>
 
+      <field name="_touchStart">-1</field>
+
       <method name="_stopSmoothScroll">
         <body><![CDATA[
           if (this._isScrolling) {
@@ -552,13 +637,17 @@
 
     <handlers>
       <handler event="wheel"><![CDATA[
+        let doScroll = false;
+        let useSmoothScroll = event.deltaMode != event.DOM_DELTA_PIXEL && this.smoothScroll;
+        let scrollAmount = 0;
         if (this.orient == "vertical") {
+          doScroll = true;
           if (event.deltaMode == event.DOM_DELTA_PIXEL)
-            this.scrollByPixels(event.deltaY);
+            scrollAmount = event.deltaY;
           else if (event.deltaMode == event.DOM_DELTA_PAGE)
-            this.scrollByPage(event.deltaY);
+            scrollAmount = event.deltaY * this.scrollClientSize;
           else
-            this.scrollByIndex(event.deltaY);
+            scrollAmount = event.deltaY * this.lineScrollAmount;
         }
         // We allow vertical scrolling to scroll a horizontal scrollbox
         // because many users have a vertical scroll wheel but no
@@ -574,12 +663,13 @@
           let scrollByDelta = isVertical && this._isRTLScrollbox ? -delta : delta;
 
           if (this._prevMouseScrolls.every(prev => prev == isVertical)) {
+            doScroll = true;
             if (event.deltaMode == event.DOM_DELTA_PIXEL)
-              this.scrollByPixels(scrollByDelta);
+              scrollAmount = scrollByDelta;
             else if (event.deltaMode == event.DOM_DELTA_PAGE)
-              this.scrollByPage(scrollByDelta);
+              scrollAmount = scrollByDelta * this.scrollClientSize;
             else
-              this.scrollByIndex(scrollByDelta);
+              scrollAmount = scrollByDelta * this.lineScrollAmount;
           }
 
           if (this._prevMouseScrolls.length > 1)
@@ -587,8 +677,49 @@
           this._prevMouseScrolls.push(isVertical);
         }
 
+        if (doScroll) {
+          if (useSmoothScroll)
+            this._smoothScrollByPixels(scrollAmount);
+          else
+            this.scrollByPixels(scrollAmount);
+        }
+
         event.stopPropagation();
         event.preventDefault();
+      ]]></handler>
+
+      <handler event="touchstart"><![CDATA[
+        if (event.touches.length > 1) {
+          // Multiple touch points detected, abort. In particular this aborts
+          // the panning gesture when the user puts a second finger down after
+          // already panning with one finger. Aborting at this point prevents
+          // the pan gesture from being resumed until all fingers are lifted
+          // (as opposed to when the user is back down to one finger).
+          this._touchStart = -1;
+        } else {
+          this._touchStart = (this.orient == "vertical"
+                ? event.touches[0].screenY
+                : event.touches[0].screenX);
+        }
+      ]]></handler>
+
+      <handler event="touchmove"><![CDATA[
+        if (event.touches.length == 1 &&
+            this._touchStart >= 0) {
+          var touchPoint = (this.orient == "vertical"
+                ? event.touches[0].screenY
+                : event.touches[0].screenX);
+          var delta = this._touchStart - touchPoint;
+          if (Math.abs(delta) > 0) {
+            this.scrollByPixels(delta);
+            this._touchStart = touchPoint;
+          }
+          event.preventDefault();
+        }
+      ]]></handler>
+
+      <handler event="touchend"><![CDATA[
+        this._touchStart = -1;
       ]]></handler>
 
       <handler event="underflow" phase="capturing"><![CDATA[

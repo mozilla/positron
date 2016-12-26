@@ -6,7 +6,6 @@
   margin: 0;
   display: flex;
   flex-direction: column;
-  padding-bottom: 20px;
   width: 100%;
   height: 100%;
 }
@@ -27,6 +26,7 @@
 
 #font-showall {
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 #font-showall:hover {

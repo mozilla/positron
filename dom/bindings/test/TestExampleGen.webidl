@@ -7,7 +7,7 @@
  Constructor(DOMString str),
  Constructor(unsigned long num, boolean? boolArg),
  Constructor(TestInterface? iface),
- Constructor(long arg1, IndirectlyImplementedInterface iface),
+ Constructor(unsigned long arg1, IndirectlyImplementedInterface iface),
  Constructor(Date arg1),
  Constructor(ArrayBuffer arrayBuf),
  Constructor(Uint8Array typedArr),
@@ -566,12 +566,8 @@ interface TestExampleInterface {
 
   // Promise types
   void passPromise(Promise<any> arg);
-  void passNullablePromise(Promise<any>? arg);
   void passOptionalPromise(optional Promise<any> arg);
-  void passOptionalNullablePromise(optional Promise<any>? arg);
-  void passOptionalNullablePromiseWithDefaultValue(optional Promise<any>? arg = null);
   void passPromiseSequence(sequence<Promise<any>> arg);
-  void passNullablePromiseSequence(sequence<Promise<any>?> arg);
   Promise<any> receivePromise();
   Promise<any> receiveAddrefedPromise();
 
@@ -775,6 +771,8 @@ interface TestExampleInterface {
   [SetterThrows] attribute boolean throwingSetterAttr;
   [NeedsSubjectPrincipal] void needsSubjectPrincipalMethod();
   [NeedsSubjectPrincipal] attribute boolean needsSubjectPrincipalAttr;
+  [NeedsCallerType] void needsCallerTypeMethod();
+  [NeedsCallerType] attribute boolean needsCallerTypeAttr;
   legacycaller short(unsigned long arg1, TestInterface arg2);
   void passArgsWithDefaults(optional long arg1,
                             optional TestInterface? arg2 = null,
@@ -793,10 +791,17 @@ interface TestExampleInterface {
 
 interface TestExampleProxyInterface {
   getter long longIndexedGetter(unsigned long ix);
-  deleter void (unsigned long ix);
   setter creator void longIndexedSetter(unsigned long y, long z);
   stringifier DOMString myStringifier();
   getter short shortNameGetter(DOMString nom);
   deleter void (DOMString nomnom);
   setter creator void shortNamedSetter(DOMString me, short value);
+};
+
+[Exposed=(Window,Worker)]
+interface TestExampleWorkerInterface {
+  [NeedsSubjectPrincipal] void needsSubjectPrincipalMethod();
+  [NeedsSubjectPrincipal] attribute boolean needsSubjectPrincipalAttr;
+  [NeedsCallerType] void needsCallerTypeMethod();
+  [NeedsCallerType] attribute boolean needsCallerTypeAttr;
 };

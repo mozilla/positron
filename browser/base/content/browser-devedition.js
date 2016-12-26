@@ -21,10 +21,11 @@ var DevEdition = {
     return theme && theme.id == "firefox-devedition@mozilla.org";
   },
 
-  init: function () {
+  init: function() {
     this.initialized = true;
     Services.prefs.addObserver(this._devtoolsThemePrefName, this, false);
     Services.obs.addObserver(this, "lightweight-theme-styling-update", false);
+    Services.obs.addObserver(this, "lightweight-theme-window-updated", false);
     this._updateDevtoolsThemeAttribute();
 
     if (this.isThemeCurrentlyApplied) {
@@ -41,7 +42,7 @@ var DevEdition = {
     this.styleSheet.sheet.disabled = true;
   },
 
-  observe: function (subject, topic, data) {
+  observe: function(subject, topic, data) {
     if (topic == "lightweight-theme-styling-update") {
       let newTheme = JSON.parse(data);
       if (newTheme && newTheme.id == "firefox-devedition@mozilla.org") {
@@ -49,6 +50,8 @@ var DevEdition = {
       } else {
         this._toggleStyleSheet(false);
       }
+    } else if (topic == "lightweight-theme-window-updated" && subject == window) {
+      this._updateLWTBrightness();
     }
 
     if (topic == "nsPref:changed" && data == this._devtoolsThemePrefName) {
@@ -67,6 +70,14 @@ var DevEdition = {
     }
   },
 
+  _updateLWTBrightness() {
+    if (this.isThemeCurrentlyApplied) {
+      let devtoolsTheme = Services.prefs.getCharPref(this._devtoolsThemePrefName);
+      let textColor = devtoolsTheme == "dark" ? "bright" : "dark";
+      document.documentElement.setAttribute("lwthemetextcolor", textColor);
+    }
+  },
+
   _updateDevtoolsThemeAttribute: function() {
     // Set an attribute on root element to make it possible
     // to change colors based on the selected devtools theme.
@@ -75,6 +86,7 @@ var DevEdition = {
       devtoolsTheme = "light";
     }
     document.documentElement.setAttribute("devtoolstheme", devtoolsTheme);
+    this._updateLWTBrightness();
     this._inferBrightness();
   },
 
@@ -110,9 +122,10 @@ var DevEdition = {
     }
   },
 
-  uninit: function () {
+  uninit: function() {
     Services.prefs.removeObserver(this._devtoolsThemePrefName, this);
     Services.obs.removeObserver(this, "lightweight-theme-styling-update", false);
+    Services.obs.removeObserver(this, "lightweight-theme-window-updated", false);
     if (this.styleSheet) {
       this.styleSheet.removeEventListener("load", this);
     }
@@ -123,7 +136,7 @@ var DevEdition = {
 // If the DevEdition theme is going to be applied in gBrowserInit.onLoad,
 // then preload it now.  This prevents a flash of unstyled content where the
 // normal theme is applied while the DevEdition stylesheet is loading.
-if (!AppConstants.RELEASE_BUILD &&
+if (!AppConstants.RELEASE_OR_BETA &&
     this != Services.appShell.hiddenDOMWindow && DevEdition.isThemeCurrentlyApplied) {
   DevEdition.createStyleSheet();
 }

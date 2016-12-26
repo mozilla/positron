@@ -63,13 +63,13 @@ add_task(function* () {
   info("Adding search event listener");
   yield ContentTask.spawn(gBrowser.selectedBrowser, {}, function* () {
     const SERVICE_EVENT_NAME = "ContentSearchService";
-    content.addEventListener(SERVICE_EVENT_NAME, function (event) {
+    content.addEventListener(SERVICE_EVENT_NAME, function(event) {
       sendAsyncMessage("test:search-event", { eventType: event.detail.type });
     });
   });
 
   let mm = gBrowser.selectedBrowser.messageManager;
-  mm.addMessageListener("test:search-event", function (message) {
+  mm.addMessageListener("test:search-event", function(message) {
     let eventType = message.data.eventType;
     if (!gExpectedSearchEventResolver) {
       ok(false, "Got search event " + eventType + " with no promise assigned");
@@ -125,11 +125,6 @@ add_task(function* () {
   yield searchEventsPromise;
   yield* checkCurrentEngine(ENGINE_SUGGESTIONS);
 
-  // Avoid intermittent failures.
-  yield ContentTask.spawn(gBrowser.selectedBrowser, {}, function* () {
-    content.gSearch._contentSearchController.remoteTimeout = 5000;
-  });
-
   // Type an X in the search input.  This is only a smoke test.  See
   // browser_searchSuggestionUI.js for comprehensive content search suggestion
   // UI tests.
@@ -178,65 +173,6 @@ add_task(function* () {
       "Search suggestion table hidden");
   });
 
-  // Remove the search bar from toolbar
-  CustomizableUI.removeWidgetFromArea("search-container");
-  // Focus a different element than the search input from the page.
-  yield BrowserTestUtils.synthesizeMouseAtCenter("#newtab-customize-button", { }, gBrowser.selectedBrowser);
-
-  yield ContentTask.spawn(gBrowser.selectedBrowser, { }, function* () {
-    let input = content.document.getElementById("newtab-search-text");
-    Assert.notEqual(input, content.document.activeElement, "Search input should not be focused");
-  });
-
-  // Test that Ctrl/Cmd + K will focus the input field from the page.
-  let focusPromise = promiseSearchEvents(["FocusInput"]);
-  EventUtils.synthesizeKey("k", { accelKey: true });
-  yield focusPromise;
-
-  yield ContentTask.spawn(gBrowser.selectedBrowser, { }, function* () {
-    let input = content.document.getElementById("newtab-search-text");
-    Assert.equal(input, content.document.activeElement, "Search input should be focused");
-  });
-
-  // Reset changes made to toolbar
-  CustomizableUI.reset();
-
-  // Test that Ctrl/Cmd + K will focus the search bar from toolbar.
-  EventUtils.synthesizeKey("k", { accelKey: true });
-  let searchBar = document.getElementById("searchbar");
-  is(searchBar.textbox.inputField, document.activeElement, "Toolbar's search bar should be focused");
-
-  // Test that Ctrl/Cmd + K will focus the search bar from a new about:home page if
-  // the newtab is disabled from `NewTabUtils.allPages.enabled`.
-  let tab = yield* addNewTabPageTab();
-  // Remove the search bar from toolbar
-  CustomizableUI.removeWidgetFromArea("search-container");
-  NewTabUtils.allPages.enabled = false;
-  EventUtils.synthesizeKey("k", { accelKey: true });
-
-
-  let aboutHomeLoaded = new Promise(resolve => {
-    tab.linkedBrowser.addEventListener("AboutHomeLoadSnippetsCompleted", function loadListener(event) {
-      tab.linkedBrowser.removeEventListener("AboutHomeLoadSnippetsCompleted", loadListener, true);
-      resolve();
-    }, true, true);
-  });
-
-  tab.linkedBrowser.loadURI("about:home");
-  yield aboutHomeLoaded;
-
-  yield ContentTask.spawn(gBrowser.selectedBrowser, { }, function* () {
-    Assert.equal(content.document.documentURI.toLowerCase(), "about:home",
-      "New tab's uri should be about:home");
-    let searchInput = content.document.getElementById("searchText");
-    Assert.equal(searchInput, content.document.activeElement,
-      "Search input must be the selected element");
-  });
-
-  NewTabUtils.allPages.enabled = true;
-  CustomizableUI.reset();
-  yield BrowserTestUtils.removeTab(gBrowser.selectedTab);
-
   // Done.  Revert the current engine and remove the new engines.
   searchEventsPromise = promiseSearchEvents(["CurrentEngine"]);
   Services.search.currentEngine = oldCurrentEngine;
@@ -275,12 +211,12 @@ function promiseNewSearchEngine({name: basename, numLogos}) {
   let addEnginePromise = new Promise((resolve, reject) => {
     let url = getRootDirectory(gTestPath) + basename;
     Services.search.addEngine(url, null, "", false, {
-      onSuccess: function (engine) {
+      onSuccess: function(engine) {
         info("Search engine added: " + basename);
         gNewEngines.push(engine);
         resolve(engine);
       },
-      onError: function (errCode) {
+      onError: function(errCode) {
         ok(false, "addEngine failed with error code " + errCode);
         reject();
       },

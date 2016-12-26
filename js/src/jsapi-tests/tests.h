@@ -186,7 +186,7 @@ class JSAPITest
             return false; \
     } while (false)
 
-    bool checkSame(JS::Value actualArg, JS::Value expectedArg,
+    bool checkSame(const JS::Value& actualArg, const JS::Value& expectedArg,
                    const char* actualExpr, const char* expectedExpr,
                    const char* filename, int lineno) {
         bool same;
@@ -272,7 +272,7 @@ class JSAPITest
     {
         const size_t MAX_STACK_SIZE =
 /* Assume we can't use more than 5e5 bytes of C stack by default. */
-#if (defined(DEBUG) && defined(__SUNPRO_CC))  || defined(JS_CPU_SPARC)
+#if (defined(DEBUG) && defined(__SUNPRO_CC)) || defined(__sparc__)
             /*
              * Sun compiler uses a larger stack space for js::Interpret() with
              * debug.  Use a bigger gMaxStackSize to make "make check" happy.
@@ -301,14 +301,14 @@ class JSAPITest
         cx = nullptr;
     }
 
-    static void reportWarning(JSContext* cx, const char* message, JSErrorReport* report) {
+    static void reportWarning(JSContext* cx, JSErrorReport* report) {
         MOZ_RELEASE_ASSERT(report);
         MOZ_RELEASE_ASSERT(JSREPORT_IS_WARNING(report->flags));
 
         fprintf(stderr, "%s:%u:%s\n",
                 report->filename ? report->filename : "<no filename>",
                 (unsigned int) report->lineno,
-                message);
+                report->message().c_str());
     }
 
     virtual const JSClass * getGlobalClass() {

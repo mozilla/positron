@@ -118,8 +118,16 @@ void
 CacheFileChunkBuffer::SetDataSize(uint32_t aDataSize)
 {
   MOZ_RELEASE_ASSERT(
-    mDataSize <= mBufSize ||
-    (mBufSize == 0 && mChunk->mState == CacheFileChunk::READING));
+    // EnsureBufSize must be called before SetDataSize, so the new data size
+    // is guaranteed to be smaller than or equal to mBufSize.
+    aDataSize <= mBufSize ||
+    // The only exception is an optimization when we read the data from the
+    // disk. The data is read to a separate buffer and CacheFileChunk::mBuf is
+    // empty (see CacheFileChunk::Read). We need to set mBuf::mDataSize
+    // accordingly so that DataSize() methods return correct value, but we don't
+    // want to allocate the buffer since it wouldn't be used in most cases.
+    (mDataSize == 0 && mBufSize == 0 && mChunk->mState == CacheFileChunk::READING));
+
   mDataSize = aDataSize;
 }
 
@@ -243,7 +251,6 @@ public:
   {
     LOG(("NotifyUpdateListenerEvent::NotifyUpdateListenerEvent() [this=%p]",
          this));
-    MOZ_COUNT_CTOR(NotifyUpdateListenerEvent);
   }
 
 protected:
@@ -251,7 +258,6 @@ protected:
   {
     LOG(("NotifyUpdateListenerEvent::~NotifyUpdateListenerEvent() [this=%p]",
          this));
-    MOZ_COUNT_DTOR(NotifyUpdateListenerEvent);
   }
 
 public:
@@ -339,15 +345,12 @@ CacheFileChunk::CacheFileChunk(CacheFile *aFile, uint32_t aIndex,
 {
   LOG(("CacheFileChunk::CacheFileChunk() [this=%p, index=%u, initByWriter=%d]",
        this, aIndex, aInitByWriter));
-  MOZ_COUNT_CTOR(CacheFileChunk);
-
   mBuf = new CacheFileChunkBuffer(this);
 }
 
 CacheFileChunk::~CacheFileChunk()
 {
   LOG(("CacheFileChunk::~CacheFileChunk() [this=%p]", this));
-  MOZ_COUNT_DTOR(CacheFileChunk);
 }
 
 void

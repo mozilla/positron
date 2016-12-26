@@ -22,13 +22,15 @@ var gTests = [
       });
       yield expectObserverCalled("getUserMedia:response:allow");
       yield expectObserverCalled("recording-device-events");
-      let expected = [];
+      let expected = {};
       if (aVideo)
-        expected.push("Camera");
+        expected.video = true;
       if (aAudio)
-        expected.push("Microphone");
-      is((yield getMediaCaptureState()), expected.join("And"),
-         "expected stream to be shared");
+        expected.audio = true;
+      Assert.deepEqual((yield getMediaCaptureState()), expected,
+                       "expected " + Object.keys(expected).join(" and ") +
+                       " to be shared");
+
 
       // Check the attribute on the tab, and check there's no visible
       // sharing icon on the tab
@@ -58,6 +60,10 @@ var gTests = [
 
       // And finally verify the attribute is removed when closing the stream.
       yield closeStream();
+
+      // TODO(Bug 1304997): Fix the race in closeStream() and remove this
+      // promiseWaitForCondition().
+      yield promiseWaitForCondition(() => !tab.getAttribute("sharing"));
       is(tab.getAttribute("sharing"), "",
          "the tab no longer has the 'sharing' attribute after closing the stream");
     }
@@ -88,9 +94,9 @@ function test() {
     Task.spawn(function* () {
       yield SpecialPowers.pushPrefEnv({"set": [[PREF_PERMISSION_FAKE, true]]});
 
-      for (let test of gTests) {
-        info(test.desc);
-        yield test.run();
+      for (let testCase of gTests) {
+        info(testCase.desc);
+        yield testCase.run();
       }
     }).then(finish, ex => {
      Cu.reportError(ex);

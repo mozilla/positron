@@ -34,8 +34,7 @@ this.EXPORTED_SYMBOLS = [
   "DownloadStore",
 ];
 
-////////////////////////////////////////////////////////////////////////////////
-//// Globals
+// Globals
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
@@ -51,16 +50,15 @@ XPCOMUtils.defineLazyModuleGetter(this, "OS",
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "gTextDecoder", function () {
+XPCOMUtils.defineLazyGetter(this, "gTextDecoder", function() {
   return new TextDecoder();
 });
 
-XPCOMUtils.defineLazyGetter(this, "gTextEncoder", function () {
+XPCOMUtils.defineLazyGetter(this, "gTextEncoder", function() {
   return new TextEncoder();
 });
 
-////////////////////////////////////////////////////////////////////////////////
-//// DownloadStore
+// DownloadStore
 
 /**
  * Handles serialization of Download objects and persistence into a file, so
@@ -71,7 +69,7 @@ XPCOMUtils.defineLazyGetter(this, "gTextEncoder", function () {
  * @param aPath
  *        String containing the file path where data should be saved.
  */
-this.DownloadStore = function (aList, aPath)
+this.DownloadStore = function(aList, aPath)
 {
   this.list = aList;
   this.path = aPath;

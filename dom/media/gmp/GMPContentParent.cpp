@@ -118,12 +118,28 @@ GMPContentParent::DecryptorDestroyed(GMPDecryptorParent* aSession)
 }
 
 void
+GMPContentParent::AddCloseBlocker()
+{
+  MOZ_ASSERT(GMPThread() == NS_GetCurrentThread());
+  ++mCloseBlockerCount;
+}
+
+void
+GMPContentParent::RemoveCloseBlocker()
+{
+  MOZ_ASSERT(GMPThread() == NS_GetCurrentThread());
+  --mCloseBlockerCount;
+  CloseIfUnused();
+}
+
+void
 GMPContentParent::CloseIfUnused()
 {
   if (mAudioDecoders.IsEmpty() &&
       mDecryptors.IsEmpty() &&
       mVideoDecoders.IsEmpty() &&
-      mVideoEncoders.IsEmpty()) {
+      mVideoEncoders.IsEmpty() &&
+      mCloseBlockerCount == 0) {
     RefPtr<GMPContentParent> toClose;
     if (mParent) {
       toClose = mParent->ForgetGMPContentParent();
@@ -194,10 +210,11 @@ GMPContentParent::GetGMPAudioDecoder(GMPAudioDecoderParent** aGMPAD)
 }
 
 nsresult
-GMPContentParent::GetGMPVideoDecoder(GMPVideoDecoderParent** aGMPVD)
+GMPContentParent::GetGMPVideoDecoder(GMPVideoDecoderParent** aGMPVD,
+                                     uint32_t aDecryptorId)
 {
   // returned with one anonymous AddRef that locks it until Destroy
-  PGMPVideoDecoderParent* pvdp = SendPGMPVideoDecoderConstructor();
+  PGMPVideoDecoderParent* pvdp = SendPGMPVideoDecoderConstructor(aDecryptorId);
   if (!pvdp) {
     return NS_ERROR_FAILURE;
   }
@@ -230,7 +247,7 @@ GMPContentParent::GetGMPVideoEncoder(GMPVideoEncoderParent** aGMPVE)
 }
 
 PGMPVideoDecoderParent*
-GMPContentParent::AllocPGMPVideoDecoderParent()
+GMPContentParent::AllocPGMPVideoDecoderParent(const uint32_t& aDecryptorId)
 {
   GMPVideoDecoderParent* vdp = new GMPVideoDecoderParent(this);
   NS_ADDREF(vdp);

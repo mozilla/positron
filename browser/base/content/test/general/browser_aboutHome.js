@@ -166,7 +166,7 @@ add_task(function* () {
 
 add_task(function* () {
   info("Check if the 'Know Your Rights' default snippet is shown when " +
-    "'browser.rights.override' pref is set");
+    "'browser.rights.override' pref is set and that its link works");
 
   Services.prefs.setBoolPref("browser.rights.override", false);
 
@@ -176,9 +176,17 @@ add_task(function* () {
     let doc = content.document;
     let snippetsElt = doc.getElementById("snippets");
     ok(snippetsElt, "Found snippets element");
-    is(snippetsElt.getElementsByTagName("a")[0].href, "about:rights",
-      "Snippet link is present.");
+    let linkEl = snippetsElt.querySelector("a");
+    is(linkEl.href, "about:rights", "Snippet link is present.");
+  }, null, function* () {
+    let loadPromise = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser, false, "about:rights");
+    yield BrowserTestUtils.synthesizeMouseAtCenter("a[href='about:rights']", {
+      button: 0
+    }, gBrowser.selectedBrowser);
+    yield loadPromise;
+    is(gBrowser.currentURI.spec, "about:rights", "about:rights should have opened.");
   });
+
 
   Services.prefs.clearUserPref("browser.rights.override");
 });
@@ -284,7 +292,7 @@ add_task(function* () {
         }
 
         if (n > 0) {
-          executeSoon(() => check(n-1));
+          executeSoon(() => check(n - 1));
         } else {
           resolve();
         }
@@ -308,9 +316,6 @@ add_task(function* () {
     yield p;
 
     yield ContentTask.spawn(browser, null, function* () {
-      // Avoid intermittent failures.
-      content.wrappedJSObject.gContentSearchController.remoteTimeout = 5000;
-
       // Type an X in the search input.
       let input = content.document.getElementById("searchText");
       input.focus();
@@ -468,34 +473,6 @@ add_task(function* () {
 });
 
 add_task(function* () {
-  info("Cmd+k should focus the search box in the page when the search box in the toolbar is absent");
-
-  // Remove the search bar from toolbar
-  CustomizableUI.removeWidgetFromArea("search-container");
-
-  yield BrowserTestUtils.withNewTab({ gBrowser, url: "about:home" }, function* (browser) {
-    yield BrowserTestUtils.synthesizeMouseAtCenter("#brandLogo", {}, browser);
-    yield ContentTask.spawn(browser, null, function* () {
-      let doc = content.document;
-      isnot(doc.getElementById("searchText"), doc.activeElement,
-        "Search input should not be the active element.");
-    });
-
-    EventUtils.synthesizeKey("k", { accelKey: true });
-
-    yield ContentTask.spawn(browser, null, function* () {
-      let doc = content.document;
-      let searchInput = doc.getElementById("searchText");
-
-      yield ContentTaskUtils.waitForCondition(() => doc.activeElement === searchInput,
-        "Search input should be the active element.");
-    });
-  });
-
-  CustomizableUI.reset();
-});
-
-add_task(function* () {
   info("Cmd+k should focus the search box in the toolbar when it's present");
 
   yield BrowserTestUtils.withNewTab({ gBrowser, url: "about:home" }, function* (browser) {
@@ -517,7 +494,7 @@ add_task(function* () {
   yield BrowserTestUtils.withNewTab({ gBrowser, url: "about:home" }, function* (browser) {
     let oldOpenPrefs = window.openPreferences;
     let openPrefsPromise = new Promise(resolve => {
-      window.openPreferences = function (pane, params) {
+      window.openPreferences = function(pane, params) {
         resolve({ pane: pane, params: params });
       };
     });
@@ -564,9 +541,15 @@ add_task(function* () {
  *
  * @param aSetupFn
  *        The setup function to be run.
+ * @param testFn
+ *        the content task to run
+ * @param testArgs (optional)
+ *        the parameters to pass to the content task
+ * @param parentFn (optional)
+ *        the function to run in the parent after the content task has completed.
  * @return {Promise} resolved when the snippets are ready.  Gets the snippets map.
  */
-function* withSnippetsMap(setupFn, testFn, testArgs = null) {
+function* withSnippetsMap(setupFn, testFn, testArgs = null, parentFn = null) {
   let setupFnSource;
   if (setupFn) {
     setupFnSource = setupFn.toSource();
@@ -639,6 +622,9 @@ function* withSnippetsMap(setupFn, testFn, testArgs = null) {
     yield promise;
 
     yield ContentTask.spawn(browser, testArgs, testFn);
+    if (parentFn) {
+      yield parentFn();
+    }
   });
 }
 
@@ -661,7 +647,7 @@ function promiseNewEngine(basename) {
   return new Promise((resolve, reject) => {
     let url = getRootDirectory(gTestPath) + basename;
     Services.search.addEngine(url, null, "", false, {
-      onSuccess: function (engine) {
+      onSuccess: function(engine) {
         info("Search engine added: " + basename);
         registerCleanupFunction(() => {
           try {
@@ -670,7 +656,7 @@ function promiseNewEngine(basename) {
         });
         resolve(engine);
       },
-      onError: function (errCode) {
+      onError: function(errCode) {
         ok(false, "addEngine failed with error code " + errCode);
         reject();
       },

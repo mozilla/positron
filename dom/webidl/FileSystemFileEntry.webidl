@@ -4,17 +4,12 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-callback interface BlobCallback {
-    void handleEvent(Blob? blob);
+callback interface FileCallback {
+    void handleEvent(File file);
 };
 
 interface FileSystemFileEntry : FileSystemEntry {
-    // the successCallback should be a FileWriteCallback but this method is not
-    // implemented. ErrorCallback will be called with SecurityError.
-    void createWriter (VoidCallback successCallback,
-                       optional ErrorCallback errorCallback);
-
     [BinaryName="GetFile"]
-    void file (BlobCallback successCallback,
+    void file (FileCallback successCallback,
                optional ErrorCallback errorCallback);
 };

@@ -1,8 +1,11 @@
-#/usr/bin/env python
+#!/usr/bin/env python
 import mozdevice
 import logging
 import re
 import unittest
+
+import mozunit
+
 from sut import MockAgent
 
 
@@ -46,4 +49,4 @@ class TestGetInfo(unittest.TestCase):
             self.assertEqual(d.getInfo(directive=directive)[directive], expected)
 
 if __name__ == '__main__':
-    unittest.main()
+    mozunit.main()

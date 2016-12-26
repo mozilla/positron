@@ -58,11 +58,13 @@ class APZEventState;
 class CompositorSession;
 class ImageContainer;
 struct ScrollableLayerGuid;
+class RemoteCompositorSession;
 } // namespace layers
 
 namespace widget {
 class CompositorWidgetDelegate;
 class InProcessCompositorWidget;
+class WidgetRenderingContext;
 } // namespace widget
 
 class CompositorVsyncDispatcher;
@@ -111,6 +113,7 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference
   friend class nsAutoRollup;
   friend class DispatchWheelEventOnMainThread;
   friend class mozilla::widget::InProcessCompositorWidget;
+  friend class mozilla::layers::RemoteCompositorSession;
 
 protected:
   typedef base::Thread Thread;
@@ -146,7 +149,7 @@ public:
   virtual nsIWidgetListener*  GetWidgetListener() override;
   virtual void            SetWidgetListener(nsIWidgetListener* alistener) override;
   virtual void            Destroy() override;
-  NS_IMETHOD              SetParent(nsIWidget* aNewParent) override;
+  virtual void            SetParent(nsIWidget* aNewParent) override {};
   virtual nsIWidget*      GetParent(void) override;
   virtual nsIWidget*      GetTopLevelWidget() override;
   virtual nsIWidget*      GetSheetWindowParent(void) override;
@@ -177,12 +180,13 @@ public:
   virtual void            SetShowsToolbarButton(bool aShow) override {}
   virtual void            SetShowsFullScreenButton(bool aShow) override {}
   virtual void            SetWindowAnimationType(WindowAnimationType aType) override {}
-  NS_IMETHOD              HideWindowChrome(bool aShouldHide) override;
+  virtual void            HideWindowChrome(bool aShouldHide) override {}
   virtual bool PrepareForFullscreenTransition(nsISupports** aData) override { return false; }
   virtual void PerformFullscreenTransition(FullscreenTransitionStage aStage,
                                            uint16_t aDuration,
                                            nsISupports* aData,
                                            nsIRunnable* aCallback) override;
+  virtual already_AddRefed<nsIScreen> GetWidgetScreen() override;
   virtual nsresult        MakeFullScreen(bool aFullScreen,
                                          nsIScreen* aScreen = nullptr) override;
   void                    InfallibleMakeFullScreen(bool aFullScreen,
@@ -229,9 +233,9 @@ public:
   virtual void            ConstrainPosition(bool aAllowSlop,
                                             int32_t *aX,
                                             int32_t *aY) override {}
-  NS_IMETHOD              MoveClient(double aX, double aY) override;
-  NS_IMETHOD              ResizeClient(double aWidth, double aHeight, bool aRepaint) override;
-  NS_IMETHOD              ResizeClient(double aX, double aY, double aWidth, double aHeight, bool aRepaint) override;
+  virtual void            MoveClient(double aX, double aY) override;
+  virtual void            ResizeClient(double aWidth, double aHeight, bool aRepaint) override;
+  virtual void            ResizeClient(double aX, double aY, double aWidth, double aHeight, bool aRepaint) override;
   virtual LayoutDeviceIntRect GetBounds() override;
   virtual LayoutDeviceIntRect GetClientBounds() override;
   virtual LayoutDeviceIntRect GetScreenBounds() override;
@@ -239,22 +243,29 @@ public:
   NS_IMETHOD              SetNonClientMargins(LayoutDeviceIntMargin& aMargins) override;
   virtual LayoutDeviceIntPoint GetClientOffset() override;
   virtual void            EnableDragDrop(bool aEnable) override {};
-  NS_IMETHOD              GetAttention(int32_t aCycleCount) override;
+  virtual MOZ_MUST_USE nsresult
+                          GetAttention(int32_t aCycleCount) override
+                          { return NS_OK; }
   virtual bool            HasPendingInputEvent() override;
-  NS_IMETHOD              SetIcon(const nsAString &anIconSpec) override;
+  virtual void            SetIcon(const nsAString &aIconSpec) override {}
   virtual void            SetWindowTitlebarColor(nscolor aColor, bool aActive)
                             override {}
   virtual void            SetDrawsInTitlebar(bool aState) override {}
   virtual bool            ShowsResizeIndicator(LayoutDeviceIntRect* aResizerRect) override;
   virtual void            FreeNativeData(void * data, uint32_t aDataType) override {}
-  NS_IMETHOD              BeginResizeDrag(mozilla::WidgetGUIEvent* aEvent,
+  virtual MOZ_MUST_USE nsresult
+                          BeginResizeDrag(mozilla::WidgetGUIEvent* aEvent,
                                           int32_t aHorizontal,
-                                          int32_t aVertical) override;
-  NS_IMETHOD              BeginMoveDrag(mozilla::WidgetMouseEvent* aEvent) override;
+                                          int32_t aVertical) override
+                          { return NS_ERROR_NOT_IMPLEMENTED; }
+  virtual MOZ_MUST_USE nsresult
+                          BeginMoveDrag(mozilla::WidgetMouseEvent* aEvent) override
+                          { return NS_ERROR_NOT_IMPLEMENTED; }
   virtual nsresult        ActivateNativeMenuItemAt(const nsAString& indexString) override { return NS_ERROR_NOT_IMPLEMENTED; }
   virtual nsresult        ForceUpdateNativeMenuAt(const nsAString& indexString) override { return NS_ERROR_NOT_IMPLEMENTED; }
   NS_IMETHOD              NotifyIME(const IMENotification& aIMENotification) override final;
-  NS_IMETHOD              StartPluginIME(const mozilla::WidgetKeyboardEvent& aKeyboardEvent,
+  virtual MOZ_MUST_USE nsresult
+                          StartPluginIME(const mozilla::WidgetKeyboardEvent& aKeyboardEvent,
                                          int32_t aPanelX, int32_t aPanelY,
                                          nsString& aCommitted) override
                           { return NS_ERROR_NOT_IMPLEMENTED; }
@@ -266,15 +277,16 @@ public:
   virtual void            DefaultProcOfPluginEvent(
                             const mozilla::WidgetPluginEvent& aEvent) override
                           { }
-  NS_IMETHOD              AttachNativeKeyEvent(mozilla::WidgetKeyboardEvent& aEvent) override { return NS_ERROR_NOT_IMPLEMENTED; }
+  virtual MOZ_MUST_USE nsresult AttachNativeKeyEvent(mozilla::WidgetKeyboardEvent& aEvent) override { return NS_ERROR_NOT_IMPLEMENTED; }
   NS_IMETHOD_(bool)       ExecuteNativeKeyBinding(
                             NativeKeyBindingsType aType,
                             const mozilla::WidgetKeyboardEvent& aEvent,
                             DoCommandCallback aCallback,
                             void* aCallbackData) override { return false; }
-  virtual bool            ComputeShouldAccelerate();
+  bool                    ComputeShouldAccelerate();
+  virtual bool            WidgetTypeSupportsAcceleration() { return true; }
   virtual nsIMEUpdatePreference GetIMEUpdatePreference() override { return nsIMEUpdatePreference(); }
-  NS_IMETHOD              OnDefaultButtonLoaded(const LayoutDeviceIntRect& aButtonRect) override { return NS_ERROR_NOT_IMPLEMENTED; }
+  virtual MOZ_MUST_USE nsresult OnDefaultButtonLoaded(const LayoutDeviceIntRect& aButtonRect) override { return NS_ERROR_NOT_IMPLEMENTED; }
   virtual already_AddRefed<nsIWidget>
   CreateChild(const LayoutDeviceIntRect& aRect,
               nsWidgetInitData* aInitData = nullptr,
@@ -389,15 +401,15 @@ protected:
   // These are methods for CompositorWidgetWrapper, and should only be
   // accessed from that class. Derived widgets can choose which methods to
   // implement, or none if supporting out-of-process compositing.
-  virtual bool PreRender(mozilla::layers::LayerManagerComposite* aManager) {
+  virtual bool PreRender(mozilla::widget::WidgetRenderingContext* aContext) {
     return true;
   }
-  virtual void PostRender(mozilla::layers::LayerManagerComposite* aManager)
+  virtual void PostRender(mozilla::widget::WidgetRenderingContext* aContext)
   {}
-  virtual void DrawWindowUnderlay(mozilla::layers::LayerManagerComposite* aManager,
+  virtual void DrawWindowUnderlay(mozilla::widget::WidgetRenderingContext* aContext,
                                   LayoutDeviceIntRect aRect)
   {}
-  virtual void DrawWindowOverlay(mozilla::layers::LayerManagerComposite* aManager,
+  virtual void DrawWindowOverlay(mozilla::widget::WidgetRenderingContext* aContext,
                                  LayoutDeviceIntRect aRect)
   {}
   virtual already_AddRefed<DrawTarget> StartRemoteDrawing();
@@ -569,7 +581,7 @@ protected:
   void EnsureTextEventDispatcher();
 
   // Notify the compositor that a device reset has occurred.
-  void OnRenderingDeviceReset();
+  void OnRenderingDeviceReset(uint64_t aSeqNo);
 
   bool UseAPZ();
 
@@ -638,6 +650,7 @@ protected:
   virtual void DestroyCompositor();
   void DestroyLayerManager();
   void ReleaseContentController();
+  void RevokeTransactionIdAllocator();
 
   void FreeShutdownObserver();
 

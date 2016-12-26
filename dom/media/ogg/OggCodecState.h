@@ -7,18 +7,7 @@
 #define OggCodecState_h_
 
 #include <ogg/ogg.h>
-#include <theora/theoradec.h>
-#ifdef MOZ_TREMOR
-#include <tremor/ivorbiscodec.h>
-#else
-#include <vorbis/codec.h>
-#endif
-#include <opus/opus.h>
-#include "opus/opus_multistream.h"
 // For MOZ_SAMPLE_TYPE_*
-#include "mozilla/dom/HTMLMediaElement.h"
-#include "MediaDecoderStateMachine.h"
-#include "MediaDecoderReader.h"
 #include <nsAutoPtr.h>
 #include <nsAutoRef.h>
 #include <nsDeque.h>
@@ -27,7 +16,12 @@
 #include "VideoUtils.h"
 #include "FlacFrameParser.h"
 
-#include <stdint.h>
+#include <theora/theoradec.h>
+#ifdef MOZ_TREMOR
+#include <tremor/ivorbiscodec.h>
+#else
+#include <vorbis/codec.h>
+#endif
 
 // Uncomment the following to validate that we're predicting the number
 // of Vorbis samples in each packet correctly.
@@ -36,9 +30,11 @@
 #include <map>
 #endif
 
-#include "OpusParser.h"
+struct OpusMSDecoder;
 
 namespace mozilla {
+
+class OpusParser;
 
 // Deallocates a packet, used in OggPacketQueue below.
 class OggPacketDeallocator : public nsDequeFunctor
@@ -72,6 +68,11 @@ public:
   ogg_packet* PopFront() { return static_cast<ogg_packet*>(nsDeque::PopFront()); }
   ogg_packet* PeekFront() { return static_cast<ogg_packet*>(nsDeque::PeekFront()); }
   ogg_packet* Pop() { return static_cast<ogg_packet*>(nsDeque::Pop()); }
+  ogg_packet* operator[](size_t aIndex) const
+  {
+    return static_cast<ogg_packet*>(nsDeque::ObjectAt(aIndex));
+  }
+  size_t Length() const { return nsDeque::GetSize(); }
   void PushFront(ogg_packet* aPacket) { nsDeque::PushFront(aPacket); }
   void Erase() { nsDeque::Erase(); }
 };
@@ -94,11 +95,11 @@ public:
   };
 
   virtual ~OggCodecState();
-  
+
   // Factory for creating nsCodecStates. Use instead of constructor.
   // aPage should be a beginning-of-stream page.
   static OggCodecState* Create(ogg_page* aPage);
-  
+
   virtual CodecType GetType() { return TYPE_UNKNOWN; }
 
   // Reads a header packet. Returns false if an error was encountered
@@ -199,7 +200,7 @@ public:
   // if there are no more packets buffered in the packet queue. More packets
   // can be buffered by inserting one or more pages into the stream by calling
   // PageIn(). The packet will have a valid granulepos.
-  virtual RefPtr<MediaRawData> PacketOutAsMediaRawData();
+  virtual already_AddRefed<MediaRawData> PacketOutAsMediaRawData();
 
   // Extracts all packets from the page, and inserts them into the packet
   // queue. They can be extracted by calling PacketOut(). Packets from an
@@ -209,7 +210,13 @@ public:
   // captured.
   virtual nsresult PageIn(ogg_page* aPage);
 
-  // Number of packets read.  
+  // Returns the maximum number of microseconds which a keyframe can be offset
+  // from any given interframe.b
+  virtual int64_t MaxKeyframeOffset() { return 0; }
+  // Public access for mTheoraInfo.keyframe_granule_shift
+  virtual int32_t KeyFrameGranuleJobs() { return 0; }
+
+  // Number of packets read.
   uint64_t mPacketCount;
 
   // Serial number of the bitstream.
@@ -224,9 +231,15 @@ public:
 
   // Is the bitstream active; whether we're decoding and playing this bitstream.
   bool mActive;
-  
+
   // True when all headers packets have been read.
   bool mDoneReadingHeaders;
+
+  virtual const TrackInfo* GetInfo() const
+  {
+    MOZ_RELEASE_ASSERT(false, "Can't be called directly");
+    return nullptr;
+  }
 
   // Validation utility for vorbis-style tag names.
   static bool IsValidVorbisTagName(nsCString& aName);
@@ -260,6 +273,8 @@ protected:
   // in order to capture granulepos.
   nsTArray<ogg_packet*> mUnstamped;
 
+  bool SetCodecSpecificConfig(MediaByteBuffer* aBuffer, OggPacketQueue& aHeaders);
+
 private:
   bool InternalInit();
 };
@@ -278,19 +293,21 @@ public:
   nsresult Reset() override;
   bool IsHeader(ogg_packet* aPacket) override;
   nsresult PageIn(ogg_page* aPage) override;
+  const TrackInfo* GetInfo() const override { return &mInfo; }
 
   // Return a hash table with tag metadata.
   MetadataTags* GetTags() override;
 
-  // Returns the end time that a granulepos represents.
-  static int64_t Time(vorbis_info* aInfo, int64_t aGranulePos);
-
-  vorbis_info mInfo;
+private:
+  AudioInfo mInfo;
+  vorbis_info mVorbisInfo;
   vorbis_comment mComment;
   vorbis_dsp_state mDsp;
   vorbis_block mBlock;
+  OggPacketQueue mHeaders;
 
-private:
+  // Returns the end time that a granulepos represents.
+  static int64_t Time(vorbis_info* aInfo, int64_t aGranulePos);
 
   // Reconstructs the granulepos of Vorbis packets stored in the mUnstamped
   // array.
@@ -351,25 +368,28 @@ public:
   int64_t StartTime(int64_t granulepos) override;
   int64_t PacketDuration(ogg_packet* aPacket) override;
   bool Init() override;
+  nsresult Reset() override;
   bool IsHeader(ogg_packet* aPacket) override;
   bool IsKeyframe(ogg_packet* aPacket) override;
   nsresult PageIn(ogg_page* aPage) override;
+  const TrackInfo* GetInfo() const override { return &mInfo; }
+  int64_t MaxKeyframeOffset() override;
+  int32_t KeyFrameGranuleJobs() override
+  {
+    return mTheoraInfo.keyframe_granule_shift;
+  }
 
-  // Returns the maximum number of microseconds which a keyframe can be offset
-  // from any given interframe.
-  int64_t MaxKeyframeOffset();
-
+private:
   // Returns the end time that a granulepos represents.
-  static int64_t Time(th_info* aInfo, int64_t aGranulePos); 
+  static int64_t Time(th_info* aInfo, int64_t aGranulePos);
 
-  th_info mInfo;
+  th_info mTheoraInfo;
   th_comment mComment;
   th_setup_info* mSetup;
   th_dec_ctx* mCtx;
 
-  float mPixelAspectRatio;
-
-private:
+  VideoInfo mInfo;
+  OggPacketQueue mHeaders;
 
   // Reconstructs the granulepos of Theora packets stored in the
   // mUnstamped array. mUnstamped must be filled with consecutive packets from
@@ -395,32 +415,22 @@ public:
   nsresult Reset(bool aStart);
   bool IsHeader(ogg_packet* aPacket) override;
   nsresult PageIn(ogg_page* aPage) override;
+  already_AddRefed<MediaRawData> PacketOutAsMediaRawData() override;
+  const TrackInfo* GetInfo() const override { return &mInfo; }
 
   // Returns the end time that a granulepos represents.
   static int64_t Time(int aPreSkip, int64_t aGranulepos);
-
-  // Various fields from the Ogg Opus header.
-  int mRate;        // Sample rate the decoder uses (always 48 kHz).
-  int mChannels;    // Number of channels the stream encodes.
-  uint16_t mPreSkip; // Number of samples to strip after decoder reset.
-#ifdef MOZ_SAMPLE_TYPE_FLOAT32
-  float mGain;      // Gain to apply to decoder output.
-#else
-  int32_t mGain_Q16; // Gain to apply to the decoder output.
-#endif
-
-  nsAutoPtr<OpusParser> mParser;
-  OpusMSDecoder* mDecoder;
-
-  int mSkip;        // Number of samples left to trim before playback.
-  // Granule position (end sample) of the last decoded Opus packet. This is
-  // used to calculate the amount we should trim from the last packet.
-  int64_t mPrevPacketGranulepos;
 
   // Construct and return a table of tags from the metadata header.
   MetadataTags* GetTags() override;
 
 private:
+  nsAutoPtr<OpusParser> mParser;
+  OpusMSDecoder* mDecoder;
+
+  // Granule position (end sample) of the last decoded Opus packet. This is
+  // used to calculate the amount we should trim from the last packet.
+  int64_t mPrevPacketGranulepos;
 
   // Reconstructs the granulepos of Opus packets stored in the
   // mUnstamped array. mUnstamped must be filled with consecutive packets from
@@ -433,7 +443,8 @@ private:
   // used to calculate the Opus per-packet granule positions on the last page,
   // where we may need to trim some samples from the end.
   int64_t mPrevPageGranulepos;
-
+  AudioInfo mInfo;
+  OggPacketQueue mHeaders;
 };
 
 // Constructs a 32bit version number out of two 16 bit major,minor
@@ -566,7 +577,7 @@ private:
   {
   public:
 
-    nsKeyFrameIndex(int64_t aStartTime, int64_t aEndTime) 
+    nsKeyFrameIndex(int64_t aStartTime, int64_t aEndTime)
       : mStartTime(aStartTime)
       , mEndTime(aEndTime)
     {
@@ -622,7 +633,7 @@ public:
   // Return a hash table with tag metadata.
   MetadataTags* GetTags() override;
 
-  const AudioInfo& Info();
+  const TrackInfo* GetInfo() const override;
 
 private:
   bool ReconstructFlacGranulepos(void);

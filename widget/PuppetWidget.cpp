@@ -85,8 +85,6 @@ PuppetWidget::PuppetWidget(TabChild* aTabChild)
   , mCursorHotspotY(0)
   , mNativeKeyCommandsValid(false)
 {
-  MOZ_COUNT_CTOR(PuppetWidget);
-
   mSingleLineCommands.SetCapacity(4);
   mMultiLineCommands.SetCapacity(4);
   mRichTextCommands.SetCapacity(4);
@@ -97,8 +95,6 @@ PuppetWidget::PuppetWidget(TabChild* aTabChild)
 
 PuppetWidget::~PuppetWidget()
 {
-  MOZ_COUNT_DTOR(PuppetWidget);
-
   Destroy();
 }
 
@@ -208,6 +204,15 @@ PuppetWidget::Show(bool aState)
   }
 
   if (!wasVisible && mVisible) {
+    // The previously attached widget listener is handy if
+    // we're transitioning from page to page without dropping
+    // layers (since we'll continue to show the old layers
+    // associated with that old widget listener). If the
+    // PuppetWidget was hidden, those layers are dropped,
+    // so the previously attached widget listener is really
+    // of no use anymore (and is actually actively harmful - see
+    // bug 1323586).
+    mPreviouslyAttachedWidgetListener = nullptr;
     Resize(mBounds.width, mBounds.height, false);
     Invalidate(mBounds);
   }
@@ -215,7 +220,7 @@ PuppetWidget::Show(bool aState)
   return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 PuppetWidget::Resize(double aWidth,
                      double aHeight,
                      bool   aRepaint)
@@ -225,7 +230,8 @@ PuppetWidget::Resize(double aWidth,
                                      NSToIntRound(aHeight)));
 
   if (mChild) {
-    return mChild->Resize(aWidth, aHeight, aRepaint);
+    mChild->Resize(aWidth, aHeight, aRepaint);
+    return;
   }
 
   // XXX: roc says that |aRepaint| dictates whether or not to
@@ -246,8 +252,6 @@ PuppetWidget::Resize(double aWidth,
     }
     mAttachedWidgetListener->WindowResized(this, mBounds.width, mBounds.height);
   }
-
-  return NS_OK;
 }
 
 nsresult
@@ -326,7 +330,8 @@ PuppetWidget::DispatchEvent(WidgetGUIEvent* event, nsEventStatus& aStatus)
              "Unexpected event dispatch!");
 
   AutoCacheNativeKeyCommands autoCache(this);
-  if (event->mFlags.mIsSynthesizedForTests && !mNativeKeyCommandsValid) {
+  if ((event->mFlags.mIsSynthesizedForTests ||
+       event->mFlags.mIsSuppressedOrDelayed) && !mNativeKeyCommandsValid) {
     WidgetKeyboardEvent* keyEvent = event->AsKeyboardEvent();
     if (keyEvent) {
       mTabChild->RequestNativeKeyBindings(&autoCache, keyEvent);
@@ -536,6 +541,16 @@ PuppetWidget::ExecuteNativeKeyBinding(NativeKeyBindingsType aType,
 #ifdef MOZ_WIDGET_GONK
   return false;
 #else // #ifdef MOZ_WIDGET_GONK
+  AutoCacheNativeKeyCommands autoCache(this);
+  if (!aEvent.mWidget && !mNativeKeyCommandsValid) {
+    MOZ_ASSERT(!aEvent.mFlags.mIsSynthesizedForTests);
+    // Abort if untrusted to avoid leaking system settings
+    if (NS_WARN_IF(!aEvent.IsTrusted())) {
+      return false;
+    }
+    mTabChild->RequestNativeKeyBindings(&autoCache, &aEvent);
+  }
+
   MOZ_ASSERT(mNativeKeyCommandsValid);
 
   const nsTArray<mozilla::CommandInt>* commands = nullptr;
@@ -574,7 +589,7 @@ PuppetWidget::GetLayerManager(PLayerTransactionChild* aShadowManager,
     mLayerManager = new ClientLayerManager(this);
   }
   ShadowLayerForwarder* lf = mLayerManager->AsShadowForwarder();
-  if (!lf->HasShadowManager() && aShadowManager) {
+  if (lf && !lf->HasShadowManager() && aShadowManager) {
     lf->SetShadowManager(aShadowManager);
   }
   return mLayerManager;
@@ -584,7 +599,9 @@ LayerManager*
 PuppetWidget::RecreateLayerManager(PLayerTransactionChild* aShadowManager)
 {
   mLayerManager = new ClientLayerManager(this);
-  mLayerManager->AsShadowForwarder()->SetShadowManager(aShadowManager);
+  if (ShadowLayerForwarder* lf = mLayerManager->AsShadowForwarder()) {
+    lf->SetShadowManager(aShadowManager);
+  }
   return mLayerManager;
 }
 
@@ -663,7 +680,7 @@ PuppetWidget::NotifyIMEInternal(const IMENotification& aIMENotification)
   }
 }
 
-NS_IMETHODIMP
+nsresult
 PuppetWidget::StartPluginIME(const mozilla::WidgetKeyboardEvent& aKeyboardEvent,
                              int32_t aPanelX, int32_t aPanelY,
                              nsString& aCommitted)
@@ -1071,7 +1088,7 @@ PuppetWidget::Paint()
       if (mTabChild) {
         mTabChild->NotifyPainted();
       }
-    } else {
+    } else if (mozilla::layers::LayersBackend::LAYERS_BASIC == mLayerManager->GetBackendType()) {
       RefPtr<gfxContext> ctx = gfxContext::CreateOrNull(mDrawTarget);
       if (!ctx) {
         gfxDevCrash(LogReason::InvalidContext) << "PuppetWidget context problem " << gfx::hexa(mDrawTarget);

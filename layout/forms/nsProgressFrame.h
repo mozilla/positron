@@ -60,14 +60,14 @@ public:
                                     int32_t  aModType) override;
 
   virtual mozilla::LogicalSize
-  ComputeAutoSize(nsRenderingContext *aRenderingContext,
-                  mozilla::WritingMode aWritingMode,
+  ComputeAutoSize(nsRenderingContext*         aRenderingContext,
+                  mozilla::WritingMode        aWM,
                   const mozilla::LogicalSize& aCBSize,
-                  nscoord aAvailableISize,
+                  nscoord                     aAvailableISize,
                   const mozilla::LogicalSize& aMargin,
                   const mozilla::LogicalSize& aBorder,
                   const mozilla::LogicalSize& aPadding,
-                  bool aShrinkWrap) override;
+                  ComputeSizeFlags            aFlags) override;
 
   virtual nscoord GetMinISize(nsRenderingContext *aRenderingContext) override;
   virtual nscoord GetPrefISize(nsRenderingContext *aRenderingContext) override;
@@ -86,11 +86,11 @@ public:
   virtual Element* GetPseudoElement(CSSPseudoElementType aType) override;
 
 protected:
-  // Helper function which reflow the anonymous div frame.
-  void ReflowBarFrame(nsIFrame*                aBarFrame,
-                      nsPresContext*           aPresContext,
-                      const ReflowInput& aReflowInput,
-                      nsReflowStatus&          aStatus);
+  // Helper function to reflow a child frame.
+  void ReflowChildFrame(nsIFrame*          aChild,
+                        nsPresContext*     aPresContext,
+                        const ReflowInput& aReflowInput,
+                        nsReflowStatus&    aStatus);
 
   /**
    * The div used to show the progress bar.
@@ -100,4 +100,3 @@ protected:
 };
 
 #endif
-

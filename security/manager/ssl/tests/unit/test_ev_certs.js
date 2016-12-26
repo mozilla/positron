@@ -36,7 +36,7 @@ do_register_cleanup(() => {
 
 Services.prefs.setCharPref("network.dns.localDomains", "www.example.com");
 Services.prefs.setIntPref("security.OCSP.enabled", 1);
-addCertFromFile(certdb, "test_ev_certs/evroot.pem", "CTu,,");
+const evroot = addCertFromFile(certdb, "test_ev_certs/evroot.pem", "CTu,,");
 addCertFromFile(certdb, "test_ev_certs/non-evroot-ca.pem", "CTu,,");
 
 const SERVER_PORT = 8888;
@@ -179,6 +179,15 @@ function ensureVerifiesAsDVWithVeryOldEndEntityOCSPResponse(testcase) {
 add_task(function* plainExpectSuccessEVTests() {
   yield ensureVerifiesAsEV("anyPolicy-int-path");
   yield ensureVerifiesAsEV("test-oid-path");
+  yield ensureVerifiesAsEV("cabforum-oid-path");
+  yield ensureVerifiesAsEV("cabforum-and-test-oid-ee-path");
+  yield ensureVerifiesAsEV("test-and-cabforum-oid-ee-path");
+  yield ensureVerifiesAsEV("reverse-order-oids-path");
+  // In this case, the end-entity has both the CA/B Forum OID and the test OID
+  // (in that order). The intermediate has the CA/B Forum OID. Since the
+  // implementation uses the first EV policy it encounters in the end-entity as
+  // the required one, this successfully verifies as EV.
+  yield ensureVerifiesAsEV("cabforum-and-test-oid-ee-cabforum-oid-int-path");
 });
 
 // These fail for various reasons to verify as EV, but fallback to DV should
@@ -189,6 +198,15 @@ add_task(function* expectDVFallbackTests() {
   yield ensureVerifiesAsDV("no-ocsp-ee-path",
                            gEVExpected ? [ "no-ocsp-ee-path-int" ] : []);
   yield ensureVerifiesAsDV("no-ocsp-int-path");
+  // In this case, the end-entity has the test OID and the intermediate has the
+  // CA/B Forum OID. Since the CA/B Forum OID is not treated the same as the
+  // anyPolicy OID, this will not verify as EV.
+  yield ensureVerifiesAsDV("test-oid-ee-cabforum-oid-int-path");
+  // In this case, the end-entity has both the test OID and the CA/B Forum OID
+  // (in that order). The intermediate has only the CA/B Forum OID. Since the
+  // implementation uses the first EV policy it encounters in the end-entity as
+  // the required one, this fails to verify as EV.
+  yield ensureVerifiesAsDV("test-and-cabforum-oid-ee-cabforum-oid-int-path");
 });
 
 // Test that removing the trust bits from an EV root causes verifications
@@ -196,7 +214,6 @@ add_task(function* expectDVFallbackTests() {
 // causes the verifications to succeed again).
 add_task(function* evRootTrustTests() {
   clearOCSPCache();
-  let evroot = certdb.findCertByNickname("evroot");
   do_print("untrusting evroot");
   certdb.setCertTrust(evroot, Ci.nsIX509Cert.CA_CERT,
                       Ci.nsIX509CertDB.UNTRUSTED);

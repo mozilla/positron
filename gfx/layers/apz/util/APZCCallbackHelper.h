@@ -9,9 +9,10 @@
 #include "FrameMetrics.h"
 #include "InputData.h"
 #include "mozilla/EventForwards.h"
-#include "mozilla/Function.h"
 #include "mozilla/layers/APZUtils.h"
 #include "nsIDOMWindowUtils.h"
+
+#include <functional>
 
 class nsIContent;
 class nsIDocument;
@@ -24,7 +25,7 @@ template<class T> class nsCOMPtr;
 namespace mozilla {
 namespace layers {
 
-typedef function<void(uint64_t, const nsTArray<TouchBehaviorFlags>&)>
+typedef std::function<void(uint64_t, const nsTArray<TouchBehaviorFlags>&)>
         SetAllowedTouchBehaviorCallback;
 
 /* This class contains some helper methods that facilitate implementing the
@@ -108,6 +109,7 @@ public:
                                                        uint64_t aTime,
                                                        const LayoutDevicePoint& aRefPoint,
                                                        Modifiers aModifiers,
+                                                       int32_t aClickCount,
                                                        nsIWidget* aWidget);
 
     /* Dispatch a mouse event with the given parameters.
@@ -125,6 +127,7 @@ public:
      * via the given widget. */
     static void FireSingleTapEvent(const LayoutDevicePoint& aPoint,
                                    Modifiers aModifiers,
+                                   int32_t aClickCount,
                                    nsIWidget* aWidget);
 
     /* Perform hit-testing on the touch points of |aEvent| to determine
