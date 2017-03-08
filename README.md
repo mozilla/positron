@@ -1,11 +1,11 @@
+[![Development Status](https://img.shields.io/badge/status-discontinued-red.svg)]
+
 Positron: Electron-compatible runtime on top of Gecko
 ===
 This project is an [Electron](http://electron.atom.io/)-compatible app shell for creating desktop apps based on Gecko, the rendering engine used in Firefox.
 
 ### Current status
-This is a _work in progress_, and doesn't run Electron based apps yet.  Part of this project is being worked on in the [SpiderNode](https://github.com/mozilla/spidernode) repository.
-
-We're actively working on this, so if you're interested in the status of this project, please check here again soon.
+As noted in the blog post [Positron Discontinued](https://mykzilla.org/2017/03/08/positron-discontinued/), this project has been discontinued. The source remains available, and you're welcome to reuse it.
 
 ### How to download the source
 To clone Positron and its submodules:
