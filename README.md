@@ -1,4 +1,4 @@
-[![Development Status](https://img.shields.io/badge/status-discontinued-red.svg)]
+![Development Status](https://img.shields.io/badge/status-discontinued-red.svg)
 
 Positron: Electron-compatible runtime on top of Gecko
 ===
