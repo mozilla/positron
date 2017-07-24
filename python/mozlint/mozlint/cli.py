@@ -75,19 +75,22 @@ class MozlintParser(ArgumentParser):
 def find_linters(linters=None):
     lints = []
     for search_path in SEARCH_PATHS:
-        if not os.path.isdir(search_path):
-            continue
-
-        files = os.listdir(search_path)
-        for f in files:
-            name, ext = os.path.splitext(f)
-            if ext != '.lint':
+        if os.path.exists(search_path):
+            if not os.path.isdir(search_path):
                 continue
 
-            if linters and name not in linters:
-                continue
+            files = os.listdir(search_path)
+            for f in files:
+                name, ext = os.path.splitext(f)
+                if ext != '.lint':
+                    continue
 
-            lints.append(os.path.join(search_path, f))
+                if linters and name not in linters:
+                    continue
+
+                lints.append(os.path.join(search_path, f))
+        else:
+            print("specified path " + search_path + "does not exist")
     return lints
 
 
