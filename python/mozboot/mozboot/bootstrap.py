@@ -136,6 +136,7 @@ Destination directory for Mercurial clone (leave empty to not clone): '''.lstrip
 DEBIAN_DISTROS = (
     'Debian',
     'debian',
+    'Deepin',
     'Ubuntu',
     # Most Linux Mint editions are based on Ubuntu. One is based on Debian.
     # The difference is reported in dist_id from platform.linux_distribution.
